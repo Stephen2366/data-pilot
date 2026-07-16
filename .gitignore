@@ -7,3 +7,4 @@ __pycache__/
 .codex/temp_work/*.db
 .codex/temp_work/*.sqlite
 .codex/temp_work/*.log
+.codex/temp_work/pytest-tmp/
