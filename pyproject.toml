@@ -1,0 +1,35 @@
+[project]
+name = "datapilot"
+version = "0.1.0"
+description = "Enterprise data analysis agent system."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.120.0",
+    "uvicorn[standard]>=0.35.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "pydantic-settings>=2.0.0",
+    "sqlglot>=25.0.0",
+    "pandas>=2.0.0",
+    "PyYAML>=6.0.0",
+    "python-dotenv>=1.0.0",
+    "streamlit>=1.36.0",
+    "altair>=5.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "engine*"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

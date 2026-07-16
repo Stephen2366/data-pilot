@@ -1,0 +1,9 @@
+.env
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+.codex/temp_work/*.db
+.codex/temp_work/*.sqlite
+.codex/temp_work/*.log
