@@ -1,2 +1,3 @@
 \.codex[/\\]temp_work
 \.claude[/\\]temp_work
+当前状态速览

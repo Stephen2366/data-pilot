@@ -24,7 +24,7 @@
 - 建表和改表必须通过 Alembic migration 管理，不裸写 DDL 作为主路径。
 - `engine/` 不写电商业务硬编码；业务配置放入 `domain_pack/`。
 - `/api/query` 从第一次实现开始就使用 Pydantic AgentResponse Schema，不先散落返回普通 dict。
-- 每完成一个模块，更新 README、`dev-log.md` 或 `.agent_work/temp/` 中对应验收记录。
+- 每完成一个模块，更新 README、`AI_CONTEXT.md` 技术档案和 `dev-log.md` ★ 日志；验收记录放 `.agent_work/temp/`。
 - 所有临时脚本中间产物放到 `./.agent_work/temp/`。
 - Agent 运行 Trace 写入 `eval/traces/`；Trace 是评测和复盘会消费的数据，不放临时目录。
 - 安全类能力不只靠 prompt，必须经过 sqlglot AST、只读限制、敏感字段策略和 RBAC 规则。
@@ -60,14 +60,14 @@
 - **M4 简单 SQL 正确性**：以 v1 验收标准为准；“执行正确”指 SQL 通过 SQL Guard、可执行、返回字段和关键结果符合对应评测用例预期。
 - **AgentResponse**：Phase 2 API 字段以本文档 M3 简化版 AgentResponse 为基准；M5 只能增量扩展字段，不改变已有字段含义。`LEARNING_ROADMAP.md` 中的 AgentResponse 是最终方向示例，不是 Phase 2 字段全集。
 - **阶段二验收记录**：写入 `eval/reports/phase2-v1-acceptance.md`；该文件是后续 README、简历和复盘会消费的持久记录，不放临时目录。
-- **模块进度**：当前进度以 `dev-log.md`「当前状态速览」为准；模块完成状态只在本文档「模块总览」表维护，各模块小节不重复登记状态行。
+- **模块进度**：以 `AI_CONTEXT.md`「当前状态」为准（学习复盘看 `dev-log.md` 模块日志）；模块完成状态只在本文档「模块总览」表维护，各模块小节不重复登记状态行。
 
 ## 模块推进原则
 
 - 每个模块可以一次连续完成，但必须在验收门停下来验证。
 - 如果模块内某个点卡住超过半天，先降级，不阻塞主链路。
-- 每个模块完成后按 CLAUDE.md「开发记录要求」在 `dev-log.md` 追加完整模块日志。
-- 参考资料按需查，不系统通读。实际查过哪个 reference，要在日志中写明。
+- 每个模块完成后按 CLAUDE.md「开发记录要求」更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 ★ 学习复盘日志。
+- 参考资料按需查，不系统通读。实际查过哪个 reference，记入 `AI_CONTEXT.md` 模块档案「参考资料」。
 
 ## 目录与文件规划
 
@@ -104,11 +104,12 @@
 | `eval/traces/` | 新建 | Agent 运行 Trace，JSONL 文件默认不提交 |
 | `demo/streamlit_app.py` | 新建 | v1 演示页 |
 | `README.md` | 修改 | ER 图、项目结构、启动说明、演示截图位置 |
-| `dev-log.md` | 已建 / 持续追加 | 模块完成记录、技术决策和面试复盘 |
+| `AI_CONTEXT.md` | 已建 / 持续追加 | 技术档案：当前状态、决策理由、验证快照、已知坑 |
+| `dev-log.md` | 已建 / 持续追加 | 学习复盘：模块故事、概念解释、面试讲法 |
 
 ## 模块总览
 
-状态取值：`已完成` | `进行中` | `待开始` | `阻塞`（阻塞时在 dev-log 速览登记阻塞项）
+状态取值：`已完成` | `进行中` | `待开始` | `阻塞`（阻塞时在 `AI_CONTEXT.md`「当前状态」登记阻塞项）
 
 | 模块 | 建议顺序 | 状态 | 模块目标 |
 |---|---:|---|---|
@@ -220,7 +221,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] 每个接口至少手动验证 2 个查询条件组合。
 - [ ] 非法分页或资源不存在时返回统一错误结构。
 - [ ] 每次请求记录 method / path / status / latency_ms / trace_id。
-- [ ] `dev-log.md` 追加 M2 记录。
+- [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M2 ★ 日志。
 
 **停止点**
 
@@ -259,7 +260,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] `eval/cases_plan.md` 32 条问题清单完整。
 - [ ] `eval/cases_plan.md` 包含后续 YAML case 字段草案。
 - [ ] README 包含 ER 图、项目结构、v0 启动步骤。
-- [ ] `dev-log.md` 追加 M3 记录。
+- [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M3 ★ 日志。
 
 **停止点**
 
@@ -299,7 +300,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] 6 条简单 SQL 中至少 5 条生成并执行正确；正确性口径以 v1 验收标准为准。
 - [ ] 安全攻击用例中的 DDL / DML、敏感字段、越权角色、Prompt Injection 诱导危险 SQL 能被拦截。
 - [ ] 所有拦截返回结构化错误，不返回 Python traceback。
-- [ ] `dev-log.md` 追加 M4 记录。
+- [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M4 ★ 日志。
 
 **停止点**
 
@@ -336,7 +337,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] 每次请求有 trace_id、latency_ms、route、SQL、tool_calls、error_type。
 - [ ] 对渠道订单量、商品退款率、月度 GMV 至少 3 类结果生成 Vega-Lite / Altair 兼容图表 spec。
 - [ ] 无法画图时返回 `chart_spec=null`，且不影响答案。
-- [ ] `dev-log.md` 追加 M5 记录。
+- [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M5 ★ 日志。
 
 **停止点**
 
@@ -373,7 +374,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] Streamlit 页面能展示答案、SQL、表格、图表、Trace。
 - [ ] README 说明实际技术栈，不写尚未实现的 LangGraph / RAG / MCP / Skill。
 - [ ] 阶段二验收记录完整。
-- [ ] `dev-log.md` 追加 M6 记录。
+- [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M6 ★ 日志。
 
 **停止点**
 
@@ -438,8 +439,8 @@ flowchart TD
 ## 模块收工检查
 
 - [ ] 新增文件能被 `rg --files` 看到，路径符合目录规划。
-- [ ] 核心命令记录在 README、`dev-log.md` 或 `.agent_work/temp/` 验收记录中。
+- [ ] 核心命令记录在 README、`AI_CONTEXT.md` 或 `.agent_work/temp/` 验收记录中。
 - [ ] 如果修改 API 响应结构，同步更新 Pydantic Schema 和 README 示例。
 - [ ] 如果发现 seed 数据无法支撑某条评测问题，当场修 seed 或调整该问题，不把问题留到阶段四。
 - [ ] 不把未实现能力写成已实现；README 使用“已完成 / 进行中 / 后续计划”分层表述。
-- [ ] 如果查了 `references/` 项目，在 `dev-log.md` 中写清楚查了什么、借鉴了什么、没有照搬什么。
+- [ ] 如果查了 `references/` 项目，在 `AI_CONTEXT.md` 模块档案「参考资料」写清楚查了什么、借鉴了什么、没有照搬什么。
