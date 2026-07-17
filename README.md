@@ -2,14 +2,14 @@
 
 企业数据分析 Agent 系统——自然语言 → SQL/RAG → 可视化 + 分析报告。
 
-🚧 阶段二 Day 1：工程骨架搭建中
+🚧 阶段二进行中：M0 工程骨架已完成，当前推进 M1 数据底座
 
 ## 快速开始
 
 ### 环境
 
 - Python：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe`
-- 当前默认数据库：SQLite（后续通过 SQLAlchemy/Alembic 保持 MySQL 迁移空间）
+- 数据库：MySQL 开发库 `datapilot_dev`（SQLAlchemy + Alembic 管理建表和迁移；SQLite 仅用于测试兜底）
 
 ### 安装依赖
 

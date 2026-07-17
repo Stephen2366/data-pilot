@@ -1,0 +1,2 @@
+\.codex[/\\]temp_work
+\.claude[/\\]temp_work

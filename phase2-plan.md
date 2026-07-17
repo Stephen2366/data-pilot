@@ -1,54 +1,91 @@
-# DataPilot Phase 2 Daily Plan
+# DataPilot Phase 2 Module Plan
 
 > 阶段二：DataPilot v0 -> v1 + EvalOps-lite  
-> 排期：2026-07-16 至 2026-07-29，共 14 天  
-> 说明：`AGENTS.md` 中写了“7/16 周三”，但 2026-07-16 实际是周四；本计划按日期为准。  
+> 原排期：2026-07-16 至 2026-07-29  
 > 核心目标：先用模板 SQL 跑通 v0，再升级到 LLM NL2SQL + SQL Guard + 简单图表 + EvalOps-lite。
 
 ## 阶段二总目标
 
 阶段二结束时，DataPilot 至少具备以下能力：
 
-- 7 张电商/SaaS 运营数据表完成建模、迁移、模拟数据生成。
+- 7 张电商 / SaaS 运营数据表完成建模、迁移、模拟数据生成。
 - FastAPI 提供基础 CRUD、查询、筛选、分页接口。
 - 统一日志中间件和全局异常处理器可用。
 - 模板 SQL 端到端链路跑通：自然语言问题 -> 模板匹配 -> sqlglot 只读检查 -> 数据库执行 -> 表格结果。
-- `eval/cases_plan.md` 完成 32 条评测问题清单，覆盖 6 简单 SQL、7 聚合、5 多表、5 RAG、3 混合、6 安全攻击。
+- `eval/cases_plan.md` 完成 32 条评测问题清单（类型构成见 M3 任务清单，文件落地后以该文件为唯一事实源）。
 - v1 最小闭环跑通：LLM 生成 SQL -> 安全拦截 -> 执行 -> 自然语言解释 -> 简单图表。
-- EvalOps-lite 能读取 YAML 用例、调用 Agent、记录 question/route/sql/answer/pass-fail/error_type。
+- EvalOps-lite 能读取 YAML 用例、调用 Agent、记录 question / route / sql / answer / pass-fail / error_type。
 - Streamlit 演示页能展示问题、答案、SQL、表格、图表。
 
 ## 全局约束
 
 - Python 使用 `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe`。
-- 数据库默认先用 SQLite 跑通本地闭环；表结构、SQLAlchemy、Alembic 迁移写法要兼容后续迁移到 MySQL。
+- 数据库主路径使用 MySQL 开发库 `datapilot_dev`；SQLite 只作为测试或兜底，不作为阶段二主路径。
 - 建表和改表必须通过 Alembic migration 管理，不裸写 DDL 作为主路径。
 - `engine/` 不写电商业务硬编码；业务配置放入 `domain_pack/`。
-- 每天结束前更新当天产出对应的 README 或计划状态，避免最后集中补文档。
-- 所有临时脚本中间产物放到 `./.codex/temp_work/`。
+- `/api/query` 从第一次实现开始就使用 Pydantic AgentResponse Schema，不先散落返回普通 dict。
+- 每完成一个模块，更新 README、`dev-log.md` 或 `.agent_work/temp/` 中对应验收记录。
+- 所有临时脚本中间产物放到 `./.agent_work/temp/`。
+- Agent 运行 Trace 写入 `eval/traces/`；Trace 是评测和复盘会消费的数据，不放临时目录。
 - 安全类能力不只靠 prompt，必须经过 sqlglot AST、只读限制、敏感字段策略和 RBAC 规则。
 - 阶段二不追求复杂 LangGraph 编排；若卡住，先用普通 Python pipeline 跑通。
+- 日志与代码注释规范以项目 CLAUDE.md 的「开发记录要求」「代码风格」章节为准，此处不重复。
+
+## 架构底线与可降级边界
+
+这些约束用来防止“先用临时方案，后面再换正式方案”造成大返工。
+
+### P0：不可降级
+
+- **数据库主路径固定 MySQL**：开发库为 `datapilot_dev`，SQLite 只用于测试或故障兜底。
+- **建表和改表必须走 Alembic**：可以简化字段约束，但不能绕开 migration 直接裸写 DDL 作为主路径。
+- **SQL 执行必须先过 SQL Guard**：任何模板 SQL 或 LLM SQL 都要先做 AST 解析、只读检查，再进入数据库执行。
+- **业务和引擎必须分层**：`engine/` 只放通用流程，电商表说明、KPI、SQL 示例和图表模板放 `domain_pack/`。
+- **AgentResponse 必须前置**：M3 第一次实现 `/api/query` 时就定义简化版结构化响应，M5 只做扩展，不推倒重来。
+- **评测用例格式要提前稳定**：M3 写 `eval/cases_plan.md` 时同步给出后续 YAML 字段草案，方便 AgentEvalOps 复用。
+
+### P1：可以简化实现，但接口要按最终形态预留
+
+- **普通 Python pipeline 可以先替代 LangGraph**：但状态字段要按未来 graph state 设计，例如 `question`、`route`、`sql`、`tool_calls`、`trace_id`、`error_type`。
+- **模板 SQL 可以先替代 LLM NL2SQL**：但模板代码放在 `engine/nl2sql/`，并沉淀到 `domain_pack/sql_examples/` 作为后续 few-shot 示例。
+- **Redis 可以先做空实现**：业务代码只能依赖缓存 wrapper，不直接散落调用 Redis client。
+- **Trace 可以先写 JSONL**：字段结构按 AgentEvalOps 复用设计，后续迁移到 SQLite 或独立评测平台时只换存储层。
+- **LLM provider 不做过度抽象**：阶段二优先支持 DeepSeek 或 SiliconFlow 中一个实际可用模型，另一个后续补。
+
+## 单一事实源
+
+- **阶段二验收**：以本文档的 v0 / v1 验收标准为准；各模块验收门是过程检查，用来保证路上不跑偏。
+- **32 条评测问题**：M3 建好 `eval/cases_plan.md` 后，以该文件作为题目构成和用例口径的唯一事实源，其他文档只引用。
+- **AgentResponse**：Phase 2 API 字段以本文档 M3 简化版 AgentResponse 为基准；M5 只能增量扩展字段，不改变已有字段含义。`LEARNING_ROADMAP.md` 中的 AgentResponse 是最终方向示例，不是 Phase 2 字段全集。
+- **模块进度**：当前进度以 `dev-log.md`「当前状态速览」为准；模块完成状态只在本文档「模块总览」表维护，各模块小节不重复登记状态行。
+
+## 模块推进原则
+
+- 每个模块可以一次连续完成，但必须在验收门停下来验证。
+- 如果模块内某个点卡住超过半天，先降级，不阻塞主链路。
+- 每个模块完成后按 CLAUDE.md「开发记录要求」在 `dev-log.md` 追加完整模块日志。
+- 参考资料按需查，不系统通读。实际查过哪个 reference，要在日志中写明。
 
 ## 目录与文件规划
 
 | 路径 | 类型 | 阶段二职责 |
 |---|---|---|
-| `pyproject.toml` | 新建 | 项目依赖、工具配置、包元数据 |
-| `.env.example` | 新建 | 数据库、Redis、LLM、运行环境变量示例 |
+| `pyproject.toml` | 已建 / 继续维护 | 项目依赖、工具配置、包元数据 |
+| `.env.example` | 已建 / 继续维护 | MySQL、Redis、LLM、LangSmith 运行环境变量示例 |
 | `alembic.ini` | 新建 | Alembic 配置 |
 | `alembic/env.py` | 新建 | Alembic 连接 SQLAlchemy metadata |
 | `alembic/versions/` | 新建 | 迁移版本目录 |
-| `app/main.py` | 新建 | FastAPI 入口、路由注册、中间件注册 |
+| `app/main.py` | 已建 / 继续维护 | FastAPI 入口、路由注册、中间件注册 |
 | `app/api/` | 新建 | 基础 REST API 路由 |
-| `app/core/config.py` | 新建 | Pydantic Settings 配置 |
+| `app/core/config.py` | 已建 / 继续维护 | Pydantic Settings 配置 |
 | `app/core/logging.py` | 新建 | 结构化日志配置 |
 | `app/core/exceptions.py` | 新建 | 全局异常类型和 FastAPI exception handler |
 | `app/db/session.py` | 新建 | SQLAlchemy engine、Session 管理 |
 | `app/db/base.py` | 新建 | declarative base 和 metadata 汇总 |
 | `app/models/` | 新建 | 7 张表 ORM 模型 |
-| `app/schemas/` | 新建 | API 请求/响应 Pydantic Schema |
+| `app/schemas/` | 新建 | API 请求 / 响应 Pydantic Schema |
 | `scripts/seed_data.py` | 新建 | 模拟数据生成脚本 |
-| `engine/sql_guard/` | 新建 | sqlglot AST 校验、只读检查、敏感字段/RBAC 检查 |
+| `engine/sql_guard/` | 新建 | sqlglot AST 校验、只读检查、敏感字段 / RBAC 检查 |
 | `engine/nl2sql/` | 新建 | 模板 SQL、schema 描述、LLM prompt、SQL 生成入口 |
 | `engine/tools/` | 新建 | SQL 查询 tool 的参数 Schema 和调用记录 |
 | `engine/trace/` | 新建 | trace_id、tool_calls、latency、error_type 记录 |
@@ -56,372 +93,346 @@
 | `domain_pack/sql_examples/` | 新建 | 模板 SQL 和 few-shot 示例 |
 | `domain_pack/kb_docs/` | 新建 | 阶段二先放 RAG 用例依赖的政策文档草稿 |
 | `domain_pack/metrics.yaml` | 新建 | refund_rate、gmv、order_count 等 KPI 定义 |
+| `domain_pack/chart_templates/` | 新建 | 基础图表模板 |
 | `eval/cases_plan.md` | 新建 | 32 条评测问题清单 |
-| `eval/cases/smoke.yaml` | 新建 | v1 最小 smoke 用例 |
+| `eval/cases/smoke.yaml` | 新建 | v1 最小 SQL smoke 用例 |
 | `eval/run_eval.py` | 新建 | EvalOps-lite 执行入口 |
 | `eval/reports/` | 新建 | 评测输出目录 |
+| `eval/traces/` | 新建 | Agent 运行 Trace，JSONL 文件默认不提交 |
 | `demo/streamlit_app.py` | 新建 | v1 演示页 |
-| `README.md` | 修改 | 每周增量补 ER 图、启动说明、演示截图位置 |
+| `README.md` | 修改 | ER 图、项目结构、启动说明、演示截图位置 |
+| `dev-log.md` | 已建 / 持续追加 | 模块完成记录、技术决策和面试复盘 |
 
-## 里程碑
+## 模块总览
 
-| 里程碑 | 截止日期 | 必须达成 |
-|---|---:|---|
-| M0 工程骨架就位 | 2026-07-16 | 项目目录、依赖、配置、FastAPI 空服务可启动 |
-| M1 数据面就位 | 2026-07-18 | 7 张表模型、迁移、模拟数据、ER 图草稿 |
-| M2 API 基础就位 | 2026-07-20 | 基础 CRUD/查询/分页、日志、异常处理 |
-| M3 DataPilot v0 | 2026-07-22 | 模板 SQL 端到端跑通、README 初版、32 条问题清单 |
-| M4 NL2SQL 最小链路 | 2026-07-25 | Schema 描述、few-shot、LLM SQL 生成、SQL Guard |
-| M5 v1 演示链路 | 2026-07-27 | 自然语言解释、简单图表、结构化输出、Tool Call Trace |
-| M6 EvalOps-lite + 演示页 | 2026-07-29 | 5-10 条 smoke 用例可跑，Streamlit 可演示 |
+| 模块 | 建议顺序 | 状态 | 模块目标 |
+|---|---:|---|---|
+| M0 工程骨架与配置 | 1 | 已完成 | 项目可启动、配置可读、测试可跑 |
+| M1 数据底座 | 2 | 待开始 | ORM 模型 + schema 描述 + Alembic + seed 数据 |
+| M2 API 与后端工程基础 | 3 | 待开始 | DB session + 分页 CRUD + 日志 + 异常 |
+| M3 v0 模板 SQL 闭环 | 4 | 待开始 | 模板 SQL + SQL Guard v0 + 简化 AgentResponse + 32 条问题清单 |
+| M4 NL2SQL 最小链路与安全 | 5 | 待开始 | Schema prompt + LLM SQL + SQL Guard + RBAC |
+| M5 AgentResponse 扩展、Trace、Tool 与图表 | 6 | 待开始 | 扩展结构化输出 + SQL Tool + Trace + chart_spec |
+| M6 EvalOps-lite 与演示收尾 | 7 | 待开始 | smoke 评测 + Streamlit + 阶段二验收 |
 
-## 每日任务清单
-
-### Day 1：2026-07-16 周四 - 工程骨架与任务边界
+## M0：工程骨架与配置
 
 **目标**：把空仓库变成可启动、可继续扩展的 FastAPI 项目。
 
 | 项 | 内容 |
 |---|---|
-| 输入 | `AGENTS.md`、`LEARNING_ROADMAP.md` 阶段二、当前空仓库 |
-| 输出 | `pyproject.toml`、`.env.example`、`app/main.py`、`app/core/config.py`、基础目录结构 |
-| 验收标准 | 使用项目 Python 能安装依赖；`fastapi dev app/main.py` 或等价命令能启动；`GET /health` 返回 `{"status":"ok"}` |
-| 依赖关系 | 无，是阶段二所有任务前置 |
+| 输入 | `AGENTS.md`、`LEARNING_ROADMAP.md`、`REFERENCE_GUIDE.md`、空仓库 |
+| 输出 | `pyproject.toml`、`.env.example`、`app/main.py`、`app/core/config.py`、基础目录结构、`dev-log.md` |
+| 验收标准 | 项目 Python 能安装依赖；`uvicorn app.main:app` 可启动；`GET /health` 返回 `{"status":"ok"}`；配置测试通过 |
 
-**任务**
+**已完成任务**
 
-- [x] 建立 `app/`、`engine/`、`domain_pack/`、`eval/`、`demo/`、`scripts/`、`.codex/temp_work/` 目录。
-- [x] 配置依赖：FastAPI、Uvicorn、SQLAlchemy、Alembic、Pydantic Settings、sqlglot、pandas、PyYAML、python-dotenv、streamlit、altair。
-- [x] 写 `.env.example`，包含 `APP_ENV`、`DATABASE_URL`、`REDIS_URL`、`LLM_PROVIDER`、`LLM_MODEL`、`LLM_API_KEY`。
-- [x] 写 `app/main.py`，注册 `/health`。
+- [x] 建立 `app/`、`engine/`、`domain_pack/`、`eval/`、`demo/`、`scripts/` 等基础目录；当前统一临时目录为 `.agent_work/temp/`。
+- [x] 配置依赖：FastAPI、Uvicorn、SQLAlchemy、Alembic、Pydantic Settings、sqlglot、pandas、PyYAML、python-dotenv、streamlit、altair、PyMySQL。
+- [x] 写 `.env.example`，包含 MySQL、Redis、LLM、DeepSeek、SiliconFlow、LangSmith 示例配置。
+- [x] 写 `app/main.py`，注册 `/health`，并提供脱敏后的 `/config` 调试快照。
 - [x] 写 `app/core/config.py`，用 Pydantic Settings 读取环境变量。
 - [x] 更新 `README.md` 的项目结构和本地启动命令。
+- [x] 创建 `dev-log.md`，记录 Day 1 / M0 交付、技术决策、验证结果和面试讲法。
 
-### Day 2：2026-07-17 周五 - 数据模型与 ER 图草稿
+**验证命令**
 
-**目标**：定义 7 张核心表的 SQLAlchemy 模型和字段语义。
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+```
+
+**下一步入口**
+
+- 从 M1 开始，不再按日拆分数据模型和迁移，而是一起完成“数据底座”。
+
+## M1：数据底座
+
+**目标**：一次性完成数据模型、业务字段说明、迁移和模拟数据，让后续 API、模板 SQL、评测用例都有可靠数据支撑。
 
 | 项 | 内容 |
 |---|---|
-| 输入 | 路线图中的 7 张表要求、RBAC 角色定义、电商/SaaS 运营场景 |
-| 输出 | `app/models/*.py`、`app/db/base.py`、`domain_pack/schema_desc/*.md`、ER 图 Mermaid 草稿 |
-| 验收标准 | 7 张表模型能被 SQLAlchemy metadata 加载；字段包含主键、外键、索引、时间字段；`users.role` 覆盖 `admin/ops/customer_service/demo_user` |
-| 依赖关系 | Day 1 工程骨架 |
+| 输入 | 路线图中的 7 张表要求、RBAC 角色定义、电商 / SaaS 运营场景、MySQL 库 `datapilot_dev` |
+| 输出 | `app/models/*.py`、`app/db/base.py`、`alembic/`、`scripts/seed_data.py`、`domain_pack/schema_desc/*.md`、README ER 图草稿 |
+| 验收标准 | 7 张表 metadata 可加载；`alembic upgrade head` 能在 MySQL 建表；seed 后每张表有可分析数据；至少 3-5 个固定业务事实可被后续评测稳定验证；README 有 ER 图草稿 |
+| 参考资料 | 优先查 `REFERENCE_GUIDE.md` 中的 `askdata_agent`：表结构、业务元数据、模拟数据组织方式 |
 
-**任务**
+**建议连续完成的任务**
 
-- [ ] 建 `users`：账号、角色、邮箱、手机号、创建时间。
-- [ ] 建 `products`：商品名、类目、价格、状态、上架时间。
-- [ ] 建 `channels`：渠道名、渠道类型、投放成本、状态。
-- [ ] 建 `orders`：用户、商品、渠道、订单金额、订单状态、下单时间。
-- [ ] 建 `refunds`：订单、退款金额、退款原因、退款状态、申请时间、处理时间。
-- [ ] 建 `tickets`：用户、订单、工单类型、优先级、状态、处理人、创建时间。
-- [ ] 建 `knowledge_docs`：标题、文档类型、内容、来源、版本、生效时间。
+- [ ] 定义 7 张 ORM 表：`users`、`products`、`channels`、`orders`、`refunds`、`tickets`、`knowledge_docs`。
+- [ ] 字段覆盖主键、外键、索引、状态字段、创建 / 更新时间字段。
+- [ ] `users.role` 覆盖 `admin`、`ops`、`customer_service`、`demo_user`。
+- [ ] 建 `app/db/base.py`，统一导入所有模型，保证 Alembic 能拿到完整 metadata。
 - [ ] 给 `domain_pack/schema_desc/` 每张表写业务描述、字段解释、敏感字段标记。
-- [ ] 在 README 中加入 Mermaid ER 图草稿。
-
-### Day 3：2026-07-18 周六 - Alembic 迁移与模拟数据
-
-**目标**：数据库可创建、可填充、可复现。
-
-| 项 | 内容 |
-|---|---|
-| 输入 | Day 2 ORM 模型、业务数据范围设计 |
-| 输出 | `alembic/` 配置、首个 migration、`scripts/seed_data.py`、本地 SQLite 数据库 |
-| 验收标准 | `alembic upgrade head` 成功建表；seed 后每张表有可用于分析的数据；退款率、渠道、工单、知识文档之间有关联 |
-| 依赖关系 | Day 2 数据模型 |
-
-**任务**
-
 - [ ] 初始化 Alembic，并在 `alembic/env.py` 接入 `app.db.base.Base.metadata`。
-- [ ] 生成首个 migration，人工检查 7 张表、外键、索引、枚举字段。
+- [ ] 生成首个 migration，人工检查 7 张表、外键、索引、枚举 / 状态字段。
 - [ ] 写 `scripts/seed_data.py`，生成至少：用户 50、商品 30、渠道 6、订单 500、退款 80、工单 120、知识文档 8。
 - [ ] 模拟数据覆盖 4 类角色，且包含手机号、邮箱等敏感字段。
 - [ ] 写 3-5 个固定业务事实，后续评测可稳定验证，例如某月某商品退款率最高。
-- [ ] 运行迁移和 seed，记录命令到 README。
+- [ ] 把固定业务事实写进 seed 脚本注释或 README，说明它们是后续 SQL 评测的“标准答案锚点”。
+- [ ] 在 README 中加入 Mermaid ER 图草稿和迁移 / seed 命令。
 
-### Day 4：2026-07-19 周日 - 基础 API、分页筛选与统一响应
+**验收门**
 
-**目标**：FastAPI 能读取数据，后续 Agent 和演示页有稳定接口可调用。
+- [ ] `python -m pytest` 通过。
+- [ ] `alembic upgrade head` 成功。
+- [ ] seed 后能查询 7 张表行数，且满足数量要求。
+- [ ] 至少 3 个固定业务事实能用 SQL 查出来，且结果稳定。
+- [ ] `dev-log.md` 追加 M1 记录，说明表结构设计理由、参考了哪些项目、面试怎么讲。
+
+**停止点**
+
+- 如果 Alembic 卡住，不要继续写 API；先降低复杂约束，保留应用层校验，确保 migration 能跑。
+
+## M2：API 与后端工程基础
+
+**目标**：FastAPI 能稳定读取数据，并具备统一分页、日志和异常响应。后续 Agent、评测和演示页都依赖这些接口。
 
 | 项 | 内容 |
 |---|---|
-| 输入 | Day 3 数据库和 seed 数据 |
-| 输出 | `app/api/` 路由、`app/schemas/` 响应模型、统一分页响应 |
-| 验收标准 | products/orders/refunds/tickets 至少 4 类资源支持列表查询；分页、基础筛选可用；OpenAPI 文档显示请求和响应 Schema |
-| 依赖关系 | Day 3 数据库就位 |
+| 输入 | M1 数据库、ORM 模型和 seed 数据 |
+| 输出 | `app/db/session.py`、`app/api/`、`app/schemas/`、`app/core/logging.py`、`app/core/exceptions.py` |
+| 验收标准 | products / orders / refunds / tickets 至少 4 类资源支持列表查询；分页和基础筛选可用；请求日志和异常响应格式稳定 |
+| 参考资料 | 如需 API 展示形态，可查 `databao-agent` 或 `langchain_data_agent` 的 README / API 结构；不要照搬复杂 UI |
 
-**任务**
+**建议连续完成的任务**
 
-- [ ] 建 `app/db/session.py`，提供请求级 Session 依赖。
+- [ ] 建 `app/db/session.py`，基于 `settings.database_url` 创建 SQLAlchemy engine 和请求级 Session 依赖。
+- [ ] 为 MySQL 设置合理连接参数，例如 `pool_pre_ping=True`。
 - [ ] 建统一响应 Schema：`PageResponse[T]`、`ErrorResponse`。
 - [ ] 实现 `GET /api/products`，支持类目、状态筛选和分页。
 - [ ] 实现 `GET /api/orders`，支持时间范围、渠道、订单状态筛选和分页。
 - [ ] 实现 `GET /api/refunds`，支持时间范围、退款状态、退款原因筛选和分页。
 - [ ] 实现 `GET /api/tickets`，支持状态、优先级、工单类型筛选和分页。
-- [ ] 用 curl 或 HTTPie 手动验证每个接口至少 2 个查询条件组合。
-
-### Day 5：2026-07-20 周一 - 日志、异常处理、Redis 缓存骨架
-
-**目标**：补齐后端工程基础，让后续 Trace 和评测有可观测性。
-
-| 项 | 内容 |
-|---|---|
-| 输入 | Day 4 API 服务 |
-| 输出 | `app/core/logging.py`、`app/core/exceptions.py`、请求日志中间件、Redis 缓存封装 |
-| 验收标准 | 每次请求记录 method/path/status/latency_ms/trace_id；业务异常返回统一 JSON；Redis 不可用时服务可降级运行 |
-| 依赖关系 | Day 4 API 路由 |
-
-**任务**
-
 - [ ] 实现请求日志中间件，生成并透传 `trace_id`。
 - [ ] 实现 `AppError`、`NotFoundError`、`ValidationAppError`、`PermissionDeniedError`。
-- [ ] 注册全局 exception handler，统一返回 `code/message/trace_id/details`。
-- [ ] 建 Redis client 包装，用于缓存常用统计；本阶段先允许无 Redis 降级为内存空实现。
-- [ ] 为 API 加 2-3 个异常路径验证，例如非法分页、资源不存在。
-- [ ] README 加“日志与异常响应示例”。
+- [ ] 注册全局 exception handler，统一返回 `code`、`message`、`trace_id`、`details`。
+- [ ] Redis 只做缓存 wrapper 骨架：Redis 不可用时服务可降级运行，不进入 M2 主验收。
+- [ ] README 增加 API、日志与异常响应示例。
 
-### Day 6：2026-07-21 周二 - 32 条评测问题清单
+**验收门**
 
-**目标**：把业务问题先设计出来，让后续开发围绕评测闭环推进。
+- [ ] 4 类资源列表接口都能返回分页结果。
+- [ ] 每个接口至少手动验证 2 个查询条件组合。
+- [ ] 非法分页或资源不存在时返回统一错误结构。
+- [ ] 每次请求记录 method / path / status / latency_ms / trace_id。
+- [ ] `dev-log.md` 追加 M2 记录。
 
-| 项 | 内容 |
-|---|---|
-| 输入 | 路线图评测分布、已设计表结构、seed 数据中的固定业务事实 |
-| 输出 | `eval/cases_plan.md` |
-| 验收标准 | 32 条问题完整覆盖 6 简单 SQL、7 聚合、5 多表、5 RAG、3 混合、6 安全攻击；每条包含问题、意图、预期表/文档、验收方式 |
-| 依赖关系 | Day 2 表结构、Day 3 模拟数据事实 |
+**停止点**
 
-**任务**
+- Redis 不要拖慢主线。连不上就先用空实现，等 v0/v1 主链路稳定后再补。
 
-- [ ] 写 6 条简单 SQL：单表查询、条件过滤、多列投影。
-- [ ] 写 7 条聚合统计：GMV、订单数、退款率、按渠道/类目/月聚合。
-- [ ] 写 5 条多表关联：orders + products + channels + refunds + users。
-- [ ] 写 5 条 RAG 问答：退款政策、客服规则、工单升级、售后时效、渠道归因口径。
-- [ ] 写 3 条 SQL+RAG 混合：先查 Top N 或异常指标，再结合政策生成建议。
-- [ ] 写 6 条安全攻击：DDL/DML、敏感字段、越权角色、Prompt Injection、RAG 文档投毒、Tool 参数绕过。
-- [ ] 每条用例标注 `case_id`、`task_type`、`difficulty`、`expected_tables/docs`、`acceptance_check`。
+## M3：v0 模板 SQL 闭环
 
-### Day 7：2026-07-22 周三 - 模板 SQL 端到端与 v0 验收
-
-**目标**：完成 DataPilot v0，不依赖 LLM 也能演示自然语言到查询结果的闭环。
+**目标**：完成 DataPilot v0。不依赖 LLM，也能从自然语言问题匹配模板 SQL，经过 SQL Guard v0 后执行，并返回简化版 AgentResponse。
 
 | 项 | 内容 |
 |---|---|
-| 输入 | Day 3 数据库、Day 6 问题清单、sqlglot |
-| 输出 | `engine/nl2sql/templates.py`、`engine/sql_guard/guard.py`、`app/api/query.py`、v0 README |
-| 验收标准 | 至少 5 个自然语言问题能匹配模板 SQL 并返回表格；危险 DDL/DML 被拦截；README 有 ER 图、项目结构、v0 运行说明 |
-| 依赖关系 | Day 3 数据、Day 5 异常处理、Day 6 用例清单 |
+| 输入 | M1 数据库、M2 API / DB session、业务问题草稿、sqlglot |
+| 输出 | `engine/nl2sql/templates.py`、`engine/sql_guard/guard.py`、`app/schemas/agent.py`、`app/api/query.py`、`eval/cases_plan.md`、README v0 |
+| 验收标准 | 至少 5 个自然语言问题能匹配模板 SQL 并返回简化版 AgentResponse；危险 DDL / DML 被拦截；32 条问题清单和 YAML 字段草案完成第一版 |
+| 参考资料 | `askdata_agent` 的 SQL 执行返回格式；`QueryMind` 的 SQL governance 边界 |
 
-**任务**
+**建议连续完成的任务**
 
+- [ ] 先写 `eval/cases_plan.md` 第一版，覆盖 32 条问题：6 简单 SQL、7 聚合、5 多表、5 RAG、3 混合、6 安全攻击。
+- [ ] 在 `eval/cases_plan.md` 中同步定义后续 YAML 字段草案：`id`、`task_type`、`question`、`user_role`、`expected_tables`、`expected_columns`、`security_expectation`、`check`。
 - [ ] 选 5 条高价值模板问题：退款率最高商品、各渠道订单量、本月 GMV、Top 退款原因、待处理高优先级工单。
 - [ ] 写模板匹配函数：输入自然语言，输出 `route=sql`、SQL、参数。
-- [ ] 写 sqlglot 只读检查：只允许 `SELECT`，拒绝 `DROP/DELETE/UPDATE/INSERT/ALTER/TRUNCATE`。
-- [ ] 实现 `/api/query`：接收 `question/user_role`，返回 `route/sql/columns/rows/trace_id`。
-- [ ] 对 5 条模板问题手动执行，保存输出摘要到 `.codex/temp_work/v0-smoke.md`。
+- [ ] 写 `domain_pack/metrics.yaml`，定义 `refund_rate = refund_count / order_count`、`gmv = sum(order_amount)` 等 KPI 口径。
+- [ ] 把模板 SQL 同步沉淀到 `domain_pack/sql_examples/basic.yaml`，作为后续 few-shot 示例。
+- [ ] 写 sqlglot 只读检查：只允许 `SELECT`，拒绝 `DROP`、`DELETE`、`UPDATE`、`INSERT`、`ALTER`、`TRUNCATE`。
+- [ ] 定义简化版 `AgentResponse` Pydantic Schema：`route`、`answer`、`sql`、`columns`、`rows`、`safety_status`、`blocked_reason`、`trace_id`。
+- [ ] 实现 `/api/query`：接收 `question`、`user_role`，返回简化版 `AgentResponse`，不直接返回散装 dict。
+- [ ] 对 5 条模板问题手动执行，保存输出摘要到 `.agent_work/temp/v0-smoke.md`。
 - [ ] 更新 README：ER 图、目录结构、v0 启动步骤、v0 示例问题。
-- [ ] v0 验收：从空库迁移、seed、启动 API、调用 `/api/query` 全链路成功。
 
-### Day 8：2026-07-23 周四 - Schema 描述与 NL2SQL Prompt
+**验收门**
 
-**目标**：从硬编码模板迈向 LLM SQL 生成，但继续保留模板作为兜底。
+- [ ] `/health` 正常。
+- [ ] 至少 5 个模板 SQL 问题通过 `/api/query` 返回简化版 AgentResponse 和表格数据。
+- [ ] sqlglot 拦截 `DROP`、`DELETE`、`UPDATE`、`INSERT`、`ALTER`、`TRUNCATE`。
+- [ ] `eval/cases_plan.md` 32 条问题清单完整。
+- [ ] `eval/cases_plan.md` 包含后续 YAML case 字段草案。
+- [ ] README 包含 ER 图、项目结构、v0 启动步骤。
+- [ ] `dev-log.md` 追加 M3 记录。
+
+**停止点**
+
+- 不要在 M3 引入 LLM 自由生成。v0 的价值是先跑通稳定闭环。
+- 不要绕过 SQL Guard 临时执行 SQL；如果 guard 解析失败，应返回结构化错误。
+
+## M4：NL2SQL 最小链路与安全
+
+**目标**：从模板 SQL 迈向 LLM SQL 生成，但安全校验必须同步进入主链路。生成 SQL 和拦截危险 SQL 不应分成两个遥远阶段。
 
 | 项 | 内容 |
 |---|---|
-| 输入 | `domain_pack/schema_desc/`、`domain_pack/sql_examples/`、v0 模板 SQL |
-| 输出 | `engine/nl2sql/schema_loader.py`、`engine/nl2sql/prompt.py`、few-shot 示例 |
-| 验收标准 | 给定问题能构造包含相关表、字段说明、KPI 口径、few-shot 的 prompt；模板能命中时优先走模板兜底 |
-| 依赖关系 | Day 7 v0 链路 |
+| 输入 | M3 模板 SQL、schema_desc、metrics、LLM 配置、SQL Guard v0 |
+| 输出 | `engine/nl2sql/schema_loader.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/sql_guard/policy.py`、`engine/sql_guard/rbac.py` |
+| 验收标准 | 至少 6 条简单 SQL 中 5 条可生成可解析 SQL；危险 SQL、敏感字段、越权角色能被结构化拦截 |
+| 参考资料 | `askdata_agent` 的局部 Schema 和 prompt builder；`GustoBot` 的 text2sql prompt；`QueryMind` 的 SQL 安全边界 |
 
-**任务**
+**建议连续完成的任务**
 
-- [ ] 把 Day 7 的 5 条模板 SQL 转成 few-shot 示例，写入 `domain_pack/sql_examples/basic.yaml`。
-- [ ] 写 `domain_pack/metrics.yaml`，定义 `refund_rate = refund_count / order_count`、`gmv = sum(order_amount)`。
 - [ ] 写 schema loader，读取表描述、字段敏感标记、KPI 定义。
-- [ ] 写 prompt builder，输出：系统约束、可用表、字段说明、业务口径、few-shot、用户问题。
-- [ ] 为 6 条简单 SQL 问题生成 prompt 快照，保存到 `.codex/temp_work/prompt-snapshots.md`。
-
-### Day 9：2026-07-24 周五 - LLM SQL 生成适配与解析
-
-**目标**：接入 LLM 生成 SQL，并把输出约束在可解析、可校验的结构内。
-
-| 项 | 内容 |
-|---|---|
-| 输入 | Day 8 prompt builder、LLM 配置 |
-| 输出 | `engine/nl2sql/generator.py`、SQL 提取和错误处理逻辑 |
-| 验收标准 | 至少 6 条简单 SQL 中 5 条可生成可解析 SQL；LLM 缺失或失败时返回明确错误并可回退模板 |
-| 依赖关系 | Day 8 Prompt，Day 7 SQL 执行链路 |
-
-**任务**
-
+- [ ] 写 prompt builder，输出系统约束、可用表、字段说明、业务口径、few-shot、用户问题。
+- [ ] 为 6 条简单 SQL 问题生成 prompt 快照，保存到 `.agent_work/temp/prompt-snapshots.md`。
 - [ ] 定义 `GeneratedSQL` Pydantic Schema：`sql`、`tables_used`、`confidence`、`reasoning_summary`。
 - [ ] 实现 LLM client 适配层，先支持一个实际可用模型；API key 缺失时返回可诊断错误。
+- [ ] LLM provider 优先 DeepSeek 或 SiliconFlow；阶段二不为了兼容太多厂商做复杂抽象。
 - [ ] 实现 SQL 提取：优先解析结构化 JSON，失败时从 fenced code block 提取 SQL。
-- [ ] 将 LLM SQL 接入 `/api/query`，模板命中优先，模板未命中再走 LLM。
-- [ ] 对 Day 6 的 6 条简单 SQL 用例手动运行，记录生成 SQL 和执行状态。
-- [ ] 把失败 SQL 加入 `domain_pack/sql_examples/error_cases.yaml`，记录错误原因和修正版本。
-
-### Day 10：2026-07-25 周六 - SQL Guard、RBAC 与超时控制
-
-**目标**：把 SQL 安全从“只读检查”升级为阶段二可讲清楚的工程安全方案。
-
-| 项 | 内容 |
-|---|---|
-| 输入 | Day 9 LLM SQL、schema_desc 敏感字段、RBAC 角色定义 |
-| 输出 | `engine/sql_guard/policy.py`、`engine/sql_guard/rbac.py`、`engine/sql_guard/guard.py` |
-| 验收标准 | 6 条安全攻击用例的 SQL 层风险至少能拦截 DDL/DML、敏感字段、越权角色、Prompt Injection 诱导危险 SQL；所有拦截返回结构化错误 |
-| 依赖关系 | Day 9 生成 SQL，Day 5 异常处理 |
-
-**任务**
-
-- [ ] 建敏感字段清单：`users.email`、`users.phone`、后续可扩展到地址、身份证等。
+- [ ] 模板命中优先；模板未命中再走 LLM。
+- [ ] 建敏感字段清单：`users.email`、`users.phone`，后续可扩展。
 - [ ] 建角色权限矩阵：`admin` 全量、`ops` 屏蔽敏感字段、`customer_service` 限工单和政策、`demo_user` 限脱敏样例。
 - [ ] 用 sqlglot AST 提取表名、列名、语句类型。
 - [ ] 拦截非 SELECT、敏感字段、角色不可访问表、角色不可访问字段。
-- [ ] 给 SQL 执行加超时参数；SQLite 本地先用执行前限制和应用层超时兜底。
-- [ ] `/api/query` 返回 `safety_status=passed/blocked` 和 `blocked_reason`。
-- [ ] 手动验证 6 条安全问题中的前 4 条，并记录结果。
+- [ ] 复用 M3 的 `AgentResponse`，补齐 LLM 生成路径下的 `safety_status=passed/blocked` 和 `blocked_reason`。
+- [ ] 把失败 SQL 加入 `domain_pack/sql_examples/error_cases.yaml`，记录错误原因和修正版本。
 
-### Day 11：2026-07-26 周日 - 结构化输出、Trace 与 SQL Tool
+**验收门**
 
-**目标**：让 Agent 输出稳定，评测和演示页可以直接消费。
+- [ ] 6 条简单 SQL 中至少 5 条生成并执行成功。
+- [ ] 安全攻击用例中的 DDL / DML、敏感字段、越权角色、Prompt Injection 诱导危险 SQL 能被拦截。
+- [ ] 所有拦截返回结构化错误，不返回 Python traceback。
+- [ ] `dev-log.md` 追加 M4 记录。
+
+**停止点**
+
+- 如果 LLM 接入不稳定，保留模板 SQL + prompt 快照，LLM 失败时返回明确错误，不阻塞 SQL Guard。
+
+## M5：AgentResponse 扩展、Trace、Tool 与图表
+
+**目标**：让 `/api/query` 的输出稳定，评测和演示页可以直接消费。结构化输出、SQL Tool、Trace 和简单图表应一起收口。
 
 | 项 | 内容 |
 |---|---|
-| 输入 | Day 10 安全链路、路线图中的 AgentResponse Schema |
-| 输出 | `engine/trace/`、`engine/tools/sql_tool.py`、统一 Agent 响应 Schema |
-| 验收标准 | 每次查询返回 route、answer、tables_used、docs_used、chart_spec、safety_status、cost、trace_id；每次 SQL tool call 记录参数、输出摘要、耗时、错误 |
-| 依赖关系 | Day 10 SQL Guard |
+| 输入 | M4 安全链路、路线图中的 AgentResponse Schema、常见聚合结果 |
+| 输出 | `engine/trace/`、`engine/tools/sql_tool.py`、`engine/tools/chart_tool.py`、`domain_pack/chart_templates/basic.yaml`、扩展版 AgentResponse Schema |
+| 验收标准 | 每次查询返回 route、answer、tables_used、docs_used、chart_spec、safety_status、cost、trace_id；聚合类结果能生成基础图表 spec |
+| 参考资料 | `databao-agent` 的 Vega-Lite / 图表 spec 思路；`CoreCoder` 的 trace / tool 结构只作概念参考，不照搬 coding agent |
 
-**任务**
+**建议连续完成的任务**
 
-- [ ] 定义 `CostInfo`、`ToolCallTrace`、`AgentResponse` Pydantic Schema。
-- [ ] 封装 SQL 查询 tool：输入 `sql/user_role/trace_id`，输出列、行、耗时、安全状态。
+- [ ] 在 M3 简化版 `AgentResponse` 基础上扩展 `CostInfo`、`ToolCallTrace`、`docs_used`、`chart_spec`。
+- [ ] 封装 SQL 查询 tool：输入 `sql`、`user_role`、`trace_id`，输出列、行、耗时、安全状态。
 - [ ] 在 `/api/query` 中改为调用 SQL tool，不直接执行 SQL。
 - [ ] 记录 `latency_ms`、`route`、`sql_time`、`model`、`prompt_tokens`、`completion_tokens`。
 - [ ] 生成自然语言 answer 的最小版本：基于结果表格模板化总结，不追求复杂报告。
-- [ ] 将 trace 以 JSONL 追加写入 `.codex/temp_work/traces.jsonl`，后续再迁到正式目录。
-
-### Day 12：2026-07-27 周一 - 简单图表与 v1 查询体验
-
-**目标**：让 SQL 查询结果不仅能返回表格，也能展示一张可解释的图。
-
-| 项 | 内容 |
-|---|---|
-| 输入 | Day 11 AgentResponse、常见聚合结果 |
-| 输出 | `engine/tools/chart_tool.py`、`domain_pack/chart_templates/`、图表 spec |
-| 验收标准 | 对渠道订单量、商品退款率、月度 GMV 至少 3 类结果生成 Vega-Lite/Altair 兼容图表 spec；无法画图时返回 `chart_spec=null` 且不影响答案 |
-| 依赖关系 | Day 11 结构化输出 |
-
-**任务**
-
+- [ ] 将 trace 以 JSONL 追加写入 `eval/traces/traces.jsonl`，字段结构按 AgentEvalOps 复用设计，后续只替换存储层。
 - [ ] 定义图表选择规则：类别 + 数值 -> bar，日期 + 数值 -> line，Top N -> horizontal bar。
 - [ ] 写 `domain_pack/chart_templates/basic.yaml`，保存 3 类图表模板。
-- [ ] 实现 chart tool，输入 columns/rows/question，输出 `chart_spec`。
-- [ ] `/api/query` 对聚合类结果自动尝试生成 chart_spec。
-- [ ] 手动验证 3 个聚合问题：渠道订单量、退款率最高商品、近 30 天 GMV。
+- [ ] 实现 chart tool，输入 `columns`、`rows`、`question`，输出 `chart_spec`。
+- [ ] `/api/query` 对聚合类结果自动尝试生成 `chart_spec`。
 - [ ] README 增加 v1 输出结构示例。
 
-### Day 13：2026-07-28 周二 - EvalOps-lite 最小闭环
+**验收门**
 
-**目标**：评测前置真正跑起来，不等阶段四才补。
+- [ ] AgentResponse 通过 Pydantic 校验，字段完整。
+- [ ] 每次请求有 trace_id、latency_ms、route、SQL、tool_calls、error_type。
+- [ ] 对渠道订单量、商品退款率、月度 GMV 至少 3 类结果生成 Vega-Lite / Altair 兼容图表 spec。
+- [ ] 无法画图时返回 `chart_spec=null`，且不影响答案。
+- [ ] `dev-log.md` 追加 M5 记录。
+
+**停止点**
+
+- 图表不要过度设计。若调试超过半天，只支持 bar / line 两类，复杂图表推迟。
+
+## M6：EvalOps-lite 与演示收尾
+
+**目标**：让阶段二成果可评测、可演示、可继续进入 RAG 阶段。先跑 smoke，再做 Streamlit。
 
 | 项 | 内容 |
 |---|---|
-| 输入 | Day 6 `eval/cases_plan.md`、Day 12 `/api/query` |
-| 输出 | `eval/cases/smoke.yaml`、`eval/run_eval.py`、`eval/reports/latest.md` |
-| 验收标准 | 至少 5 条 SQL smoke 用例能批量执行并输出 pass/fail/error_type；失败样本能看到 question、route、sql、answer、trace_id |
-| 依赖关系 | Day 12 v1 查询 API |
+| 输入 | `eval/cases_plan.md`、M5 `/api/query`、AgentResponse |
+| 输出 | `eval/cases/smoke.yaml`、`eval/run_eval.py`、`eval/reports/latest.md`、`demo/streamlit_app.py`、阶段二验收记录 |
+| 验收标准 | 6 条 SQL smoke 用例能批量执行并输出 pass / fail / error_type；Streamlit 能展示 answer / SQL / table / chart / trace_id |
+| 参考资料 | `QueryMind` 的 evaluation-run；`hello-agents/ch12` 的评估方法论；`databao-agent` 的展示体验 |
 
-**任务**
+**建议连续完成的任务**
 
-- [ ] 从 32 条问题清单中抽 5-10 条 smoke：2 简单 SQL、2 聚合、1 多表、1 安全。
-- [ ] 定义 YAML 字段：`id/task_type/question/user_role/expected_tables/expected_columns/security_expectation/check`。
+- [ ] 从 32 条问题清单中抽 6 条 SQL smoke：2 简单 SQL、2 聚合、1 多表、1 安全。
+- [ ] 定义 YAML 字段：`id`、`task_type`、`question`、`user_role`、`expected_tables`、`expected_columns`、`security_expectation`、`check`。
 - [ ] 写 `eval/run_eval.py`：读取 YAML，调用本地 `/api/query` 或直接调用 pipeline，收集响应。
 - [ ] 实现最小评分：接口成功、route 匹配、预期表命中、安全期望匹配。
 - [ ] 输出 Markdown 报告：总数、通过数、失败数、失败原因、每条 trace_id。
 - [ ] 跑一次 smoke，保存 `eval/reports/latest.md`。
-
-### Day 14：2026-07-29 周三 - Streamlit 演示页与 v1 总验收
-
-**目标**：完成阶段二 v1，可演示、可评测、可继续进入 RAG 阶段。
-
-| 项 | 内容 |
-|---|---|
-| 输入 | Day 12 v1 API、Day 13 EvalOps-lite |
-| 输出 | `demo/streamlit_app.py`、README v1 截图位和演示步骤、阶段二验收记录 |
-| 验收标准 | Streamlit 页面支持输入问题并展示 answer/sql/table/chart/trace_id；EvalOps-lite 跑通至少 5 条 SQL 用例；README 能让别人按步骤启动 v1 |
-| 依赖关系 | Day 13 EvalOps-lite |
-
-**任务**
-
 - [ ] 写 Streamlit 页面：问题输入框、角色选择、提交按钮。
 - [ ] 展示结构化响应：answer、SQL、表格、图表、safety_status、trace_id。
 - [ ] 准备 5 个演示问题按钮，覆盖简单查询、聚合、多表、安全拦截。
-- [ ] 跑完整 v1 验收流程：迁移、seed、启动 API、启动 Streamlit、跑 smoke。
 - [ ] 更新 README：v1 能力、启动步骤、示例问题、评测命令、已知限制。
-- [ ] 写阶段二收尾记录到 `.codex/temp_work/phase2-v1-acceptance.md`，包含通过项、失败项、后续阶段三需要接上的 RAG 输入。
+- [ ] 写阶段二收尾记录到 `.agent_work/temp/phase2-v1-acceptance.md`，包含通过项、失败项、后续阶段三需要接上的 RAG 输入。
 
-## 阶段验收标准
+**验收门**
 
-### v0 验收：2026-07-22
+- [ ] EvalOps-lite 跑通 6 条 SQL smoke 用例并输出 pass / fail。
+- [ ] Streamlit 页面能展示答案、SQL、表格、图表、Trace。
+- [ ] README 说明实际技术栈，不写尚未实现的 LangGraph / RAG / MCP / Skill。
+- [ ] 阶段二验收记录完整。
+- [ ] `dev-log.md` 追加 M6 记录。
 
-- [ ] 从空数据库执行 migration 成功。
-- [ ] seed 数据生成成功，7 张表行数满足 Day 3 标准。
+**停止点**
+
+- 如果 Streamlit 页面耗时，页面只调 `/api/query` 并展示 JSON + 表格，图表可后补。
+
+## v0 验收标准
+
+v0 对应 M1-M3 的完成结果。
+
+- [ ] 从空 MySQL 数据库执行 migration 成功。
+- [ ] seed 数据生成成功，7 张表行数满足 M1 标准。
 - [ ] `/health` 正常。
-- [ ] 至少 5 个模板 SQL 问题通过 `/api/query` 返回表格。
-- [ ] sqlglot 拦截 `DROP/DELETE/UPDATE/INSERT/ALTER/TRUNCATE`。
-- [ ] `eval/cases_plan.md` 32 条问题清单完整。
+- [ ] 至少 5 个模板 SQL 问题通过 `/api/query` 返回简化版 AgentResponse 和表格数据。
+- [ ] sqlglot 拦截 `DROP`、`DELETE`、`UPDATE`、`INSERT`、`ALTER`、`TRUNCATE`。
+- [ ] `eval/cases_plan.md` 32 条问题清单完整，并包含后续 YAML case 字段草案。
 - [ ] README 包含 ER 图、目录结构、v0 启动步骤。
 
-### v1 验收：2026-07-29
+## v1 验收标准
+
+v1 对应 M4-M6 的完成结果。
 
 - [ ] 至少 6 条简单 SQL 中 5 条生成并执行正确。
 - [ ] 至少 3 条聚合问题可返回表格和图表。
 - [ ] SQL Guard 拦截危险 SQL、敏感字段、越权角色。
 - [ ] AgentResponse 通过 Pydantic 校验，字段完整。
 - [ ] 每次请求有 trace_id、latency_ms、route、SQL、tool_calls、error_type。
-- [ ] EvalOps-lite 跑通至少 5 条 SQL smoke 用例并输出 pass/fail。
+- [ ] EvalOps-lite 跑通 6 条 SQL smoke 用例并输出 pass / fail。
 - [ ] Streamlit 演示页能展示答案、SQL、表格、图表、Trace。
-- [ ] README 说明实际技术栈，不写尚未实现的 LangGraph/RAG/MCP/Skill。
+- [ ] README 说明实际技术栈，不写尚未实现的 LangGraph / RAG / MCP / Skill。
 
 ## 依赖关系总览
 
 ```mermaid
 flowchart TD
-  D1["Day 1 工程骨架"] --> D2["Day 2 数据模型"]
-  D2 --> D3["Day 3 迁移与模拟数据"]
-  D3 --> D4["Day 4 基础 API"]
-  D4 --> D5["Day 5 日志异常缓存"]
-  D2 --> D6["Day 6 评测问题清单"]
-  D3 --> D7["Day 7 模板 SQL v0"]
-  D5 --> D7
-  D6 --> D7
-  D7 --> D8["Day 8 Schema + Prompt"]
-  D8 --> D9["Day 9 LLM SQL"]
-  D9 --> D10["Day 10 SQL Guard + RBAC"]
-  D10 --> D11["Day 11 结构化输出 + Trace + Tool"]
-  D11 --> D12["Day 12 图表"]
-  D12 --> D13["Day 13 EvalOps-lite"]
-  D13 --> D14["Day 14 Streamlit + v1 验收"]
+  M0["M0 工程骨架与配置"] --> M1["M1 数据底座"]
+  M1 --> M2["M2 API 与后端工程基础"]
+  M1 --> M3["M3 v0 模板 SQL 闭环"]
+  M2 --> M3
+  M3 --> M4["M4 NL2SQL 最小链路与安全"]
+  M4 --> M5["M5 AgentResponse + Trace + Tool + 图表"]
+  M5 --> M6["M6 EvalOps-lite + Streamlit + 验收"]
 ```
 
 ## 风险与兜底
 
 | 风险 | 触发信号 | 兜底方案 | 不影响的验收 |
 |---|---|---|---|
-| LLM 接入不稳定 | Day 9 半天内不能稳定返回 SQL | 保留模板 SQL + few-shot，LLM 失败时返回可诊断错误 | v0、EvalOps-lite、SQL Guard |
-| Redis 环境麻烦 | 本地 Redis 起不来或连接不稳定 | Redis wrapper 降级为空实现，缓存能力只保留接口 | v0/v1 主链路 |
-| SQLAlchemy/Alembic 卡住 | migration 反复生成异常 | 减少高级枚举和复杂约束，先用字符串字段 + 应用层校验 | 数据库可迁移 |
-| 图表生成耗时 | chart_spec 结构调试超过半天 | 只支持 bar/line 两类，复杂图表推迟到阶段四 | v1 演示 |
+| MySQL / Alembic 卡住 | migration 反复生成异常 | 减少高级枚举和复杂约束，先用字符串字段 + 应用层校验 | 数据库可迁移 |
+| AgentResponse 设计不完整 | M3 结构化响应字段暂时不够 | 保留简化版字段，M5 只增量扩展，不改已有字段含义 | v0 API、后续评测 |
+| eval case 格式不确定 | M3 还不能写完整 YAML 用例 | 先在 `eval/cases_plan.md` 写字段草案和示例，M6 再落成 `smoke.yaml` | 32 条问题清单 |
+| 普通 pipeline 后续要换 LangGraph | M4/M5 前 LangGraph 编排卡住 | pipeline 状态字段按未来 graph state 设计，后续只替换编排层 | NL2SQL 主链路 |
+| Redis 环境麻烦 | 本地 Redis 起不来或连接不稳定 | Redis wrapper 降级为空实现，缓存能力只保留接口 | v0 / v1 主链路 |
+| LLM 接入不稳定 | M4 半天内不能稳定返回 SQL | 保留模板 SQL + few-shot，LLM 失败时返回可诊断错误 | v0、EvalOps-lite、SQL Guard |
+| LLM provider 抽象过度 | 为兼容多个厂商拖慢 M4 | 优先接通 DeepSeek 或 SiliconFlow 中一个可用模型，另一个后续补 | NL2SQL 最小链路 |
+| Trace 存储后续要迁移 | JSONL 不适合长期查询 | 先固定 trace 字段结构，后续只把存储从 JSONL 换到 SQLite / AgentEvalOps | Trace 可复用 |
+| 图表生成耗时 | chart_spec 结构调试超过半天 | 只支持 bar / line 两类，复杂图表推迟 | v1 演示 |
 | Streamlit 耗时 | 页面交互调试超过半天 | 页面只调 `/api/query` 并展示 JSON + 表格，图表可后补 | 可演示 |
-| 权限矩阵过复杂 | RBAC 规则影响主链路开发 | 先实现字段/表级 allowlist，行级权限后续补 | 安全用例核心覆盖 |
+| 权限矩阵过复杂 | RBAC 规则影响主链路开发 | 先实现字段 / 表级 allowlist，行级权限后续补 | 安全用例核心覆盖 |
 
-## 每日收工检查
+## 模块收工检查
 
-- [ ] 当天新增文件能被 `rg --files` 看到，路径符合目录规划。
-- [ ] 当天核心命令记录在 README 或 `.codex/temp_work/` 验收记录中。
-- [ ] 如果当天修改 API 响应结构，同步更新 Pydantic Schema 和 README 示例。
-- [ ] 如果当天发现 seed 数据无法支撑某条评测问题，当天修 seed 或调整该问题，不把问题留到阶段四。
-- [ ] 不把未实现能力写成已实现；README 使用“已完成/进行中/后续计划”分层表述。
+- [ ] 新增文件能被 `rg --files` 看到，路径符合目录规划。
+- [ ] 核心命令记录在 README、`dev-log.md` 或 `.agent_work/temp/` 验收记录中。
+- [ ] 如果修改 API 响应结构，同步更新 Pydantic Schema 和 README 示例。
+- [ ] 如果发现 seed 数据无法支撑某条评测问题，当场修 seed 或调整该问题，不把问题留到阶段四。
+- [ ] 不把未实现能力写成已实现；README 使用“已完成 / 进行中 / 后续计划”分层表述。
+- [ ] 如果查了 `references/` 项目，在 `dev-log.md` 中写清楚查了什么、借鉴了什么、没有照搬什么。
