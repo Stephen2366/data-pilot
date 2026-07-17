@@ -24,7 +24,7 @@
 - 建表和改表必须通过 Alembic migration 管理，不裸写 DDL 作为主路径。
 - `engine/` 不写电商业务硬编码；业务配置放入 `domain_pack/`。
 - `/api/query` 从第一次实现开始就使用 Pydantic AgentResponse Schema，不先散落返回普通 dict。
-- 每完成一个模块，更新 README、`AI_CONTEXT.md` 技术档案和 `dev-log.md` ★ 日志；验收记录放 `.agent_work/temp/`。
+- 每完成一个模块，更新 README、`AI_CONTEXT.md` 技术档案和 `dev-log.md` 日志；验收记录放 `.agent_work/temp/`。
 - 所有临时脚本中间产物放到 `./.agent_work/temp/`。
 - Agent 运行 Trace 写入 `eval/traces/`；Trace 是评测和复盘会消费的数据，不放临时目录。
 - 安全类能力不只靠 prompt，必须经过 sqlglot AST、只读限制、敏感字段策略和 RBAC 规则。
