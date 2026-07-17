@@ -11,8 +11,8 @@
 > **参考资料速查**：[REFERENCE_GUIDE.md](D:/.Work/Practice/Python-Practice/references/REFERENCE_GUIDE.md) — 参考项目的定位、可借鉴点、不要照搬的坑。写代码时按场景查对应项目，不用通读。
 
 ## 用户背景
-- **用户信息**：硕士研究生（2028 届），计划 9 月开始集中投递 + 面试，目标 10 月找到 AI 应用开发 / Agent 开发 / 后端开发的日常实习。实践项目服务简历和面试
-- **用户已学习技术栈**：Java / SpringBoot / MySQL / Redis / Python / FastAPI / LangChain-LangGraph / （讲解和注释时可用这些技术作类比）
+- **用户信息**：2028 届硕士研究生，计划 9 月开始集中投递 + 面试，目标 10 月找到 AI 应用开发 / Agent 开发 / 后端开发的日常实习。两个实践项目服务简历和面试
+- **已学习技术栈**：Java / SpringBoot / MySQL / Redis / Python / FastAPI / LangChain-LangGraph（讲解和注释时可用这些技术作类比）
 
 ## 目录结构
 
