@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统——自然语言 → SQL/RAG → 可视化 + 分析报告。
 
-🚧 阶段二进行中：M0 工程骨架已完成，当前推进 M1 数据底座
+🚧 阶段二进行中：M1 数据底座已完成，下一步推进 M2 API 与后端工程基础
 
 ## 快速开始
 
@@ -47,6 +47,118 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 
 ```powershell
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest
+```
+
+### 数据库迁移与 Seed
+
+建表主路径使用 Alembic，目标库是 MySQL 开发库 `datapilot_dev`：
+
+```powershell
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic upgrade head
+```
+
+写入确定性模拟数据：
+
+```powershell
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
+```
+
+M1 seed 固定写入以下数据量：用户 50、商品 30、渠道 6、订单 500、退款 80、工单 120、知识文档 8。
+
+固定业务事实锚点：
+
+- 2026-06 退款率最高商品：`Aurora Noise Cancelling Headphones`
+- 2026-06 GMV 最高渠道：`Mobile App`
+- 全量退款 Top 原因：`quality_issue`
+- 待处理高优先级工单数量：`12`
+
+## M1 ER 图草稿
+
+```mermaid
+erDiagram
+  users ||--o{ orders : places
+  users ||--o{ refunds : requests
+  users ||--o{ tickets : opens
+  users ||--o{ tickets : assigned_to
+  products ||--o{ orders : sold_as
+  products ||--o{ refunds : refunded_as
+  channels ||--o{ orders : receives
+  orders ||--o{ refunds : may_have
+  orders ||--o{ tickets : may_have
+
+  users {
+    int id PK
+    string user_name
+    string role
+    string email "sensitive"
+    string phone "sensitive"
+    string status
+    datetime created_at
+    datetime updated_at
+  }
+
+  products {
+    int id PK
+    string sku
+    string product_name
+    string category
+    string status
+    decimal price
+    datetime launched_at
+  }
+
+  channels {
+    int id PK
+    string channel_code
+    string channel_name
+    string channel_type
+    string status
+  }
+
+  orders {
+    int id PK
+    string order_no
+    int user_id FK
+    int product_id FK
+    int channel_id FK
+    string order_status
+    decimal order_amount
+    int quantity
+    datetime paid_at
+  }
+
+  refunds {
+    int id PK
+    string refund_no
+    int order_id FK
+    int user_id FK
+    int product_id FK
+    string refund_status
+    string refund_reason
+    decimal refund_amount
+    datetime requested_at
+    datetime processed_at
+  }
+
+  tickets {
+    int id PK
+    string ticket_no
+    int user_id FK
+    int order_id FK
+    int assigned_user_id FK
+    string ticket_type
+    string priority
+    string status
+  }
+
+  knowledge_docs {
+    int id PK
+    string doc_key
+    string title
+    string doc_type
+    string audience_role
+    string status
+  }
 ```
 
 ## 项目结构

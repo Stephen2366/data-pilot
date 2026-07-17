@@ -56,7 +56,10 @@
 
 - **阶段二验收**：以本文档的 v0 / v1 验收标准为准；各模块验收门是过程检查，用来保证路上不跑偏。
 - **32 条评测问题**：M3 建好 `eval/cases_plan.md` 后，以该文件作为题目构成和用例口径的唯一事实源，其他文档只引用。
+- **YAML case 字段**：M3 在 `eval/cases_plan.md` 中定义字段草案；M6 落地 `smoke.yaml` 时只按该草案执行，不在本文档其他位置重复维护字段清单。
+- **M4 简单 SQL 正确性**：以 v1 验收标准为准；“执行正确”指 SQL 通过 SQL Guard、可执行、返回字段和关键结果符合对应评测用例预期。
 - **AgentResponse**：Phase 2 API 字段以本文档 M3 简化版 AgentResponse 为基准；M5 只能增量扩展字段，不改变已有字段含义。`LEARNING_ROADMAP.md` 中的 AgentResponse 是最终方向示例，不是 Phase 2 字段全集。
+- **阶段二验收记录**：写入 `eval/reports/phase2-v1-acceptance.md`；该文件是后续 README、简历和复盘会消费的持久记录，不放临时目录。
 - **模块进度**：当前进度以 `dev-log.md`「当前状态速览」为准；模块完成状态只在本文档「模块总览」表维护，各模块小节不重复登记状态行。
 
 ## 模块推进原则
@@ -105,10 +108,12 @@
 
 ## 模块总览
 
+状态取值：`已完成` | `进行中` | `待开始` | `阻塞`（阻塞时在 dev-log 速览登记阻塞项）
+
 | 模块 | 建议顺序 | 状态 | 模块目标 |
 |---|---:|---|---|
 | M0 工程骨架与配置 | 1 | 已完成 | 项目可启动、配置可读、测试可跑 |
-| M1 数据底座 | 2 | 待开始 | ORM 模型 + schema 描述 + Alembic + seed 数据 |
+| M1 数据底座 | 2 | 已完成 | ORM 模型 + schema 描述 + Alembic + seed 数据 |
 | M2 API 与后端工程基础 | 3 | 待开始 | DB session + 分页 CRUD + 日志 + 异常 |
 | M3 v0 模板 SQL 闭环 | 4 | 待开始 | 模板 SQL + SQL Guard v0 + 简化 AgentResponse + 32 条问题清单 |
 | M4 NL2SQL 最小链路与安全 | 5 | 待开始 | Schema prompt + LLM SQL + SQL Guard + RBAC |
@@ -269,7 +274,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 |---|---|
 | 输入 | M3 模板 SQL、schema_desc、metrics、LLM 配置、SQL Guard v0 |
 | 输出 | `engine/nl2sql/schema_loader.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/sql_guard/policy.py`、`engine/sql_guard/rbac.py` |
-| 验收标准 | 至少 6 条简单 SQL 中 5 条可生成可解析 SQL；危险 SQL、敏感字段、越权角色能被结构化拦截 |
+| 验收标准 | 至少 6 条简单 SQL 中 5 条生成并执行正确；危险 SQL、敏感字段、越权角色能被结构化拦截 |
 | 参考资料 | `askdata_agent` 的局部 Schema 和 prompt builder；`GustoBot` 的 text2sql prompt；`QueryMind` 的 SQL 安全边界 |
 
 **建议连续完成的任务**
@@ -291,7 +296,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 
 **验收门**
 
-- [ ] 6 条简单 SQL 中至少 5 条生成并执行成功。
+- [ ] 6 条简单 SQL 中至少 5 条生成并执行正确；正确性口径以 v1 验收标准为准。
 - [ ] 安全攻击用例中的 DDL / DML、敏感字段、越权角色、Prompt Injection 诱导危险 SQL 能被拦截。
 - [ ] 所有拦截返回结构化错误，不返回 Python traceback。
 - [ ] `dev-log.md` 追加 M4 记录。
@@ -351,7 +356,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 **建议连续完成的任务**
 
 - [ ] 从 32 条问题清单中抽 6 条 SQL smoke：2 简单 SQL、2 聚合、1 多表、1 安全。
-- [ ] 定义 YAML 字段：`id`、`task_type`、`question`、`user_role`、`expected_tables`、`expected_columns`、`security_expectation`、`check`。
+- [ ] 按 `eval/cases_plan.md` 中的 YAML 字段草案落成 `eval/cases/smoke.yaml`，不在 M6 重复维护字段清单。
 - [ ] 写 `eval/run_eval.py`：读取 YAML，调用本地 `/api/query` 或直接调用 pipeline，收集响应。
 - [ ] 实现最小评分：接口成功、route 匹配、预期表命中、安全期望匹配。
 - [ ] 输出 Markdown 报告：总数、通过数、失败数、失败原因、每条 trace_id。
@@ -360,7 +365,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] 展示结构化响应：answer、SQL、表格、图表、safety_status、trace_id。
 - [ ] 准备 5 个演示问题按钮，覆盖简单查询、聚合、多表、安全拦截。
 - [ ] 更新 README：v1 能力、启动步骤、示例问题、评测命令、已知限制。
-- [ ] 写阶段二收尾记录到 `.agent_work/temp/phase2-v1-acceptance.md`，包含通过项、失败项、后续阶段三需要接上的 RAG 输入。
+- [ ] 写阶段二收尾记录到 `eval/reports/phase2-v1-acceptance.md`，包含通过项、失败项、后续阶段三需要接上的 RAG 输入。
 
 **验收门**
 
@@ -380,6 +385,8 @@ v0 对应 M1-M3 的完成结果。
 
 - [ ] 从空 MySQL 数据库执行 migration 成功。
 - [ ] seed 数据生成成功，7 张表行数满足 M1 标准。
+- [ ] `products` / `orders` / `refunds` / `tickets` 4 类列表接口支持分页和基础筛选。
+- [ ] 请求日志包含 method / path / status / latency_ms / trace_id，异常响应统一为 code / message / trace_id / details。
 - [ ] `/health` 正常。
 - [ ] 至少 5 个模板 SQL 问题通过 `/api/query` 返回简化版 AgentResponse 和表格数据。
 - [ ] sqlglot 拦截 `DROP`、`DELETE`、`UPDATE`、`INSERT`、`ALTER`、`TRUNCATE`。
