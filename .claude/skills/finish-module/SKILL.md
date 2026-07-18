@@ -1,9 +1,9 @@
 ---
-name: datapilot-module-finish
-description: Use when finishing any DataPilot module, before claiming module completion, before running accept-module, or when the user says 收工、模块完成、补注释、写日志、finish module、归档模块. This skill finishes a module by checking comments, running verification, updating AI_CONTEXT technical records, and writing dev-log learning notes.
+name: finish-module
+description: 项目模块代码完成后的收工整理。补注释、跑验证、写技术档案、写学习复盘。Use when the user says 收工、模块完成、补注释、写日志、finish module.
 ---
 
-# DataPilot Module Finish
+# Module Finish（模块收工整理）
 
 用于模块代码开发完成后的“收工整理”。它不是最终验收门禁；最终验收由 `accept-module` skill 负责。
 
@@ -26,7 +26,7 @@ description: Use when finishing any DataPilot module, before claiming module com
 ## 与 accept-module 的关系
 
 ```text
-datapilot-module-finish
+finish-module
   负责：补注释 + 跑验证 + 写技术档案 + 写学习复盘
         ↓
 用户人工看一遍，可要求小修
@@ -81,9 +81,35 @@ accept-module
 
 ## 阶段 2：运行验证
 
-根据模块类型选择验证命令。
+1. 先读当前阶段计划文件中本模块的「验证」或「验收标准」小节，确认是否有模块特定的验证步骤（如 eval 脚本、smoke 测试）。有则优先执行；没有则只跑通用命令。
+   
+2. 通用验证命令（以 CLAUDE.md 指定的项目 Python 路径为准）：
 
-记录要求：
+   Windows / PowerShell 常用：
+
+   ```powershell
+   $env:PYTHONDONTWRITEBYTECODE='1'
+   # 测试（所有模块）
+   <项目 Python> -m pytest -p no:cacheprovider
+
+   # 数据库迁移检查（涉及 ORM / Alembic 时）
+   <项目 Python> -m alembic check
+   <项目 Python> -m alembic current
+
+   # seed 数据完整性（涉及 seed 时）
+   <项目 Python> -m scripts.seed_data --reset
+   ```
+
+   macOS / Linux 可用：
+
+   ```bash
+   PYTHONDONTWRITEBYTECODE=1 "<项目 Python>" -m pytest -p no:cacheprovider
+   PYTHONDONTWRITEBYTECODE=1 "<项目 Python>" -m alembic check
+   PYTHONDONTWRITEBYTECODE=1 "<项目 Python>" -m alembic current
+   PYTHONDONTWRITEBYTECODE=1 "<项目 Python>" -m scripts.seed_data --reset
+   ```
+
+3. 记录要求：
 
 - 记录命令是否成功
 - 记录关键输出结论
@@ -172,3 +198,16 @@ accept-module
 ```powershell
 ...
 ```
+
+## 阶段 5：收尾确认
+
+写完 AI_CONTEXT.md 和 dev-log.md 后，回读各自刚写入的章节，确认格式正确、内容完整、没有截断或乱码。发现异常立即修正。
+
+最后回复用户，列出本次收工做了什么：
+
+- 补了哪些注释
+- 跑了哪些验证及其结论
+- 更新了哪些文档
+- 有哪些 warning / 遗留
+
+> 收工完成后，提示用户可以继续调用 `accept-module` 做最终验收门禁。

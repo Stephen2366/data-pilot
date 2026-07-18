@@ -66,7 +66,7 @@
 
 - 每个模块可以一次连续完成，但必须在验收门停下来验证。
 - 如果模块内某个点卡住超过半天，先降级，不阻塞主链路。
-- 每个模块代码完成后先调用 `datapilot-module-finish` 做收工整理，再调用 `accept-module` 做最终门禁；文档格式按 CLAUDE.md「开发记录要求」执行。
+- 每个模块代码完成后先调用 `finish-module` 做收工整理，再调用 `accept-module` 做最终门禁；文档格式按 CLAUDE.md「开发记录要求」执行。
 - 参考资料按需查，不系统通读。实际查过哪个 reference，记入 `AI_CONTEXT.md` 模块档案「参考资料」。
 
 ## 目录与文件规划
@@ -162,20 +162,20 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 | 验收标准 | 7 张表 metadata 可加载；`alembic upgrade head` 能在 MySQL 建表；seed 后每张表有可分析数据；至少 3-5 个固定业务事实可被后续评测稳定验证；README 有 ER 图草稿 |
 | 参考资料 | 优先查 `REFERENCE_GUIDE.md` 中的 `askdata_agent`：表结构、业务元数据、模拟数据组织方式 |
 
-**建议连续完成的任务**
+**已完成任务**
 
-- [ ] 定义 7 张 ORM 表：`users`、`products`、`channels`、`orders`、`refunds`、`tickets`、`knowledge_docs`。
-- [ ] 字段覆盖主键、外键、索引、状态字段、创建 / 更新时间字段。
-- [ ] `users.role` 覆盖 `admin`、`ops`、`customer_service`、`demo_user`。
-- [ ] 建 `app/db/base.py`，统一导入所有模型，保证 Alembic 能拿到完整 metadata。
-- [ ] 给 `domain_pack/schema_desc/` 每张表写业务描述、字段解释、敏感字段标记。
-- [ ] 初始化 Alembic，并在 `alembic/env.py` 接入 `app.db.base.Base.metadata`。
-- [ ] 生成首个 migration，人工检查 7 张表、外键、索引、枚举 / 状态字段。
-- [ ] 写 `scripts/seed_data.py`，生成至少：用户 50、商品 30、渠道 6、订单 500、退款 80、工单 120、知识文档 8。
-- [ ] 模拟数据覆盖 4 类角色，且包含手机号、邮箱等敏感字段。
-- [ ] 写 3-5 个固定业务事实，后续评测可稳定验证，例如某月某商品退款率最高。
-- [ ] 把固定业务事实写进 seed 脚本注释或 README，说明它们是后续 SQL 评测的“标准答案锚点”。
-- [ ] 在 README 中加入 Mermaid ER 图草稿和迁移 / seed 命令。
+- [x] 定义 7 张 ORM 表：`users`、`products`、`channels`、`orders`、`refunds`、`tickets`、`knowledge_docs`。
+- [x] 字段覆盖主键、外键、索引、状态字段、创建 / 更新时间字段。
+- [x] `users.role` 覆盖 `admin`、`ops`、`customer_service`、`demo_user`。
+- [x] 建 `app/db/base.py`，统一导入所有模型，保证 Alembic 能拿到完整 metadata。
+- [x] 给 `domain_pack/schema_desc/` 每张表写业务描述、字段解释、敏感字段标记。
+- [x] 初始化 Alembic，并在 `alembic/env.py` 接入 `app.db.base.Base.metadata`。
+- [x] 生成首个 migration，人工检查 7 张表、外键、索引、枚举 / 状态字段。
+- [x] 写 `scripts/seed_data.py`，生成至少：用户 50、商品 30、渠道 6、订单 500、退款 80、工单 120、知识文档 8。
+- [x] 模拟数据覆盖 4 类角色，且包含手机号、邮箱等敏感字段。
+- [x] 写 3-5 个固定业务事实，后续评测可稳定验证，例如某月某商品退款率最高。
+- [x] 把固定业务事实写进 seed 脚本注释或 README，说明它们是后续 SQL 评测的”标准答案锚点”。
+- [x] 在 README 中加入 Mermaid ER 图草稿和迁移 / seed 命令。
 
 **验收门**
 

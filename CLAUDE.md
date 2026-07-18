@@ -24,7 +24,7 @@ app/                    # FastAPI 后端服务
   api/                  # HTTP 路由
   core/                 # 配置、日志、异常处理
   db/                   # SQLAlchemy engine、Session、Base
-  models/               # 7 张业务表 ORM 模型
+  models/               # 业务表 ORM 模型
   schemas/              # Pydantic 请求 / 响应结构
 
 alembic/                # 数据库迁移
@@ -76,7 +76,7 @@ tests/                  # pytest 测试
 
 ## 代码风格
 
-本项目代码服务新手学习、简历复盘和面试讲解，新增代码默认写新手友好注释。开发过程中先写核心注释；模块收工时调用 `datapilot-module-finish` skill 统一查漏补缺。
+本项目代码服务新手学习、简历复盘和面试讲解，新增代码默认写新手友好注释。开发过程中先写核心注释；模块收工时调用 `finish-module` skill 统一查漏补缺。
 
 注释基本要求：
 
@@ -88,6 +88,6 @@ tests/                  # pytest 测试
 
 - `AI_CONTEXT.md`（技术档案）：记录 git 和代码查不到的信息——决策理由、踩坑、验证结论等。顶部「当前状态」是模块进度唯一权威出处，「已知的坑」维护活跃列表，过期即删。
 - `dev-log.md`（学习复盘）：面向用户，模块故事 + 新概念 + 面试讲法。
-- 两者的详细模板和写作要求见 `datapilot-module-finish` skill，模块完成后才调用该 skill 记录 `AI_CONTEXT.md` 和 `dev-log.md`。
-- 开发中遇到关键决策/踩坑/验证命令/临时取舍，随手记入 `AI_CONTEXT.md`「补充记录」或 `.agent_work/temp/<module>-notes.md`，不要求格式——目的是给 `datapilot-module-finish` skill 留素材。
+- 两者的详细模板和写作要求见 `finish-module` skill，模块完成后才调用该 skill 记录 `AI_CONTEXT.md` 和 `dev-log.md`。
+- 开发中遇到关键决策/踩坑/验证命令/临时取舍，随手记入 `AI_CONTEXT.md`「补充记录」或 `.agent_work/temp/<module>-notes.md`，不要求格式——目的是给 `finish-module` skill 留素材。
 - 配置修正、文档调整等小修复只更新 AI_CONTEXT「补充记录」，dev-log 不动，也不需要调用skill。

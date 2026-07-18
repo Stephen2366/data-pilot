@@ -41,7 +41,7 @@ DataPilot 不是只写一个脚本 demo，而是从第一天按真实后端服�
 可复制验证命令：
 
 ```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest
+python -m pytest
 ```
 
 ## ★ M1 数据底座（2026-07-17）
@@ -85,9 +85,9 @@ DataPilot 的数据底座不是随手建几张 demo 表，而是按真实分析�
 可复制验证命令：
 
 ```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic upgrade head
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+python -m pytest -p no:cacheprovider
+python -m alembic upgrade head
+python -m scripts.seed_data --reset
+python -m alembic current
+python -m alembic check
 ```
