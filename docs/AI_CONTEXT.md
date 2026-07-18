@@ -6,8 +6,9 @@
 
 - 当前阶段计划文件：`docs/phase2-plan.md`
 - 当前模块：Phase 2 M3 v0 模板 SQL 闭环，待开始（任务详情 → 计划文件 M3 小节）
+- 上一模块验收：M2 已验收（2026-07-19，报告 `.agent_work/temp/accept-M2-recheck-20260719.md`）
 - 阻塞项：无
-- 更新时间：2026-07-18
+- 更新时间：2026-07-19
 
 ## 已知的坑（活跃列表，过期即删）
 
@@ -66,6 +67,10 @@
 - 遗留：已由 M1 完成（ORM、Alembic、seed）
 
 ## 补充记录（小修补，新的在上）
+
+- 2026-07-19 验收状态入「当前状态」：新增「上一模块验收」字段（现值 M2 已验收），防止未跑 accept-module 就开工下一模块。维护闭环：finish-module 收工置「Mx 未验收（待 accept-module）」→ accept-module 通过后改「已验收」（有 ❌ 记「验收未通过」）；CLAUDE.md「开发记录要求」新增任务开始核对规则（下一模块开发前上一模块未验收 → 先提醒用户）；accept-module 检查 3 把该字段纳入核对项。验证：rg「上一模块验收」命中 CLAUDE.md / AI_CONTEXT 当前状态 / 两个 skill 共 6 处预期位置
+
+- 2026-07-19 Codex wrapper 残余口径修正（M3 前口径巡检收尾）：`.codex/skills/` 两个 wrapper 的 canonical 引用路径原为 `../../.claude/...`，自 wrapper 所在目录少跳一级、会解析到不存在的 `.codex/.claude/`，改为自项目根目录起算的 `.claude/skills/<skill>/SKILL.md`；description 同步 07-19「skill description 收敛」口径（accept-module 删流程摘要、finish-module 补「写复盘」触发词）。同轮巡检其余均干净：finish-module canonical 无硬编码 smoke 路径（验证步骤现读计划文件）、phase2-plan M2-M5 命令均指 `scripts/`、README 无 smoke 引用、全库旧路径仅本文件历史记录命中。验证：两个 canonical 路径 `test -f` 存在；废弃口径扫描（--hidden，覆盖 .codex）无命中 exit 1
 
 - 2026-07-19 验收工作流优化（据 M2 验收复盘）：① accept-module 检查 3 改为 AI_CONTEXT 唯一权威口径（总览已无状态列）；② 检查 5 增加计数口径（docstring 或开头注释均算解释、pytest / 常量子类 / 纯字段模型豁免规则、≤10 文件必须全读列清单）；③ 检查 5 增加同模块复检的增量范围规则；④ 验收报告增加"落点两动作"（结论进补充记录、⚠️ 项登记已知的坑或下模块任务）；⑤ M2 smoke 脚本从 `.agent_work/temp/phase2/` 迁入 `scripts/smoke_m2_api.py`（★ 修正 `parents[3]`→`parents[1]` 并补中文注释），phase2-plan M2-M5 验证命令与 dev-log 引用同步改为 scripts/ 路径，CLAUDE.md「工作约定」明确 smoke 脚本落位并在 phase2-plan「单一事实源」登记，deprecated-terms 新增 temp 下 smoke .py 路径守卫正则；.gitattributes 换行统一经用户决定暂不做。验证：`python scripts/smoke_m2_api.py` 输出 9 行符合预期（8×200 + 1×422 validation_error）；废弃口径扫描含新守卫无命中（exit 1）；pytest 15 passed, 1 warning
 
