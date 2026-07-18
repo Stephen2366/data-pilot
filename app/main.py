@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 
+from app.api import resources_router
 from app.core.config import get_settings
+from app.core.exceptions import register_exception_handlers
+from app.core.logging import configure_logging, register_request_logging_middleware
 
 
 def redact_database_url(database_url: str) -> str:
@@ -27,6 +30,7 @@ def create_app() -> FastAPI:
     # 步骤 1：读取配置 =======================================================================
     # settings 是整个应用的配置对象，后续数据库、LLM、日志都会从这里取值。
     settings = get_settings()
+    configure_logging()
 
     # 步骤 2：创建 FastAPI 应用 ==============================================================
     # FastAPI 实例可以理解成“Web 服务总入口”，路由都会挂在这个对象上。
@@ -35,6 +39,9 @@ def create_app() -> FastAPI:
         description="Enterprise data analysis agent API.",
         version="0.1.0",
     )
+    register_request_logging_middleware(application)
+    register_exception_handlers(application)
+    application.include_router(resources_router)
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:

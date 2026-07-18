@@ -115,7 +115,7 @@
 |---|---:|---|---|
 | M0 工程骨架与配置 | 1 | 已完成 | 项目可启动、配置可读、测试可跑 |
 | M1 数据底座 | 2 | 已完成 | ORM 模型 + schema 描述 + Alembic + seed 数据 |
-| M2 API 与后端工程基础 | 3 | 待开始 | DB session + 分页 CRUD + 日志 + 异常 |
+| M2 API 与后端工程基础 | 3 | 已完成 | DB session + 分页 CRUD + 日志 + 异常 |
 | M3 v0 模板 SQL 闭环 | 4 | 待开始 | 模板 SQL + SQL Guard v0 + 简化 AgentResponse + 32 条问题清单 |
 | M4 NL2SQL 最小链路与安全 | 5 | 待开始 | Schema prompt + LLM SQL + SQL Guard + RBAC |
 | M5 AgentResponse 扩展、Trace、Tool 与图表 | 6 | 待开始 | 扩展结构化输出 + SQL Tool + Trace + chart_spec |

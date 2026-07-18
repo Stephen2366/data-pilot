@@ -5,9 +5,9 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase2-plan.md`
-- 当前模块：Phase 2 M2 API 与后端工程基础，待开始（任务详情 → 计划文件 M2 小节）
+- 当前模块：Phase 2 M3 v0 模板 SQL 闭环，待开始（任务详情 → 计划文件 M3 小节）
 - 阻塞项：无
-- 更新时间：2026-07-17
+- 更新时间：2026-07-18
 
 ## 已知的坑（活跃列表，过期即删）
 
@@ -16,6 +16,28 @@
 - Milvus 本地暂不可用（兼容性问题），阶段三 RAG 主路径按 ChromaDB 规划；阶段三启动时重新评估 Milvus 兼容性
 
 ## 模块技术档案（新的在上）
+
+### M2 API 与后端工程基础（2026-07-18）
+
+- 改动范围：`app/db/session.py`、`app/api/*`、`app/schemas/*`、`app/core/logging.py`、`app/core/exceptions.py`、`app/core/cache.py`、`app/main.py`、`tests/test_m2_api.py`、`README.md`（细节看 git）
+- 关键决策：
+  - DB session 走正式共享 SQLAlchemy engine + 请求级 `get_db()`，并启用 `pool_pre_ping=True`；不在接口里临时创建连接，避免后续 SQL Tool / API 出现多套数据库入口
+  - 4 类资源只做 M2 计划要求的列表查询、分页和基础筛选；不扩展详情、新增、修改、删除，避免 M2 范围膨胀
+  - `PageResponse[T]` 和 `ErrorResponse` 从 M2 固定响应形状，后续演示页、EvalOps 和 Agent 错误路径可以复用，不返回散装 dict
+  - Redis 只落 `NullCache` wrapper 骨架，不接真实 Redis client，也不把缓存逻辑散进业务 API；这是计划允许的降级边界，后续可替换实现
+  - 修复一次导入顺序坑：资源路由不能先从 `app.models` 聚合包导入模型，否则会和 `app.db.base` 的 metadata 注册形成循环导入；改为沿用 M1 的 `app.db.base` 导入路径
+- 参考资料：未查阅外部参考；M2 API 形态按阶段计划和项目现有 FastAPI / SQLAlchemy 风格实现
+- 验证快照：
+  - TDD 红灯：`pytest tests\test_m2_api.py -p no:cacheprovider` 首次失败于 `ModuleNotFoundError: No module named 'app.db.session'`
+  - M2 聚焦测试：`6 passed, 1 warning`（Starlette/httpx TestClient 依赖提示，不影响本模块）
+  - 全量 pytest：`15 passed, 1 warning`（同上）
+  - API smoke：4 类接口各 2 个筛选组合均返回 200 且有 `trace_id`；非法分页返回 422 + `validation_error`
+  - Alembic：`alembic check` 无新增操作；`alembic current` = `20260717_0001 (head)`
+  - seed：users 50 / products 30 / channels 6 / orders 500 / refunds 80 / tickets 120 / knowledge_docs 8；4 个固定业务事实保持稳定
+  - `git diff --check`：仅 README / app/main.py / docs 文件的 CRLF 提示，无 whitespace error
+- 遗留：
+  - M3 接 `/api/query`、模板 SQL、SQL Guard v0 和简化版 AgentResponse
+  - Redis 仍是空实现骨架，不作为已完成缓存能力宣传
 
 ### M1 数据底座（2026-07-17）
 

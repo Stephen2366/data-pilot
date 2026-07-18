@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统——自然语言 → SQL/RAG → 可视化 + 分析报告。
 
-🚧 阶段二进行中：M1 数据底座已完成，下一步推进 M2 API 与后端工程基础
+🚧 阶段二进行中：M2 API 与后端工程基础已完成，下一步推进 M3 v0 模板 SQL 闭环
 
 ## 快速开始
 
@@ -43,10 +43,45 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 }
 ```
 
+M2 已提供 4 类基础列表接口，供后续 Agent、评测和演示页读取业务数据：
+
+| 接口 | 主要筛选条件 |
+|---|---|
+| `GET /api/products` | `category`、`status`、`page`、`page_size` |
+| `GET /api/orders` | `paid_from`、`paid_to`、`channel_id`、`order_status`、`page`、`page_size` |
+| `GET /api/refunds` | `requested_from`、`requested_to`、`refund_status`、`refund_reason`、`page`、`page_size` |
+| `GET /api/tickets` | `status`、`priority`、`ticket_type`、`page`、`page_size` |
+
+分页响应统一为：
+
+```json
+{
+  "items": [],
+  "total": 0,
+  "page": 1,
+  "page_size": 20,
+  "trace_id": "..."
+}
+```
+
+异常响应统一为：
+
+```json
+{
+  "code": "validation_error",
+  "message": "Request validation failed.",
+  "trace_id": "...",
+  "details": []
+}
+```
+
+每次请求都会生成或透传 `X-Trace-Id`，服务端日志记录 `method / path / status / latency_ms / trace_id`。
+Redis 在 M2 只保留 `NullCache` wrapper 骨架，暂未接入真实缓存能力。
+
 ### 运行测试
 
 ```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
 ```
 
 ### 数据库迁移与 Seed
