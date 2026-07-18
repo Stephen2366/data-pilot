@@ -60,7 +60,7 @@
 - **M4 简单 SQL 正确性**：以 v1 验收标准为准；“执行正确”指 SQL 通过 SQL Guard、可执行、返回字段和关键结果符合对应评测用例预期。
 - **AgentResponse**：Phase 2 API 字段以本文档 M3 简化版 AgentResponse 为基准；M5 只能增量扩展字段，不改变已有字段含义。`LEARNING_ROADMAP.md` 中的 AgentResponse 是最终方向示例，不是 Phase 2 字段全集。
 - **阶段二验收记录**：写入 `eval/reports/phase2-v1-acceptance.md`；该文件是后续 README、简历和复盘会消费的持久记录，不放临时目录。
-- **模块进度**：以 `AI_CONTEXT.md`「当前状态」为准（学习复盘看 `dev-log.md` 模块日志）；模块完成状态只在本文档「模块总览」表维护，各模块小节不重复登记状态行。
+- **模块进度**：只以 `AI_CONTEXT.md`「当前状态」为准（学习复盘看 `dev-log.md` 模块日志）；本文档只维护范围、顺序、验收标准和验证命令，不维护模块实时状态。
 
 ## 模块推进原则
 
@@ -109,17 +109,17 @@
 
 ## 模块总览
 
-状态取值：`已完成` | `进行中` | `待开始` | `阻塞`（阻塞时在 `AI_CONTEXT.md`「当前状态」登记阻塞项）
+模块实时进度只看 `docs/AI_CONTEXT.md`「当前状态」。
 
-| 模块 | 建议顺序 | 状态 | 模块目标 |
-|---|---:|---|---|
-| M0 工程骨架与配置 | 1 | 已完成 | 项目可启动、配置可读、测试可跑 |
-| M1 数据底座 | 2 | 已完成 | ORM 模型 + schema 描述 + Alembic + seed 数据 |
-| M2 API 与后端工程基础 | 3 | 已完成 | DB session + 分页 CRUD + 日志 + 异常 |
-| M3 v0 模板 SQL 闭环 | 4 | 待开始 | 模板 SQL + SQL Guard v0 + 简化 AgentResponse + 32 条问题清单 |
-| M4 NL2SQL 最小链路与安全 | 5 | 待开始 | Schema prompt + LLM SQL + SQL Guard + RBAC |
-| M5 AgentResponse 扩展、Trace、Tool 与图表 | 6 | 待开始 | 扩展结构化输出 + SQL Tool + Trace + chart_spec |
-| M6 EvalOps-lite 与演示收尾 | 7 | 待开始 | smoke 评测 + Streamlit + 阶段二验收 |
+| 模块 | 建议顺序 | 模块目标 |
+|---|---:|---|
+| M0 工程骨架与配置 | 1 | 项目可启动、配置可读、测试可跑 |
+| M1 数据底座 | 2 | ORM 模型 + schema 描述 + Alembic + seed 数据 |
+| M2 API 与后端工程基础 | 3 | DB session + 分页 CRUD + 日志 + 异常 |
+| M3 v0 模板 SQL 闭环 | 4 | 模板 SQL + SQL Guard v0 + 简化 AgentResponse + 32 条问题清单 |
+| M4 NL2SQL 最小链路与安全 | 5 | Schema prompt + LLM SQL + SQL Guard + RBAC |
+| M5 AgentResponse 扩展、Trace、Tool 与图表 | 6 | 扩展结构化输出 + SQL Tool + Trace + chart_spec |
+| M6 EvalOps-lite 与演示收尾 | 7 | smoke 评测 + Streamlit + 阶段二验收 |
 
 ## M0：工程骨架与配置
 
@@ -185,6 +185,15 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] 至少 3 个固定业务事实能用 SQL 查出来，且结果稳定。
 - [ ] `dev-log.md` 追加 M1 记录，说明表结构设计理由、参考了哪些项目、面试怎么讲。
 
+**模块验证命令**
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
+```
+
 **停止点**
 
 - 如果 Alembic 卡住，不要继续写 API；先降低复杂约束，保留应用层校验，确保 migration 能跑。
@@ -222,6 +231,16 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] 非法分页或资源不存在时返回统一错误结构。
 - [ ] 每次请求记录 method / path / status / latency_ms / trace_id。
 - [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M2 ★ 日志。
+
+**模块验证命令**
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\m2_api_smoke.py
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
+```
 
 **停止点**
 
@@ -261,6 +280,15 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] `eval/cases_plan.md` 包含后续 YAML case 字段草案。
 - [ ] README 包含 ER 图、项目结构、v0 启动步骤。
 - [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M3 ★ 日志。
+
+**模块验证命令**
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\v0-smoke.py
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+```
 
 **停止点**
 
@@ -302,6 +330,15 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] 所有拦截返回结构化错误，不返回 Python traceback。
 - [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M4 ★ 日志。
 
+**模块验证命令**
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\m4-nl2sql-smoke.py
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+```
+
 **停止点**
 
 - 如果 LLM 接入不稳定，保留模板 SQL + prompt 快照，LLM 失败时返回明确错误，不阻塞 SQL Guard。
@@ -339,6 +376,15 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] 无法画图时返回 `chart_spec=null`，且不影响答案。
 - [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M5 ★ 日志。
 
+**模块验证命令**
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\m5-agent-response-smoke.py
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+```
+
 **停止点**
 
 - 图表不要过度设计。若调试超过半天，只支持 bar / line 两类，复杂图表推迟。
@@ -375,6 +421,13 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 - [ ] README 说明实际技术栈，不写尚未实现的 LangGraph / RAG / MCP / Skill。
 - [ ] 阶段二验收记录完整。
 - [ ] 更新 `AI_CONTEXT.md` 技术档案，并在 `dev-log.md` 追加 M6 ★ 日志。
+
+**模块验证命令**
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval
+```
 
 **停止点**
 

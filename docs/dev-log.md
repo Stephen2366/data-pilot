@@ -2,57 +2,6 @@
 
 > 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `AI_CONTEXT.md`「当前状态」；完整技术档案看 `AI_CONTEXT.md` 对应模块，查 bug 找那边。
 
-## ★ M2 API 与后端工程基础（2026-07-18）
-
-**简述**：给 M1 的数据底座装上稳定 API 出入口——像给仓库开了带登记簿的取货窗口，后续 Agent 和演示页都从这里拿数据。
-
-### 这次做了什么
-
-M1 已经把 7 张表和确定性数据准备好了，但后续 Agent、评测脚本、Streamlit 页面不能直接到处打开数据库连接。M2 做的是后端工程基础：统一数据库会话、统一分页列表接口、统一请求日志和统一错误响应。
-
-这次新增了 `app/db/session.py`，让每个请求通过 `get_db()` 拿一个 SQLAlchemy Session，用完自动关闭；`pool_pre_ping=True` 负责在 MySQL 连接交给业务代码前先探活。然后新增 4 个列表接口：商品、订单、退款、工单，每个接口都支持分页和本模块计划里的基础筛选。接口返回统一 `PageResponse`，错误返回统一 `ErrorResponse`，并且每次请求都有 `trace_id`，日志里能看到 method、path、status、latency_ms 和 trace_id。
-
-关键文件：
-
-- `app/db/session.py`：数据库 engine 和请求级 Session 依赖。
-- `app/api/resources.py`：4 类资源列表接口。
-- `app/schemas/common.py`、`app/schemas/resources.py`：分页响应、错误响应和资源读取模型。
-- `app/core/logging.py`、`app/core/exceptions.py`：请求日志中间件和全局异常处理。
-- `app/core/cache.py`：Redis wrapper 骨架，目前是 `NullCache`，不宣传为真实缓存能力。
-
-### 新概念
-
-- **请求级 Session**：每个 HTTP 请求拿一个数据库会话，请求结束就关闭。类比 SpringBoot 里一次请求进 Service / Repository 使用同一个事务上下文，不在 Controller 里到处手写连接。
-- **分页响应**：列表接口不只返回数据，还返回 `total / page / page_size`。前端或评测脚本才知道总共有多少条、当前是哪一页。
-- **trace_id**：一次请求的追踪编号。出错时用户拿到 trace_id，服务端也用同一个 trace_id 查日志，排查链路会快很多。
-
-### 设计要点
-
-- **DB 入口只保留一套**：API 不自己创建连接，而是统一依赖 `get_db()`。后续 SQL Tool 和 `/api/query` 也可以沿用这套入口，避免多个模块各连各的库。
-- **响应结构提前稳定**：`PageResponse` 和 `ErrorResponse` 从 M2 固定下来，后面 EvalOps、演示页、Agent 错误路径都能复用。
-- **Redis 不拖主线**：M2 只放 `NullCache` 骨架，不接真实 Redis。这样保留未来替换点，又不把缓存环境问题带进 v0 主链路。
-- **导入顺序要小心**：这次全量测试暴露过一次循环导入，原因是资源路由先从 `app.models` 聚合包拿模型，和 `app.db.base` 的 metadata 注册顺序撞上；最后沿用 M1 的 `app.db.base` 导入路径解决。
-
-### 面试怎么讲
-
-M2 体现的是后端工程能力，不只是“写几个 GET 接口”。我把数据库访问统一收口到请求级 Session，MySQL engine 开启连接探活；列表接口统一分页、筛选和响应结构；异常统一成 `code / message / trace_id / details`，请求日志统一记录关键字段。这样后续做 Agent 查询、评测和演示页时，不需要重新设计基础工程能力，只要复用这套 API 和响应契约。
-
-### 验证与下一步
-
-- 验证：15 个测试全过；4 类接口各 2 个筛选组合 smoke 成功；非法分页返回统一错误；Alembic check/current 和 seed 都通过
-- warning：Starlette TestClient 提示 httpx 依赖迁移，不影响 M2 行为
-- 下一步：M3 做 v0 模板 SQL 闭环，新增 `/api/query`、SQL Guard v0 和简化版 AgentResponse
-
-可复制验证命令：
-
-```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\m2_api_smoke.py
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
-```
-
 ## ★ M0 工程骨架与配置（2026-07-16）
 
 **简述：**把空仓库变成一个能启动、能跑测试的 FastAPI 项目——相当于盖房子前先打好地基、通好水电。
@@ -141,4 +90,55 @@ python -m alembic upgrade head
 python -m scripts.seed_data --reset
 python -m alembic current
 python -m alembic check
+```
+
+## ★ M2 API 与后端工程基础（2026-07-18）
+
+**简述**：给 M1 的数据底座装上稳定 API 出入口——像给仓库开了带登记簿的取货窗口，后续 Agent 和演示页都从这里拿数据。
+
+### 这次做了什么
+
+M1 已经把 7 张表和确定性数据准备好了，但后续 Agent、评测脚本、Streamlit 页面不能直接到处打开数据库连接。M2 做的是后端工程基础：统一数据库会话、统一分页列表接口、统一请求日志和统一错误响应。
+
+这次新增了 `app/db/session.py`，让每个请求通过 `get_db()` 拿一个 SQLAlchemy Session，用完自动关闭；`pool_pre_ping=True` 负责在 MySQL 连接交给业务代码前先探活。然后新增 4 个列表接口：商品、订单、退款、工单，每个接口都支持分页和本模块计划里的基础筛选。接口返回统一 `PageResponse`，错误返回统一 `ErrorResponse`，并且每次请求都有 `trace_id`，日志里能看到 method、path、status、latency_ms 和 trace_id。
+
+关键文件：
+
+- `app/db/session.py`：数据库 engine 和请求级 Session 依赖。
+- `app/api/resources.py`：4 类资源列表接口。
+- `app/schemas/common.py`、`app/schemas/resources.py`：分页响应、错误响应和资源读取模型。
+- `app/core/logging.py`、`app/core/exceptions.py`：请求日志中间件和全局异常处理。
+- `app/core/cache.py`：Redis wrapper 骨架，目前是 `NullCache`，不宣传为真实缓存能力。
+
+### 新概念
+
+- **请求级 Session**：每个 HTTP 请求拿一个数据库会话，请求结束就关闭。类比 SpringBoot 里一次请求进 Service / Repository 使用同一个事务上下文，不在 Controller 里到处手写连接。
+- **分页响应**：列表接口不只返回数据，还返回 `total / page / page_size`。前端或评测脚本才知道总共有多少条、当前是哪一页。
+- **trace_id**：一次请求的追踪编号。出错时用户拿到 trace_id，服务端也用同一个 trace_id 查日志，排查链路会快很多。
+
+### 设计要点
+
+- **DB 入口只保留一套**：API 不自己创建连接，而是统一依赖 `get_db()`。后续 SQL Tool 和 `/api/query` 也可以沿用这套入口，避免多个模块各连各的库。
+- **响应结构提前稳定**：`PageResponse` 和 `ErrorResponse` 从 M2 固定下来，后面 EvalOps、演示页、Agent 错误路径都能复用。
+- **Redis 不拖主线**：M2 只放 `NullCache` 骨架，不接真实 Redis。这样保留未来替换点，又不把缓存环境问题带进 v0 主链路。
+- **导入顺序要小心**：这次全量测试暴露过一次循环导入，原因是资源路由先从 `app.models` 聚合包拿模型，和 `app.db.base` 的 metadata 注册顺序撞上；最后沿用 M1 的 `app.db.base` 导入路径解决。
+
+### 面试怎么讲
+
+M2 体现的是后端工程能力，不只是“写几个 GET 接口”。我把数据库访问统一收口到请求级 Session，MySQL engine 开启连接探活；列表接口统一分页、筛选和响应结构；异常统一成 `code / message / trace_id / details`，请求日志统一记录关键字段。这样后续做 Agent 查询、评测和演示页时，不需要重新设计基础工程能力，只要复用这套 API 和响应契约。
+
+### 验证与下一步
+
+- 验证：15 个测试全过；4 类接口各 2 个筛选组合 smoke 成功；非法分页返回统一错误；Alembic check/current 和 seed 都通过
+- warning：Starlette TestClient 提示 httpx 依赖迁移，不影响 M2 行为
+- 下一步：M3 做 v0 模板 SQL 闭环，新增 `/api/query`、SQL Guard v0 和简化版 AgentResponse
+
+可复制验证命令：
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\m2_api_smoke.py
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
 ```
