@@ -12,6 +12,8 @@ from scripts.seed_data import (
 
 
 def test_m1_metadata_contains_all_business_tables() -> None:
+    # ★ 这个测试守住 M1 的底线：7 张业务表必须全部注册进 Base.metadata。
+    # Alembic 后续就是从这个 metadata 里读取表结构并生成 / 校验迁移。
     expected_tables = {
         "users",
         "products",
@@ -26,6 +28,7 @@ def test_m1_metadata_contains_all_business_tables() -> None:
 
 
 def test_m1_tables_have_primary_keys_foreign_keys_and_indexes() -> None:
+    # 每张表都必须有单列主键 id，方便其他表外键关联，也方便分页和详情查询。
     assert [column.name for column in User.__table__.primary_key] == ["id"]
     assert [column.name for column in Product.__table__.primary_key] == ["id"]
     assert [column.name for column in Channel.__table__.primary_key] == ["id"]
@@ -34,6 +37,7 @@ def test_m1_tables_have_primary_keys_foreign_keys_and_indexes() -> None:
     assert [column.name for column in Ticket.__table__.primary_key] == ["id"]
     assert [column.name for column in KnowledgeDoc.__table__.primary_key] == ["id"]
 
+    # 订单、退款、工单是事实表，必须能连回用户、商品、渠道、订单等维表 / 主事实。
     foreign_key_targets = {
         fk.target_fullname
         for table in (Order.__table__, Refund.__table__, Ticket.__table__)
@@ -48,6 +52,7 @@ def test_m1_tables_have_primary_keys_foreign_keys_and_indexes() -> None:
         "channels.id",
         "orders.id",
     } <= foreign_key_targets
+    # 高频筛选字段必须有索引：后续 API 和 SQL 模板会按角色、状态、优先级过滤。
     assert User.role.property.columns[0].index is True
     assert Order.order_status.property.columns[0].index is True
     assert Refund.refund_status.property.columns[0].index is True
@@ -55,22 +60,30 @@ def test_m1_tables_have_primary_keys_foreign_keys_and_indexes() -> None:
 
 
 def test_m1_seed_data_counts_roles_and_business_facts_are_stable() -> None:
+    # SQLite 只在测试里做快速兜底；阶段二主路径仍然是 MySQL + Alembic。
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
+        # seed_database 是真实 seed 脚本复用的函数，测试直接调用它，避免测一套假逻辑。
         summary = seed_database(session, reset_existing=True)
         counts = summary["counts"]
 
+        # 行数和角色覆盖是 M1 明确验收标准。
         assert counts == EXPECTED_SEED_COUNTS
         assert set(summary["roles"]) == REQUIRED_ROLES
 
+        # 固定业务事实是后续 M3/M6 评测的标准答案锚点。
         facts = verify_business_facts(session)
 
-        assert facts["highest_refund_rate_product_june_2026"] == "Aurora Noise Cancelling Headphones"
+        assert (
+            facts["highest_refund_rate_product_june_2026"]
+            == "Aurora Noise Cancelling Headphones"
+        )
         assert facts["top_gmv_channel_june_2026"] == "Mobile App"
         assert facts["top_refund_reason"] == "quality_issue"
         assert facts["pending_high_priority_tickets"] == 12
 
+    # 最后从数据库视角再看一次真实建出的表名，防止只检查 Python 对象。
     inspector = inspect(engine)
     assert sorted(inspector.get_table_names()) == sorted(EXPECTED_SEED_COUNTS)
