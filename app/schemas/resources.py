@@ -5,6 +5,13 @@ from pydantic import BaseModel, ConfigDict
 
 
 class ProductRead(BaseModel):
+    """商品的 API 出参模型（Read = 只读展示，不用于写入）。
+
+    ★ `from_attributes=True` 让 Pydantic 直接从 ORM 对象读取属性完成转换（类比 Java 里
+    把 Entity 映射成 DTO / VO），路由函数返回 ORM 对象即可自动序列化成 JSON。
+    Read 模型只暴露业务需要的字段，用户邮箱 / 手机号等敏感字段不出现在这批模型里。
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -17,6 +24,8 @@ class ProductRead(BaseModel):
 
 
 class OrderRead(BaseModel):
+    """订单的 API 出参模型：字段与 orders 表对应，金额用 Decimal 保证财务精度。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -31,6 +40,8 @@ class OrderRead(BaseModel):
 
 
 class RefundRead(BaseModel):
+    """退款的 API 出参模型：processed_at 可能为 None（退款尚未处理完成）。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -46,6 +57,8 @@ class RefundRead(BaseModel):
 
 
 class TicketRead(BaseModel):
+    """工单的 API 出参模型：order_id / assigned_user_id 允许为 None（未关联订单 / 未指派）。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int

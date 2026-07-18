@@ -30,24 +30,31 @@ class AppError(Exception):
 
 
 class NotFoundError(AppError):
+    """资源不存在 → HTTP 404。"""
+
     code = "not_found"
     message = "Resource not found."
     status_code = status.HTTP_404_NOT_FOUND
 
 
 class ValidationAppError(AppError):
+    """请求参数校验失败 → HTTP 422（分页参数越界等都会落到这里）。"""
+
     code = "validation_error"
     message = "Request validation failed."
     status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 class PermissionDeniedError(AppError):
+    """无权限访问 → HTTP 403，后续 RBAC / SQL Guard 的越权拦截会复用它。"""
+
     code = "permission_denied"
     message = "Permission denied."
     status_code = status.HTTP_403_FORBIDDEN
 
 
 def get_trace_id(request: Request) -> str:
+    # 读取日志中间件写入 request.state 的 trace_id；极端情况（中间件未执行）兜底 "unknown"。
     return getattr(request.state, "trace_id", "unknown")
 
 
@@ -59,6 +66,12 @@ def error_response(
     trace_id: str,
     details: dict[str, Any] | list[dict[str, Any]] | None = None,
 ) -> JSONResponse:
+    """把错误信息组装成统一的 ErrorResponse JSON。
+
+    ★ 所有异常出口都必须经过这一个函数，保证错误响应永远是
+    `code / message / trace_id / details` 四件套，前端和评测脚本只写一套解析逻辑。
+    """
+
     body = ErrorResponse(
         code=code,
         message=message,
@@ -69,6 +82,13 @@ def error_response(
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    """注册三层异常兜底，类比 SpringBoot 的 @RestControllerAdvice + @ExceptionHandler。
+
+    ★ 捕获从“最具体”到“最兜底”：业务异常 AppError → FastAPI 参数校验错误 → 未知
+    Exception。目标只有一个：任何错误都变成统一 JSON，不把 traceback 泄露给调用方。
+    """
+
+    # 第 1 层：业务异常。抛出哪个子类，就用它自带的 code / message / status_code。
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
         return error_response(
@@ -79,6 +99,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             details=exc.details,
         )
 
+    # 第 2 层：FastAPI 参数校验失败（如 page=0）。details 会带上具体哪个字段错在哪。
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
@@ -91,6 +112,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             details=exc.errors(),
         )
 
+    # 第 3 层：未知异常兜底。对外只说 internal_error，细节留在服务端日志里排查。
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
         return error_response(

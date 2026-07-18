@@ -24,7 +24,11 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 def get_db() -> Generator[Session, None, None]:
-    """FastAPI dependency that provides one database Session per request."""
+    """FastAPI 依赖：为每个请求提供一个独立的数据库 Session。
+
+    ★ yield 写法是 FastAPI 依赖的“前置 + 后置”模式：yield 之前相当于请求开始时借出
+    连接，finally 保证请求无论成功还是抛异常都归还连接（类比 Java 的 try-with-resources）。
+    """
 
     db = SessionLocal()
     try:
