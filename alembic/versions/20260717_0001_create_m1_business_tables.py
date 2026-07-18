@@ -8,7 +8,6 @@ Create Date: 2026-07-17
 from alembic import op
 import sqlalchemy as sa
 
-
 revision = "20260717_0001"
 down_revision = None
 branch_labels = None
@@ -16,7 +15,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 用户维表 ================================================================
+    # 用户维表 ================================================================================
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -30,12 +29,8 @@ def upgrade() -> None:
         sa.Column("email", sa.String(length=160), nullable=False, comment="敏感字段：邮箱"),
         sa.Column("phone", sa.String(length=32), nullable=False, comment="敏感字段：手机号"),
         sa.Column("status", sa.String(length=24), nullable=False, comment="用户状态"),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("email"),
         sa.UniqueConstraint("phone"),
@@ -43,7 +38,7 @@ def upgrade() -> None:
     op.create_index(op.f("ix_users_role"), "users", ["role"], unique=False)
     op.create_index(op.f("ix_users_status"), "users", ["status"], unique=False)
 
-    # 商品、渠道维表 ==========================================================
+    # 商品、渠道维表 ==========================================================================
     op.create_table(
         "products",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -53,19 +48,13 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=24), nullable=False),
         sa.Column("price", sa.Numeric(12, 2), nullable=False),
         sa.Column("launched_at", sa.DateTime(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("sku"),
     )
     op.create_index(op.f("ix_products_category"), "products", ["category"], unique=False)
-    op.create_index(
-        op.f("ix_products_product_name"), "products", ["product_name"], unique=False
-    )
+    op.create_index(op.f("ix_products_product_name"), "products", ["product_name"], unique=False)
     op.create_index(op.f("ix_products_status"), "products", ["status"], unique=False)
 
     op.create_table(
@@ -80,21 +69,15 @@ def upgrade() -> None:
             comment="渠道类型，如 paid / organic / partner",
         ),
         sa.Column("status", sa.String(length=24), nullable=False),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("channel_code"),
     )
-    op.create_index(
-        op.f("ix_channels_channel_type"), "channels", ["channel_type"], unique=False
-    )
+    op.create_index(op.f("ix_channels_channel_type"), "channels", ["channel_type"], unique=False)
     op.create_index(op.f("ix_channels_status"), "channels", ["status"], unique=False)
 
-    # 订单事实表 ==============================================================
+    # 订单事实表 ==============================================================================
     op.create_table(
         "orders",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -111,12 +94,8 @@ def upgrade() -> None:
         sa.Column("order_amount", sa.Numeric(12, 2), nullable=False),
         sa.Column("quantity", sa.Integer(), nullable=False),
         sa.Column("paid_at", sa.DateTime(), nullable=False),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["channel_id"], ["channels.id"]),
         sa.ForeignKeyConstraint(["product_id"], ["products.id"]),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
@@ -124,20 +103,14 @@ def upgrade() -> None:
         sa.UniqueConstraint("order_no"),
     )
     op.create_index(op.f("ix_orders_channel_id"), "orders", ["channel_id"], unique=False)
-    op.create_index(
-        "ix_orders_paid_at_channel", "orders", ["paid_at", "channel_id"], unique=False
-    )
+    op.create_index("ix_orders_paid_at_channel", "orders", ["paid_at", "channel_id"], unique=False)
     op.create_index(op.f("ix_orders_paid_at"), "orders", ["paid_at"], unique=False)
-    op.create_index(
-        "ix_orders_product_paid_at", "orders", ["product_id", "paid_at"], unique=False
-    )
+    op.create_index("ix_orders_product_paid_at", "orders", ["product_id", "paid_at"], unique=False)
     op.create_index(op.f("ix_orders_product_id"), "orders", ["product_id"], unique=False)
-    op.create_index(
-        op.f("ix_orders_order_status"), "orders", ["order_status"], unique=False
-    )
+    op.create_index(op.f("ix_orders_order_status"), "orders", ["order_status"], unique=False)
     op.create_index(op.f("ix_orders_user_id"), "orders", ["user_id"], unique=False)
 
-    # 退款事实表 ==============================================================
+    # 退款事实表 ==============================================================================
     op.create_table(
         "refunds",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -160,12 +133,8 @@ def upgrade() -> None:
         sa.Column("refund_amount", sa.Numeric(12, 2), nullable=False),
         sa.Column("requested_at", sa.DateTime(), nullable=False),
         sa.Column("processed_at", sa.DateTime(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["order_id"], ["orders.id"]),
         sa.ForeignKeyConstraint(["product_id"], ["products.id"]),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
@@ -174,21 +143,13 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_refunds_order_id"), "refunds", ["order_id"], unique=False)
     op.create_index(op.f("ix_refunds_product_id"), "refunds", ["product_id"], unique=False)
-    op.create_index(
-        "ix_refunds_reason_status", "refunds", ["refund_reason", "refund_status"], unique=False
-    )
-    op.create_index(
-        op.f("ix_refunds_refund_reason"), "refunds", ["refund_reason"], unique=False
-    )
-    op.create_index(
-        op.f("ix_refunds_refund_status"), "refunds", ["refund_status"], unique=False
-    )
-    op.create_index(
-        op.f("ix_refunds_requested_at"), "refunds", ["requested_at"], unique=False
-    )
+    op.create_index("ix_refunds_reason_status", "refunds", ["refund_reason", "refund_status"], unique=False)
+    op.create_index(op.f("ix_refunds_refund_reason"), "refunds", ["refund_reason"], unique=False)
+    op.create_index(op.f("ix_refunds_refund_status"), "refunds", ["refund_status"], unique=False)
+    op.create_index(op.f("ix_refunds_requested_at"), "refunds", ["requested_at"], unique=False)
     op.create_index(op.f("ix_refunds_user_id"), "refunds", ["user_id"], unique=False)
 
-    # 工单与知识库 ============================================================
+    # 工单与知识库 ============================================================================
     op.create_table(
         "tickets",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -212,28 +173,20 @@ def upgrade() -> None:
         sa.Column("subject", sa.String(length=200), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("resolved_at", sa.DateTime(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["assigned_user_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["order_id"], ["orders.id"]),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("ticket_no"),
     )
-    op.create_index(
-        op.f("ix_tickets_assigned_user_id"), "tickets", ["assigned_user_id"], unique=False
-    )
+    op.create_index(op.f("ix_tickets_assigned_user_id"), "tickets", ["assigned_user_id"], unique=False)
     op.create_index(op.f("ix_tickets_order_id"), "tickets", ["order_id"], unique=False)
     op.create_index(op.f("ix_tickets_priority"), "tickets", ["priority"], unique=False)
     op.create_index("ix_tickets_status_priority", "tickets", ["status", "priority"], unique=False)
     op.create_index(op.f("ix_tickets_status"), "tickets", ["status"], unique=False)
-    op.create_index(
-        op.f("ix_tickets_ticket_type"), "tickets", ["ticket_type"], unique=False
-    )
+    op.create_index(op.f("ix_tickets_ticket_type"), "tickets", ["ticket_type"], unique=False)
     op.create_index(op.f("ix_tickets_user_id"), "tickets", ["user_id"], unique=False)
 
     op.create_table(
@@ -255,12 +208,8 @@ def upgrade() -> None:
         ),
         sa.Column("status", sa.String(length=24), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("doc_key"),
     )
@@ -270,15 +219,9 @@ def upgrade() -> None:
         ["audience_role"],
         unique=False,
     )
-    op.create_index(
-        op.f("ix_knowledge_docs_doc_type"), "knowledge_docs", ["doc_type"], unique=False
-    )
-    op.create_index(
-        op.f("ix_knowledge_docs_status"), "knowledge_docs", ["status"], unique=False
-    )
-    op.create_index(
-        op.f("ix_knowledge_docs_title"), "knowledge_docs", ["title"], unique=False
-    )
+    op.create_index(op.f("ix_knowledge_docs_doc_type"), "knowledge_docs", ["doc_type"], unique=False)
+    op.create_index(op.f("ix_knowledge_docs_status"), "knowledge_docs", ["status"], unique=False)
+    op.create_index(op.f("ix_knowledge_docs_title"), "knowledge_docs", ["title"], unique=False)
 
 
 def downgrade() -> None:
