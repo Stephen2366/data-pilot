@@ -5,7 +5,7 @@
 
 from fastapi import FastAPI
 
-from app.api import resources_router
+from app.api import query_router, resources_router
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, register_request_logging_middleware
@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
     register_request_logging_middleware(application)
     register_exception_handlers(application)
     application.include_router(resources_router)
+    application.include_router(query_router)
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:

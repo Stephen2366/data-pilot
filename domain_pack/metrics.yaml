@@ -1,0 +1,35 @@
+# DataPilot M3 KPI 口径
+#
+# ★ 这里只放业务口径，不放执行逻辑。engine/ 读取这些定义后，才能在不硬编码业务含义的
+# 前提下理解 GMV、退款率等指标。
+metrics:
+  refund_rate:
+    name: 退款率
+    formula: refund_count / order_count
+    numerator: COUNT(DISTINCT refunds.id)
+    denominator: COUNT(DISTINCT orders.id)
+    default_time_field: orders.paid_at
+    description: 按商品等维度统计退款订单数占订单数的比例。
+  gmv:
+    name: GMV
+    formula: SUM(orders.order_amount)
+    filter: orders.order_status <> 'cancelled'
+    default_time_field: orders.paid_at
+    description: 成交总额，默认排除已取消订单。
+  order_count:
+    name: 订单量
+    formula: COUNT(orders.id)
+    default_time_field: orders.paid_at
+    description: 订单事实表中的订单记录数量。
+  refund_count:
+    name: 退款量
+    formula: COUNT(refunds.id)
+    default_time_field: refunds.requested_at
+    description: 退款事实表中的退款记录数量。
+  pending_high_priority_ticket_count:
+    name: 待处理高优先级工单数
+    formula: COUNT(tickets.id)
+    filter: tickets.status = 'pending' AND tickets.priority = 'high'
+    default_time_field: tickets.created_at
+    description: 客服运营中需要优先关注的待处理高优先级工单数量。
+

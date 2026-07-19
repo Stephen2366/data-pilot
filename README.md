@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统——自然语言 → SQL/RAG → 可视化 + 分析报告。
 
-🚧 阶段二进行中：M2 API 与后端工程基础已完成，下一步推进 M3 v0 模板 SQL 闭环
+🚧 阶段二进行中：M3 v0 模板 SQL 闭环已完成，下一步推进 M4 NL2SQL 最小链路与安全
 
 ## 快速开始
 
@@ -77,6 +77,69 @@ M2 已提供 4 类基础列表接口，供后续 Agent、评测和演示页读�
 
 每次请求都会生成或透传 `X-Trace-Id`，服务端日志记录 `method / path / status / latency_ms / trace_id`。
 Redis 在 M2 只保留 `NullCache` wrapper 骨架，暂未接入真实缓存能力。
+
+### v0 模板 SQL 查询
+
+M3 提供 `POST /api/query`：自然语言问题先匹配白名单模板 SQL，再经过 sqlglot SQL Guard
+只读检查，最后执行数据库查询并返回简化版 AgentResponse。v0 不调用 LLM。
+
+请求示例：
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/query `
+  -ContentType 'application/json' `
+  -Body '{"question":"2026年6月退款率最高的商品是什么？","user_role":"ops"}'
+```
+
+当前 5 个模板问题：
+
+| 问题 | 关键结果 |
+|---|---|
+| `2026年6月退款率最高的商品是什么？` | `Aurora Noise Cancelling Headphones` |
+| `各渠道订单量是多少？` | 返回各渠道 `order_count` |
+| `2026年6月本月GMV是多少？` | 返回 `gmv` |
+| `Top退款原因是什么？` | `quality_issue` |
+| `待处理高优先级工单有多少？` | `12` |
+
+简化版 AgentResponse：
+
+```json
+{
+  "route": "sql",
+  "answer": "2026-06 退款率最高商品：product_name=Aurora Noise Cancelling Headphones...",
+  "sql": "SELECT ...",
+  "columns": ["product_name", "refund_count", "order_count", "refund_rate"],
+  "rows": [],
+  "safety_status": "passed",
+  "blocked_reason": null,
+  "trace_id": "..."
+}
+```
+
+危险 DDL / DML 会被结构化拦截：
+
+```json
+{
+  "route": "sql",
+  "answer": "SQL Guard 已拦截该请求。",
+  "sql": "DROP TABLE orders",
+  "columns": [],
+  "rows": [],
+  "safety_status": "blocked",
+  "blocked_reason": "只允许 SELECT 只读查询...",
+  "trace_id": "..."
+}
+```
+
+v0 smoke：
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_v0.py
+```
+
+输出摘要会写入 `.agent_work/temp/v0-smoke.md`。
 
 ### 运行测试
 
@@ -213,10 +276,12 @@ engine/                 # 通用 Agent 引擎
 domain_pack/            # 电商/SaaS 业务配置
   chart_templates/      # 图表模板
   kb_docs/              # 知识库文档
+  metrics.yaml          # KPI 口径
   schema_desc/          # 表结构与字段语义
   sql_examples/         # few-shot 与模板 SQL
 eval/                   # EvalOps-lite
   cases/                # YAML 测试用例
+  cases_plan.md         # 32 条评测问题清单和 YAML 字段草案
   reports/              # 评测报告
 demo/                   # Streamlit 演示页
 scripts/                # 数据生成和维护脚本

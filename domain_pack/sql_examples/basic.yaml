@@ -1,0 +1,67 @@
+# M3 v0 模板 SQL / M4 few-shot 示例
+#
+# ★ 这些示例来自已经跑通的模板 SQL。M4 接 LLM 时优先把它们作为 few-shot，而不是
+# 重新发明 SQL 口径。
+examples:
+  - id: highest_refund_rate_product_june_2026
+    question: 2026年6月退款率最高的商品是什么？
+    route: sql
+    expected_tables: [products, orders, refunds]
+    sql: |
+      SELECT
+        p.product_name,
+        COUNT(DISTINCT r.id) AS refund_count,
+        COUNT(DISTINCT o.id) AS order_count,
+        ROUND(COUNT(DISTINCT r.id) * 1.0 / COUNT(DISTINCT o.id), 4) AS refund_rate
+      FROM products p
+      JOIN orders o ON o.product_id = p.id
+      LEFT JOIN refunds r ON r.order_id = o.id
+      WHERE o.paid_at >= :month_start AND o.paid_at < :month_end
+      GROUP BY p.id, p.product_name
+      ORDER BY refund_rate DESC, p.product_name ASC
+      LIMIT 5
+  - id: channel_order_count
+    question: 各渠道订单量是多少？
+    route: sql
+    expected_tables: [channels, orders]
+    sql: |
+      SELECT
+        c.channel_name,
+        COUNT(o.id) AS order_count
+      FROM channels c
+      JOIN orders o ON o.channel_id = c.id
+      GROUP BY c.id, c.channel_name
+      ORDER BY order_count DESC, c.channel_name ASC
+  - id: gmv_june_2026
+    question: 2026年6月本月GMV是多少？
+    route: sql
+    expected_tables: [orders]
+    sql: |
+      SELECT
+        ROUND(SUM(o.order_amount), 2) AS gmv
+      FROM orders o
+      WHERE o.paid_at >= :month_start
+        AND o.paid_at < :month_end
+        AND o.order_status <> 'cancelled'
+  - id: top_refund_reason
+    question: Top退款原因是什么？
+    route: sql
+    expected_tables: [refunds]
+    sql: |
+      SELECT
+        r.refund_reason,
+        COUNT(r.id) AS refund_count
+      FROM refunds r
+      GROUP BY r.refund_reason
+      ORDER BY refund_count DESC, r.refund_reason ASC
+      LIMIT 5
+  - id: pending_high_priority_tickets
+    question: 待处理高优先级工单有多少？
+    route: sql
+    expected_tables: [tickets]
+    sql: |
+      SELECT
+        COUNT(t.id) AS pending_high_priority_tickets
+      FROM tickets t
+      WHERE t.status = 'pending' AND t.priority = 'high'
+

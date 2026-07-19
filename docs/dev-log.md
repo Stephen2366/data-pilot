@@ -142,3 +142,62 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
 ```
+
+## ★ M3 v0 模板 SQL 闭环（2026-07-19）
+
+**简述**：让 DataPilot 第一次能“听懂问题并查数据库”——先不用 LLM，靠 5 条稳定模板 SQL 跑通自然语言到表格答案的闭环。
+
+### 这次做了什么
+
+M1 准备了数据，M2 准备了 API 出入口。M3 做的是 DataPilot v0 的核心体验：用户问一句业务问题，系统匹配一条预设 SQL，先过安全检查，再执行查询，最后返回统一的 AgentResponse。
+
+这次没有提前接 LLM。原因很简单：如果一开始就让模型自由生成 SQL，问题会同时变成“生成准不准、SQL 安不安全、接口结构稳不稳、数据能不能查”四件事混在一起。M3 先把可控链路跑通：5 个高价值问题覆盖退款率、渠道订单量、GMV、退款原因和工单优先级；SQL Guard 用 sqlglot 只允许单条 `SELECT`；`/api/query` 返回 `route / answer / sql / columns / rows / safety_status / blocked_reason / trace_id`。这样 M4 再接 LLM 时，只需要替换“SQL 从哪里来”，不用重做执行、安全和响应结构。
+
+同时，M3 还写了 `eval/cases_plan.md`，把阶段二 32 条评测问题先固定下来，包括简单 SQL、聚合、多表、RAG、混合和安全攻击，并同步定义后续 YAML 字段草案。它会成为 M6 smoke 用例的题库来源。
+
+### 新概念
+
+- **模板 SQL**：把常见自然语言问题映射到预先写好的 SQL。它不像 LLM 那样灵活，但稳定、可测、可解释，非常适合 v0 先打通链路。
+- **SQL Guard**：SQL 执行前的安全门。M3 使用 sqlglot 把 SQL 解析成 AST，再判断它是不是单条 `SELECT`。这比只靠字符串里有没有 `drop` 更可靠。
+- **AgentResponse**：Agent 对外输出的结构化合同。前端、评测脚本、演示页都按这份合同读取答案、SQL、表格、安全状态和 trace_id。
+- **few-shot 示例**：M3 的模板 SQL 同步沉淀到 `domain_pack/sql_examples/basic.yaml`，后续 M4 给 LLM 看这些“标准问法 + 标准 SQL”，帮助它按项目口径生成 SQL。
+
+### 关键文件
+
+- `engine/nl2sql/templates.py`：5 条 v0 模板 SQL 和自然语言关键词匹配逻辑。
+- `engine/sql_guard/guard.py`：sqlglot 只读检查，只允许单条 `SELECT`。
+- `app/schemas/agent.py`：M3 简化版 `QueryRequest` 和 `AgentResponse`。
+- `app/api/query.py`：`POST /api/query` 主链路：模板匹配 → Guard → 执行 SQL → 组装响应。
+- `domain_pack/metrics.yaml`：退款率、GMV、订单量、退款量、待处理高优先级工单数的业务口径。
+- `domain_pack/sql_examples/basic.yaml`：模板 SQL 沉淀为 M4 few-shot 示例。
+- `eval/cases_plan.md`：32 条评测问题和 YAML 字段草案。
+- `scripts/smoke_v0.py`：M3 smoke 脚本，输出摘要到 `.agent_work/temp/v0-smoke.md`。
+
+### 设计要点
+
+- **先稳闭环，再上 LLM**：M3 不做自由生成，避免把生成质量和工程链路混在一起排查。
+- **安全入口前置**：模板 SQL 也必须过 SQL Guard，不因为“SQL 是我们写的”就绕过安全层。后续 LLM SQL 能复用同一个入口。
+- **接口结构不推倒重来**：M3 先定简化版 `AgentResponse`，M5 只加字段，不改已有字段含义。
+- **业务口径放 domain_pack**：GMV、退款率这些电商含义不写死在 `engine/` 里，后续换行业时优先替换 domain pack。
+- **边界清楚**：M3 只做模板 SQL 和只读检查；敏感字段、RBAC、LLM prompt、RAG / hybrid 执行链路留给 M4 以后。
+
+### 面试怎么讲
+
+M3 可以讲成“先做一个可控的 Text-to-SQL v0”。我没有一上来接 LLM，而是用模板 SQL 建立稳定基线：自然语言问题命中模板，SQL 进入 Guard，只允许只读查询，然后通过统一数据库 Session 执行，最后返回结构化 AgentResponse。这样做的好处是可测试、可验收，也为后续 LLM 接入留好工程接口。
+
+安全上，我没有只靠 prompt 或字符串过滤，而是用 sqlglot 解析 SQL AST，拦截 DDL / DML。虽然 M3 还没做敏感字段和角色权限，但 SQL Guard 的入口已经固定，M4 可以在同一个层继续加 RBAC 和字段策略。
+
+### 验证与下一步
+
+- 验证：19 个测试全过；v0 smoke 中 5 条模板查询返回 `safety=passed`，危险 `DROP TABLE orders` 返回 `safety=blocked`；Alembic check/current 正常。
+- warning：Starlette TestClient 提示 httpx 依赖迁移，不影响 M3 行为。
+- 下一步：M4 做 schema loader、prompt、LLM SQL 生成、敏感字段策略和 RBAC。
+
+可复制验证命令：
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_v0.py
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+```

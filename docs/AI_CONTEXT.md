@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase2-plan.md`
-- 当前模块：Phase 2 M3 v0 模板 SQL 闭环，待开始（任务详情 → 计划文件 M3 小节）
-- 上一模块验收：M2 已验收（2026-07-19，报告 `.agent_work/temp/accept-M2-recheck-20260719.md`）
+- 当前模块：Phase 2 M4 NL2SQL 最小链路与安全，待开始（任务详情 → 计划文件 M4 小节）
+- 上一模块验收：M3 未验收（待 accept-module）
 - 阻塞项：无
 - 更新时间：2026-07-19
 
@@ -18,6 +18,27 @@
 - Milvus 本地暂不可用（兼容性问题），阶段三 RAG 主路径按 ChromaDB 规划；阶段三启动时重新评估 Milvus 兼容性
 
 ## 模块技术档案（新的在上）
+
+### M3 v0 模板 SQL 闭环（2026-07-19）
+
+- 改动范围：`engine/nl2sql/*`、`engine/sql_guard/*`、`app/schemas/agent.py`、`app/api/query.py`、`domain_pack/metrics.yaml`、`domain_pack/sql_examples/basic.yaml`、`eval/cases_plan.md`、`scripts/smoke_v0.py`、`tests/test_m3_query.py`、`README.md`（细节看 git）
+- 关键决策：
+  - v0 严格使用白名单模板 SQL，不接 LLM、不做自由 SQL 生成；未命中模板时返回结构化拦截说明，避免 M3 范围膨胀
+  - SQL 执行入口统一先过 `engine/sql_guard/guard.py`，用 sqlglot AST 只允许单条 `SELECT`；`DROP/DELETE/UPDATE/INSERT/ALTER/TRUNCATE` 等危险 SQL 返回 `safety_status=blocked`
+  - `AgentResponse` 从 M3 固定简化字段：`route`、`answer`、`sql`、`columns`、`rows`、`safety_status`、`blocked_reason`、`trace_id`；M5 后续只增量扩展，不改变含义
+  - 模板 SQL 使用 MySQL / SQLite 都支持的基础语法；MySQL 仍是主路径，SQLite 仅服务自动化测试和 smoke
+  - `eval/cases_plan.md` 同步落地 32 条问题和 YAML 字段草案，M6 只从该文件抽取 smoke 用例，不另起一套字段口径
+- 参考资料：未查阅外部参考；M3 按阶段计划、M1 固定业务事实和 M2 FastAPI / SQLAlchemy 结构实现
+- 验证快照：
+  - TDD 红灯：`pytest tests\test_m3_query.py -p no:cacheprovider` 首次失败于缺 `engine.nl2sql.templates`、缺 `engine.sql_guard.guard`、`/api/query` 返回 404
+  - M3 聚焦测试：`4 passed, 1 warning`（Starlette/httpx TestClient 依赖提示，不影响本模块）
+  - 全量 pytest：`19 passed, 1 warning`（同上）
+  - v0 smoke：5 条模板问题均返回 `status=200` + `safety=passed`，关键结果包括 `Aurora Noise Cancelling Headphones`、`Mobile App`、`gmv=160247.0`、`quality_issue`、`pending_high_priority_tickets=12`；`DROP TABLE orders` 返回 `safety=blocked`；摘要写入 `.agent_work/temp/v0-smoke.md`
+  - Alembic：`alembic check` 无新增操作；`alembic current` = `20260717_0001 (head)`
+  - `git diff --check`：仅 README / app/main.py / app/api/__init__.py 的 CRLF 提示，无 whitespace error
+- 遗留：
+  - M4 接 schema loader、prompt、LLM SQL 生成、敏感字段策略和 RBAC；M3 的 `user_role` 目前仅在请求 Schema 中保留
+  - RAG / hybrid 用例只在 `eval/cases_plan.md` 中规划，尚未实现检索链路
 
 ### M2 API 与后端工程基础（2026-07-18）
 
