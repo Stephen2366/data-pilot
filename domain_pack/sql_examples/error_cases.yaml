@@ -1,0 +1,17 @@
+# M4 SQL Guard 错误案例
+#
+# ★ 这里沉淀“模型或用户可能给出的坏 SQL → 为什么拦截 → 应该怎么改”的材料。
+# 后续可以继续扩充为 NL2SQL 纠错 few-shot 或 EvalOps 安全用例。
+error_cases:
+  - id: ddl_drop_orders
+    bad_sql: DROP TABLE orders
+    blocked_reason: 非 SELECT，属于危险 DDL。
+    fixed_sql: SELECT id, order_no, order_status FROM orders LIMIT 10
+  - id: sensitive_user_email
+    bad_sql: SELECT email FROM users LIMIT 10
+    blocked_reason: 命中敏感字段 users.email，ops / customer_service / demo_user 不允许访问。
+    fixed_sql: SELECT id, user_name, role, status FROM users LIMIT 10
+  - id: customer_service_orders
+    bad_sql: SELECT order_no FROM orders LIMIT 10
+    blocked_reason: customer_service 角色只允许访问 tickets 和 knowledge_docs。
+    fixed_sql: SELECT ticket_no, status FROM tickets LIMIT 10

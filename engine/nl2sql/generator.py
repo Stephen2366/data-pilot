@@ -1,0 +1,156 @@
+"""M4 LLM SQL Generator：调用 DeepSeek 生成 SQL，并把模型输出解析成结构化结果。
+
+★ 本模块只做一个最小 provider 适配层。阶段二先跑通 DeepSeek 主路径，不把工程复杂度
+花在多厂商抽象上；如果密钥缺失或网络失败，向上返回可诊断错误。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import urllib.error
+import urllib.request
+from typing import Protocol
+
+from pydantic import BaseModel, Field
+
+from app.core.config import get_settings
+from engine.nl2sql.prompt import build_sql_prompt
+from engine.nl2sql.schema_loader import DomainSchema
+
+
+class LLMGenerationError(RuntimeError):
+    """LLM SQL 生成失败，调用方应转成结构化拦截响应。"""
+
+
+class LLMClient(Protocol):
+    """最小 LLM client 协议，方便测试替换真实 DeepSeek 调用。"""
+
+    def complete(self, *, prompt: str) -> str:
+        """输入完整 prompt，返回模型原始文本。"""
+
+
+class GeneratedSQL(BaseModel):
+    """LLM 生成 SQL 的结构化结果。"""
+
+    sql: str = Field(min_length=1)
+    tables_used: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    reasoning_summary: str = ""
+
+
+class DeepSeekChatClient:
+    """DeepSeek OpenAI-compatible chat completion 客户端。"""
+
+    def __init__(self, *, api_key: str, base_url: str, model: str) -> None:
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/") or "https://api.deepseek.com"
+        self.model = model or "deepseek-chat"
+
+    def complete(self, *, prompt: str) -> str:
+        """调用 DeepSeek chat completions 接口。"""
+
+        if not self.api_key:
+            raise LLMGenerationError("DeepSeek API key 缺失，请配置 DEEPSEEK_API_KEY 或 LLM_API_KEY。")
+
+        # 步骤 1：按 OpenAI-compatible chat 格式组装请求 -------------------------------
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "你只负责把中文业务问题转换为安全的单条 SELECT SQL。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+        request = urllib.request.Request(
+            url=f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        # 步骤 2：真实网络调用只在这里发生；失败统一转成 LLMGenerationError。
+        try:
+            with urllib.request.urlopen(request, timeout=45) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            raise LLMGenerationError(f"DeepSeek HTTP 调用失败：{exc.code} {detail[:300]}") from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise LLMGenerationError(f"DeepSeek 网络调用失败：{exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise LLMGenerationError(f"DeepSeek 返回非 JSON：{exc}") from exc
+
+        # 步骤 3：只把模型正文交给 SQL 提取器；token / cost 等细节留给 M5 trace。
+        try:
+            return str(response_payload["choices"][0]["message"]["content"])
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMGenerationError(f"DeepSeek 返回结构缺少 choices/message/content：{response_payload}") from exc
+
+
+def get_default_llm_client() -> LLMClient:
+    """按当前配置创建默认 LLM client。
+
+    如果 `.env` 仍是 `LLM_PROVIDER=mock`，但已经配置 DeepSeek key，则按 M4 确认方案走
+    DeepSeek 主路径，避免因为旧默认值误判为只能 mock。
+    """
+
+    settings = get_settings()
+    provider = settings.llm_provider.lower()
+    if provider not in {"deepseek", "mock"}:
+        raise LLMGenerationError(f"M4 仅支持 DeepSeek 主路径，当前 LLM_PROVIDER={settings.llm_provider}。")
+
+    api_key = settings.deepseek_api_key or settings.llm_api_key
+    model = settings.llm_model if settings.llm_model != "mock-sql-generator" else "deepseek-chat"
+    return DeepSeekChatClient(
+        api_key=api_key,
+        base_url=settings.deepseek_base_url or "https://api.deepseek.com",
+        model=model,
+    )
+
+
+def extract_generated_sql(raw_text: str) -> GeneratedSQL:
+    """从模型原始输出中提取 `GeneratedSQL`。
+
+    优先解析结构化 JSON；如果模型返回了 ```sql fenced code block，则降级只提取 SQL，并
+    把 confidence 设为 0.5，表示格式可信度一般。
+    """
+
+    stripped = raw_text.strip()
+
+    # 步骤 1：优先走约定的 JSON 结构。
+    try:
+        payload = json.loads(stripped)
+        return GeneratedSQL(**payload)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    # 步骤 2：兼容模型偶尔返回 markdown fenced SQL 的情况。
+    fenced_match = re.search(r"```(?:sql)?\s*(.*?)```", stripped, flags=re.IGNORECASE | re.DOTALL)
+    if fenced_match:
+        return GeneratedSQL(sql=fenced_match.group(1).strip(), confidence=0.5, reasoning_summary="从 fenced SQL 提取。")
+
+    # 步骤 3：最后兜底纯 SQL 文本；再失败就交给调用方结构化拦截。
+    if stripped.lower().startswith("select"):
+        return GeneratedSQL(sql=stripped, confidence=0.5, reasoning_summary="从纯 SQL 文本提取。")
+
+    raise LLMGenerationError("无法从 LLM 输出中提取 SQL。")
+
+
+def generate_sql(
+    *,
+    question: str,
+    user_role: str,
+    domain_schema: DomainSchema,
+    llm_client: LLMClient | None = None,
+) -> GeneratedSQL:
+    """构造 prompt、调用 LLM，并返回结构化 SQL 结果。"""
+
+    client = llm_client or get_default_llm_client()
+    prompt = build_sql_prompt(question=question, user_role=user_role, domain_schema=domain_schema)
+    raw_text = client.complete(prompt=prompt)
+    return extract_generated_sql(raw_text)

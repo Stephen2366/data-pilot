@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统——自然语言 → SQL/RAG → 可视化 + 分析报告。
 
-🚧 阶段二进行中：M3 v0 模板 SQL 闭环已完成，下一步推进 M4 NL2SQL 最小链路与安全
+🚧 阶段二进行中：M4 NL2SQL 最小链路与安全已完成，下一步推进 M5 AgentResponse 扩展、Trace、Tool 与图表
 
 ## 快速开始
 
@@ -81,7 +81,8 @@ Redis 在 M2 只保留 `NullCache` wrapper 骨架，暂未接入真实缓存能�
 ### v0 模板 SQL 查询
 
 M3 提供 `POST /api/query`：自然语言问题先匹配白名单模板 SQL，再经过 sqlglot SQL Guard
-只读检查，最后执行数据库查询并返回简化版 AgentResponse。v0 不调用 LLM。
+只读检查，最后执行数据库查询并返回简化版 AgentResponse。M4 之后仍然保持“模板优先”，
+这些高价值问题不会被 LLM 波动影响。
 
 请求示例：
 
@@ -140,6 +141,34 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 ```
 
 输出摘要会写入 `.agent_work/temp/v0-smoke.md`。
+
+### v1 NL2SQL 最小链路与安全
+
+M4 在模板未命中时接入 DeepSeek NL2SQL：`schema_desc`、`metrics.yaml` 和 M3 模板 SQL
+few-shot 会被组装进 prompt，模型输出 SQL 后仍必须经过增强 SQL Guard：
+
+- 只允许单条 `SELECT`。
+- 拦截 `DROP / DELETE / UPDATE / INSERT / ALTER / TRUNCATE`。
+- 拦截 `users.email`、`users.phone` 等敏感字段，除 `admin` 外不可访问。
+- 按角色做表级 allowlist：`customer_service` 当前只允许 `tickets` 和 `knowledge_docs`。
+
+LLM 配置示例：
+
+```powershell
+$env:LLM_PROVIDER='deepseek'
+$env:LLM_MODEL='deepseek-chat'
+$env:DEEPSEEK_API_KEY='<your_key>'
+$env:DEEPSEEK_BASE_URL='https://api.deepseek.com'
+```
+
+M4 smoke：
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m4_nl2sql.py
+```
+
+脚本会为 6 条 simple SQL 生成 prompt 快照到 `.agent_work/temp/prompt-snapshots.md`，
+并把实际执行摘要写入 `.agent_work/temp/m4-smoke.md`。
 
 ### 运行测试
 

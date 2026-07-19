@@ -317,3 +317,98 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
 $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 ```
+
+## ★ M4 NL2SQL 最小链路与安全（2026-07-20）
+
+**简述**：把 SQL 来源从固定模板扩展到 **DeepSeek LLM 生成**，但数据库执行前仍然必须经过同一个安全闸门。
+
+### 这次做了什么
+
+M3 已经跑通了 **模板 SQL 闭环**：自然语言问题命中白名单模板，SQL 过 Guard，再执行数据库查询。M4 往前走了一步：当问题没有命中模板时，系统会读取 `domain_pack/` 里的表结构、字段敏感标记、KPI 口径和 M3 few-shot 示例，构造 **NL2SQL prompt**，调用 **DeepSeek** 生成 SQL。
+
+关键点是：M4 没有把“模型生成”当成安全保证。LLM 生成的 SQL 和模板 SQL 一样，都要进入增强版 **SQL Guard policy**：先用 sqlglot 确认是单条 `SELECT`，再提取访问的表和列，然后按角色矩阵拦截敏感字段和越权表访问。这样 SQL 从哪里来可以变化，但**执行前的安全入口不变**。
+
+这次还补了 M4 smoke：6 条 simple SQL 真实调用 DeepSeek，其中 **5 条生成并执行正确**，满足 M4 口径；剩下一条待处理工单查询返回了 pending 数据，但模型没有把 `status` 放进 SELECT，记录为后续提示词和 EvalOps 优化素材。
+
+### 新概念
+
+- **Schema Loader**：把 markdown / YAML 里的业务知识加载成程序里的结构化对象。类比 SpringBoot 启动时读取配置文件，只不过这里读的是“表、字段、敏感级别、指标口径”。
+- **Prompt Builder**：把可用表、字段说明、业务指标、few-shot 示例和用户问题拼成模型能理解的任务说明。它负责提高 SQL 生成质量，但不负责最终安全。
+- **LLM Provider Adapter**：把 DeepSeek 的 HTTP 调用包成一个小客户端。M4 只接一个实际可用 provider，不提前做复杂多厂商抽象。
+- **RBAC allowlist**：角色权限白名单。`admin` 可以看全量；`ops` 不能看敏感字段；`customer_service` 只看工单和政策；`demo_user` 只看脱敏样例表。
+- **字段级安全策略**：不只判断能不能访问表，还判断 SQL 是否碰到 `users.email`、`users.phone` 这类敏感字段。`SELECT * FROM users` 也会被展开检查。
+
+### 关键文件
+
+- `engine/nl2sql/schema_loader.py`：读取 `domain_pack/schema_desc`、`metrics.yaml` 和 few-shot 示例。
+- `engine/nl2sql/prompt.py`：构造 NL2SQL prompt。
+- `engine/nl2sql/generator.py`：DeepSeek 调用、模型输出解析和 `GeneratedSQL`。
+- `engine/sql_guard/rbac.py`：角色权限矩阵。
+- `engine/sql_guard/policy.py`：只读检查、表级 RBAC、敏感字段拦截。
+- `app/api/query.py`：模板优先、LLM 兜底、policy 校验、SQL 执行和 AgentResponse 返回。
+- `scripts/smoke_m4_nl2sql.py`：M4 smoke 和 prompt 快照生成。
+- `tests/test_m4_nl2sql.py`：M4 行为契约测试。
+
+### 代码阅读路线
+
+1. **领域知识入口**：`engine/nl2sql/schema_loader.py`
+   先看 `load_domain_schema()`。它把表结构 markdown、KPI YAML 和 M3 SQL 示例合成 `DomainSchema`，后面的 prompt 和 policy 都依赖它。
+
+2. **模型看到什么**：`engine/nl2sql/prompt.py`
+   主角是 `build_sql_prompt()`。读的时候重点看 prompt 里如何写清楚单条 SELECT、敏感字段、可用表、指标口径和 few-shot。
+
+3. **SQL 如何生成**：`engine/nl2sql/generator.py`
+   主角是 `DeepSeekChatClient`、`extract_generated_sql()` 和 `generate_sql()`。重点理解：真实网络调用集中在一个地方，JSON / fenced SQL 两种输出都能解析，失败会变成可诊断错误。
+
+4. **权限如何拦截**：`engine/sql_guard/rbac.py` 和 `engine/sql_guard/policy.py`
+   先看 `ROLE_POLICIES`，再看 `validate_sql_policy()`。它先复用 M3 的只读检查，再从 AST 里提取表和字段，判断角色是否允许访问。
+
+5. **API 如何串起来**：`app/api/query.py`
+   读 `query()` 和 `_resolve_sql()`。完整链路是：先 `match_template()`，没命中才 `generate_sql()`，拿到 SQL 后统一 `validate_sql_policy()`，最后执行并返回 `AgentResponse`。
+
+一次 LLM 查询的数据流向：
+
+`POST /api/query`
+→ `match_template()` 未命中
+→ `load_domain_schema()`
+→ `build_sql_prompt()`
+→ `DeepSeekChatClient.complete()`
+→ `extract_generated_sql()`
+→ `validate_sql_policy()`
+→ `db.execute()`
+→ `AgentResponse`
+
+一次安全拦截的数据流向：
+
+`SELECT email FROM users`
+→ `validate_readonly_sql()` 通过
+→ `extract_sql_access()` 提取 `users.email`
+→ 命中敏感字段
+→ `safety_status=blocked`
+
+### 设计要点
+
+- **模板优先，不让 LLM 破坏稳定基线**：M3 已验证的 5 条模板问题继续走模板路径，模板未命中才走 LLM。
+- **安全不靠 prompt**：prompt 会提醒模型不要写危险 SQL，但真正放行由 sqlglot AST、RBAC 和敏感字段策略决定。
+- **provider 不过度抽象**：M4 只接 DeepSeek，先证明端到端能跑；SiliconFlow 等 provider 后续需要时再补。
+- **业务口径仍放 domain_pack**：GMV、退款率、敏感字段都从配置读，`engine/` 不写电商硬编码。
+- **边界明确**：M4 只做表级 / 字段级 allowlist；行级权限、脱敏样例数据和更细角色策略留到后续。
+
+### 面试怎么讲
+
+M4 可以讲成“把 **Text-to-SQL** 从规则模板升级到 **LLM 生成**，但没有把安全交给模型”。我先让模板 SQL 保持优先，保证 v0 稳定基线不被模型波动影响；未命中模板时，用 schema、指标口径和 few-shot 构造 prompt 调 DeepSeek。模型输出后，系统用 **sqlglot AST** 提取表和字段，再按 **RBAC allowlist** 和 **敏感字段策略**决定是否放行。这个设计能体现一个关键工程意识：LLM 可以负责生成候选答案，但数据库执行权必须由后端安全策略掌握喵
+
+### 验证与下一步
+
+- 验证：**24 个测试全过**；M4 smoke 真实调用 DeepSeek，**6 条 simple SQL 中 5 条通过**；危险 SQL、敏感字段和越权角色在自动化测试中都返回结构化拦截。
+- warning：Starlette TestClient 提示 httpx 依赖迁移，不影响 M4 行为；`git diff --check` 只有 Windows CRLF 提示。
+- 下一步：M5 扩展 AgentResponse、封装 SQL Tool、记录 Trace / cost / latency，并生成基础图表 spec。
+
+可复制验证命令：
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m4_nl2sql.py
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+```
