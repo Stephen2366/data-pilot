@@ -13,7 +13,7 @@ from app.core.config import get_settings
 
 
 def build_engine(database_url: str) -> Engine:
-    """Create the shared SQLAlchemy engine for application requests.
+    """Create the shared SQLAlchemy engine for application requests. 为应用程序请求创建共享的SQLAlchemy引擎。
 
     ★ `pool_pre_ping=True` 会在连接交给业务代码前先探活。MySQL 连接空闲太久时
     可能被服务端断开，pre-ping 可以避免请求拿到一条已经失效的连接。
@@ -31,6 +31,8 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def get_db() -> Generator[Session, None, None]:
     """FastAPI 依赖：为每个请求提供一个独立的数据库 Session。
+
+    get_db() 把每次请求需要的 Session 借出去、用完再关闭。
 
     ★ yield 写法是 FastAPI 依赖的“前置 + 后置”模式：yield 之前相当于请求开始时借出
     连接，finally 保证请求无论成功还是抛异常都归还连接（类比 Java 的 try-with-resources）。

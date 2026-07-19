@@ -24,6 +24,28 @@ DataPilot 最终要做"用自然语言问数据"的 Agent 系统，但第一天*
 - `pyproject.toml`：项目依赖清单，类似 Java 项目的 `pom.xml` / `build.gradle`。
 - `tests/test_config.py`、`tests/test_health.py`：第一批自动化测试，负责守住配置和健康检查。
 
+### 代码阅读路线
+
+1. **应用入口**：`app/main.py`
+   理解 FastAPI 应用是怎么被创建出来的。主角是 `create_app()`：它负责组装服务、注册 `/health`，也是后续所有路由挂载的入口。
+
+2. **配置对象**：`app/core/config.py`
+   理解 `.env` 配置如何变成 Python 对象。重点看 `Settings` 和 `get_settings()`，它们决定后续数据库、LLM、环境变量从哪里读。
+
+3. **健康检查契约**：`tests/test_health.py`
+   反过来理解服务最小可用标准：`/health` 必须返回 `{"status": "ok"}`。
+
+4. **配置测试契约**：`tests/test_config.py`
+   看测试如何守住配置默认值、`.env` 读取和敏感信息不外泄。
+
+一次启动的调用关系：
+
+`uvicorn app.main:app`
+→ `create_app()`
+→ `get_settings()`
+→ 注册 `/health`
+→ 测试用 `TestClient` 请求接口
+
 ### 设计要点
 
 - **健康检查不是摆设**：一个永远回答"我还活着"的接口，CI/CD、K8s 探针、测试脚本都用它确认服务启动成功——加新功能后先看健康检查，能快速判断是谁坏了
@@ -67,6 +89,32 @@ python -m pytest
 - `alembic/versions/20260717_0001_create_m1_business_tables.py`：第一版建表迁移，负责真正把表建到 MySQL。
 - `scripts/seed_data.py`：确定性模拟数据脚本，负责写入 7 张表的数据和固定业务事实。
 - `domain_pack/schema_desc/`：给后续 NL2SQL / SQL Guard 看的业务字段说明和敏感字段标记。
+
+### 代码阅读路线
+
+1. **模型定义**：`app/models/`
+   重点不要逐字段背表，而是先看 7 张表的角色：`User/Product/Channel` 是维表，`Order/Refund/Ticket` 是事实表，`KnowledgeDoc` 给后续 RAG 预留。每个模型里的主角是类本身和外键关系字段。
+
+2. **metadata 汇总**：`app/db/base.py`
+   理解为什么 Alembic 能“看见”所有模型。这个文件的主角是 `Base` 和模型导入：它把分散的 ORM 类汇总成一份 metadata。
+
+3. **migration 建表**：`alembic/versions/20260717_0001_create_m1_business_tables.py`
+   把它当成“数据库真实建表脚本”读。重点看 `upgrade()` 里创建了哪些表、索引和外键；`downgrade()` 则是回滚顺序。
+
+4. **seed 造数与事实校验**：`scripts/seed_data.py`
+   主角是 `seed_database()`：它按父表到子表的顺序写入数据。再看 `verify_business_facts()`，理解 4 个标准答案是怎么被 SQL 查出来的。
+
+5. **业务语义说明**：`domain_pack/schema_desc/`
+   这里不是给数据库执行的，而是给后续 NL2SQL / SQL Guard 理解业务语义的。重点看字段说明和敏感字段标记。
+
+一次 seed 的数据流向：
+
+`seed_database()`
+→ `_build_users/products/channels/docs()`
+→ `_build_orders()`
+→ `_build_refunds()` / `_build_tickets()`
+→ `verify_business_facts()`
+→ 输出固定标准答案
 
 ### 设计要点
 
@@ -115,6 +163,39 @@ M1 已经把 **7 张表和确定性数据**准备好了，但后续 Agent、评�
 - `app/schemas/common.py`、`app/schemas/resources.py`：分页响应、错误响应和资源读取模型。
 - `app/core/logging.py`、`app/core/exceptions.py`：请求日志中间件和全局异常处理。
 - `app/core/cache.py`：Redis wrapper 骨架，目前是 `NullCache`，不宣传为真实缓存能力。
+
+### 代码阅读路线
+
+1. **数据库入口**：`app/db/session.py`
+   主角是 `build_engine()` 和 `get_db()`。前者创建共享 SQLAlchemy engine，后者把每次请求需要的 Session 借出去、用完再关闭。
+
+2. **响应 Schema**：`app/schemas/common.py` 和 `app/schemas/resources.py`
+   先理解接口返回什么形状。`PageResponse` 和 `ErrorResponse` 是 M2 的核心合同，资源读取模型则规定列表里每个 item 的字段。
+
+3. **路由实现**：`app/api/resources.py`
+   主角是 `_paginate()` 和 4 个列表函数：`list_products()`、`list_orders()`、`list_refunds()`、`list_tickets()`。读的时候重点看筛选条件怎么转成 SQLAlchemy `where()`，分页怎么统一收口。
+
+4. **日志与异常**：`app/core/logging.py` 和 `app/core/exceptions.py`
+   理解一次请求从进入到返回，中间如何生成 `trace_id`、记录日志，以及异常如何变成统一 JSON。
+
+5. **测试反推契约**：`tests/test_m2_api.py`
+   测试是 M2 的行为说明书：它告诉你哪些筛选组合必须可用，非法分页必须返回什么结构。
+
+一次列表查询的调用链：
+
+`GET /api/orders`
+→ 日志中间件生成 `trace_id`
+→ `get_db()` 提供 Session
+→ `list_orders()` 拼筛选条件
+→ `_paginate()` 统一计数和分页
+→ `PageResponse`
+
+一次非法请求的调用链：
+
+`GET /api/products?page=0`
+→ FastAPI 参数校验失败
+→ 全局异常处理器接住
+→ `ErrorResponse(code="validation_error")`
 
 ### 设计要点
 
@@ -172,6 +253,41 @@ M1 准备了数据，M2 准备了 API 出入口。M3 做的是 DataPilot v0 的�
 - `domain_pack/sql_examples/basic.yaml`：模板 SQL 沉淀为 M4 few-shot 示例。
 - `eval/cases_plan.md`：32 条评测问题和 YAML 字段草案。
 - `scripts/smoke_v0.py`：M3 smoke 脚本，输出摘要到 `.agent_work/temp/v0-smoke.md`。
+
+### 代码阅读路线
+
+1. **接口契约**：`app/schemas/agent.py`
+   理解 `/api/query` 的输入输出合同。主角是 `QueryRequest` 和 `AgentResponse`：前者规定用户怎么问，后者规定系统必须怎么答。
+
+2. **SQL 从哪来**：`engine/nl2sql/templates.py`
+   理解 M3 暂时不接 LLM，而是通过 `match_template()` 把自然语言问题匹配到 5 条白名单 SQL。主角是 `SQLTemplate`、`TEMPLATES` 和 `match_template()`。
+
+3. **安全检查**：`engine/sql_guard/guard.py`
+   理解 SQL 不是直接执行，而是先经过 `validate_readonly_sql()`，只允许单条 `SELECT`。主角是 `GuardResult` 和 `validate_readonly_sql()`。
+
+4. **API 串起来**：`app/api/query.py`
+   这是 M3 的主角文件。`query()` 把前面几步串成完整链路：问题 → 模板匹配 → SQL Guard → 执行 SQL → 组装 AgentResponse。辅助函数 `_blocked_response()`、`_build_answer()`、`_row_to_dict()` 分别负责拦截响应、最小答案和结果序列化。
+
+5. **测试验证**：`tests/test_m3_query.py` 和 `scripts/smoke_v0.py`
+   前者守住自动化测试契约，后者给人工验收看真实输出。读测试时重点看：哪些问题必须命中模板，哪些危险 SQL 必须被拦截。
+
+一次正常查询的调用链：
+
+`POST /api/query`
+→ `QueryRequest`
+→ `match_template(question)`
+→ `validate_readonly_sql(sql)`
+→ `db.execute(text(sql), parameters)`
+→ `columns / rows`
+→ `AgentResponse`
+
+一次危险 SQL 的调用链：
+
+`POST /api/query`
+→ 未命中模板
+→ `validate_readonly_sql(question)`
+→ `safety_status=blocked`
+→ 返回结构化拦截响应
 
 ### 设计要点
 
