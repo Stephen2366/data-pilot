@@ -1,3 +1,10 @@
+"""统一异常处理模块：业务异常基类 + 三层异常兜底注册。
+
+★ 类比 SpringBoot 的 @RestControllerAdvice + @ExceptionHandler：
+任何异常都变成统一的 JSON 响应（code/message/trace_id/details），
+不把 Python traceback 泄露给调用方。
+"""
+
 from typing import Any
 
 from fastapi import FastAPI, Request, status
@@ -54,7 +61,10 @@ class PermissionDeniedError(AppError):
 
 
 def get_trace_id(request: Request) -> str:
-    # 读取日志中间件写入 request.state 的 trace_id；极端情况（中间件未执行）兜底 "unknown"。
+    """从请求上下文读取日志中间件写入的 trace_id。
+
+    极端情况（中间件未执行）兜底返回 "unknown"，保证异常处理器不会因取不到 trace_id 而报错。
+    """
     return getattr(request.state, "trace_id", "unknown")
 
 

@@ -1,3 +1,9 @@
+"""应用配置模块：统一从环境变量/.env 读取所有配置项。
+
+★ 业务代码只从 Settings 类拿配置，不在各处散落 os.environ 读取，
+排查配置问题时只需关注这一个文件。
+"""
+
 from functools import lru_cache
 
 from pydantic import Field
@@ -47,5 +53,8 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    # lru_cache 让 Settings 只创建一次，避免每次请求都重新读取 `.env`。
+    """返回全局唯一的 Settings 实例（通过 lru_cache 保证单例）。
+
+    ★ lru_cache 让 Settings 只创建一次，避免每次请求都重新读取 .env 文件。
+    """
     return Settings()

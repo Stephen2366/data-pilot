@@ -15,6 +15,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """执行 M1 业务表创建：7 张表按维表→事实表→知识库的顺序创建。"""
     # 用户维表 ================================================================================
     op.create_table(
         "users",
@@ -225,6 +226,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """回滚 M1 迁移：按创建顺序反向删除所有 7 张业务表。"""
     op.drop_index(op.f("ix_knowledge_docs_title"), table_name="knowledge_docs")
     op.drop_index(op.f("ix_knowledge_docs_status"), table_name="knowledge_docs")
     op.drop_index(op.f("ix_knowledge_docs_doc_type"), table_name="knowledge_docs")

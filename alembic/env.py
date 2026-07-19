@@ -1,3 +1,9 @@
+"""Alembic 迁移环境配置：连接数据库、注册 ORM metadata、切换离线/在线模式。
+
+★ FastAPI 服务和 Alembic 迁移共用同一份 DATABASE_URL（通过 app.core.config.Settings），
+避免"服务连 A 库、迁移连 B 库"的配置漂移事故。
+"""
+
 from __future__ import annotations
 
 from logging.config import fileConfig
@@ -19,17 +25,17 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
-    """Read the database URL from the same Settings object used by FastAPI.
+    """从 FastAPI 相同的 Settings 对象读取 DATABASE_URL。
 
-    ★ 这样 FastAPI 服务和 Alembic 迁移只维护一份 DATABASE_URL，避免“服务连 A 库，
-    迁移连 B 库”的事故。
+    ★ 这样 FastAPI 服务和 Alembic 迁移只维护一份 DATABASE_URL，避免"服务连 A 库，
+    迁移连 B 库"的事故。
     """
 
     return get_settings().database_url
 
 
 def run_migrations_offline() -> None:
-    """Run migrations without creating an Engine, useful for SQL script generation."""
+    """离线模式运行迁移：不创建数据库 Engine，仅生成 SQL 脚本。"""
 
     # offline 模式只生成 SQL 文本，不真的连接数据库；适合审查迁移 SQL。
     context.configure(
@@ -45,7 +51,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations against the configured MySQL development database."""
+    """在线模式运行迁移：直连 MySQL 开发库执行 DDL。"""
 
     # online 模式会真实连接 MySQL 并执行 migration，是阶段二建表主路径。
     configuration = config.get_section(config.config_ini_section, {})

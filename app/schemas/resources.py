@@ -3,6 +3,11 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+"""资源 Read Schema：定义商品/订单/退款/工单的 API 返回字段。
+
+★ 每个 Read Schema 对应一张业务表的"对外展示视图"，
+敏感字段不暴露，字段类型适配 JSON 序列化（如 Decimal 保持财务精度）。
+"""
 
 class ProductRead(BaseModel):
     """商品的 API 出参模型（Read = 只读展示，不用于写入）。

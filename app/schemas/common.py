@@ -2,6 +2,11 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
+"""通用 Pydantic Schema：分页响应 + 错误响应，所有接口共用。
+
+★ 后续演示页和 EvalOps 评测脚本只依赖这一套响应格式，
+无论哪个接口返回，前端都按同一套字段解析。
+"""
 
 T = TypeVar("T")
 

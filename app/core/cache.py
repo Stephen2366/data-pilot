@@ -1,3 +1,9 @@
+"""缓存模块骨架：提供统一的缓存接口，当前使用空实现（Null Object 模式）。
+
+★ 业务代码只依赖 get/set 两个方法，后续把 NullCache 换成 RedisCache 时
+调用方一行不用改——类似 Spring 里先注入空实现的 CacheManager 占住扩展点。
+"""
+
 from typing import Any
 
 
@@ -11,11 +17,11 @@ class NullCache:
     """
 
     def get(self, key: str) -> Any | None:
-        # 空实现：永远视为“缓存未命中”，调用方自然回源数据库查询。
+        """读取缓存：空实现永远返回 None，调用方自然回源数据库查询。"""
         return None
 
     def set(self, key: str, value: Any, ttl_seconds: int | None = None) -> None:
-        # 空实现：写入直接丢弃；ttl_seconds 先占位，保持与真实缓存一致的方法签名。
+        """写入缓存：空实现直接丢弃；ttl_seconds 占位保持与真实缓存一致的方法签名。"""
         return None
 
 

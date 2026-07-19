@@ -1,9 +1,14 @@
+"""请求日志与全链路追踪模块：日志格式配置 + trace_id 中间件。
+
+★ 每个 HTTP 请求自动生成/透传 trace_id，排查问题时靠它把"用户看到的错误"
+和"服务端日志"串起来。
+"""
+
 import logging
 import time
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
-
 
 # 请求日志专用 logger：独立命名空间，后续可以只对它单独调整级别或输出目的地。
 logger = logging.getLogger("datapilot.request")

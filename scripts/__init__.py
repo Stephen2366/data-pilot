@@ -1,1 +1,1 @@
-"""Local maintenance scripts that can also be imported by tests."""
+"""本地维护脚本包，可被测试代码导入复用。"""

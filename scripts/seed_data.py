@@ -1,3 +1,9 @@
+"""种子数据脚本：向 datapilot_dev 库填充确定性的演示数据。
+
+★ 每次重跑生成相同数据（确定性种子），供开发、测试和 demo 使用。
+命令行：python -m scripts.seed_data --reset
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -11,7 +17,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import get_settings
 from app.db.base import Base
 from app.models import Channel, KnowledgeDoc, Order, Product, Refund, Ticket, User
-
 
 EXPECTED_SEED_COUNTS = {
     "users": 50,
@@ -35,7 +40,7 @@ REQUIRED_ROLES = {"admin", "ops", "customer_service", "demo_user"}
 
 
 def seed_database(session: Session, reset_existing: bool = False) -> dict[str, Any]:
-    """Seed deterministic demo data into an already-migrated database.
+    """向已迁移完成的数据库中填充确定性的演示数据。
 
     参数说明：
     - session：外部传入事务会话，方便 API、测试和命令行复用同一套逻辑。
@@ -71,7 +76,7 @@ def seed_database(session: Session, reset_existing: bool = False) -> dict[str, A
     # 所有表一起提交，保证 seed 要么完整成功，要么完整回滚。
     session.commit()
 
-    # 步骤 4：返回摘要，给命令行输出、测试断言和后续排查使用。
+    # 步骤 4：返回摘要，给命令行输出、测试断言和后续排查使用。====================
     counts = _count_seed_tables(session)
     return {
         "counts": counts,
@@ -81,9 +86,9 @@ def seed_database(session: Session, reset_existing: bool = False) -> dict[str, A
 
 
 def verify_business_facts(session: Session) -> dict[str, Any]:
-    """Run stable SQL-style checks for the business facts embedded in seed data.
+    """对种子数据中内嵌的业务事实执行稳定的 SQL 校验。
 
-    ★ 这里不是为了业务功能服务，而是为了“验收可复现”。后续 Agent 生成 SQL 后，
+    ★ 这里不是为了业务功能服务，而是为了”验收可复现”。后续 Agent 生成 SQL 后，
     可以拿这些事实当标准答案，判断它查出来的关键结果是否正确。
     """
 
@@ -96,22 +101,14 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
     refund_rate_stmt = (
         select(
             Product.product_name,
-            (
-                func.count(func.distinct(Refund.id))
-                * 1.0
-                / func.count(func.distinct(Order.id))
-            ).label("refund_rate"),
+            (func.count(func.distinct(Refund.id)) * 1.0 / func.count(func.distinct(Order.id))).label("refund_rate"),
         )
         .join(Order, Order.product_id == Product.id)
         .outerjoin(Refund, Refund.order_id == Order.id)
         .where(Order.paid_at >= june_start, Order.paid_at < july_start)
         .group_by(Product.id, Product.product_name)
         .order_by(
-            (
-                func.count(func.distinct(Refund.id))
-                * 1.0
-                / func.count(func.distinct(Order.id))
-            ).desc(),
+            (func.count(func.distinct(Refund.id)) * 1.0 / func.count(func.distinct(Order.id))).desc(),
             Product.product_name.asc(),
         )
         .limit(1)
@@ -143,9 +140,7 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
     top_refund_reason = session.execute(reason_stmt).scalar_one()
 
     # 事实 4：待处理高优先级工单数量。
-    pending_ticket_stmt = select(func.count(Ticket.id)).where(
-        Ticket.status == "pending", Ticket.priority == "high"
-    )
+    pending_ticket_stmt = select(func.count(Ticket.id)).where(Ticket.status == "pending", Ticket.priority == "high")
     pending_high_priority_tickets = session.execute(pending_ticket_stmt).scalar_one()
 
     return {
@@ -157,6 +152,7 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
 
 
 def _delete_existing_rows(session: Session) -> None:
+    """按外键依赖顺序清空 7 张业务表，避免 MySQL 外键约束阻止删除。"""
     # 按外键依赖从子表到父表删除，避免 MySQL 外键约束阻止清空。
     for model in (Ticket, Refund, Order, KnowledgeDoc, Product, Channel, User):
         session.execute(delete(model))
@@ -164,7 +160,7 @@ def _delete_existing_rows(session: Session) -> None:
 
 
 def _build_users() -> list[User]:
-    """Build 50 users and cycle through all required RBAC roles."""
+    """构建 50 个用户，覆盖所有 RBAC 角色。"""
 
     users: list[User] = []
     roles = ["admin", "ops", "customer_service", "demo_user"]
@@ -186,7 +182,7 @@ def _build_users() -> list[User]:
 
 
 def _build_products() -> list[Product]:
-    """Build products, including one anchor product for refund-rate evaluation."""
+    """构建商品数据，包含一个用于退款率评测的锚点商品。"""
 
     # 第 1 个商品是固定事实锚点：后续 refunds 会集中指向它，
     # 确保它成为 2026-06 退款率最高商品。
@@ -219,7 +215,7 @@ def _build_products() -> list[Product]:
 
 
 def _build_channels() -> list[Channel]:
-    """Build six channels that cover owned, marketplace, paid and partner traffic."""
+    """构建 6 个渠道，覆盖自有、平台、付费和合作伙伴流量来源。"""
 
     return [
         Channel(channel_code="mobile_app", channel_name="Mobile App", channel_type="owned"),
@@ -231,10 +227,8 @@ def _build_channels() -> list[Channel]:
     ]
 
 
-def _build_orders(
-    users: list[User], products: list[Product], channels: list[Channel]
-) -> list[Order]:
-    """Build deterministic orders with June/May distribution and channel anchors."""
+def _build_orders(users: list[User], products: list[Product], channels: list[Channel]) -> list[Order]:
+    """构建确定性订单数据，模拟 6 月/5 月的时间分布和渠道锚点。"""
 
     orders: list[Order] = []
     june_start = datetime(2026, 6, 1, 9, 0, 0)
@@ -257,9 +251,7 @@ def _build_orders(
             amount = Decimal("109.00") + Decimal(index % 17) * Decimal("23.00")
 
         # 前 320 单落在 6 月，剩余订单落在 5 月，方便后续测试时间筛选。
-        paid_at = (june_start if index < 320 else may_start) + timedelta(
-            days=index % 28, hours=index % 7
-        )
+        paid_at = (june_start if index < 320 else may_start) + timedelta(days=index % 28, hours=index % 7)
         status = statuses[index % len(statuses)]
 
         orders.append(
@@ -279,16 +271,11 @@ def _build_orders(
 
 
 def _build_refunds(orders: list[Order]) -> list[Refund]:
-    """Build refunds with stable reason distribution and product refund-rate anchor."""
+    """构建退款数据，包含稳定的原因分布和商品退款率锚点。"""
 
     refunds: list[Refund] = []
     # quality_issue 出现 42 次，确保它稳定成为 Top 退款原因。
-    reasons = (
-        ["quality_issue"] * 42
-        + ["late_delivery"] * 15
-        + ["wrong_item"] * 12
-        + ["changed_mind"] * 11
-    )
+    reasons = ["quality_issue"] * 42 + ["late_delivery"] * 15 + ["wrong_item"] * 12 + ["changed_mind"] * 11
     statuses = ["approved", "completed", "requested", "rejected"]
 
     # 先集中给锚点商品生成 18 条退款，确保它在 2026-06 的退款率最高。
@@ -307,9 +294,7 @@ def _build_refunds(orders: list[Order]) -> list[Refund]:
                 product=order.product,
                 refund_status=statuses[index % len(statuses)],
                 refund_reason=reasons[index],
-                refund_amount=(order.order_amount * Decimal("0.90")).quantize(
-                    Decimal("0.01")
-                ),
+                refund_amount=(order.order_amount * Decimal("0.90")).quantize(Decimal("0.01")),
                 requested_at=requested_at,
                 processed_at=processed_at,
             )
@@ -319,7 +304,7 @@ def _build_refunds(orders: list[Order]) -> list[Refund]:
 
 
 def _build_tickets(users: list[User], orders: list[Order]) -> list[Ticket]:
-    """Build support tickets with 12 fixed pending high-priority tickets."""
+    """构建客服工单，固定包含 12 个待处理高优先级工单。"""
 
     tickets: list[Ticket] = []
     ticket_types = ["refund", "shipping", "invoice", "account", "product"]
@@ -328,20 +313,10 @@ def _build_tickets(users: list[User], orders: list[Order]) -> list[Ticket]:
     for index in range(EXPECTED_SEED_COUNTS["tickets"]):
         # 前 12 条固定为 pending + high，作为后续客服工单评测锚点。
         is_anchor_ticket = index < 12
-        priority = (
-            "high" if is_anchor_ticket else ["low", "medium", "urgent"][index % 3]
-        )
-        status = (
-            "pending"
-            if is_anchor_ticket
-            else ["processing", "resolved", "closed"][index % 3]
-        )
+        priority = "high" if is_anchor_ticket else ["low", "medium", "urgent"][index % 3]
+        status = "pending" if is_anchor_ticket else ["processing", "resolved", "closed"][index % 3]
         created_at = datetime(2026, 6, 1, 10, 0, 0) + timedelta(hours=index * 3)
-        resolved_at = (
-            None
-            if status in {"pending", "processing"}
-            else created_at + timedelta(days=2)
-        )
+        resolved_at = None if status in {"pending", "processing"} else created_at + timedelta(days=2)
 
         tickets.append(
             Ticket(
@@ -363,7 +338,7 @@ def _build_tickets(users: list[User], orders: list[Order]) -> list[Ticket]:
 
 
 def _build_knowledge_docs() -> list[KnowledgeDoc]:
-    """Build policy and metric documents for the later RAG module."""
+    """构建政策与指标文档，供后续 RAG 模块使用。"""
 
     # 这些文档先只是结构化草稿；阶段三会再做切分、向量化和检索。
     docs = [
@@ -390,7 +365,7 @@ def _build_knowledge_docs() -> list[KnowledgeDoc]:
 
 
 def _count_seed_tables(session: Session) -> dict[str, int]:
-    """Count seeded rows table by table for command output and tests."""
+    """逐表统计种子数据行数，供命令行输出和测试使用。"""
 
     models = {
         "users": User,
@@ -401,13 +376,11 @@ def _count_seed_tables(session: Session) -> dict[str, int]:
         "tickets": Ticket,
         "knowledge_docs": KnowledgeDoc,
     }
-    return {
-        table_name: session.execute(select(func.count(model.id))).scalar_one()
-        for table_name, model in models.items()
-    }
+    return {table_name: session.execute(select(func.count(model.id))).scalar_one() for table_name, model in models.items()}
 
 
 def main() -> None:
+    """命令行入口：连接数据库 → 填充种子数据 → 校验业务事实 → 打印统计。"""
     # 命令行入口 ==============================================================
     # 设计成 python -m scripts.seed_data --reset，方便 README 和 dev-log 复用。
     parser = argparse.ArgumentParser(description="Seed DataPilot M1 demo data.")

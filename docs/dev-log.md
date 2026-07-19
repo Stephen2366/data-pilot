@@ -12,17 +12,17 @@ DataPilot 最终要做"用自然语言问数据"的 Agent 系统，但第一天�
 
 具体做法是：搭好 FastAPI 服务（把 Python 函数变成对外 HTTP 接口的 Web 框架），加一个 `/health` 健康检查接口确认服务活着；用 Pydantic Settings 把 `.env` 里的配置（数据库地址、API Key 等）自动读成 Python 对象，避免代码里到处手写 `os.getenv()`；再配上第一批自动化测试。这样后面每加一个功能，都能随时确认"服务还能起、配置还能读、测试还能过"。
 
-关键文件：
+### 新概念
+
+- **FastAPI**：Python 的 Web 框架，把函数变成 HTTP 接口。类比 SpringBoot 的 `@RestController`
+- **Pydantic Settings**：把 `.env` 里的配置自动读成带类型检查的 Python 对象，避免代码里到处手写 `os.getenv()`
+
+### 关键文件：
 
 - `app/main.py`：FastAPI 应用入口，负责创建服务和注册 `/health`。
 - `app/core/config.py`：配置入口，负责读取 `.env`。
 - `pyproject.toml`：项目依赖清单，类似 Java 项目的 `pom.xml` / `build.gradle`。
 - `tests/test_config.py`、`tests/test_health.py`：第一批自动化测试，负责守住配置和健康检查。
-
-### 新概念
-
-- **FastAPI**：Python 的 Web 框架，把函数变成 HTTP 接口。类比 SpringBoot 的 `@RestController`
-- **Pydantic Settings**：把 `.env` 里的配置自动读成带类型检查的 Python 对象，避免代码里到处手写 `os.getenv()`
 
 ### 设计要点
 
@@ -54,19 +54,19 @@ python -m pytest
 
 这次用 SQLAlchemy 定义了 7 张表：用户、商品、渠道是"维度"（描述业务对象是谁），订单、退款、工单是"事实"（记录业务发生了什么），知识文档表给后面的 RAG 检索预留位置。建表不手写 SQL，而是通过 Alembic 迁移管理，改表历史全程可追溯。然后写了一个"每次运行结果都一模一样"的假数据脚本，还故意在数据里埋了 4 个"标准答案"（比如 2026 年 6 月退款率最高的商品是谁）——以后评测 Agent 时，就能自动判断它查得对不对。
 
-关键文件：
+### 新概念
+
+- **SQLAlchemy**：Python 操作数据库的工具包，两层——**ORM**（类↔表，类比 JPA/Hibernate）和 **Core**（用 Python 表达式构建 SQL，防注入，类比 MyBatis）。项目里 `app/models/` 走 ORM，后面 `engine/nl2sql/` 动态拼 SQL 走 Core
+- **Alembic**：数据库结构的版本控制（类比 Flyway/Liquibase）。改 Model → 自动生成迁移脚本 → `upgrade` 应用到库，可 `downgrade` 回滚，和 git 一样可追溯
+- **维度表 / 事实表**：维度表回答"是谁 / 是什么"，事实表回答"发生了什么"——查询时先定位维度，再查事实，性能更好
+
+### 关键文件：
 
 - `app/models/`：7 张业务表的 ORM 模型，负责描述数据库长什么样。
 - `app/db/base.py`：统一收集所有 ORM 表，让 Alembic 能看到完整表结构。
 - `alembic/versions/20260717_0001_create_m1_business_tables.py`：第一版建表迁移，负责真正把表建到 MySQL。
 - `scripts/seed_data.py`：确定性模拟数据脚本，负责写入 7 张表的数据和固定业务事实。
 - `domain_pack/schema_desc/`：给后续 NL2SQL / SQL Guard 看的业务字段说明和敏感字段标记。
-
-### 新概念
-
-- **SQLAlchemy**：Python 操作数据库的工具包，两层——**ORM**（类↔表，类比 JPA/Hibernate）和 **Core**（用 Python 表达式构建 SQL，防注入，类比 MyBatis）。项目里 `app/models/` 走 ORM，后面 `engine/nl2sql/` 动态拼 SQL 走 Core
-- **Alembic**：数据库结构的版本控制（类比 Flyway/Liquibase）。改 Model → 自动生成迁移脚本 → `upgrade` 应用到库，可 `downgrade` 回滚，和 git 一样可追溯
-- **维度表 / 事实表**：维度表回答"是谁 / 是什么"，事实表回答"发生了什么"——查询时先定位维度，再查事实，性能更好
 
 ### 设计要点
 
@@ -102,19 +102,19 @@ M1 已经把 7 张表和确定性数据准备好了，但后续 Agent、评测�
 
 这次新增了 `app/db/session.py`，让每个请求通过 `get_db()` 拿一个 SQLAlchemy Session，用完自动关闭；`pool_pre_ping=True` 负责在 MySQL 连接交给业务代码前先探活。然后新增 4 个列表接口：商品、订单、退款、工单，每个接口都支持分页和本模块计划里的基础筛选。接口返回统一 `PageResponse`，错误返回统一 `ErrorResponse`，并且每次请求都有 `trace_id`，日志里能看到 method、path、status、latency_ms 和 trace_id。
 
-关键文件：
+### 新概念
+
+- **请求级 Session**：每个 HTTP 请求拿一个数据库会话，请求结束就关闭。类比 SpringBoot 里一次请求进 Service / Repository 使用同一个事务上下文，不在 Controller 里到处手写连接。
+- **分页响应**：列表接口不只返回数据，还返回 `total / page / page_size`。前端或评测脚本才知道总共有多少条、当前是哪一页。
+- **trace_id**：一次请求的追踪编号。出错时用户拿到 trace_id，服务端也用同一个 trace_id 查日志，排查链路会快很多。
+
+### 关键文件：
 
 - `app/db/session.py`：数据库 engine 和请求级 Session 依赖。
 - `app/api/resources.py`：4 类资源列表接口。
 - `app/schemas/common.py`、`app/schemas/resources.py`：分页响应、错误响应和资源读取模型。
 - `app/core/logging.py`、`app/core/exceptions.py`：请求日志中间件和全局异常处理。
 - `app/core/cache.py`：Redis wrapper 骨架，目前是 `NullCache`，不宣传为真实缓存能力。
-
-### 新概念
-
-- **请求级 Session**：每个 HTTP 请求拿一个数据库会话，请求结束就关闭。类比 SpringBoot 里一次请求进 Service / Repository 使用同一个事务上下文，不在 Controller 里到处手写连接。
-- **分页响应**：列表接口不只返回数据，还返回 `total / page / page_size`。前端或评测脚本才知道总共有多少条、当前是哪一页。
-- **trace_id**：一次请求的追踪编号。出错时用户拿到 trace_id，服务端也用同一个 trace_id 查日志，排查链路会快很多。
 
 ### 设计要点
 

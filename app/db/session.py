@@ -1,3 +1,9 @@
+"""数据库连接管理：Engine 构建 + FastAPI 依赖注入式的 Session 生命周期。
+
+★ 每个请求通过 get_db() 获取独立 Session，请求结束自动关闭，
+类比 Java Spring 中每个请求绑定一个 EntityManager。
+"""
+
 from collections.abc import Generator
 
 from sqlalchemy import Engine, create_engine

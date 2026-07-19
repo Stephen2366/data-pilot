@@ -10,6 +10,11 @@ from app.db.session import get_db
 from app.schemas.common import PageResponse
 from app.schemas.resources import OrderRead, ProductRead, RefundRead, TicketRead
 
+"""资源列表 API：商品/订单/退款/工单 4 个列表接口 + 通用分页执行器。
+
+★ 4 个接口共用同一个 _paginate 执行器，各自只负责拼筛选条件；
+分页、计数、响应组装全部收口在一处，避免重复代码。
+"""
 
 # 4 个资源列表接口共用一个 router，统一挂 /api 前缀（类比 SpringBoot 的类级 @RequestMapping）。
 router = APIRouter(prefix="/api", tags=["resources"])
@@ -18,7 +23,7 @@ ModelT = TypeVar("ModelT")
 
 
 def _trace_id(request: Request) -> str:
-    # 读取日志中间件写入的 trace_id，塞进分页响应，方便把某次响应和服务端日志对上。
+    """从请求上下文读取 trace_id，塞进分页响应，方便把某次响应和服务端日志对上。"""
     return getattr(request.state, "trace_id", "unknown")
 
 
@@ -38,16 +43,10 @@ def _paginate(
 
     # 步骤 1：先统计过滤后的总数，前端需要它计算总页数。
     # order_by(None) 去掉计数子查询里的排序：算总数不需要排序，留着只会浪费性能。
-    total = db.execute(
-        select(func.count()).select_from(stmt.order_by(None).subquery())
-    ).scalar_one()
+    total = db.execute(select(func.count()).select_from(stmt.order_by(None).subquery())).scalar_one()
 
     # 步骤 2：再取当前页。offset = (页码 - 1) * 每页条数，是最常见分页公式。
-    items = (
-        db.execute(stmt.offset((page - 1) * page_size).limit(page_size))
-        .scalars()
-        .all()
-    )
+    items = db.execute(stmt.offset((page - 1) * page_size).limit(page_size)).scalars().all()
     return PageResponse(
         items=items,
         total=total,
@@ -79,9 +78,7 @@ def list_products(
     if status:
         stmt = stmt.where(Product.status == status)
 
-    return _paginate(
-        db=db, stmt=stmt, page=page, page_size=page_size, request=request
-    )
+    return _paginate(db=db, stmt=stmt, page=page, page_size=page_size, request=request)
 
 
 @router.get("/orders", response_model=PageResponse[OrderRead])
@@ -95,7 +92,11 @@ def list_orders(
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> PageResponse[OrderRead]:
-    """订单列表：支持支付时间范围 / 渠道 / 订单状态筛选 + 分页。"""
+    """订单列表：支持支付时间范围 / 渠道 / 订单状态筛选 + 分页。
+
+    ★ 时间筛选使用左闭右开区间 [paid_from, paid_to)，避免月度统计时边界数据重复计算。
+    渠道和订单状态是 GMV 分析最常用的两个维度，所以单独暴露为可选筛选参数。
+    """
 
     stmt = select(Order).order_by(Order.id.asc())
     if paid_from:
@@ -108,9 +109,7 @@ def list_orders(
     if order_status:
         stmt = stmt.where(Order.order_status == order_status)
 
-    return _paginate(
-        db=db, stmt=stmt, page=page, page_size=page_size, request=request
-    )
+    return _paginate(db=db, stmt=stmt, page=page, page_size=page_size, request=request)
 
 
 @router.get("/refunds", response_model=PageResponse[RefundRead])
@@ -124,7 +123,11 @@ def list_refunds(
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> PageResponse[RefundRead]:
-    """退款列表：支持申请时间范围 / 退款状态 / 退款原因筛选 + 分页。"""
+    """退款列表：支持申请时间范围 / 退款状态 / 退款原因筛选 + 分页。
+
+    ★ 退款状态和退款原因是售后分析的两个核心维度；退款原因（quality_issue 等）
+    后续会用于退款率归因分析。
+    """
 
     stmt = select(Refund).order_by(Refund.id.asc())
     if requested_from:
@@ -136,9 +139,7 @@ def list_refunds(
     if refund_reason:
         stmt = stmt.where(Refund.refund_reason == refund_reason)
 
-    return _paginate(
-        db=db, stmt=stmt, page=page, page_size=page_size, request=request
-    )
+    return _paginate(db=db, stmt=stmt, page=page, page_size=page_size, request=request)
 
 
 @router.get("/tickets", response_model=PageResponse[TicketRead])
@@ -151,7 +152,11 @@ def list_tickets(
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> PageResponse[TicketRead]:
-    """工单列表：支持状态 / 优先级 / 工单类型筛选 + 分页。"""
+    """工单列表：支持状态 / 优先级 / 工单类型筛选 + 分页。
+
+    ★ 客服运营最常见的筛选场景是"待处理 + 高优先级"，所以 status 和 priority
+    都建了索引；工单类型用于区分咨询、投诉、技术支持等不同处理流程。
+    """
 
     stmt = select(Ticket).order_by(Ticket.id.asc())
     if status:
@@ -161,6 +166,4 @@ def list_tickets(
     if ticket_type:
         stmt = stmt.where(Ticket.ticket_type == ticket_type)
 
-    return _paginate(
-        db=db, stmt=stmt, page=page, page_size=page_size, request=request
-    )
+    return _paginate(db=db, stmt=stmt, page=page, page_size=page_size, request=request)

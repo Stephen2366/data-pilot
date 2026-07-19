@@ -1,3 +1,8 @@
+"""FastAPI 应用入口：创建应用、注册中间件/路由/异常处理器、启动服务。
+
+★ 整个服务的组装线：配置 → 日志 → 中间件 → 路由 → 异常兜底，都在 create_app() 里按顺序完成。
+"""
+
 from fastapi import FastAPI
 
 from app.api import resources_router
@@ -27,6 +32,11 @@ def redact_database_url(database_url: str) -> str:
 
 
 def create_app() -> FastAPI:
+    """创建并配置 FastAPI 应用实例。
+
+    ★ 按顺序完成：读取配置 → 创建 app → 注册日志中间件 → 注册路由 → 注册异常兜底。
+    这个函数是服务启动的唯一组装入口。
+    """
     # 步骤 1：读取配置 =======================================================================
     # settings 是整个应用的配置对象，后续数据库、LLM、日志都会从这里取值。
     settings = get_settings()
@@ -45,12 +55,12 @@ def create_app() -> FastAPI:
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:
-        # 健康检查接口：只回答服务是否活着，不依赖数据库或外部模型。
+        """健康检查接口：只回答服务是否活着，不依赖数据库或外部模型。"""
         return {"status": "ok"}
 
     @application.get("/config", tags=["system"], include_in_schema=False)
     def config_snapshot() -> dict[str, str]:
-        # 调试用配置快照：只返回非敏感信息，避免 API key、数据库密码泄露。
+        """调试用配置快照：只返回非敏感信息，避免 API key、数据库密码泄露。"""
         return {
             "app_env": settings.app_env,
             "database_url": redact_database_url(settings.database_url),
