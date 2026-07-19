@@ -8,9 +8,9 @@
 
 ### 这次做了什么
 
-DataPilot 最终要做"用自然语言问数据"的 Agent 系统，但第一天不碰 AI，先把工程底子打牢。就像做 Java / SpringBoot 项目前先建好启动类、配置文件和健康检查一样，这一步先让 Python 后端具备最基本的工程形态。
+DataPilot 最终要做"用自然语言问数据"的 Agent 系统，但第一天**不碰 AI**，先把**工程底子打牢**。就像做 **Java / SpringBoot** 项目前先建好启动类、配置文件和健康检查一样，这一步先让 Python 后端具备最基本的工程形态。
 
-具体做法是：搭好 FastAPI 服务（把 Python 函数变成对外 HTTP 接口的 Web 框架），加一个 `/health` 健康检查接口确认服务活着；用 Pydantic Settings 把 `.env` 里的配置（数据库地址、API Key 等）自动读成 Python 对象，避免代码里到处手写 `os.getenv()`；再配上第一批自动化测试。这样后面每加一个功能，都能随时确认"服务还能起、配置还能读、测试还能过"。
+具体做法是：搭好 **FastAPI 服务**（把 Python 函数变成对外 HTTP 接口的 Web 框架），加一个 `/health` **健康检查接口**确认服务活着；用 **Pydantic Settings** 把 `.env` 里的配置（数据库地址、API Key 等）自动读成 Python 对象，避免代码里到处手写 `os.getenv()`；再配上**第一批自动化测试**。这样后面每加一个功能，都能随时确认"服务还能起、配置还能读、测试还能过"。
 
 ### 新概念
 
@@ -31,11 +31,11 @@ DataPilot 最终要做"用自然语言问数据"的 Agent 系统，但第一天�
 
 ### 面试怎么讲
 
-DataPilot 不是只写一个脚本 demo，而是从第一天按真实后端服务搭骨架：FastAPI 负责 API 层，Pydantic Settings 负责配置管理，SQLAlchemy + Alembic 负责后续数据模型和数据库迁移。数据库直接使用 MySQL 开发库，后面讲表设计、权限控制、索引和迁移时更贴近真实业务项目。配置层允许 `.env` 里存在暂时没用到的字段，但代码只建模当前真正使用的配置，既方便本地开发，也避免配置混乱。
+DataPilot 不是只写一个脚本 demo，而是从第一天按**真实后端服务**搭骨架：**FastAPI 负责 API 层**，**Pydantic Settings 负责配置管理**，**SQLAlchemy + Alembic** 负责后续数据模型和数据库迁移。数据库直接使用 **MySQL 开发库**，后面讲表设计、权限控制、索引和迁移时更贴近真实业务项目。配置层允许 `.env` 里存在暂时没用到的字段，但代码只建模当前真正使用的配置，既方便本地开发，也避免配置混乱。
 
 ### 验证与下一步
 
-- 验证：5 个测试全过，`.env` 配置能被正确读取
+- 验证：**5 个测试全过**，`.env` 配置能被正确读取
 - 下一步：M1 建数据底座（7 张表 + 迁移 + 模拟数据）
 
 可复制验证命令：
@@ -50,9 +50,9 @@ python -m pytest
 
 ### 这次做了什么
 
-要让 Agent 回答"上月退款率最高的商品是什么"，前提是数据库里真的有订单、退款这些数据。这一步相当于先给数据分析系统准备"业务仓库"：表结构是货架，seed 数据是摆上去的货，固定业务事实是后面验货用的标准答案。
+要让 Agent 回答"上月退款率最高的商品是什么"，前提是数据库里真的有**订单、退款这些数据**。这一步相当于先给数据分析系统准备"业务仓库"：**表结构是货架**，**seed 数据是摆上去的货**，**固定业务事实是后面验货用的标准答案**。
 
-这次用 SQLAlchemy 定义了 7 张表：用户、商品、渠道是"维度"（描述业务对象是谁），订单、退款、工单是"事实"（记录业务发生了什么），知识文档表给后面的 RAG 检索预留位置。建表不手写 SQL，而是通过 Alembic 迁移管理，改表历史全程可追溯。然后写了一个"每次运行结果都一模一样"的假数据脚本，还故意在数据里埋了 4 个"标准答案"（比如 2026 年 6 月退款率最高的商品是谁）——以后评测 Agent 时，就能自动判断它查得对不对。
+这次用 **SQLAlchemy 定义了 7 张表**：用户、商品、渠道是"**维度**"（描述业务对象是谁），订单、退款、工单是"**事实**"（记录业务发生了什么），知识文档表给后面的 **RAG 检索**预留位置。建表不手写 SQL，而是通过 **Alembic 迁移管理**，改表历史全程可追溯。然后写了一个"**每次运行结果都一模一样**"的假数据脚本，还故意在数据里埋了 **4 个标准答案**（比如 2026 年 6 月退款率最高的商品是谁）——以后评测 Agent 时，就能自动判断它查得对不对。
 
 ### 新概念
 
@@ -75,11 +75,11 @@ python -m pytest
 
 ### 面试怎么讲
 
-DataPilot 的数据底座不是随手建几张 demo 表，而是按真实分析系统拆成维表和事实表：用户、商品、渠道是维度，订单、退款、工单是运营事实，知识文档给后续 RAG 链路预留入口。迁移全部通过 Alembic 管理，seed 数据里还专门设计了固定业务事实，后续 NL2SQL 和评测可以验证"查出来的答案是否稳定正确"。敏感字段从 M1 就标出来，说明安全策略不是最后补文档，而是会进入 schema、RBAC 和 SQL Guard 的主链路。
+DataPilot 的数据底座不是随手建几张 demo 表，而是按真实分析系统拆成**维表和事实表**：用户、商品、渠道是维度，订单、退款、工单是运营事实，知识文档给后续 **RAG 链路**预留入口。迁移全部通过 **Alembic 管理**，seed 数据里还专门设计了**固定业务事实**，后续 **NL2SQL 和评测**可以验证"查出来的答案是否稳定正确"。**敏感字段从 M1 就标出来**，说明安全策略不是最后补文档，而是会进入 schema、RBAC 和 SQL Guard 的主链路。
 
 ### 验证与下一步
 
-- 验证：9 个测试全过，MySQL 在线迁移和 seed 数据都成功，4 个"标准答案"可查
+- 验证：**9 个测试全过**，MySQL 在线迁移和 seed 数据都成功，**4 个标准答案**可查
 - 下一步：M2 做 API 层（数据库会话、分页查询接口、请求日志、统一异常）
 
 可复制验证命令：
@@ -98,9 +98,9 @@ python -m alembic check
 
 ### 这次做了什么
 
-M1 已经把 7 张表和确定性数据准备好了，但后续 Agent、评测脚本、Streamlit 页面不能直接到处打开数据库连接。M2 做的是后端工程基础：统一数据库会话、统一分页列表接口、统一请求日志和统一错误响应。
+M1 已经把 **7 张表和确定性数据**准备好了，但后续 Agent、评测脚本、Streamlit 页面不能直接到处打开数据库连接。M2 做的是后端工程基础：**统一数据库会话、统一分页列表接口、统一请求日志和统一错误响应**。
 
-这次新增了 `app/db/session.py`，让每个请求通过 `get_db()` 拿一个 SQLAlchemy Session，用完自动关闭；`pool_pre_ping=True` 负责在 MySQL 连接交给业务代码前先探活。然后新增 4 个列表接口：商品、订单、退款、工单，每个接口都支持分页和本模块计划里的基础筛选。接口返回统一 `PageResponse`，错误返回统一 `ErrorResponse`，并且每次请求都有 `trace_id`，日志里能看到 method、path、status、latency_ms 和 trace_id。
+这次新增了 `app/db/session.py`，让每个请求通过 `get_db()` 拿一个 **SQLAlchemy Session**，用完自动关闭；`pool_pre_ping=True` 负责在 MySQL 连接交给业务代码前先探活。然后新增 **4 个列表接口**：商品、订单、退款、工单，每个接口都支持分页和本模块计划里的基础筛选。接口返回统一 `PageResponse`，错误返回统一 `ErrorResponse`，并且每次请求都有 `trace_id`，日志里能看到 method、path、status、latency_ms 和 trace_id。
 
 ### 新概念
 
@@ -125,11 +125,11 @@ M1 已经把 7 张表和确定性数据准备好了，但后续 Agent、评测�
 
 ### 面试怎么讲
 
-M2 体现的是后端工程能力，不只是“写几个 GET 接口”。我把数据库访问统一收口到请求级 Session，MySQL engine 开启连接探活；列表接口统一分页、筛选和响应结构；异常统一成 `code / message / trace_id / details`，请求日志统一记录关键字段。这样后续做 Agent 查询、评测和演示页时，不需要重新设计基础工程能力，只要复用这套 API 和响应契约。
+M2 体现的是**后端工程能力**，不只是“写几个 GET 接口”。我把数据库访问统一收口到**请求级 Session**，MySQL engine 开启**连接探活**；列表接口统一**分页、筛选和响应结构**；异常统一成 `code / message / trace_id / details`，请求日志统一记录关键字段。这样后续做 Agent 查询、评测和演示页时，不需要重新设计基础工程能力，只要复用这套 **API 和响应契约**。
 
 ### 验证与下一步
 
-- 验证：15 个测试全过；4 类接口各 2 个筛选组合 smoke 成功；非法分页返回统一错误；Alembic check/current 和 seed 都通过
+- 验证：**15 个测试全过**；**4 类接口各 2 个筛选组合** smoke 成功；非法分页返回统一错误；Alembic check/current 和 seed 都通过
 - warning：Starlette TestClient 提示 httpx 依赖迁移，不影响 M2 行为
 - 下一步：M3 做 v0 模板 SQL 闭环，新增 `/api/query`、SQL Guard v0 和简化版 AgentResponse
 
@@ -149,17 +149,17 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 
 ### 这次做了什么
 
-M1 准备了数据，M2 准备了 API 出入口。M3 做的是 DataPilot v0 的核心体验：用户问一句业务问题，系统匹配一条预设 SQL，先过安全检查，再执行查询，最后返回统一的 AgentResponse。
+M1 准备了数据，M2 准备了 API 出入口。M3 做的是 DataPilot v0 的核心体验：用户问一句业务问题，系统**匹配一条预设 SQL**，先过**安全检查**，再执行查询，最后返回统一的 **AgentResponse**。
 
-这次没有提前接 LLM。原因很简单：如果一开始就让模型自由生成 SQL，问题会同时变成“生成准不准、SQL 安不安全、接口结构稳不稳、数据能不能查”四件事混在一起。M3 先把可控链路跑通：5 个高价值问题覆盖退款率、渠道订单量、GMV、退款原因和工单优先级；SQL Guard 用 sqlglot 只允许单条 `SELECT`；`/api/query` 返回 `route / answer / sql / columns / rows / safety_status / blocked_reason / trace_id`。这样 M4 再接 LLM 时，只需要替换“SQL 从哪里来”，不用重做执行、安全和响应结构。
+这次**没有提前接 LLM**。原因很简单：如果一开始就让模型自由生成 SQL，问题会同时变成“**生成准不准、SQL 安不安全、接口结构稳不稳、数据能不能查**”四件事混在一起。M3 先把**可控链路**跑通：5 个高价值问题覆盖退款率、渠道订单量、GMV、退款原因和工单优先级；**SQL Guard** 用 sqlglot 只允许单条 `SELECT`；`/api/query` 返回 `route / answer / sql / columns / rows / safety_status / blocked_reason / trace_id`。这样 M4 再接 LLM 时，只需要替换“SQL 从哪里来”，不用重做**执行、安全和响应结构**。
 
-同时，M3 还写了 `eval/cases_plan.md`，把阶段二 32 条评测问题先固定下来，包括简单 SQL、聚合、多表、RAG、混合和安全攻击，并同步定义后续 YAML 字段草案。它会成为 M6 smoke 用例的题库来源。
+同时，M3 还写了 `eval/cases_plan.md`，把阶段二 **32 条评测问题**先固定下来，包括简单 SQL、聚合、多表、RAG、混合和安全攻击，并同步定义后续 **YAML 字段草案**。它会成为 M6 smoke 用例的题库来源。
 
 ### 新概念
 
 - **模板 SQL**：把常见自然语言问题映射到预先写好的 SQL。它不像 LLM 那样灵活，但稳定、可测、可解释，非常适合 v0 先打通链路。
 - **SQL Guard**：SQL 执行前的安全门。M3 使用 sqlglot 把 SQL 解析成 AST，再判断它是不是单条 `SELECT`。这比只靠字符串里有没有 `drop` 更可靠。
-- **AgentResponse**：Agent 对外输出的结构化合同。前端、评测脚本、演示页都按这份合同读取答案、SQL、表格、安全状态和 trace_id。
+- **AgentResponse**：Agent **对外输出**的结构化合同。前端、评测脚本、演示页都按这份合同读取答案、SQL、表格、安全状态和 trace_id。
 - **few-shot 示例**：M3 的模板 SQL 同步沉淀到 `domain_pack/sql_examples/basic.yaml`，后续 M4 给 LLM 看这些“标准问法 + 标准 SQL”，帮助它按项目口径生成 SQL。
 
 ### 关键文件
@@ -183,13 +183,13 @@ M1 准备了数据，M2 准备了 API 出入口。M3 做的是 DataPilot v0 的�
 
 ### 面试怎么讲
 
-M3 可以讲成“先做一个可控的 Text-to-SQL v0”。我没有一上来接 LLM，而是用模板 SQL 建立稳定基线：自然语言问题命中模板，SQL 进入 Guard，只允许只读查询，然后通过统一数据库 Session 执行，最后返回结构化 AgentResponse。这样做的好处是可测试、可验收，也为后续 LLM 接入留好工程接口。
+M3 可以讲成“先做一个**可控的 Text-to-SQL v0**”。我没有一上来接 LLM，而是用**模板 SQL 建立稳定基线**：自然语言问题命中模板，SQL 进入 Guard，只允许只读查询，然后通过统一数据库 Session 执行，最后返回结构化 AgentResponse。这样做的好处是**可测试、可验收**，也为后续 LLM 接入留好工程接口。
 
-安全上，我没有只靠 prompt 或字符串过滤，而是用 sqlglot 解析 SQL AST，拦截 DDL / DML。虽然 M3 还没做敏感字段和角色权限，但 SQL Guard 的入口已经固定，M4 可以在同一个层继续加 RBAC 和字段策略。
+安全上，我没有只靠 **prompt** 或**字符串过滤**，而是用 **sqlglot 解析 SQL AST**，拦截 **DDL / DML**。虽然 M3 还没做敏感字段和角色权限，但 **SQL Guard 的入口已经固定**，M4 可以在同一个层继续加 RBAC 和字段策略。
 
 ### 验证与下一步
 
-- 验证：19 个测试全过；v0 smoke 中 5 条模板查询返回 `safety=passed`，危险 `DROP TABLE orders` 返回 `safety=blocked`；Alembic check/current 正常。
+- 验证：**19 个测试全过**；v0 smoke 中 **5 条模板查询**返回 `safety=passed`，危险 `DROP TABLE orders` 返回 `safety=blocked`；Alembic check/current 正常。
 - warning：Starlette TestClient 提示 httpx 依赖迁移，不影响 M3 行为。
 - 下一步：M4 做 schema loader、prompt、LLM SQL 生成、敏感字段策略和 RBAC。
 

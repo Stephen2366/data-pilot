@@ -89,6 +89,12 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-19 dev-log 前序章节与 finish-module 写作规则优化：为 `docs/dev-log.md` M0-M2 补充扫读重点加粗；在 `.claude/skills/finish-module/SKILL.md` 阶段 4 增加 dev-log 加粗写作要求，要求突出关键词、核心决策、类比锚点、量化成果和面试 talking point。验证：人工回读 M0-M3 与 skill 阶段 4
+
+- 2026-07-19 M3 dev-log 可读性微调：按用户反馈为 `docs/dev-log.md` 的 M3 复盘补充重点加粗，突出模板 SQL、SQL Guard、AgentResponse、评测清单和验证结论；仅文档样式调整，未改代码。验证：人工回读 M3 小节
+
+- 2026-07-19 dev-log.md 加粗优化：为"面试怎么讲"段落提取关键 talking point 加粗、Java→Python 类比标记加粗、关键数字锚点（X 个测试 / X 张表 / X 条 SQL 等）加粗、设计要点结论句补漏。原则：加粗服务于扫读，让新手不用逐字读就能定位到"这个概念对应 Java 的什么、面试能讲哪几个点、量化成果是什么"。
+
 - 2026-07-19 全项目注释风格合规整改：按 CLAUDE.md「代码风格」扫描全部 36 个 .py 文件，修复合规项 47 处（A 英文→中文 docstring 14 / B 缺文件头 11 / C 缺函数 docstring 15 / D 注释简略 3 / E 空 __init__.py 4）。发现 agent 修改的两个常见问题：① docstring 可能被错放在 import 之后（Python 模块 docstring 应为首个语句，PEP 257）；② Unicode 弯引号 "" 会替代 """ 导致语法非法，prompt 应显式禁止。验证：20/20 文件 ast.parse 通过；pytest 5/5 passed
     - 2026-07-19 验收状态入「当前状态」：新增「上一模块验收」字段（现值 M2 已验收），防止未跑 accept-module 就开工下一模块。维护闭环：finish-module 收工置「Mx 未验收（待 accept-module）」→ accept-module 通过后改「已验收」（有 ❌ 记「验收未通过」）；CLAUDE.md「开发记录要求」新增任务开始核对规则（下一模块开发前上一模块未验收 → 先提醒用户）；accept-module 检查 3 把该字段纳入核对项。验证：rg「上一模块验收」命中 CLAUDE.md / AI_CONTEXT 当前状态 / 两个 skill 共 6 处预期位置
 
