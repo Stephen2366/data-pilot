@@ -12,7 +12,6 @@ from typing import Any
 
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_DESC_DIR = PROJECT_ROOT / "domain_pack" / "schema_desc"
 METRICS_PATH = PROJECT_ROOT / "domain_pack" / "metrics.yaml"
@@ -185,24 +184,17 @@ def load_domain_schema(
     metrics_path: Path = METRICS_PATH,
     sql_examples_path: Path = SQL_EXAMPLES_PATH,
 ) -> DomainSchema:
-    """读取 DataPilot 领域配置并返回一次完整 Schema 快照。"""
+    """★ 读取 DataPilot 领域配置并返回一次完整 Schema 快照。"""
 
     # 步骤 1：读取所有表结构描述 ----------------------------------------------------------
-    tables = {
-        path.stem: _load_table(path)
-        for path in sorted(schema_desc_dir.glob("*.md"))
-        if path.name != ".gitkeep"
-    }
+    tables = {path.stem: _load_table(path) for path in sorted(schema_desc_dir.glob("*.md")) if path.name != ".gitkeep"}
 
-    # 步骤 2：把敏感字段预计算成 `table.column` 集合，policy 层可以 O(1) 判断。
+    # 步骤 2：把敏感字段预计算成 `table.column` 集合，policy 层可以 O(1) 判断。---------------
     sensitive_fields = {
-        f"{table.name}.{field_desc.name}"
-        for table in tables.values()
-        for field_desc in table.fields.values()
-        if field_desc.sensitivity == "sensitive"
+        f"{table.name}.{field_desc.name}" for table in tables.values() for field_desc in table.fields.values() if field_desc.sensitivity == "sensitive"
     }
 
-    # 步骤 3：汇总 schema、KPI、few-shot，形成 prompt / policy 共享的领域快照。
+    # 步骤 3：汇总 schema、KPI、few-shot，形成 prompt / policy 共享的领域快照。--------------
     return DomainSchema(
         tables=tables,
         metrics=_load_metrics(metrics_path),

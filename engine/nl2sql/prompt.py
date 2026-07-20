@@ -16,9 +16,7 @@ def _format_tables(domain_schema: DomainSchema) -> str:
         lines.append(f"- 表 `{table.name}`：{table.business_meaning}")
         for field in table.fields.values():
             sensitive_note = "，敏感字段" if field.sensitivity == "sensitive" else ""
-            lines.append(
-                f"  - {table.name}.{field.name}：{field.meaning}；角色={field.semantic_role}{sensitive_note}"
-            )
+            lines.append(f"  - {table.name}.{field.name}：{field.meaning}；角色={field.semantic_role}{sensitive_note}")
     return "\n".join(lines)
 
 

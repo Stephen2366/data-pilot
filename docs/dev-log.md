@@ -404,74 +404,65 @@ M4 可以讲成“把 **Text-to-SQL** 从规则模板升级到 **LLM 生成**，
 - warning：Starlette TestClient 提示 httpx 依赖迁移，不影响 M4 行为；`git diff --check` 只有 Windows CRLF 提示。
 - 下一步：M5 扩展 AgentResponse、封装 SQL Tool、记录 Trace / cost / latency，并生成基础图表 spec。
 
-自动化验证命令和大致结果：
+可复制验证命令：
 
 ```powershell
 # 跑所有自动化测试。预期：24 passed，可能有 1 个 Starlette/httpx warning。
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+python -m pytest -p no:cacheprovider
 
 # 跑 M4 smoke。预期：6 条 simple SQL 里至少 5 条 passed=True；
 # 当前已知 sql_005 可能因为模型没有选择 status 列而显示 missing_columns=['status']。
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m4_nl2sql.py
+python scripts\smoke_m4_nl2sql.py
 
 # 检查 ORM 模型和 MySQL 当前迁移是否一致。预期：No new upgrade operations detected.
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+python -m alembic check
 
 # 查看当前数据库迁移版本。预期：20260717_0001 (head)。
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+python -m alembic current
 ```
 
-本地启动体验：
-
-这部分更像做 SpringBoot 项目时的“把后端服务跑起来，然后用接口工具点一点”。自动化测试证明代码没坏；本地启动体验则帮你形成工程实感：这个项目真的有一个 API 服务，能接收问题、查数据库、返回 JSON。
+**本地启动体验：**
 
 ```powershell
 # 1. 确认 .env 里 DATABASE_URL 指向本地 MySQL datapilot_dev，并配置 DeepSeek key。
-#    如果只想体验 M3 模板问题，DeepSeek key 不是必须；如果想体验 M4 LLM 生成问题，需要 key。
+# 如果只想体验 M3 模板问题，DeepSeek key 不是必须；如果想体验 M4 LLM 生成问题，需要 key。
 
 # 2. 准备数据库表结构。预期：数据库迁移到 head。
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic upgrade head
-
 # 3. 写入确定性演示数据。预期：输出 users/products/orders/refunds/tickets 等行数和固定业务事实。
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
-
 # 4. 启动 FastAPI 后端。预期：看到 Uvicorn running on http://127.0.0.1:8000。
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:app --reload
+python -m alembic upgrade head
+python -m scripts.seed_data --reset
+python -m uvicorn app.main:app --reload
+
+# 服务启动后，用浏览器打开 Swagger UI `http://127.0.0.1:8000/docs`：
+# `POST /api/query` → `Try it out` → 在 `Request body` 文本框里输入 JSON → `Execute` → 查看 `Response body` 里的字段。
 ```
 
-服务启动后，另开一个 PowerShell 窗口试这些输入：
+M4 LLM 生成问题 —— 大致结果：`safety_status` 应该是 `passed`，`sql` 是一条查询 `products` 的 `SELECT`，`columns / rows` 会返回 active 商品列表。这个问题需要 DeepSeek key 可用，因为它不是 M3 的固定模板问题。
 
-```powershell
-# 健康检查。预期：{"status":"ok"}。
-Invoke-RestMethod http://127.0.0.1:8000/health
-
-# M3 模板问题。预期：safety_status=passed，rows 里能看到 Aurora Noise Cancelling Headphones。
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8000/api/query `
-  -ContentType 'application/json' `
-  -Body '{"question":"2026年6月退款率最高的商品是什么？","user_role":"ops"}'
-
-# M4 LLM 生成问题。预期：safety_status=passed，返回 active 商品列表；需要 DeepSeek key 可用。
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8000/api/query `
-  -ContentType 'application/json' `
-  -Body '{"question":"查询 active 商品列表前 10 条","user_role":"ops"}'
-
-# 敏感字段拦截。预期：safety_status=blocked，blocked_reason 提到 users.email 敏感字段。
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8000/api/query `
-  -ContentType 'application/json' `
-  -Body '{"question":"查询用户邮箱","user_role":"ops"}'
-
-# 越权角色拦截。预期：safety_status=blocked，blocked_reason 提到 customer_service 不允许访问 orders。
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8000/api/query `
-  -ContentType 'application/json' `
-  -Body '{"question":"查询订单","user_role":"customer_service"}'
+```json
+{
+  "question": "查询 active 商品列表前 10 条",
+  "user_role": "ops"
+}
 ```
 
-如果想用浏览器看接口文档，可以打开 `http://127.0.0.1:8000/docs`，这相当于 FastAPI 自动生成的 Swagger 页面。M4 还没有 Streamlit 可视化界面，真正“页面化操作”会在 M6 接上。
+M3 模板问题 —— 大致结果：`safety_status=passed`，`answer` 会提到 `Aurora Noise Cancelling Headphones`，`rows` 第一行包含 `refund_count=18`、`order_count=40`、`refund_rate=0.45`。这条会优先命中 M3 模板 SQL，所以不依赖 LLM 生成质量。
+
+```json
+{
+  "question": "2026年6月退款率最高的商品是什么？",
+  "user_role": "ops"
+}
+```
+
+安全拦截 —— 大致结果：`safety_status=blocked`，`blocked_reason` 会提到 `users.email` 这类敏感字段，说明 M4 的字段级安全策略生效。
+
+```json
+{
+  "question": "查询用户邮箱",
+  "user_role": "ops"
+}
+```
+
+
