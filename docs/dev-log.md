@@ -620,10 +620,10 @@ M6 做的是“收口”：前面 M3-M5 已经能把自然语言变成安全 SQL
 
 ### 新概念
 
-- **EvalOps-lite**：一个轻量评测闭环。完整 EvalOps 会有用例管理、批量运行、评分、报告、历史趋势；M6 只实现最小版：YAML case -> 调 API -> 评分 -> Markdown 报告。
-- **API seam 评测**：评测不绕过 `/api/query` 直接调内部函数，而是走真实 API 契约。类比 SpringBoot 项目里用 Controller 层集成测试，不只测 Service 私有逻辑。
-- **Smoke case**：少量高价值用例，用来快速确认主链路还活着。它不是全量回归，但适合作为每次开发后的第一道健康检查。
-- **阶段验收报告**：把“当前到底完成了什么、没完成什么、下一阶段接哪里”写成持久文档，避免 README、简历和复盘时凭记忆拼。
+- **EvalOps-lite**：一个**轻量评测闭环**。完整 EvalOps 会有用例管理、批量运行、评分、报告、历史趋势；M6 只实现最小版：**YAML case -> 调 API -> 评分 -> Markdown 报告**。
+- **API seam 评测**：评测不绕过 `/api/query` 直接调内部函数，而是走**真实 API 契约**。类比 SpringBoot 项目里用 Controller 层集成测试，不只测 Service 私有逻辑。
+- **Smoke case**：少量**高价值用例**，用来快速确认主链路还活着。它不是全量回归，但适合作为每次开发后的**第一道健康检查**。
+- **阶段验收报告**：把“**当前到底完成了什么、没完成什么、下一阶段接哪里**”写成持久文档，避免 README、简历和复盘时凭记忆拼。
 
 ### 关键文件
 
@@ -637,19 +637,19 @@ M6 做的是“收口”：前面 M3-M5 已经能把自然语言变成安全 SQL
 ### 代码阅读路线
 
 1. **用例入口**：`eval/cases/smoke.yaml`
-   先看 6 条 case 的字段：`id`、`task_type`、`question`、`expected_tables`、`expected_columns`、`security_expectation` 和 `check`。重点理解 M6 没有新造字段，而是落地 M3 已定的 YAML 草案。
+   先看 `cases` 下面的 6 条用例，每条都包含 `id`、`task_type`、`question`、`expected_tables`、`expected_columns`、`security_expectation` 和 `check`。这里的关键设计是 **评测字段复用**：M6 没有重新发明一套 case 格式，而是把 M3 在 `eval/cases_plan.md` 里定好的 YAML 草案落成文件。读的时候重点看 6 条 smoke 如何覆盖简单 SQL、聚合、多表 join 和安全拦截，不用纠结每条 SQL 最终由模板还是 LLM 生成。
 
 2. **评测执行**：`eval/run_eval.py`
-   主角是 `main()`、`load_cases()`、`seeded_api_client()`、`run_cases()` 和 `write_report()`。阅读重点是数据怎么从 YAML 变成 `EvalCase`，再通过 FastAPI `TestClient` 调 `/api/query`，最后变成 Markdown 报告。
+   可以按“一条 case 的旅程”来读：先看 `main()`，它负责把命令行参数、用例加载、API 测试客户端、执行结果和报告输出串起来。然后看 `load_cases()`，它把 YAML 用例变成 `EvalCase`；`seeded_api_client()` 准备 **内存 SQLite 测试库**，并用 FastAPI **dependency override** 临时替换 `get_db()`；`run_cases()` 用 `TestClient` 调真实 `/api/query`；最后 `write_report()` 把结果写成 `latest.md`。重点理解：M6 评测走的是 **API seam**，不是绕过接口直接调内部函数。
 
 3. **评分逻辑**：`eval/run_eval.py`
-   主角是 `_score_case()`。它只做 smoke 级检查：HTTP 200、`route=sql`、安全状态、表/列命中、关键文本包含。不要把它理解成完整 SQL 语义评测。
+   主角是 `_score_case()`，它接收一条 `EvalCase` 和一次 `/api/query` 返回的 AgentResponse，然后判断这条 case 是否通过。这里的关键设计是 **smoke 级评分**：它只检查 HTTP 200、`route=sql`、安全状态、表/列命中和关键文本包含，目的是快速发现主链路断没断。不要把它理解成完整 SQL 语义评测；比如 SQL 写法是否最优、结果是否覆盖所有业务边界，都不是 M6 这层负责。
 
 4. **演示页面**：`demo/streamlit_app.py`
-   主角是 `_post_query()` 和 `_render_response()`。前者调用真实 API，后者拆解 AgentResponse，分别渲染 answer、SQL、DataFrame、Vega-Lite 图表和 trace。
+   先看 `main()`，它负责页面布局：左侧放 API 地址、角色和预置问题，主区域放问题输入和执行结果。再看 `_post_query()`，它通过 HTTP 调真实 `/api/query`，说明 Streamlit 只是演示层，不复制后端 Agent 逻辑。最后看 `_render_response()`：它把 AgentResponse 拆成 **answer / SQL / table / chart / trace** 几块展示。这里的关键设计是 **前端消费统一响应契约**，也就是演示页只依赖 M5 固定下来的字段，而不是自己猜 SQL、图表或安全状态。
 
 5. **阶段记录**：`eval/reports/phase2-v1-acceptance.md`
-   这不是程序入口，而是阶段二交付边界：哪些能力已完成，哪些明确留到阶段三。
+   这个文件不是程序入口，而是阶段二的**交付边界说明**。先看 v0 / v1 capability checklist，确认哪些能力已经有证据支撑；再看 `Boundaries`，它明确写了 RAG、Hybrid、LangGraph、MCP 还没有在阶段二实现。这里的关键设计是 **报告不夸大能力**：它既能给 README、简历和复盘提供阶段成果，也防止后续 AI 或人把“计划中的 RAG”误写成“已经完成的 RAG”。
 
 一次 M6 评测的数据流向：
 
@@ -672,11 +672,11 @@ M6 做的是“收口”：前面 M3-M5 已经能把自然语言变成安全 SQL
 
 ### 设计要点
 
-- **评测走 API seam**：用户确认后选择 `/api/query`，不直接调内部 pipeline。这样慢一点，但更贴近真实用户路径。
-- **默认用内存 SQLite seed**：Eval runner 通过 FastAPI dependency override 接内存库，不写 MySQL 主库；这保持评测可重复，也不污染开发数据。
-- **case 选择避开模板误命中**：`join_005` 会提前命中“渠道 + 订单量”模板，缺 `gmv`；`join_001` 会提前命中“退款 + 原因”模板。M6 最终选 `join_002`，稳定走三表 join。
-- **演示页只做最小控制台**：不做历史记录、复杂筛选和多页面，避免 M6 范围膨胀。
-- **报告诚实写边界**：README 和验收记录只写已完成的 SQL Agent v1，不把 RAG、LangGraph、MCP 写成已实现。
+- **评测走 API seam**：用户确认后选择 `/api/query`，不直接调内部 pipeline。这样慢一点，但更贴近**真实用户路径**，也能一起检查 API 契约、Trace 和图表字段。
+- **默认用内存 SQLite seed**：Eval runner 通过 **FastAPI dependency override** 接内存库，不写 **MySQL 主库**；这保持评测可重复，也不污染开发数据。
+- **case 选择避开模板误命中**：`join_005` 会提前命中“渠道 + 订单量”模板，缺 `gmv`；`join_001` 会提前命中“退款 + 原因”模板。M6 最终选 `join_002`，稳定走**三表 join**。
+- **演示页只做最小控制台**：不做历史记录、复杂筛选和多页面，避免 **M6 范围膨胀**。
+- **报告诚实写边界**：README 和验收记录只写**已完成的 SQL Agent v1**，不把 RAG、LangGraph、MCP 写成已实现。
 
 ### 面试怎么讲
 
