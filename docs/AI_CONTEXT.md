@@ -6,7 +6,7 @@
 
 - 当前阶段计划文件：`docs/phase2-plan.md`
 - 当前模块：Phase 2 M5 AgentResponse 扩展、Trace、Tool 与图表，待开始（任务详情 → 计划文件 M5 小节）
-- 上一模块验收：M4 未验收（待 accept-module）
+- 上一模块验收：M4 已验收（2026-07-20，accept-M4-20260720.md）
 - 阻塞项：无
 - 更新时间：2026-07-20
 
@@ -112,6 +112,7 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-20 M4 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 24 passed），报告 `accept-M4-20260720.md`
 - 2026-07-20 M4 本地启动体验改为 Swagger 优先：按用户实际验证路径，将 `docs/dev-log.md` M4「本地启动体验」改为“启动 FastAPI → 打开 `/docs` Swagger UI → Try it out → 填 JSON → Execute → 看 Response body”，PowerShell 只作为复现和验收留证；同步微调 `finish-module` 模板，后续模块本地体验优先写 Swagger / 浏览器接口文档。验证：人工回读 M4 小节
 - 2026-07-20 M4 dev-log 验证体验补强：按用户反馈，`docs/dev-log.md` M4「验证与下一步」从单纯命令列表扩展为自动化验证预期、本地 FastAPI 启动体验、可复制 `/api/query` 输入和大致返回结果；同步更新 `finish-module` skill 模板，要求后续模块写“命令说明 + 预期结果 + 本地启动体验”。验证：人工回读 M4 小节和 skill 阶段 4
 - 2026-07-20 M3 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 19 passed），报告 `accept-M3-20260720.md`
