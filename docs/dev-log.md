@@ -604,3 +604,112 @@ python -m uvicorn app.main:app --reload
 }
 ```
 
+## ★ M6 EvalOps-lite 与演示收尾（2026-07-20）
+
+**简述**：把阶段二的 SQL Agent 闭环收成一个**能批量评测、能本地演示、能进入阶段三**的 v1 小系统。
+
+### 这次做了什么
+
+M6 做的是“收口”：前面 M3-M5 已经能把自然语言变成安全 SQL、结构化响应、图表和 trace；这次把这些能力接到两个使用场景上。
+
+第一个场景是 **EvalOps-lite**。`eval/cases/smoke.yaml` 从 32 条问题清单里抽出 6 条 smoke：2 条简单 SQL、2 条聚合、1 条多表 join、1 条安全攻击。`eval/run_eval.py` 会读取 YAML，通过 FastAPI `/api/query` 批量调用真实 API，再检查 route、表、列、安全期望和关键结果，最后写出 `eval/reports/latest.md`。这就像给 Agent 做一个很小但稳定的“单元验收台”：不是完整评测平台，但能快速回答“v1 主链路今天还通不通”。
+
+第二个场景是 **Streamlit 演示页**。`demo/streamlit_app.py` 不复制任何 SQL 或 Agent 逻辑，只通过 HTTP 调 `/api/query`，展示 `answer`、SQL、表格、图表、`safety_status`、`trace_id` 和 tool trace。这样本地演示和后端真实链路一致：Swagger 能测，Streamlit 能看，EvalOps-lite 能批量跑。
+
+最后补了阶段二收尾材料：README 写清 v1 能力、启动方式、评测命令和未实现边界；`eval/reports/phase2-v1-acceptance.md` 记录 v0/v1 能力清单、6 条 smoke 结果和阶段三 RAG 输入。
+
+### 新概念
+
+- **EvalOps-lite**：一个轻量评测闭环。完整 EvalOps 会有用例管理、批量运行、评分、报告、历史趋势；M6 只实现最小版：YAML case -> 调 API -> 评分 -> Markdown 报告。
+- **API seam 评测**：评测不绕过 `/api/query` 直接调内部函数，而是走真实 API 契约。类比 SpringBoot 项目里用 Controller 层集成测试，不只测 Service 私有逻辑。
+- **Smoke case**：少量高价值用例，用来快速确认主链路还活着。它不是全量回归，但适合作为每次开发后的第一道健康检查。
+- **阶段验收报告**：把“当前到底完成了什么、没完成什么、下一阶段接哪里”写成持久文档，避免 README、简历和复盘时凭记忆拼。
+
+### 关键文件
+
+- `eval/cases/smoke.yaml`：M6 的 6 条 smoke 用例，字段沿用 `eval/cases_plan.md` 草案。
+- `eval/run_eval.py`：EvalOps-lite 执行入口，负责加载 YAML、调用 `/api/query`、评分、写报告。
+- `eval/reports/latest.md`：最近一次 smoke 评测报告，记录 pass/fail/error_type/trace_id。
+- `eval/reports/phase2-v1-acceptance.md`：阶段二 v1 收尾记录。
+- `demo/streamlit_app.py`：Streamlit 最小演示控制台。
+- `README.md`：补充 M6 评测命令、演示页启动方式、v1 能力边界。
+
+### 代码阅读路线
+
+1. **用例入口**：`eval/cases/smoke.yaml`
+   先看 6 条 case 的字段：`id`、`task_type`、`question`、`expected_tables`、`expected_columns`、`security_expectation` 和 `check`。重点理解 M6 没有新造字段，而是落地 M3 已定的 YAML 草案。
+
+2. **评测执行**：`eval/run_eval.py`
+   主角是 `main()`、`load_cases()`、`seeded_api_client()`、`run_cases()` 和 `write_report()`。阅读重点是数据怎么从 YAML 变成 `EvalCase`，再通过 FastAPI `TestClient` 调 `/api/query`，最后变成 Markdown 报告。
+
+3. **评分逻辑**：`eval/run_eval.py`
+   主角是 `_score_case()`。它只做 smoke 级检查：HTTP 200、`route=sql`、安全状态、表/列命中、关键文本包含。不要把它理解成完整 SQL 语义评测。
+
+4. **演示页面**：`demo/streamlit_app.py`
+   主角是 `_post_query()` 和 `_render_response()`。前者调用真实 API，后者拆解 AgentResponse，分别渲染 answer、SQL、DataFrame、Vega-Lite 图表和 trace。
+
+5. **阶段记录**：`eval/reports/phase2-v1-acceptance.md`
+   这不是程序入口，而是阶段二交付边界：哪些能力已完成，哪些明确留到阶段三。
+
+一次 M6 评测的数据流向：
+
+`smoke.yaml`
+→ `EvalCase`
+→ `TestClient POST /api/query`
+→ `AgentResponse`
+→ `_score_case()`
+→ `EvalResult`
+→ `eval/reports/latest.md`
+
+一次 Streamlit 演示的数据流向：
+
+`页面输入问题`
+→ `HTTP POST /api/query`
+→ `AgentResponse`
+→ `answer / SQL / table / chart / trace` 展示
+
+**模块闭环**：M3-M6 现在构成阶段二 v1 闭环：M3 有模板 SQL 基线，M4 有 LLM NL2SQL 与安全策略，M5 有结构化输出和图表 trace，M6 有 smoke 评测和演示入口。阶段二可以作为一个可运行、可讲述、可继续扩展的简历项目节点。
+
+### 设计要点
+
+- **评测走 API seam**：用户确认后选择 `/api/query`，不直接调内部 pipeline。这样慢一点，但更贴近真实用户路径。
+- **默认用内存 SQLite seed**：Eval runner 通过 FastAPI dependency override 接内存库，不写 MySQL 主库；这保持评测可重复，也不污染开发数据。
+- **case 选择避开模板误命中**：`join_005` 会提前命中“渠道 + 订单量”模板，缺 `gmv`；`join_001` 会提前命中“退款 + 原因”模板。M6 最终选 `join_002`，稳定走三表 join。
+- **演示页只做最小控制台**：不做历史记录、复杂筛选和多页面，避免 M6 范围膨胀。
+- **报告诚实写边界**：README 和验收记录只写已完成的 SQL Agent v1，不把 RAG、LangGraph、MCP 写成已实现。
+
+### 面试怎么讲
+
+M6 可以讲成“我给 Agent 项目补了一个轻量 EvalOps 和演示闭环”。我不是只做了一个 `/api/query` 接口就结束，而是把问题整理成 **YAML case**，通过真实 API 批量调用，记录 **pass/fail/error_type/trace_id**，并生成 Markdown 报告。同时用 Streamlit 做了一个最小演示台，让面试官能看到 answer、SQL、表格、图表和 trace。这个模块体现的是工程收尾能力：能把一个 AI 能力从“能跑”推进到“能测、能演示、能复盘、能继续迭代”喵
+
+### 验证与下一步
+
+- 验证：`py_compile` 通过；全量 pytest **27 passed, 1 warning**；`python -m eval.run_eval` **6/6 passed**；Streamlit 页面 HTTP 200，真实 API 查询返回 answer / SQL / rows / chart_spec / trace_id。
+- warning：默认 `.agent_work/temp/pytest-tmp` 曾被 Windows 旧临时目录锁住，改用新的 `--basetemp=.agent_work/temp/pytest-m6-tmp-final` 后测试通过；Starlette TestClient 仍有 httpx 迁移 warning，不影响 M6。
+- 下一步：用户人工检查后可运行 `accept-module` 做 M6 最终验收；通过后进入阶段三 RAG / Hybrid。
+
+可复制验证命令：
+
+```powershell
+# 编译 M6 新增 Python 文件。预期：无输出即通过。
+python -m py_compile eval\run_eval.py demo\streamlit_app.py
+
+# 跑全量测试。若默认 pytest-tmp 被 Windows 锁住，可使用新的 basetemp；预期：27 passed。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m6-tmp-final
+
+# 跑 M6 EvalOps-lite。预期：passed=6/6，报告写入 eval/reports/latest.md。
+python -m eval.run_eval
+```
+
+**本地启动体验：**
+
+```powershell
+# 1. 启动 FastAPI。预期：Uvicorn running on http://127.0.0.1:8000。
+python -m uvicorn app.main:app --reload
+
+# 2. 启动 Streamlit。预期：Local URL: http://localhost:8501。
+python -m streamlit run demo\streamlit_app.py
+```
+
+打开 `http://localhost:8501` 后，可以点左侧预置问题，例如“各渠道订单量是多少？”。大致结果：主区域展示自然语言答案、SQL、表格、柱状图和 trace；如果点 `DROP TABLE orders`，会看到 `safety_status=blocked` 和 `sql_guard_blocked`。
+

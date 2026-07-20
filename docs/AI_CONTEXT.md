@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase2-plan.md`
-- 当前模块：Phase 2 M6 EvalOps-lite 与演示收尾，待开始（任务详情 → 计划文件 M6 小节）
-- 上一模块验收：M5 已验收（2026-07-20，报告 accept-M5-20260720.md）
+- 当前模块：Phase 2 M6 EvalOps-lite 与演示收尾，已收工（待 accept-module）
+- 上一模块验收：M6 未验收（待 accept-module）
 - 阻塞项：无
 - 更新时间：2026-07-20
 
@@ -18,18 +18,39 @@
 - NL2SQL：M3 模板 SQL 优先；M4 起模板未命中时走 DeepSeek，Schema / KPI / few-shot 从 `domain_pack/` 加载
 - SQL 安全：sqlglot AST 只读检查 + 表级 RBAC + `users.email/users.phone` 敏感字段策略；安全能力不只靠 prompt
 - Agent 编排：Phase 2 先用普通 Python pipeline，不上复杂 LangGraph；字段按未来 graph state 预留；后续进入多步骤 Agent / RAG 编排时，可在不改响应契约的前提下迁移到 LangGraph。
-- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`，字段结构供 M6 EvalOps-lite 复用；JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalOps 平台
+- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M6 EvalOps-lite 已复用 AgentResponse / trace 字段跑 6 条 SQL smoke；JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalOps 平台
 - 图表：后端输出 Vega-Lite 兼容 `chart_spec`，当前仅覆盖基础 bar / line / horizontal_bar 和单指标柱图
-- 演示：阶段二规划 Streamlit；README 完整能力说明优先在阶段结束时统一整理，模块学习复盘优先写 `docs/dev-log.md`
+- 演示：M6 已提供 `demo/streamlit_app.py` 最小演示控制台，通过 HTTP 调用 `/api/query` 展示 answer / SQL / table / chart / trace
 
 ## 已知的坑（活跃列表，过期即删）
 
 - `app.db.base` 目前同时定义 `Base` 又导入所有模型来注册 Alembic metadata；如果业务代码先从 `app.models` 聚合包导入模型，可能触发循环导入。当前规避方式：API / 工具层优先沿用 `app.db.base` 暴露的模型导入路径；后续若重构，可拆 `app/db/base_class.py`（只放 Base）和 `app/db/base.py`（只汇总 metadata）
+- Windows 下 `.agent_work/temp/pytest-tmp` 偶发被旧 pytest 临时目录锁住，表现为 `PermissionError` 删除 basetemp 失败；遇到时不要改业务代码，改用新的 `--basetemp=.agent_work/temp/<name>` 复跑即可。本次 M6 已用 `pytest-m6-tmp-final` 验证通过
 - DB comment 在 PowerShell 离线 SQL 输出中乱码；在线迁移和建表正常，无害。如需导出 SQL文件，再统一处理输出编码或将 DB comment 改为 ASCII（M1）
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 - Milvus 本地暂不可用（兼容性问题），阶段三 RAG 主路径按 ChromaDB 规划；阶段三启动时重新评估 Milvus 兼容性
 
 ## 模块技术档案（新的在上）
+
+### M6 EvalOps-lite 与演示收尾（2026-07-20）
+
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`eval/cases/smoke.yaml`、`eval/run_eval.py`、`eval/reports/latest.md`、`eval/reports/phase2-v1-acceptance.md`、`demo/streamlit_app.py`、`README.md`、`.agent_work/temp/m6-notes.md`、`.agent_work/temp/m6-eval-traces.jsonl`
+- 关键决策：
+  - 用户确认 Eval 执行方式选择 FastAPI `/api/query`：可选方案是直接调用本地 pipeline，风险是绕过 API 契约；最终选择 API seam，默认用 `TestClient` + 内存 SQLite seed 调真实路由，避免写 MySQL 主库，同时验证 AgentResponse、trace、SQL Tool 和 chart_spec
+  - 用户确认 Streamlit 只做最小演示闭环：可选方案是增加复杂筛选和历史记录，风险是 M6 扩大成 UI 大模块；最终只展示 answer / SQL / table / chart / safety_status / trace_id / tool trace
+  - 用户确认阶段二验收报告写 v0/v1 能力清单，但自动化评测只覆盖 6 条 smoke：可选方案是只写 smoke 或拉全量 32 条，最终选择“能力清单 + 6 条自动化 smoke”，不把 RAG/hybrid 尚未实现能力写成已完成
+  - smoke multi-table 用例从 `join_005` 调整到 `join_002`：`join_005` 会被现有“渠道 + 订单量”模板提前命中，缺 `gmv`；`join_001` 会被“退款 + 原因”模板命中。`join_002` 能稳定走 LLM 三表 join，命中 `channels/orders/refunds`
+- 参考资料：未查阅外部参考；本次按 phase2-plan M6、`eval/cases_plan.md` YAML 字段草案、M5 AgentResponse / Trace 契约实现；没有照搬 `QueryMind`、`hello-agents/ch12` 或 `databao-agent`
+- 验证快照：
+  - `py_compile`：`eval/run_eval.py`、`demo/streamlit_app.py` 编译通过
+  - pytest：首次使用默认 `.agent_work/temp/pytest-tmp` 时，旧 basetemp 删除失败触发 Windows `PermissionError`；改用 `--basetemp=.agent_work/temp/pytest-m6-tmp-final` 后 `27 passed, 1 warning`
+  - EvalOps-lite：`python -m eval.run_eval` 通过，`6/6 passed`；覆盖 `sql_001/sql_006/agg_001/agg_002/join_002/sec_001`，报告写入 `eval/reports/latest.md`，临时 trace 写入 `.agent_work/temp/m6-eval-traces.jsonl`
+  - Streamlit/API smoke：现有 FastAPI `http://127.0.0.1:8000/health` 返回 `ok`；`streamlit run demo/streamlit_app.py --server.port 8501` 页面 HTTP 200；通过真实 API 查询“各渠道订单量是多少？”返回 answer、SQL、rows、chart_spec、tool_calls、trace_id
+  - `git diff --check`：仅 README 的 LF→CRLF 提示，无 whitespace error
+- 遗留：
+  - M6 未调用 accept-module，等待用户人工检查后再跑最终验收门
+  - 阶段三接 RAG / Hybrid：以 `domain_pack/kb_docs/` 和 `knowledge_docs` 为语料入口，新增 RAG/hybrid YAML 后继续复用 AgentResponse 字段
+  - EvalOps-lite 当前只做 smoke 级检查；完整 32 条评测、RAG 指标和历史聚合留到后续 EvalOps 扩展
 
 ### M5 AgentResponse 扩展、Trace、Tool 与图表（2026-07-20）
 

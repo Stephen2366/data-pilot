@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统——自然语言 → SQL/RAG → 可视化 + 分析报告。
 
-🚧 阶段二进行中：M5 AgentResponse 扩展、Trace、Tool 与图表已完成，下一步推进 M6 EvalOps-lite 与演示收尾
+✅ 阶段二 v1 已收尾：M6 EvalOps-lite 与 Streamlit 演示页已完成，下一步进入阶段三 RAG / Hybrid。
 
 ## 快速开始
 
@@ -238,6 +238,47 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 脚本会验证渠道订单量、商品退款率、GMV 和危险 SQL 拦截 4 条用例；摘要写入
 `.agent_work/temp/m5-smoke.md`，测试用 trace 写入 `.agent_work/temp/m5-traces.jsonl`。
 
+### M6 EvalOps-lite 与演示页
+
+M6 提供最小 EvalOps-lite：从 `eval/cases/smoke.yaml` 读取 6 条 smoke case，通过 FastAPI
+`/api/query` 批量执行，并把每条的 `pass / fail / error_type / trace_id` 写入 Markdown 报告。
+当前 smoke 覆盖 2 条简单 SQL、2 条聚合、1 条多表 join、1 条安全拦截。
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval
+```
+
+最新报告写入 `eval/reports/latest.md`。当前验证快照：`6/6 passed`；评测 trace 写入
+`.agent_work/temp/m6-eval-traces.jsonl`，避免污染正式 `eval/traces/traces.jsonl`。
+
+启动 Streamlit 演示页：
+
+```powershell
+# 终端 1：启动 FastAPI
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:app --reload
+
+# 终端 2：启动演示页
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m streamlit run demo\streamlit_app.py
+```
+
+演示页通过 HTTP 调用本地 `/api/query`，展示 `answer`、`SQL`、表格、Vega-Lite 图表、
+`safety_status`、`trace_id` 和 tool trace。
+
+阶段二已完成能力：
+
+| 能力 | 状态 |
+|---|---|
+| MySQL + Alembic + 确定性 seed 数据 | 已完成 |
+| 4 类基础列表 API、分页、筛选、统一异常 | 已完成 |
+| 模板 SQL + SQL Guard v0 | 已完成 |
+| DeepSeek NL2SQL + schema / KPI / few-shot prompt | 已完成 |
+| 表级 RBAC + 敏感字段拦截 | 已完成 |
+| AgentResponse + SQL Tool + JSONL Trace + 基础图表 | 已完成 |
+| EvalOps-lite 6 条 SQL smoke + Markdown 报告 | 已完成 |
+| Streamlit 最小演示控制台 | 已完成 |
+| RAG / Hybrid 正式检索链路 | 阶段三 |
+| LangGraph 编排、MCP、Skill 化 | 后续计划 |
+
 ### 运行测试
 
 ```powershell
@@ -378,9 +419,11 @@ domain_pack/            # 电商/SaaS 业务配置
   sql_examples/         # few-shot 与模板 SQL
 eval/                   # EvalOps-lite
   cases/                # YAML 测试用例
+    smoke.yaml          # M6 6 条 SQL smoke case
   cases_plan.md         # 32 条评测问题清单和 YAML 字段草案
   reports/              # 评测报告
 demo/                   # Streamlit 演示页
+  streamlit_app.py      # M6 最小演示控制台
 scripts/                # 数据生成和维护脚本
 tests/                  # 自动化测试
 ```

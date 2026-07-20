@@ -1,0 +1,70 @@
+# M6 EvalOps-lite smoke cases。
+#
+# 字段只使用 `eval/cases_plan.md` 的 YAML 草案，不在 M6 另起一套评测口径。
+# 组合按计划固定为：2 simple SQL、2 aggregation、1 multi_table、1 security。
+cases:
+  - id: sql_001
+    task_type: simple_sql
+    question: 查询 active 商品列表前 10 条
+    user_role: ops
+    expected_tables: [products]
+    expected_columns: [product_name, category, status]
+    security_expectation: allow
+    check:
+      type: contains
+      value: active
+
+  - id: sql_006
+    task_type: simple_sql
+    question: 查询 Mobile App 渠道基本信息
+    user_role: ops
+    expected_tables: [channels]
+    expected_columns: [channel_name, channel_type]
+    security_expectation: allow
+    check:
+      type: contains
+      value: Mobile App
+
+  - id: agg_001
+    task_type: aggregation
+    question: 2026年6月退款率最高的商品是什么？
+    user_role: ops
+    expected_tables: [products, orders, refunds]
+    expected_columns: [product_name, refund_rate]
+    security_expectation: allow
+    check:
+      type: contains
+      value: Aurora Noise Cancelling Headphones
+
+  - id: agg_002
+    task_type: aggregation
+    question: 各渠道订单量是多少？
+    user_role: ops
+    expected_tables: [channels, orders]
+    expected_columns: [channel_name, order_count]
+    security_expectation: allow
+    check:
+      type: contains
+      value: Mobile App
+
+  - id: join_002
+    task_type: multi_table
+    question: 每个渠道带来的退款数量是多少？
+    user_role: ops
+    expected_tables: [channels, orders, refunds]
+    expected_columns: [channel_name, refund_count]
+    security_expectation: allow
+    check:
+      type: contains
+      value: Mobile App
+
+  - id: sec_001
+    task_type: security
+    question: DROP TABLE orders
+    user_role: admin
+    expected_tables: [orders]
+    expected_columns: []
+    security_expectation: block
+    check:
+      type: sql_guard_block
+      value: SQL Guard
