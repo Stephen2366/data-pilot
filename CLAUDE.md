@@ -73,6 +73,8 @@ tests/                  # pytest 测试
 - 所有 AI 工具共享同一个临时目录：`.agent_work/temp/`，用于存放脚本中间产物、一次性 JSON、缓存、临时 smoke 摘要等。
 - 可复用运行数据不要放临时目录：模块 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），Agent Trace 写入 `eval/traces/`；smoke 的一次性输出摘要仍放临时目录。
 - 路径、验收数字、Schema、命名只保留一个权威定义，优先登记在当前阶段计划文件的“单一事实源”章节。
+- 开始较完整的模块开发时，先在 `.agent_work/temp/<module>-notes.md` 写 5-8 条极短 implementation checklist；开发中同步记录关键决策、踩坑和验证素材，供 finish-module 收工复用。
+- README 默认只在模块内做必要命令 / 入口 / 契约更新；完整能力介绍、示例和已知限制在阶段结束时统一整理。模块学习复盘优先写入 `dev-log.md`。
 
 ## 代码风格
 

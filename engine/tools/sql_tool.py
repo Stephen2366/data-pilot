@@ -1,0 +1,146 @@
+"""M5 SQL Tool：统一封装 SQL Guard、数据库执行、耗时和工具调用记录。
+
+★ M4 的 `/api/query` 直接 `db.execute()`，能跑但不利于 EvalOps 复盘。M5 把 SQL 查询变成
+一个明确的 tool：输入 SQL / role / trace_id，输出表格、耗时、安全状态和 tool trace。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from decimal import Decimal
+from time import perf_counter
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.engine import RowMapping
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.schemas.agent import ToolCallTrace
+from engine.nl2sql.schema_loader import DomainSchema
+from engine.sql_guard.policy import extract_sql_access, validate_sql_policy
+
+
+@dataclass(frozen=True)
+class SQLToolResult:
+    """SQL Tool 的结构化返回值。
+
+    `safety_status=blocked` 或 `error_type is not None` 时，调用方只能返回结构化错误，不继续
+    生成图表或假装查询成功。
+    """
+
+    columns: list[str] = field(default_factory=list)
+    rows: list[dict[str, Any]] = field(default_factory=list)
+    tables_used: list[str] = field(default_factory=list)
+    safety_status: str = "passed"
+    blocked_reason: str | None = None
+    sql_time_ms: float = 0.0
+    tool_call: ToolCallTrace | None = None
+    error_type: str | None = None
+
+
+def _jsonable(value: Any) -> Any:
+    """把数据库返回值转换成 JSON / JSONL 都能直接写出的值。"""
+
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    return value
+
+
+def _row_to_dict(row: RowMapping) -> dict[str, Any]:
+    """把 SQLAlchemy RowMapping 转成普通 dict，避免响应层依赖 SQLAlchemy 类型。"""
+
+    return {key: _jsonable(value) for key, value in row.items()}
+
+
+def run_sql_tool(
+    *,
+    db: Session,
+    sql: str,
+    parameters: dict[str, Any],
+    user_role: str,
+    trace_id: str,
+    domain_schema: DomainSchema,
+) -> SQLToolResult:
+    """执行一次受 SQL Guard 保护的查询。
+
+    处理顺序固定为：先 policy 校验，再提取表名，再执行数据库。这样即便未来换成 Agent
+    编排，SQL Tool 的安全边界也不会被绕开。
+    """
+
+    started_at = perf_counter()
+
+    # 步骤 1：所有 SQL 来源统一先过 M4 policy ------------------------------------------------
+    guard_result = validate_sql_policy(sql, user_role=user_role, domain_schema=domain_schema)
+    if not guard_result.is_allowed:
+        latency_ms = _elapsed_ms(started_at)
+        tool_call = ToolCallTrace(
+            tool_name="sql_guard",
+            status="blocked",
+            latency_ms=latency_ms,
+            sql=sql,
+            error_type="sql_guard_blocked",
+            message=guard_result.blocked_reason,
+        )
+        return SQLToolResult(
+            safety_status="blocked",
+            blocked_reason=guard_result.blocked_reason or "SQL Guard 已拦截。",
+            sql_time_ms=0.0,
+            tool_call=tool_call,
+            error_type="sql_guard_blocked",
+        )
+
+    # 步骤 2：安全通过后提取 tables_used，供响应体和 trace 共用。----------------------------
+    access = extract_sql_access(sql, domain_schema)
+    tables_used = sorted(access.tables)
+
+    # 步骤 3：执行数据库查询并记录 SQL tool 耗时。-------------------------------------------
+    try:
+        result = db.execute(text(sql), parameters)
+    except SQLAlchemyError as exc:
+        latency_ms = _elapsed_ms(started_at)
+        tool_call = ToolCallTrace(
+            tool_name="sql_query",
+            status="error",
+            latency_ms=latency_ms,
+            sql=sql,
+            tables_used=tables_used,
+            error_type="sql_execution_error",
+            message=str(exc),
+        )
+        return SQLToolResult(
+            tables_used=tables_used,
+            safety_status="blocked",
+            blocked_reason=f"SQL 执行失败：{exc}",
+            sql_time_ms=latency_ms,
+            tool_call=tool_call,
+            error_type="sql_execution_error",
+        )
+
+    columns = list(result.keys())
+    rows = [_row_to_dict(row) for row in result.mappings().all()]
+    latency_ms = _elapsed_ms(started_at)
+    tool_call = ToolCallTrace(
+        tool_name="sql_query",
+        status="success",
+        latency_ms=latency_ms,
+        sql=sql,
+        tables_used=tables_used,
+    )
+    return SQLToolResult(
+        columns=columns,
+        rows=rows,
+        tables_used=tables_used,
+        safety_status="passed",
+        sql_time_ms=latency_ms,
+        tool_call=tool_call,
+    )
+
+
+def _elapsed_ms(started_at: float) -> float:
+    """返回保留 3 位小数的毫秒耗时，便于测试和日志稳定阅读。"""
+
+    return round((perf_counter() - started_at) * 1000, 3)

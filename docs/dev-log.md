@@ -465,4 +465,142 @@ M3 模板问题 —— 大致结果：`safety_status=passed`，`answer` 会提�
 }
 ```
 
+## ★ M5 AgentResponse 扩展、Trace、Tool 与图表（2026-07-20）
+
+**简述**：把 `/api/query` 从“能查出表格”升级成一个**可评测、可演示、可追踪**的结构化 Agent 输出。
+
+### 这次做了什么
+
+M4 已经解决了 SQL 从哪里来、怎么安全执行的问题：模板优先，未命中时走 LLM，所有 SQL 都过 SQL Guard。M5 做的是另一件同样重要的工程收口：让这个查询结果变成后续 **EvalOps-lite** 和演示页可以直接消费的标准响应。
+
+这次先扩展了 `AgentResponse`：除了原来的 `route / answer / sql / columns / rows / safety_status / trace_id`，新增了 **`tables_used`**、**`docs_used`**、**`chart_spec`**、**`cost`**、**`tool_calls`** 和 **`error_type`**。这些字段让前端不需要猜：用了哪些表、有没有文档证据、能不能画图、SQL 花了多久、哪个工具被调用、失败属于什么类型。
+
+然后把 SQL 执行从 API 层抽成 **SQL Tool**。原来 `/api/query` 自己做 Guard、自己 `db.execute()`、自己转 rows；现在它把 SQL、角色和 trace_id 交给 `run_sql_tool()`，SQL Tool 统一做安全检查、表名提取、查询执行、耗时统计和 tool call 记录。API 层回到编排职责：解析问题、调用工具、拼响应、写 trace。
+
+最后补了 **Chart Tool** 和 **JSONL Trace**。Chart Tool 根据表格形状生成基础 Vega-Lite spec：各渠道订单量是柱状图，退款率最高商品是横向柱状图，GMV 单指标是一根柱。Trace 先写 JSONL，每行保存一次完整查询过程；这是后续 M6 评测最需要的“证据链”。
+
+### 新概念
+
+- **AgentResponse 扩展契约**：可以理解成后端给前端和评测系统的“固定合同”。字段一旦稳定，Streamlit、EvalOps、甚至未来别的前端都能按同一份结构读取结果。
+- **ToolCallTrace**：记录一次工具调用的过程，例如 `sql_query` 成功、`sql_guard` 拦截、耗时多少、访问了哪些表。类比 SpringBoot 里的调用日志，但它是结构化数据，评测程序也能读。
+- **CostInfo**：记录一次查询的成本和耗时。M5 先真实记录 `latency_ms` 和 `sql_time_ms`，模型名和 token 先保留字段，后续接 LLM usage 时直接填进去。
+- **JSONL Trace**：一行一个 JSON 对象。好处是追加写入简单，M6 可以按行读取，不需要现在就设计数据库表和查询接口。
+- **Vega-Lite chart_spec**：一种前端可视化描述格式。后端不直接画图，而是告诉前端“用什么 mark、什么字段做 x/y 轴、数据是什么”，演示页可以直接渲染。
+
+### 关键文件
+
+- `app/schemas/agent.py`：M5 扩展版 AgentResponse、CostInfo、ToolCallTrace。
+- `engine/tools/sql_tool.py`：SQL Tool，统一执行 Guard、SQL 查询、耗时和工具调用记录。
+- `engine/tools/chart_tool.py`：Chart Tool，把聚合结果转成 Vega-Lite 兼容 spec。
+- `engine/trace/recorder.py`：JSONL Trace 写入器。
+- `domain_pack/chart_templates/basic.yaml`：bar / line / horizontal_bar 三类基础图表模板。
+- `app/api/query.py`：查询编排层，调用 SQL Tool、Chart Tool，并写 Trace。
+- `tests/test_m5_agent_response.py`：M5 响应契约、trace 和图表规则测试。
+- `scripts/smoke_m5_agent_response.py`：M5 smoke，输出人工验收摘要。
+
+### 代码阅读路线
+
+1. **响应合同**：`app/schemas/agent.py`
+   先看 `AgentResponse`、`CostInfo` 和 `ToolCallTrace`。重点理解 M5 不是改旧字段，而是新增评测和演示页需要的字段。
+
+2. **SQL Tool**：`engine/tools/sql_tool.py`
+   主角是 `run_sql_tool()`。它先调用 `validate_sql_policy()`，再用 `extract_sql_access()` 提取 `tables_used`，最后执行 SQL 并返回 `SQLToolResult`。
+
+3. **图表生成**：`engine/tools/chart_tool.py`
+   主角是 `build_chart_spec()`。读的时候重点看三类规则：类别 + 数值走 `bar`，日期 + 数值走 `line`，Top / 最高类问题走横向 `bar`。GMV 单指标用 `metric_name/value` 合成一根柱。
+
+4. **Trace 写入**：`engine/trace/recorder.py`
+   主角是 `TraceRecord` 和 `append_trace()`。它把一次 Agent 查询写成 JSONL 的一行，M6 后续按行读即可。
+
+5. **API 编排**：`app/api/query.py`
+   读 `query()`：模板 / LLM 解析 SQL 后，不再直接执行数据库，而是调用 `run_sql_tool()`；成功时再调用 `build_chart_spec()`，最后 `_record_trace()` 写 JSONL。
+
+一次成功查询的数据流向：
+
+`POST /api/query`
+→ `QueryRequest`
+→ `match_template()` / `generate_sql()`
+→ `run_sql_tool()`
+→ `validate_sql_policy()`
+→ `db.execute()`
+→ `build_chart_spec()`
+→ `AgentResponse`
+→ `TraceRecord JSONL`
+
+一次拦截查询的数据流向：
+
+`DROP TABLE orders`
+→ `validate_readonly_sql()`
+→ `ToolCallTrace(tool_name="sql_guard", status="blocked")`
+→ `AgentResponse(error_type="sql_guard_blocked")`
+→ `TraceRecord JSONL`
+
+### 模块闭环
+
+M3-M5 现在形成了一个可演示的 SQL Agent 闭环：M3 负责**模板 SQL 稳定基线**，M4 负责**LLM SQL 生成和安全策略**，M5 负责**结构化输出、工具调用记录、Trace 和图表**。换句话说，M5 让前面的能力从“后端能跑”变成“评测和页面能消费”。
+
+### 设计要点
+
+- **Trace 先 JSONL，不上数据库表**：这是用户确认后的方案。JSONL 足够支撑 M6 smoke 评测，也避免 M5 扩大到 migration / Trace 查询服务。
+- **SQL Tool 固定安全边界**：任何 SQL 进入数据库前都在 Tool 内过 policy，避免后续 Agent 编排绕过 Guard。
+- **AgentResponse 只增不改**：M3/M4 已有字段含义保持不变，保证旧测试和调用方继续可用。
+- **图表规则轻量但可消费**：只支持基础 bar / line / horizontal_bar；无法判断时返回 `chart_spec=null`，不阻塞答案。
+- **单指标 GMV 做合成柱图**：因为现有模板返回单行 `gmv`，Chart Tool 用 `metric_name/value` 生成一根柱，满足演示需要且不改 SQL 口径。
+
+### 面试怎么讲
+
+M5 可以讲成“我把 Text-to-SQL 的结果做成了**可观测的 Agent 输出协议**”。很多项目只返回 answer 和 SQL，但我额外记录了 **tool_calls、cost、tables_used、chart_spec、error_type 和 JSONL trace**。这样做的价值是：前端能直接展示图表，评测系统能按 trace_id 回放每次查询，安全拦截也能被归类统计。工程上，我把 SQL 执行从 API 层拆成 SQL Tool，保证安全检查、执行和耗时记录在同一个边界里，后续换成 LangGraph 或 EvalOps 时不用重写核心查询逻辑喵
+
+### 验证与下一步
+
+- 验证：**27 个测试全过**；M5 smoke **4/4 通过**，覆盖渠道订单量、商品退款率、GMV 和危险 SQL 拦截；Alembic check/current 正常。
+- warning：Starlette TestClient 提示 httpx 依赖迁移，不影响 M5 行为；`git diff --check` 只有 Windows CRLF 提示。
+- 下一步：M6 做 EvalOps-lite 和 Streamlit 演示页，直接消费 M5 的 AgentResponse、chart_spec 和 trace。
+
+可复制验证命令：
+
+```powershell
+# 跑所有自动化测试。预期：27 passed，可能有 1 个 Starlette/httpx warning。
+python -m pytest -p no:cacheprovider
+
+# 跑 M5 smoke。预期：4/4 passed；摘要写入 .agent_work/temp/m5-smoke.md。
+python scripts\smoke_m5_agent_response.py
+
+# 检查 ORM 模型和 MySQL 当前迁移是否一致。预期：No new upgrade operations detected.
+python -m alembic check
+
+# 查看当前数据库迁移版本。预期：20260717_0001 (head)。
+python -m alembic current
+```
+
+**本地启动体验：**
+
+```powershell
+# 1. 准备数据库和 seed。预期：MySQL datapilot_dev 里有 M1 的确定性数据。
+# 2. 启动 FastAPI 后端。预期：看到 Uvicorn running on http://127.0.0.1:8000。
+python -m alembic upgrade head
+python -m scripts.seed_data --reset
+python -m uvicorn app.main:app --reload
+
+# 服务启动后，用浏览器打开 Swagger UI `http://127.0.0.1:8000/docs`：
+# `POST /api/query` → `Try it out` → 输入下面 JSON → `Execute`。
+```
+
+图表查询 —— 大致结果：`safety_status=passed`，`tables_used=["channels","orders"]`，`chart_spec.mark="bar"`，`tool_calls[0].tool_name="sql_query"`，trace 会追加到 `eval/traces/traces.jsonl`。
+
+```json
+{
+  "question": "各渠道订单量是多少？",
+  "user_role": "ops"
+}
+```
+
+安全拦截 —— 大致结果：`safety_status=blocked`，`chart_spec=null`，`tool_calls[0].tool_name="sql_guard"`，`error_type="sql_guard_blocked"`。
+
+```json
+{
+  "question": "DROP TABLE orders",
+  "user_role": "admin"
+}
+```
 

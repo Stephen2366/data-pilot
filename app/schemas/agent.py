@@ -1,7 +1,8 @@
-"""Agent 查询接口 Schema：M3 简化版 AgentResponse 的单一实现。
+"""Agent 查询接口 Schema：M5 扩展版 AgentResponse 的单一实现。
 
 ★ 从 `/api/query` 第一次落地开始就用 Pydantic Schema 固定响应形状，后续 M5 只能增量
-扩展字段，不能推倒重来。
+扩展字段，不能推倒重来。这里保留 M3/M4 已有字段含义，再补 EvalOps 和演示页需要的
+成本、工具调用、文档命中和图表结构。
 """
 
 from typing import Any, Literal
@@ -12,17 +13,48 @@ from pydantic import BaseModel, Field
 class QueryRequest(BaseModel):
     """自然语言查询请求。
 
-    `user_role` 在 M3 只透传保留；M4 会把它接入 RBAC 权限矩阵。
+    `user_role` 会进入 SQL Guard 的 RBAC 权限矩阵，决定这个问题能访问哪些表和字段。
     """
 
     question: str = Field(min_length=1)
     user_role: str = Field(default="ops")
 
 
-class AgentResponse(BaseModel):
-    """M3 简化版 AgentResponse。
+class CostInfo(BaseModel):
+    """一次 Agent 查询的成本与耗时快照。
 
-    字段顺序按“路由 → 答案 → SQL → 表格 → 安全 → 追踪”组织，方便前端和 EvalOps 读取。
+    ★ M5 先不做真实计费，只固定字段：模型名和 token 默认为空 / 0；SQL 耗时与总耗时真实记录。
+    后续接入更完整 LLM usage 时，只需要填充这些字段，不改响应契约。
+    """
+
+    latency_ms: float = Field(default=0.0, ge=0.0)
+    sql_time_ms: float = Field(default=0.0, ge=0.0)
+    model: str | None = None
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+
+
+class ToolCallTrace(BaseModel):
+    """单次工具调用记录，供响应体和 JSONL trace 共用。
+
+    类比 LangGraph / Agent 工程里的 tool call 日志：它不是给用户看的答案，而是给评测、
+    调试和演示页解释“刚才调用了什么工具、花了多久、是否被拦截”。
+    """
+
+    tool_name: str
+    status: Literal["success", "blocked", "error", "skipped"]
+    latency_ms: float = Field(default=0.0, ge=0.0)
+    sql: str | None = None
+    tables_used: list[str] = Field(default_factory=list)
+    error_type: str | None = None
+    message: str | None = None
+
+
+class AgentResponse(BaseModel):
+    """M5 扩展版 AgentResponse。
+
+    字段顺序按“路由 → 答案 → 证据 → 图表 → 安全 → 成本 / 追踪”组织，方便前端和
+    EvalOps 读取。旧字段只增不改，避免 M3/M4 测试和后续调用方失效。
     """
 
     route: Literal["sql", "rag", "hybrid"]
@@ -30,7 +62,12 @@ class AgentResponse(BaseModel):
     sql: str | None = None
     columns: list[str] = Field(default_factory=list)
     rows: list[dict[str, Any]] = Field(default_factory=list)
+    tables_used: list[str] = Field(default_factory=list)
+    docs_used: list[dict[str, Any]] = Field(default_factory=list)
+    chart_spec: dict[str, Any] | None = None
     safety_status: Literal["passed", "blocked"]
     blocked_reason: str | None = None
+    cost: CostInfo = Field(default_factory=CostInfo)
+    tool_calls: list[ToolCallTrace] = Field(default_factory=list)
+    error_type: str | None = None
     trace_id: str
-

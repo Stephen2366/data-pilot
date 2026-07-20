@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统——自然语言 → SQL/RAG → 可视化 + 分析报告。
 
-🚧 阶段二进行中：M4 NL2SQL 最小链路与安全已完成，下一步推进 M5 AgentResponse 扩展、Trace、Tool 与图表
+🚧 阶段二进行中：M5 AgentResponse 扩展、Trace、Tool 与图表已完成，下一步推进 M6 EvalOps-lite 与演示收尾
 
 ## 快速开始
 
@@ -142,7 +142,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 
 输出摘要会写入 `.agent_work/temp/v0-smoke.md`。
 
-### v1 NL2SQL 最小链路与安全
+### v1 NL2SQL、Trace 与图表
 
 M4 在模板未命中时接入 DeepSeek NL2SQL：`schema_desc`、`metrics.yaml` 和 M3 模板 SQL
 few-shot 会被组装进 prompt，模型输出 SQL 后仍必须经过增强 SQL Guard：
@@ -151,6 +151,65 @@ few-shot 会被组装进 prompt，模型输出 SQL 后仍必须经过增强 SQL 
 - 拦截 `DROP / DELETE / UPDATE / INSERT / ALTER / TRUNCATE`。
 - 拦截 `users.email`、`users.phone` 等敏感字段，除 `admin` 外不可访问。
 - 按角色做表级 allowlist：`customer_service` 当前只允许 `tickets` 和 `knowledge_docs`。
+
+M5 把查询执行收口成 SQL Tool，并扩展 AgentResponse：每次 `/api/query` 都会返回
+`tables_used`、`docs_used`、`chart_spec`、`cost`、`tool_calls`、`error_type` 和 `trace_id`。
+成功查询会把完整 trace 追加到 `eval/traces/traces.jsonl`；该 JSONL 默认不提交，M6
+EvalOps-lite 后续按行读取即可。
+
+扩展版 AgentResponse 示例：
+
+```json
+{
+  "route": "sql",
+  "answer": "各渠道订单量：channel_name=Mobile App，order_count=93（共 6 行结果）",
+  "sql": "SELECT ...",
+  "columns": ["channel_name", "order_count"],
+  "rows": [{"channel_name": "Mobile App", "order_count": 93}],
+  "tables_used": ["channels", "orders"],
+  "docs_used": [],
+  "chart_spec": {
+    "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+    "mark": "bar",
+    "data": {"values": [{"channel_name": "Mobile App", "order_count": 93}]},
+    "encoding": {
+      "x": {"field": "channel_name", "type": "nominal"},
+      "y": {"field": "order_count", "type": "quantitative"}
+    }
+  },
+  "safety_status": "passed",
+  "blocked_reason": null,
+  "cost": {
+    "latency_ms": 15.0,
+    "sql_time_ms": 12.0,
+    "model": null,
+    "prompt_tokens": 0,
+    "completion_tokens": 0
+  },
+  "tool_calls": [
+    {
+      "tool_name": "sql_query",
+      "status": "success",
+      "latency_ms": 12.0,
+      "sql": "SELECT ...",
+      "tables_used": ["channels", "orders"],
+      "error_type": null,
+      "message": null
+    }
+  ],
+  "error_type": null,
+  "trace_id": "..."
+}
+```
+
+基础图表规则：
+
+| 结果形状 | 图表 |
+|---|---|
+| 类别 + 数值，例如各渠道订单量 | `bar` |
+| 日期 / 月份 + 数值 | `line` |
+| Top N / 最高类排名，例如退款率最高商品 | 横向 `bar` |
+| GMV 这类单指标 | 单柱 `bar` |
 
 LLM 配置示例：
 
@@ -169,6 +228,15 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 
 脚本会为 6 条 simple SQL 生成 prompt 快照到 `.agent_work/temp/prompt-snapshots.md`，
 并把实际执行摘要写入 `.agent_work/temp/m4-smoke.md`。
+
+M5 smoke：
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m5_agent_response.py
+```
+
+脚本会验证渠道订单量、商品退款率、GMV 和危险 SQL 拦截 4 条用例；摘要写入
+`.agent_work/temp/m5-smoke.md`，测试用 trace 写入 `.agent_work/temp/m5-traces.jsonl`。
 
 ### 运行测试
 

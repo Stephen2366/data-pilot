@@ -1,0 +1,10 @@
+templates:
+  bar:
+    $schema: https://vega.github.io/schema/vega-lite/v5.json
+    mark: bar
+  line:
+    $schema: https://vega.github.io/schema/vega-lite/v5.json
+    mark: line
+  horizontal_bar:
+    $schema: https://vega.github.io/schema/vega-lite/v5.json
+    mark: bar

@@ -401,6 +401,12 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 | 验收标准 | 6 条 SQL smoke 用例能批量执行并输出 pass / fail / error_type；Streamlit 能展示 answer / SQL / table / chart / trace_id |
 | 参考资料 | `QueryMind` 的 evaluation-run；`hello-agents/ch12` 的评估方法论；`databao-agent` 的展示体验 |
 
+**需用户确认的决策点**
+
+- Eval 执行方式：优先通过 FastAPI `/api/query` 调用，还是直接调用本地 pipeline；建议优先走 `/api/query`，更贴近真实演示链路。
+- Streamlit 展示范围：只展示 answer / SQL / table / chart / trace，还是额外做复杂筛选和历史记录；建议 M6 只做最小可演示闭环。
+- 阶段二验收报告粒度：只记录 6 条 smoke 结果，还是同时整理 v0/v1 全量能力清单；建议写 v0/v1 能力清单，但不扩大自动化评测范围。
+
 **建议连续完成的任务**
 
 - [ ] 从 32 条问题清单中抽 6 条 SQL smoke：2 简单 SQL、2 聚合、1 多表、1 安全。
