@@ -32,5 +32,6 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+addopts = "--basetemp=.agent_work/temp/pytest-tmp"
 pythonpath = ["."]
 testpaths = ["tests"]
