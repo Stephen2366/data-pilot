@@ -65,7 +65,7 @@ def run_sql_tool(
     trace_id: str,
     domain_schema: DomainSchema,
 ) -> SQLToolResult:
-    """执行一次受 SQL Guard 保护的查询。
+    """★ 执行一次受 SQL Guard 保护的查询。
 
     处理顺序固定为：先 policy 校验，再提取表名，再执行数据库。这样即便未来换成 Agent
     编排，SQL Tool 的安全边界也不会被绕开。
