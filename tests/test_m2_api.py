@@ -62,7 +62,7 @@ def test_products_list_supports_category_status_pagination_and_trace_id() -> Non
         response = client.get(
             "/api/products",
             params={
-                "category": "Electronics",
+                "category": "数码电子",
                 "status": "active",
                 "page": 1,
                 "page_size": 5,
@@ -77,7 +77,7 @@ def test_products_list_supports_category_status_pagination_and_trace_id() -> Non
     assert body["page_size"] == 5
     assert body["total"] >= 1
     assert 1 <= len(body["items"]) <= 5
-    assert {item["category"] for item in body["items"]} == {"Electronics"}
+    assert {item["category"] for item in body["items"]} == {"数码电子"}
     assert {item["status"] for item in body["items"]} == {"active"}
 
 
@@ -90,7 +90,7 @@ def test_orders_list_supports_time_channel_status_filters() -> None:
                 "paid_from": "2026-06-01T00:00:00",
                 "paid_to": "2026-07-01T00:00:00",
                 "channel_id": 1,
-                "order_status": "paid",
+                "order_status": "delivered",
                 "page_size": 10,
             },
         )
@@ -102,7 +102,7 @@ def test_orders_list_supports_time_channel_status_filters() -> None:
     assert 1 <= len(body["items"]) <= 10
     for item in body["items"]:
         assert item["channel_id"] == 1
-        assert item["order_status"] == "paid"
+        assert item["order_status"] == "delivered"
         assert datetime.fromisoformat(item["paid_at"]) >= datetime(2026, 6, 1)
         assert datetime.fromisoformat(item["paid_at"]) < datetime(2026, 7, 1)
 

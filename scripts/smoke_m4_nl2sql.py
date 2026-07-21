@@ -44,7 +44,7 @@ class SmokeCase:
 
 CASES: tuple[SmokeCase, ...] = (
     SmokeCase("sql_001", "查询 active 商品列表前 10 条", "ops", ("product_name", "category", "status"), "active"),
-    SmokeCase("sql_002", "查询 Electronics 类目下有哪些商品", "ops", ("product_name", "category"), "Electronics"),
+    SmokeCase("sql_002", "查询 数码电子 类目下有哪些商品", "ops", ("product_name", "category"), "数码电子"),
     SmokeCase("sql_003", "查询 2026 年 6 月已支付订单", "ops", ("order_no", "order_amount", "paid_at"), "2026-06"),
     SmokeCase("sql_004", "查询 quality_issue 的退款记录", "ops", ("refund_no", "refund_reason"), "quality_issue"),
     SmokeCase("sql_005", "查询待处理工单列表", "customer_service", ("ticket_no", "status"), "pending"),

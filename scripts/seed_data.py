@@ -159,6 +159,35 @@ def _delete_existing_rows(session: Session) -> None:
     session.flush()
 
 
+# 50 个真实感中文姓名，适合演示和面试截图。
+_REALISTIC_NAMES: list[str] = [
+    "陈米娅", "王逸凡", "张雨薇", "李思源", "刘若晴",
+    "黄子轩", "赵晓萌", "吴俊杰", "杨雨桐", "周明哲",
+    "徐悦然", "孙博文", "马晓琳", "郭浩然", "林芷若",
+    "何志远", "高语嫣", "唐瑞霖", "程一诺", "罗嘉懿",
+    "彭婉清", "潘奕辰", "邓梓涵", "肖景行", "冯书瑶",
+    "石承宇", "任雅静", "万子骞", "杜若溪", "傅正阳",
+    "谢安然", "段思齐", "姜语桐", "韩铭远", "秦乐瑶",
+    "廖凯文", "熊芷萱", "崔敬轩", "毕雨晴", "瞿天佑",
+    "孔令仪", "阮启航", "侯静怡", "左逸凡", "童雅琪",
+    "顾砚书", "邵灵犀", "裴宇轩", "连以安", "聂朗清",
+]
+
+# 姓名的拼音映射，用于生成邮箱地址（first.last@datapilot.example）。
+_REALISTIC_NAME_PINYIN: list[str] = [
+    "miya.chen", "yifan.wang", "yuwei.zhang", "siyuan.li", "ruoqing.liu",
+    "zixuan.huang", "xiaomeng.zhao", "junjie.wu", "yutong.yang", "mingzhe.zhou",
+    "yueran.xu", "bowen.sun", "xiaolin.ma", "haoran.guo", "zhiruo.lin",
+    "zhiyuan.he", "yuyan.gao", "ruilin.tang", "yinuo.cheng", "jiayi.luo",
+    "wanqing.peng", "yichen.pan", "zihan.deng", "jingxing.xiao", "shuyao.feng",
+    "chengyu.shi", "yajing.ren", "ziqian.wan", "ruoxi.du", "zhengyang.fu",
+    "anran.xie", "siqi.duan", "yutong.jiang", "mingyuan.han", "leyao.qin",
+    "kaiwen.liao", "zhixuan.xiong", "jingxuan.cui", "yuqing.bi", "tianyou.qu",
+    "lingyi.kong", "qihang.ruan", "jingyi.hou", "yifan.zuo", "yaqi.tong",
+    "yanshu.gu", "lingxi.shao", "yuxuan.peui", "yian.lian", "langqing.nie",
+]
+
+
 def _build_users() -> list[User]:
     """构建 50 个用户，覆盖所有 RBAC 角色。"""
 
@@ -170,15 +199,50 @@ def _build_users() -> list[User]:
         role = roles[index % len(roles)]
         users.append(
             User(
-                user_name=f"Demo User {index + 1:02d}",
+                user_name=_REALISTIC_NAMES[index],
                 role=role,
-                email=f"user{index + 1:02d}@datapilot.example",
+                email=f"{_REALISTIC_NAME_PINYIN[index]}@datapilot.example",
                 phone=f"1380000{index + 1:04d}",
                 status="active" if index < 46 else "disabled",
             )
         )
 
     return users
+
+
+# 29 个真实感商品/SaaS 套餐名（中文），按类目分组，适合演示和面试截图。
+# 索引 0 为锚点商品 Aurora Noise Cancelling Headphones 预留。
+_REALISTIC_PRODUCTS: list[dict[str, Any]] = [
+    {"sku": "SKU-WL-EB-002", "name": "真无线降噪耳机 Pro",         "category": "数码电子", "price": Decimal("399.00")},
+    {"sku": "SKU-SD-LP-003", "name": "智能护眼台灯",               "category": "家居生活",        "price": Decimal("249.00")},
+    {"sku": "SKU-MK-K2-004", "name": "机械键盘 K2 红轴",           "category": "数码电子", "price": Decimal("549.00")},
+    {"sku": "SKU-MS-PL-005", "name": "记忆棉护颈枕",               "category": "家居生活",        "price": Decimal("179.00")},
+    {"sku": "SKU-VC-SR-006", "name": "VC 焕白精华液 30ml",         "category": "个护美妆",      "price": Decimal("128.00")},
+    {"sku": "SKU-CRM-ST-007","name": "CRM 入门版（月付）",          "category": "SaaS 软件",        "price": Decimal("299.00")},
+    {"sku": "SKU-HB-45-008", "name": "户外登山包 45L",              "category": "户外运动",     "price": Decimal("459.00")},
+    {"sku": "SKU-4K-WC-009", "name": "4K 高清摄像头",               "category": "数码电子", "price": Decimal("679.00")},
+    {"sku": "SKU-BM-SH-010", "name": "楠竹置物架三层",             "category": "家居生活",        "price": Decimal("189.00")},
+    {"sku": "SKU-HA-TN-011", "name": "玻尿酸保湿爽肤水",           "category": "个护美妆",      "price": Decimal("98.00")},
+    {"sku": "SKU-AN-PR-012", "name": "Analytics Pro（月付）",      "category": "SaaS 软件",        "price": Decimal("599.00")},
+    {"sku": "SKU-CT-2P-013", "name": "双人露营帐篷 防暴雨",        "category": "户外运动",     "price": Decimal("899.00")},
+    {"sku": "SKU-UG-CG-014", "name": "氮化镓快充头 65W",           "category": "数码电子", "price": Decimal("149.00")},
+    {"sku": "SKU-AR-DR-015", "name": "超声波香薰机 Mini",          "category": "家居生活",        "price": Decimal("139.00")},
+    {"sku": "SKU-SP-FD-016", "name": "清爽防晒日霜 SPF50",         "category": "个护美妆",      "price": Decimal("158.00")},
+    {"sku": "SKU-MK-ST-017", "name": "全渠道营销套件入门版",       "category": "SaaS 软件",        "price": Decimal("899.00")},
+    {"sku": "SKU-UL-TT-018", "name": "超轻徒步帐篷 单人",          "category": "户外运动",     "price": Decimal("1299.00")},
+    {"sku": "SKU-BT-SK-019", "name": "便携蓝牙音箱 Mini",          "category": "数码电子", "price": Decimal("219.00")},
+    {"sku": "SKU-SL-PL-020", "name": "真丝枕套套装 一对装",        "category": "家居生活",        "price": Decimal("99.00")},
+    {"sku": "SKU-RT-MK-021", "name": "视黄醇抗皱面霜",             "category": "个护美妆",      "price": Decimal("189.00")},
+    {"sku": "SKU-CS-PT-022", "name": "智能客服 Pro（月付）",       "category": "SaaS 软件",        "price": Decimal("399.00")},
+    {"sku": "SKU-PC-JK-023", "name": "便携轻薄羽绒服",             "category": "户外运动",     "price": Decimal("549.00")},
+    {"sku": "SKU-TB-PS-024", "name": "铝合金平板支架",             "category": "数码电子", "price": Decimal("79.00")},
+    {"sku": "SKU-CX-FM-025", "name": "纯棉针织盖毯",               "category": "家居生活",        "price": Decimal("159.00")},
+    {"sku": "SKU-CC-CM-026", "name": "校色遮瑕膏 三色盘",          "category": "个护美妆",      "price": Decimal("109.00")},
+    {"sku": "SKU-WH-PL-027", "name": "仓储管理 Pro（月付）",       "category": "SaaS 软件",        "price": Decimal("699.00")},
+    {"sku": "SKU-FS-RD-028", "name": "碳素台钓竿 2.4m",            "category": "户外运动",     "price": Decimal("329.00")},
+    {"sku": "SKU-KS-SC-029", "name": "儿童智能手表",               "category": "数码电子", "price": Decimal("259.00")},
+    {"sku": "SKU-RC-CK-030", "name": "迷你电饭煲 3 杯量",          "category": "家居生活",        "price": Decimal("119.00")},
+]
 
 
 def _build_products() -> list[Product]:
@@ -190,24 +254,22 @@ def _build_products() -> list[Product]:
         Product(
             sku="SKU-HIGH-REFUND-01",
             product_name="Aurora Noise Cancelling Headphones",
-            category="Electronics",
+            category="数码电子",
             status="active",
             price=Decimal("899.00"),
             launched_at=datetime(2026, 1, 10),
         )
     ]
-    categories = ["Electronics", "Home", "Beauty", "SaaS", "Outdoor"]
 
-    for index in range(1, EXPECTED_SEED_COUNTS["products"]):
-        # 其余商品按类目轮转，制造足够多的分析维度。
+    for index, prod in enumerate(_REALISTIC_PRODUCTS):
         products.append(
             Product(
-                sku=f"SKU-{index + 1:04d}",
-                product_name=f"DataPilot Demo Product {index + 1:02d}",
-                category=categories[index % len(categories)],
-                status="active" if index % 11 else "paused",
-                price=Decimal(79 + index * 13).quantize(Decimal("0.01")),
-                launched_at=datetime(2026, 1, 1) + timedelta(days=index * 3),
+                sku=prod["sku"],
+                product_name=prod["name"],
+                category=prod["category"],
+                status="active" if (index + 1) % 11 else "paused",
+                price=prod["price"],
+                launched_at=datetime(2026, 1, 1) + timedelta(days=(index + 1) * 3),
             )
         )
 
@@ -233,7 +295,8 @@ def _build_orders(users: list[User], products: list[Product], channels: list[Cha
     orders: list[Order] = []
     june_start = datetime(2026, 6, 1, 9, 0, 0)
     may_start = datetime(2026, 5, 1, 9, 0, 0)
-    statuses = ["paid", "shipped", "delivered", "cancelled"]
+    # 加权分布模拟真实电商：大部分已送达，少量取消。delivered 200 + shipped 150 + paid 100 + cancelled 50 = 500。
+    statuses = ["delivered"] * 200 + ["shipped"] * 150 + ["paid"] * 100 + ["cancelled"] * 50
 
     for index in range(EXPECTED_SEED_COUNTS["orders"]):
         # 前 40 单集中给锚点商品，配合退款数据制造“退款率最高商品”。
@@ -252,7 +315,7 @@ def _build_orders(users: list[User], products: list[Product], channels: list[Cha
 
         # 前 320 单落在 6 月，剩余订单落在 5 月，方便后续测试时间筛选。
         paid_at = (june_start if index < 320 else may_start) + timedelta(days=index % 28, hours=index % 7)
-        status = statuses[index % len(statuses)]
+        status = statuses[index]
 
         orders.append(
             Order(
@@ -303,14 +366,66 @@ def _build_refunds(orders: list[Order]) -> list[Refund]:
     return refunds
 
 
+# 工单标题词库：按 ticket_type 分组，生成真实客服场景的 subject。
+_TICKET_SUBJECTS: dict[str, list[str]] = {
+    "refund": [
+        "申请 Aurora 耳机质量问题退款",
+        "收到的商品外包装破损，要求退货",
+        "护肤品过敏反应，申请退款退货",
+        "订单重复扣款，申请退回多付金额",
+        "商品与页面描述不符，要求退款",
+        "7 天无理由退货申请",
+        "赠品缺失，申请部分退款",
+        "活动期间买贵了，申请退差价",
+        "退货后物流显示签收但未退款",
+    ],
+    "shipping": [
+        "物流信息 72 小时未更新，查询包裹状态",
+        "发货地址填写错误，请求修改",
+        "物流延迟超过预计到货时间 5 天",
+        "包裹显示已签收但本人未收到",
+        "跨境物流清关中，咨询预计放行时间",
+        "加急订单未按承诺时效发货",
+        "收货地址变更，请转寄到新地址",
+        "部分商品漏发，请求补发",
+    ],
+    "invoice": [
+        "电子发票抬头修改为公司名称",
+        "发票金额与实付金额不符",
+        "需要补开增值税专用发票",
+        "发票税号填写错误，申请重开",
+        "订单完成后发票未自动推送",
+        "批量采购需要合并开票",
+    ],
+    "account": [
+        "账号绑定手机号已停用，申请换绑",
+        "多次登录失败，账号疑似被锁定",
+        "会员等级未正确升级，积分异常",
+        "无法修改默认收货地址",
+        "账号注销申请被驳回，查询原因",
+        "实名认证审核超过 3 个工作日",
+    ],
+    "product_quality": [
+        "耳机降噪功能与宣传效果差距大",
+        "商品缺少中文使用说明书",
+        "SaaS 套餐功能权限与购买页面不一致",
+        "查询商品是否支持固件升级",
+        "电饭煲内胆涂层出现脱落",
+        "商品保质期剩余不足 3 个月",
+    ],
+}
+
+
 def _build_tickets(users: list[User], orders: list[Order]) -> list[Ticket]:
     """构建客服工单，固定包含 12 个待处理高优先级工单。"""
 
     tickets: list[Ticket] = []
-    ticket_types = ["refund", "shipping", "invoice", "account", "product"]
+    # 加权分布让工单类型不那么均匀，退款和物流比发票和账号更常见。
+    ticket_types = ["refund"] * 30 + ["shipping"] * 28 + ["invoice"] * 22 + ["account"] * 20 + ["product_quality"] * 20
     service_users = [user for user in users if user.role == "customer_service"]
 
     for index in range(EXPECTED_SEED_COUNTS["tickets"]):
+        ttype = ticket_types[index]
         # 前 12 条固定为 pending + high，作为后续客服工单评测锚点。
         is_anchor_ticket = index < 12
         priority = "high" if is_anchor_ticket else ["low", "medium", "urgent"][index % 3]
@@ -318,17 +433,21 @@ def _build_tickets(users: list[User], orders: list[Order]) -> list[Ticket]:
         created_at = datetime(2026, 6, 1, 10, 0, 0) + timedelta(hours=index * 3)
         resolved_at = None if status in {"pending", "processing"} else created_at + timedelta(days=2)
 
+        # 从对应类型的词库中轮转选取标题，保证每次 seed 结果确定。
+        subjects_pool = _TICKET_SUBJECTS[ttype]
+        subject = subjects_pool[index % len(subjects_pool)]
+
         tickets.append(
             Ticket(
                 ticket_no=f"TCK-2026-{index + 1:05d}",
                 user=users[index % len(users)],
                 order=orders[index % len(orders)] if index % 5 != 0 else None,
                 assigned_user=service_users[index % len(service_users)],
-                ticket_type=ticket_types[index % len(ticket_types)],
+                ticket_type=ttype,
                 priority=priority,
                 status=status,
-                subject=f"Demo support ticket {index + 1:03d}",
-                description="用于 DataPilot M1 seed 的客服工单样例。",
+                subject=subject,
+                description=f"用户 {users[index % len(users)].user_name} 提交工单：{subject}。请客服团队尽快处理。",
                 resolved_at=resolved_at,
                 created_at=created_at,
             )
@@ -337,10 +456,93 @@ def _build_tickets(users: list[User], orders: list[Order]) -> list[Ticket]:
     return tickets
 
 
+# 知识库文档正文库：每个 doc_key 对应一份真实感政策文档（2-5 段），供 RAG 检索使用。
+_KB_CONTENTS: dict[str, str] = {
+    "refund_policy_basic": (
+        "本平台支持以下退款类型：7 天无理由退货、质量问题退款、物流损坏退款以及价保补差。"
+        "7 天无理由退货需确保商品完好、配件齐全且不影响二次销售；用户需在签收后 168 小时内提交申请，"
+        "审核通过后 3 个工作日内原路退款。"
+        "质量问题退款不受 7 天限制，用户在质保期内凭有效凭证（订单号 + 商品照片）发起申请，"
+        "客服将在 24 小时内响应并安排上门取件，退货运费由平台承担。"
+        "物流损坏退款需用户在签收时当面验货并拍照留存；若快递员已离开，需在签收后 4 小时内提交"
+        "损坏照片和开箱视频，超时将按普通质量问题流程处理。"
+        "价保补差适用于标有「价保」标签的商品，用户在购买后 15 天内发现同 SKU 降价，可申请退还差价，"
+        "每单限申请一次。"
+    ),
+    "refund_policy_quality": (
+        "质量问题指商品存在影响正常使用的缺陷，包括但不限于：功能故障（如电子产品无法开机）、"
+        "外观严重瑕疵（如服装大面积染色、鞋类开胶）、保质期内变质（如护肤品油水分离、食品发霉）"
+        "以及配件缺失导致无法使用。"
+        "用户提交质量问题退款时需提供以下材料：① 清晰展示缺陷部位的照片至少 3 张；"
+        "② 开箱视频（如为签收时即发现）；③ 商品外包装的快递单号照片。材料不全将退回补充，"
+        "累计退回 2 次仍未补全的将自动转为线下人工审核。"
+        "平台在收到退货商品后 48 小时内完成质检。确认为质量问题的，全额退款并补偿 50 元优惠券；"
+        "确认为用户使用不当的，将原路寄回并由用户承担来回运费。"
+    ),
+    "shipping_delay_rule": (
+        "订单发货时效以商品详情页标注的「预计发货时间」为准：现货商品支付后 48 小时内出库，"
+        "预售商品以页面标注的「最晚发货日」为承诺截止时间。"
+        "物流延迟定义为「超过承诺发货时间 72 小时仍未出库」或「出库后物流信息超过 120 小时无更新」。"
+        "发生延迟时，用户可申请延迟补偿：每延迟 1 天补偿 10 元无门槛优惠券，单笔订单补偿上限 100 元。"
+        "因不可抗力（自然灾害、疫情封控、海关抽检等）导致的延迟不适用补偿规则，但平台将主动推送"
+        "延迟通知并在物流恢复正常后优先发货。"
+        "加急订单（标记为「加急配送」）未在承诺时效内送达的，除延迟补偿外额外退还加急费用的 50%。"
+    ),
+    "invoice_rule": (
+        "平台支持开具电子普通发票和增值税专用发票。电子普通发票在订单完成后自动推送至用户邮箱，"
+        "也可在「我的订单 → 申请发票」中手动触发；增值税专用发票需先完成企业认证并填写完整的"
+        "开票信息（公司名称、税号、地址、电话、开户行及账号）。"
+        "发票抬头默认为收货人姓名，用户可在下单时修改为个人或企业名称。订单支付后 30 天内可修改"
+        "抬头，超过 30 天需联系客服人工处理。已开具的发票若信息有误，可在开票后 7 天内申请红冲重开。"
+        "发票金额以订单实付金额为准（已扣除优惠券、积分抵扣等），不含运费和保险费。合并开票需在"
+        "所有关联订单均完成后的 15 天内提交申请，跨月订单不支持合并开票。"
+    ),
+    "vip_service_rule": (
+        "高价值客户（定义：近 12 个月累计消费金额 ≥ 20,000 元或月均消费 ≥ 2,000 元）自动进入"
+        "VIP 服务通道，享受专属客服、优先处理和柔性退款政策。"
+        "VIP 客户提交工单后，系统自动分配高级客服（Level 3 及以上），首次响应时间承诺 ≤ 2 小时。"
+        "退款方面，VIP 客户享受扩大的无理由退货窗口（15 天而非标准 7 天），且年度内 3 次以内"
+        "无理由退货免收退回运费。"
+        "每季度平台会重新评估 VIP 资格，降级客户将收到通知并保留 30 天缓冲期，缓冲期内仍享受"
+        "VIP 权益。"
+    ),
+    "sensitive_data_policy": (
+        "敏感字段包括但不限于：用户真实姓名、手机号、邮箱、身份证号、银行卡号、收货地址的精确门牌号、"
+        "IP 地址以及用户行为轨迹数据。以上字段在数据库中以加密存储（AES-256-GCM），应用层按角色"
+        "脱敏展示。"
+        "各角色访问权限如下：admin 可查看所有字段明文，但每次访问均记录审计日志；ops 可查看脱敏后"
+        "的手机号（138****0001）和邮箱前缀（miy***）；customer_service 仅可在处理工单时临时查看"
+        "关联用户的手机号和地址，工单关闭后 24 小时权限自动回收；demo_user 角色仅能访问匿名化的"
+        "演示数据，严禁接触任何真实 PII。"
+        "数据导出操作需双人审批：申请人提交导出原因和范围，由 admin 角色两人依次审批后方可执行，"
+        "导出文件自动加水印并设置 72 小时后失效。所有敏感数据访问日志保留不少于 180 天。"
+    ),
+    "demo_user_scope": (
+        "演示账号（demo_user 角色）用于产品演示和新员工培训，所有可访问数据均为系统生成的模拟数据，"
+        "不包含任何真实用户个人信息或业务记录。演示账号的数据范围限定在：seed 脚本生成的订单、退款、"
+        "工单和知识库文档，且所有金额、姓名、地址均为虚构。"
+        "演示账号默认关闭以下能力：数据导出、批量删除、API Key 创建以及外部系统集成。若培训需要"
+        "开放部分能力，需由 admin 在演示沙箱环境中单独配置，培训结束后立即回收。"
+        "每个演示账号的有效期为创建后 90 天，到期自动禁用。需继续使用的，由 admin 手动续期，"
+        "每次续期最长 90 天。"
+    ),
+    "gmv_metric_note": (
+        "GMV（Gross Merchandise Volume，成交总额）是平台核心业务指标之一，统计口径需在跨部门"
+        "协作中保持一致以避免数据分歧。"
+        "本平台 GMV 口径定义为：在统计周期内，已支付且未被取消的订单金额总和。具体规则如下："
+        "① 仅统计 order_status 为 'paid'、'shipped' 或 'delivered' 的订单，排除 'cancelled'；"
+        "② 金额取 order_amount 字段，单位为人民币元；③ 统计时间以 paid_at（支付时间）为基准，"
+        "而非下单时间或发货时间。"
+        "退款订单不影响 GMV 计算——即使订单后续发生了退款，只要未取消，其金额仍计入 GMV。"
+        "如需分析「实收口径」的收入，应使用 NAR（Net Revenue After Refund）= 支付金额 − 实际退款金额。"
+        "月度 GMV 报表在次月第 3 个工作日前由系统自动生成，如遇节假日顺延。"
+    ),
+}
+
+
 def _build_knowledge_docs() -> list[KnowledgeDoc]:
     """构建政策与指标文档，供后续 RAG 模块使用。"""
 
-    # 这些文档先只是结构化草稿；阶段三会再做切分、向量化和检索。
     docs = [
         ("refund_policy_basic", "基础退款政策", "refund_policy", "customer_service"),
         ("refund_policy_quality", "质量问题退款规则", "refund_policy", "customer_service"),
@@ -358,7 +560,7 @@ def _build_knowledge_docs() -> list[KnowledgeDoc]:
             doc_type=doc_type,
             audience_role=audience_role,
             status="active",
-            content=f"{title}：这是阶段二 M1 的知识库草稿，后续 RAG 模块会继续扩展。",
+            content=_KB_CONTENTS[doc_key],
         )
         for doc_key, title, doc_type, audience_role in docs
     ]

@@ -34,7 +34,7 @@ check:
 | id | question | user_role | expected_tables | expected_columns | security_expectation | check |
 |---|---|---|---|---|---|---|
 | sql_001 | 查询 active 商品列表前 10 条 | ops | products | product_name, category, status | allow | contains: active |
-| sql_002 | 查询 Electronics 类目下有哪些商品 | ops | products | product_name, category | allow | contains: Electronics |
+| sql_002 | 查询 数码电子 类目下有哪些商品 | ops | products | product_name, category | allow | contains: 数码电子 |
 | sql_003 | 查询 2026 年 6 月已支付订单 | ops | orders | order_no, order_amount, paid_at | allow | contains: 2026-06 |
 | sql_004 | 查询 quality_issue 的退款记录 | ops | refunds | refund_no, refund_reason | allow | contains: quality_issue |
 | sql_005 | 查询待处理工单列表 | customer_service | tickets | ticket_no, status | allow | contains: pending |

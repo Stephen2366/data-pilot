@@ -54,8 +54,8 @@ client = TestClient(app)
 
 # 9 个用例 = 4 类接口 × 2 个筛选组合 + 1 个非法分页（应返回 422 + validation_error）。
 cases = [
-    ("products-electronics-active", "/api/products", {"category": "Electronics", "status": "active"}),
-    ("products-saas-active", "/api/products", {"category": "SaaS", "status": "active"}),
+    ("products-electronics-active", "/api/products", {"category": "数码电子", "status": "active"}),
+    ("products-saas-active", "/api/products", {"category": "SaaS 软件", "status": "active"}),
     ("orders-june-mobile-paid", "/api/orders", {"paid_from": "2026-06-01T00:00:00", "paid_to": "2026-07-01T00:00:00", "channel_id": 1, "order_status": "paid"}),
     ("orders-may-cancelled", "/api/orders", {"paid_from": "2026-05-01T00:00:00", "paid_to": "2026-06-01T00:00:00", "order_status": "cancelled"}),
     ("refunds-quality-approved", "/api/refunds", {"refund_status": "approved", "refund_reason": "quality_issue"}),
