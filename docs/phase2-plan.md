@@ -60,7 +60,7 @@
 - **M4 简单 SQL 正确性**：以 v1 验收标准为准；“执行正确”指 SQL 通过 SQL Guard、可执行、返回字段和关键结果符合对应评测用例预期。
 - **AgentResponse**：Phase 2 API 字段以本文档 M3 简化版 AgentResponse 为基准；M5 只能增量扩展字段，不改变已有字段含义。`LEARNING_ROADMAP.md` 中的 AgentResponse 是最终方向示例，不是 Phase 2 字段全集。
 - **阶段二验收记录**：写入 `eval/reports/phase2-v1-acceptance.md`；该文件是后续 README、简历和复盘会消费的持久记录，不放临时目录。
-- **Phase 2.5 / M7 可选硬化**：M7 仅在 M6 通过 accept-module 后执行，目标是 trace 和 EvalOps-lite 的最小硬化；它不属于 v1 验收标准，不回写 M6 验收边界，也不引入阶段四 AgentEvalOps 平台能力。
+- **Phase 2.5 / M7 处理决策**：M7 不再作为独立模块执行，已吸收进 roadmap v2 的阶段三A。原 M7 中有价值的 `trace_steps` 和最小 Eval issue tags 会随阶段三A的新 Text2SQL 链路一起落地；完整 scorer / 失败归因 / 报告平台仍归独立 AgentEvalOps。
 - **模块进度**：只以 `AI_CONTEXT.md`「当前状态」为准（学习复盘看 `dev-log.md` 模块日志）；本文档只维护范围、顺序、验收标准和验证命令，不维护模块实时状态。
 - **模块 smoke 脚本落位**：可复用 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），一次性输出摘要放 `.agent_work/temp/`；原则出处为 CLAUDE.md「工作约定」。
 
@@ -122,7 +122,7 @@
 | M4 NL2SQL 最小链路与安全 | 5 | Schema prompt + LLM SQL + SQL Guard + RBAC |
 | M5 AgentResponse 扩展、Trace、Tool 与图表 | 6 | 扩展结构化输出 + SQL Tool + Trace + chart_spec |
 | M6 EvalOps-lite 与演示收尾 | 7 | smoke 评测 + Streamlit + 阶段二验收 |
-| M7 Phase 2.5 Trace 与 Eval 最小硬化 | 8（可选，M6 accept 后） | trace 决策步骤 + Eval issue tag 最小化 |
+| M7 Phase 2.5 Trace 与 Eval 最小硬化 | 不再单独执行 | 合理内容已并入 roadmap v2 阶段三A |
 
 ## M0：工程骨架与配置
 
@@ -442,60 +442,29 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 
 - 如果 Streamlit 页面耗时，页面只调 `/api/query` 并展示 JSON + 表格，图表可后补。
 
-## M7：Phase 2.5 Trace 与 Eval 最小硬化（可选）
+## M7：Phase 2.5 Trace 与 Eval 最小硬化（已并入阶段三A）
 
-**目标**：在不改变阶段二 v1 验收边界、不扩大成完整 EvalOps 平台的前提下，为阶段三 RAG / Hybrid 调试和阶段四 AgentEvalOps 接入补两个最小硬化点：更细的 trace 决策步骤、EvalOps-lite 稳定 issue tag。
+**执行决策**：M7 不再作为独立模块执行。阶段二 M0-M6 已作为 v1 baseline 冻结，下一步直接进入 roadmap v2 的 **阶段三A：DataPilot Text2SQL 深化**。
 
-| 项 | 内容 |
-|---|---|
-| 前置条件 | M6 已通过 `accept-module`；若 `AI_CONTEXT.md` 仍显示 M6 未验收，先停止并提醒用户跑验收 |
-| 输入 | `docs/phase2-reference-review.md`、`docs/phase2-optimization-triage.md`、M5 Trace / AgentResponse 契约、M6 `eval/run_eval.py` |
-| 输出 | 内部 trace steps / metadata、Eval issue tags、必要测试、`.agent_work/temp/m7-notes.md`、M7 收工记录 |
-| 验收标准 | 6 条 SQL smoke 仍通过；trace 能看到关键决策步骤；Eval 报告能输出稳定 issue tags；公开 `AgentResponse` 字段含义不变 |
+**为什么不单独做 M7**：
 
-**范围边界**
+- M7 原本是在“还没系统吸收 AskData 思路”时提出的小硬化包，主要补 trace 决策步骤和 Eval issue tags。
+- 阶段三A会重做 Text2SQL 主链路，引入 Schema Retriever、局部 Schema、Join 路径和 QueryPlanStep；如果先在旧 pipeline 上补 M7，随后很快要改一遍。
+- M7 的合理内容不丢弃，而是随阶段三A的新链路一起设计，避免重复实现和重复复盘。
 
-- 只做 **trace 决策粒度增强** 和 **Eval issue tag 最小化**。
-- trace 新字段优先作为 JSONL 内部字段；除非已有 Schema 自然容纳，不新增公开 API 必填字段。
-- 不引入 SQLite eval result store、checkpoint、resume、HTML 报告、LLM-as-Judge、完整 `eval/scorers/` 分层。
-- 不做 LangGraph 迁移，不调整 RAG 存储选型，不修改数据库结构。
-- 不以模板匹配重构为目标；若为了 trace 需要记录 template 信息，只记录现有结果，不大改匹配逻辑。
+**并入阶段三A的内容**：
 
-**建议连续完成的任务**
+- `trace_steps`：从旧链路的 `template_match / llm_generation / sql_guard / sql_execution / chart_decision`，升级为阶段三A链路的 `schema_retrieval / schema_context / join_path / query_plan / sql_generation / sql_guard / sql_execution / chart_decision`。
+- 最小 Eval issue tags：阶段三A只保留 `missing_table`、`missing_column`、`safety_mismatch`、`unexpected_error`，用于 SQL 主链路回归诊断。
+- Trace 安全边界：trace 可保留 SQL、表字段、召回得分和步骤状态，但不能新增用户 email / phone 等敏感字段原值。
 
-- [ ] 开工前创建 `.agent_work/temp/m7-notes.md`，写 5-8 条极短 checklist，并记录关键取舍。
-- [ ] 读取 `engine/trace/recorder.py`、`app/api/query.py`、`eval/run_eval.py`、`app/schemas/agent.py`，确认现有 trace 和响应字段。
-- [ ] 设计最小 `trace_steps` 结构，字段建议包括 `name`、`status`、`metadata`、`elapsed_ms`；只放 JSON 可序列化数据。
-- [ ] 在 `/api/query` 主链路记录关键步骤：`template_match`、`llm_generation`、`sql_guard`、`sql_execution`、`chart_decision`。被拦截路径也要有 `sql_guard` 或对应失败步骤。
-- [ ] 确保 `trace_steps` 不暴露敏感字段原值；SQL 可保留，但不要新增用户 email / phone 等敏感数据。
-- [ ] 为 EvalOps-lite 增加稳定 issue tags：至少覆盖 `status_mismatch`、`safety_mismatch`、`missing_table`、`missing_column`、`answer_fragment_mismatch`、`unexpected_error`。
-- [ ] 在 Markdown report 中增加 issue tag 汇总和每条 case 的 issue tags；保留原有 pass/fail 文本，避免破坏可读性。
-- [ ] 补最小测试：trace steps 可序列化、blocked case 有安全相关步骤、失败评分能给出稳定 issue tag。
-- [ ] 更新 `AI_CONTEXT.md` 模块技术档案和 `dev-log.md` M7 复盘；完成后调用 `finish-module`，暂不自动调用 `accept-module`，除非用户要求。
+**不并入阶段三A的内容**：
 
-**验收门**
+- 完整 scorer 分层、SQLite eval result store、checkpoint / resume、HTML 报告、LLM-as-Judge，归阶段四独立 AgentEvalOps。
+- 单独 M7 notes、M7 dev-log、M7 finish-module / accept-module，不再执行。
+- LangGraph 迁移、RAG 存储选型调整、数据库 migration，不属于原 M7，也不借 M7 名义插入阶段二。
 
-- [ ] M6 accept-module 已通过，且 M7 变更发生在 M6 baseline 之后。
-- [ ] `python -m pytest` 通过。
-- [ ] `python -m eval.run_eval` 仍为 6/6 passed。
-- [ ] `eval/reports/latest.md` 包含 issue tag 汇总；通过用例可以是空 tag 或 `passed`，失败用例必须有稳定 tag。
-- [ ] JSONL trace 至少包含 template / guard / execution / chart 中的关键决策步骤；安全拦截用例也有可读步骤。
-- [ ] 没有新增数据库 migration、没有引入新运行依赖、没有改变公开 AgentResponse 已有字段含义。
-
-**模块验证命令**
-
-```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m7-tmp
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m py_compile eval\run_eval.py app\api\query.py engine\trace\recorder.py
-git diff --check
-```
-
-**停止点**
-
-- 如果实现 trace steps 需要改变公开 `AgentResponse` 必填字段，先暂停说明方案和兼容影响。
-- 如果 Eval issue tag 需要拆完整 scorer 架构、引入数据库或 checkpoint，先暂停；这些属于阶段四 AgentEvalOps。
-- 如果发现 M6 未验收，不继续 M7，先提醒用户完成 `accept-module`。
+> 后续如果看到旧对话或旧草案提到“做 M7”，按本文档执行：**不新开 M7；直接做阶段三A，并检查 trace_steps 与最小 issue tags 是否被阶段三A覆盖。**
 
 ## v0 验收标准
 
@@ -535,7 +504,7 @@ flowchart TD
   M3 --> M4["M4 NL2SQL 最小链路与安全"]
   M4 --> M5["M5 AgentResponse + Trace + Tool + 图表"]
   M5 --> M6["M6 EvalOps-lite + Streamlit + 验收"]
-  M6 -. "可选 Phase 2.5" .-> M7["M7 Trace + Eval 最小硬化"]
+  M6 -. "M7 已吸收" .-> S3A["roadmap v2 阶段三A Text2SQL 深化"]
 ```
 
 ## 风险与兜底

@@ -28,7 +28,7 @@
 - Windows 下 `.agent_work/temp/pytest-tmp` 偶发被旧 pytest 临时目录锁住，表现为 `PermissionError` 删除 basetemp 失败；遇到时不要改业务代码，改用新的 `--basetemp=.agent_work/temp/<name>` 复跑即可。本次 M6 已用 `pytest-m6-tmp-final` 验证通过
 - DB comment 在 PowerShell 离线 SQL 输出中乱码；在线迁移和建表正常，无害。如需导出 SQL文件，再统一处理输出编码或将 DB comment 改为 ASCII（M1）
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
-- Milvus 本地暂不可用（兼容性问题），阶段三 RAG 主路径按 ChromaDB 规划；阶段三启动时重新评估 Milvus 兼容性
+- Milvus Standalone 已通过 Docker Desktop 部署成功（2026-07-21 验证），连接 `localhost:19530` 可用；阶段三 RAG 主路径改为 Milvus，不再使用 ChromaDB
 
 ## 模块技术档案（新的在上）
 
@@ -167,6 +167,11 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-21 roadmap v3 生成：按用户确认将 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v2.md` 复制为 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`，只优化学习路线大方向，不生成具体执行 plan。v3 保留阶段三A，但收敛为可校验 Text2SQL 中间层改造：确定默认主链路 `question -> schema_retrieval -> schema_graph/join_path -> query_plan -> local_schema_prompt -> sql_generation -> sql_guard -> sql_execution -> trace`；将 QueryPlanStep 自检提升为 P0；先定 `trace_steps` 结构；Schema 检索文档扩展为 `field_doc / metric_doc / relation_doc`；Milvus 保持主路径并轻提 ChromaDB / 内存向量检索备选；RRF / Rerank 只做接口预留；阶段三A结束要求产出新旧链路对照报告；阶段三A不引入 LangGraph、MCP、Skill、多智能体、SQL 自修复或 EXPLAIN 风险检查。
+- 2026-07-21 Phase 2.5 M7 并入阶段三A：按用户确认执行排期收敛，`docs/phase2-plan.md` 中 M7 不再作为独立模块执行，阶段二 M0-M6 作为 v1 baseline 冻结；原 M7 的合理内容并入 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v2.md` 阶段三A，包括新 Text2SQL 链路的 `trace_steps`（schema_retrieval / schema_context / join_path / query_plan / sql_generation / sql_guard / sql_execution / chart_decision）和最小 Eval issue tags（missing_table / missing_column / safety_mismatch / unexpected_error）。完整 scorer 分层、历史结果库、HTML 报告和失败归因平台仍归阶段四独立 AgentEvalOps，不借 M7 名义提前实现。
+- 2026-07-21 AskData 技术亮点取舍沉淀：新增 `docs/askdata-tech-value-decision.md`，把 AskData 亮点按“真泛用且面试常问”“有价值但轻量做”“能讲但不做主线”分层；结论是 DataPilot 应优先借鉴字段级 Schema 检索、局部 Schema、轻量 Join 路径约束、结构化 QueryPlanStep、SQL Guard 和分步骤 Trace，MCP / Skill / 长短期记忆 / 多智能体继续作为后期扩展。同步小修 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v2.md`：保留阶段三A，但澄清 SchemaGraph 只是当前 Query 的轻量关系视图，四元组计划只作为 AskData 参考，DataPilot 落地为可校验的 QueryPlanStep；RRF / Rerank / SQL 自修复仍为 P1/P2，不阻塞主线。
+- 2026-07-21 面试适配报告修正与 roadmap v2：按用户反馈修正 `docs/interview-fit-vs-askdata.md`，将 DataPilot 单体评分与 “DataPilot + 独立 AgentEvalOps” 项目组合评分拆开，避免把完整版 AgentEvalOps 算作 DataPilot 内置能力；DataPilot 单体完成 Text2SQL 深化 + RAG/Hybrid + 包装后预期约 84-86/100，项目组合约 88-90/100。另在 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v2.md` 生成 roadmap v2，在 RAG/Hybrid 前新增阶段三A「Text2SQL 深化」，覆盖字段级 Schema Retriever、Milvus 向量召回、SchemaGraph/Join 路径、QueryPlanStep、局部 Schema SQL prompt、分步骤 Trace、加分项优先级与 AskData 参考位置；同步调整时间表、README 周计划、技术栈和兜底策略。备注：用户提醒后续准备使用 Milvus，本次仅在 roadmap v2 中按主路径体现，未改当前项目运行状态口径。
+- 2026-07-21 面试适配度与 AskData 对照分析：按用户担心“AI 从 0 到 1开发的 DataPilot 是否偏离市场面试项目”新增 `docs/interview-fit-vs-askdata.md`，对照当前 M0-M6 DataPilot v1、roadmap 阶段三到阶段五最终形态，以及 `references/askdata_agent` 的文档和可见代码。结论：DataPilot 当前 v1 是工程底座扎实的 NL2SQL v1，面试分约 72/100；完成 RAG/Hybrid、独立 AgentEvalOps、包装后可达强面试项目区间约 88/100。后续最值得借鉴 AskData 的是字段级 Schema Retriever、结构化 QueryPlanStep、SchemaGraph/Join 约束和分步骤 Trace；不建议盲目提前做多库 MCP、长短记忆或完整 Reflection。
 - 2026-07-21 M6 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 27 passed），报告 `accept-M6-20260721.md`。阶段二 v1 全部模块 M0-M6 验收完成，可进入阶段三 RAG/Hybrid 或可选 M7 Phase 2.5 硬化
 - 2026-07-21 M7 plan 补入 phase2-plan：用户确认采用“方案 B：小做 Phase 2.5”后，将 M7「Phase 2.5 Trace 与 Eval 最小硬化」加入 `docs/phase2-plan.md`。关键边界：M7 仅在 M6 accept 后执行，不属于 v1 验收标准；只做 trace 决策步骤和 Eval issue tag 最小化，不引入完整 EvalOps、数据库、LangGraph 或 RAG 存储选型变化。验证：人工回读；`git diff --check` 仅 Windows LF→CRLF 提示
 - 2026-07-21 Phase 2 优化机会分流：按用户阅读 `phase2-reference-review.md` 后的问题，新增 `docs/phase2-optimization-triage.md`，把 trace 增强、Eval issue tag、RAG 契约、模板匹配、SQL Guard reason、Streamlit 增强、LangGraph 迁移等优化点按优先级/难度/风险/roadmap 影响分流。结论：先 accept M6 锁定 baseline；可选做限时 Phase 2.5（trace 决策粒度 + Eval issue tag 最小化）；完整 EvalOps 和 LangGraph 迁移后置。验证：人工回读；`git diff --check` 仅 Windows LF→CRLF 提示
