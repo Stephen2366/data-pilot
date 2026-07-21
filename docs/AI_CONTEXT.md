@@ -8,7 +8,7 @@
 - 当前模块：Phase 2 M6 EvalOps-lite 与演示收尾，已收工（待 accept-module）
 - 上一模块验收：M6 未验收（待 accept-module）
 - 阻塞项：无
-- 更新时间：2026-07-20
+- 更新时间：2026-07-21
 
 ## 当前技术选型快照
 
@@ -167,6 +167,9 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-21 M7 plan 补入 phase2-plan：用户确认采用“方案 B：小做 Phase 2.5”后，将 M7「Phase 2.5 Trace 与 Eval 最小硬化」加入 `docs/phase2-plan.md`。关键边界：M7 仅在 M6 accept 后执行，不属于 v1 验收标准；只做 trace 决策步骤和 Eval issue tag 最小化，不引入完整 EvalOps、数据库、LangGraph 或 RAG 存储选型变化。验证：人工回读；`git diff --check` 仅 Windows LF→CRLF 提示
+- 2026-07-21 Phase 2 优化机会分流：按用户阅读 `phase2-reference-review.md` 后的问题，新增 `docs/phase2-optimization-triage.md`，把 trace 增强、Eval issue tag、RAG 契约、模板匹配、SQL Guard reason、Streamlit 增强、LangGraph 迁移等优化点按优先级/难度/风险/roadmap 影响分流。结论：先 accept M6 锁定 baseline；可选做限时 Phase 2.5（trace 决策粒度 + Eval issue tag 最小化）；完整 EvalOps 和 LangGraph 迁移后置。验证：人工回读；`git diff --check` 仅 Windows LF→CRLF 提示
+- 2026-07-20 Phase 2 reference 对照复盘：按用户要求补查 phase2-plan 提到的 `askdata_agent`、`QueryMind`、`GustoBot`、`databao-agent`、`langchain_data_agent`、`CoreCoder`、`hello-agents/ch12` 相关文件，并新增 `docs/phase2-reference-review.md`。结论：M2-M6 当时未系统查 reference 在范围受控前提下可接受；当前实现无需返工，后续优先补 trace 粒度、EvalOps issue tags/scorer 分层、Phase 3 RAG 元数据契约。验证：人工回读报告；`git diff --check` 仅 Windows LF→CRLF 提示
 - 2026-07-20 M6 dev-log 加粗与 finish-module 规则补强：按用户反馈，为 M6「新概念」「设计要点」解释句补充必要加粗锚点；`finish-module` 阶段 4 新增加粗自检，要求「新概念」「设计要点」不能只加粗条目名，也要加粗关键作用、核心取舍、量化结果和边界风险。验证：人工回读修改段落
 - 2026-07-20 M6 dev-log 代码阅读路线二次优化：按用户反馈，将「读者需要重点理解哪个设计点」改进为“点名关键设计，并解释它解决什么问题、为什么这样放”；同步扩充 M6 阅读路线的 `smoke.yaml`、`_score_case()`、Streamlit 页面和阶段验收报告说明。验证：人工回读修改段落
 - 2026-07-20 M6 dev-log 阅读路线补强：按用户反馈，将 `docs/dev-log.md` M6「代码阅读路线」中 `eval/run_eval.py` 的说明从函数名罗列扩展为入口、YAML 加载、TestClient + SQLite dependency override、API 调用、评分、报告输出的逐步阅读导航。验证：人工回读修改段落
