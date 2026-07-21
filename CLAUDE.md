@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统。接受自然语言问题，自动判断查 SQL / 查文档 / 混合推理，生成结果 + 可视化 + 分析报告。
 
-> **总路线**：[LEARNING_ROADMAP.md](D:/.Work/Practice/Python-Practice/LEARNING_ROADMAP.md) — 总体规划。日常模块开发优先读 `CLAUDE.md / AGENTS.md`、`AI_CONTEXT.md` 和当前阶段计划文件（见 `AI_CONTEXT.md`「当前状态」）；阶段切换、范围调整或技术取舍等情况时再读完整 `LEARNING_ROADMAP.md`。
+> **总路线**：[LEARNING_ROADMAP.md](D:/.Work/Practice/Python-Practice/LEARNING_ROADMAP_v3.md) — 总体规划。日常模块开发优先读 `CLAUDE.md / AGENTS.md`、`AI_CONTEXT.md` 和当前阶段计划文件（见 `AI_CONTEXT.md`「当前状态」）；阶段切换、范围调整或技术取舍等情况时再读完整 `LEARNING_ROADMAP.md`。
 >
 > **技术档案**：[AI_CONTEXT.md](docs/AI_CONTEXT.md) — AI 续接 / 查 bug 优先阅读，记录当前状态、决策理由、验证快照和已知坑。
 >

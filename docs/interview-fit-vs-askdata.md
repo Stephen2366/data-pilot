@@ -231,7 +231,7 @@ DataPilot 也应该按这个结构组织，而不是一上来报技术栈。
 | 多库 MCP 路由 | 当前单库业务足够，提前做多库会稀释主线。 |
 | 长短期记忆 | 对当前“数据分析 + RAG + Eval”主线不是 P0，容易讲得虚。 |
 | 完整 Reflection 回调修正 | 很有价值，但工程量大；阶段四可先用失败归因和 SQL 错误样例库替代。 |
-| 大规模 Milvus / Rerank 依赖 | 本地 Milvus 已记录有兼容性问题，阶段三应优先 ChromaDB 或轻量本地方案。 |
+| 大规模 Milvus / Rerank 依赖 | Milvus Standalone 已通过 Docker Desktop 部署可用（2026-07-21），阶段三直接走 Milvus，不需要 ChromaDB。 |
 | 直接照搬金融/研究所话术 | 你的项目业务域是电商/SaaS 运营，应该讲自己的业务闭环，不能冒充横向交付。 |
 
 ## 面试适配风险
