@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase2-plan.md`
-- 当前模块：Phase 2 M6 EvalOps-lite 与演示收尾，已收工（待 accept-module）
-- 上一模块验收：M6 未验收（待 accept-module）
+- 当前模块：Phase 2 M6 EvalOps-lite 与演示收尾，已验收
+- 上一模块验收：M6 已验收（2026-07-21，accept-M6-20260721.md）
 - 阻塞项：无
 - 更新时间：2026-07-21
 
@@ -167,6 +167,7 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-21 M6 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 27 passed），报告 `accept-M6-20260721.md`。阶段二 v1 全部模块 M0-M6 验收完成，可进入阶段三 RAG/Hybrid 或可选 M7 Phase 2.5 硬化
 - 2026-07-21 M7 plan 补入 phase2-plan：用户确认采用“方案 B：小做 Phase 2.5”后，将 M7「Phase 2.5 Trace 与 Eval 最小硬化」加入 `docs/phase2-plan.md`。关键边界：M7 仅在 M6 accept 后执行，不属于 v1 验收标准；只做 trace 决策步骤和 Eval issue tag 最小化，不引入完整 EvalOps、数据库、LangGraph 或 RAG 存储选型变化。验证：人工回读；`git diff --check` 仅 Windows LF→CRLF 提示
 - 2026-07-21 Phase 2 优化机会分流：按用户阅读 `phase2-reference-review.md` 后的问题，新增 `docs/phase2-optimization-triage.md`，把 trace 增强、Eval issue tag、RAG 契约、模板匹配、SQL Guard reason、Streamlit 增强、LangGraph 迁移等优化点按优先级/难度/风险/roadmap 影响分流。结论：先 accept M6 锁定 baseline；可选做限时 Phase 2.5（trace 决策粒度 + Eval issue tag 最小化）；完整 EvalOps 和 LangGraph 迁移后置。验证：人工回读；`git diff --check` 仅 Windows LF→CRLF 提示
 - 2026-07-20 Phase 2 reference 对照复盘：按用户要求补查 phase2-plan 提到的 `askdata_agent`、`QueryMind`、`GustoBot`、`databao-agent`、`langchain_data_agent`、`CoreCoder`、`hello-agents/ch12` 相关文件，并新增 `docs/phase2-reference-review.md`。结论：M2-M6 当时未系统查 reference 在范围受控前提下可接受；当前实现无需返工，后续优先补 trace 粒度、EvalOps issue tags/scorer 分层、Phase 3 RAG 元数据契约。验证：人工回读报告；`git diff --check` 仅 Windows LF→CRLF 提示
