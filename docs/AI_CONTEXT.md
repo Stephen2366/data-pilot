@@ -4,9 +4,9 @@
 
 ## 当前状态（唯一权威出处）
 
-- 当前阶段计划文件：`docs/database-upgrade-plan-v5.md`
-- 当前模块：Phase 2.7.1 数据库 polish（已完成，待人工确认；未进入 Phase 3A M8）
-- 上一模块验收：Phase 2.7 已验收（2026-07-22，accept-Phase2.7-20260722.md）
+- 当前阶段计划文件：`docs/phase3a-plan.md`
+- 当前模块：Phase 3A M8 回归基线冻结（进行中）
+- 上一模块验收：Phase 2.7.1 已验收（2026-07-22，accept-Phase2.7.1-20260722.md）
 - 阻塞项：无
 - 更新时间：2026-07-22
 
@@ -29,7 +29,6 @@
 - Windows 下 `.agent_work/temp/pytest-tmp` 偶发被旧 pytest 临时目录锁住，表现为 `PermissionError` 删除 basetemp 失败；遇到时不要改业务代码，改用新的 `--basetemp=.agent_work/temp/<name>` 复跑即可。本次 M6 已用 `pytest-m6-tmp-final` 验证通过
 - DB comment 在 PowerShell 离线 SQL 输出中乱码；在线迁移和建表正常，无害。如需导出 SQL文件，再统一处理输出编码或将 DB comment 改为 ASCII（M1）
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
-- Milvus Standalone 已通过 Docker Desktop 部署成功（2026-07-21 验证），连接 `localhost:19530` 可用；阶段三 RAG 主路径改为 Milvus，不再使用 ChromaDB
 
 ## 模块技术档案（新的在上）
 
@@ -43,6 +42,7 @@
   - `coupons` 补 `ix_valid_range(valid_from, valid_to)`，服务优惠券有效期查询；`coupon_code VARCHAR(64)` 保持不动，属于无害兼容差异。
   - `product_price_history` 追加 `change_reason`，同时保留 `price_source`。前者是业务调价原因，后者是数据来源元数据，两者不要混用。
   - seed 仍然保持确定性生成：宽表退款字段从 `order.refunds` 聚合，明细行数从 `order.order_items` 计算；没有逐行写死 10000 行数据，也不依赖自增 ID 从 1 开始。
+- 参考资料：未查阅外部参考；本次按外部 AI 对 Phase 2.7 的审查意见和 `docs/database-upgrade-plan-v5.md` 口径补齐偏差，调整范围限定在 3 个 ORM 模型 + 1 条 migration + seed + 4 份 schema_desc + 数据库速查。
 - 验证快照：
   - 聚焦 pytest：`tests/test_m1_models.py tests/test_database_upgrade.py` 7 passed
   - 真实 MySQL：`alembic current` 从 `20260722_0002` 升级到 `20260722_0003 (head)`；`alembic check` 输出 `No new upgrade operations detected.`
@@ -209,6 +209,8 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-22 Phase 2.7.1 验收完成、plan v5 归档、切入 Phase 3A M8：① 将 `docs/database-upgrade-plan-v5.md` 归档至 `docs/archive/`；② 补全 AI_CONTEXT Phase 2.7.1 模块档案的「参考资料」小节；③ 当前阶段计划文件切换为 `docs/phase3a-plan.md`，当前模块改为 Phase 3A M8；④ 上一模块验收更新为 Phase 2.7.1 已验收。
+- 2026-07-22 Phase 2.7.1 验收未通过（accept-Phase2.7.1-20260722.md）：7 项检查中 2 项 ❌。检查 3 进度状态不一致（plan v5 已移至 archive 但 AI_CONTEXT 仍指向原路径；dev-log Phase 2.7 下一步指针过时未指向 2.7.1）；检查 4 最新日志不完整（AI_CONTEXT 2.7.1 模块档案缺「参考资料」小节；dev-log 无 2.7.1 条目）。其余 5 项 ✅（废弃口径清零、目录地图一致、注释合规、单一事实源抽查 4 项一致、pytest 31 passed）。待用户修复 ❌ 项后复检。
 - 2026-07-22 seed 用户姓名真实感小修：按用户反馈，`scripts/seed_data.py` 不再用 50 个基础姓名追加 `02/03/04` 后缀生成 200 用户，改为固定 200 个姓名池，包含二字名、三字名和少量英文名；保留邮箱 / 手机号唯一性和角色分布。执行 `seed --reset` 时发现 MySQL 自引用类目树会拦截 `DELETE FROM product_categories`，已在 reset 前先断开 `ProductCategory.parent_id` 再删除。验证：`python -m scripts.seed_data --reset` 成功，14 表行数和固定事实全部匹配；数据库前 12 个用户已为新姓名 + `user001...` 邮箱；`pytest tests/test_database_upgrade.py tests/test_m1_models.py` 7 passed。
 - 2026-07-22 Phase 3A 计划对齐 Phase 2.7 已验收状态：按用户确认修改 `docs/phase3a-plan.md`，将顶部「数据库升级先行」改为「Phase 2.7 数据库升级已完成」，补入 `docs/database-current-state.md` 为单一事实源入口；M8 从“新建 regression / 从 32 条候选抽样”改为“校验现有 10 条新库 regression 并冻结 baseline”；目录规划把 `eval/cases/phase3a-regression.yaml` 标为已有/校验；M9 JoinPath 验收 case 改为 `p3a_multi_001/002/003`。仅文档口径同步，未进入 M8 实现。
 - 2026-07-22 新增数据库状态速查：按用户要求新增 `docs/database-current-state.md`，作为后续 AI 快速获取 Phase 2.7 后 14 表数据库现状、seed 固定事实、指标口径、RBAC、安全边界和后续写 plan 注意事项的入口；同步在「当前技术选型快照」挂入口链接。仅文档整理，未改代码。
