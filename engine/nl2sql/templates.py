@@ -92,7 +92,7 @@ SELECT
 FROM orders o
 WHERE o.paid_at >= :month_start
   AND o.paid_at < :month_end
-  AND o.order_status <> 'cancelled'
+  AND o.order_status NOT IN ('cancelled', 'canceled')
 """.strip(),
         parameters=JUNE_2026_PARAMETERS,
         answer_hint="2026-06 GMV",
@@ -151,4 +151,3 @@ def match_template(question: str) -> MatchedTemplate | None:
                 answer_hint=template.answer_hint,
             )
     return None
-

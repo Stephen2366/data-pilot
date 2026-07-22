@@ -9,13 +9,25 @@ metrics:
     numerator: COUNT(DISTINCT refunds.id)
     denominator: COUNT(DISTINCT orders.id)
     default_time_field: orders.paid_at
-    description: 按商品等维度统计退款订单数占订单数的比例。
+    description: 按商品等维度统计退款订单数占订单数的比例；商品维度优先用 refunds.order_item_id / order_items.product_id，兼容 refunds.product_id。
   gmv:
     name: GMV
     formula: SUM(orders.order_amount)
-    filter: orders.order_status <> 'cancelled'
+    filter: orders.order_status NOT IN ('cancelled', 'canceled') AND orders.paid_at IS NOT NULL
     default_time_field: orders.paid_at
-    description: 成交总额，默认排除已取消订单。
+    description: 成交总额，默认不含运费、不扣优惠，排除未支付和已取消订单。
+  item_gmv:
+    name: 商品维度GMV
+    formula: SUM(order_items.line_amount)
+    filter: orders.order_status NOT IN ('cancelled', 'canceled') AND orders.paid_at IS NOT NULL
+    default_time_field: orders.paid_at
+    description: 商品销售额默认从订单明细聚合，再关联订单头套用支付和取消过滤。
+  net_revenue:
+    name: 净收入
+    formula: SUM(orders.actual_amount)
+    filter: orders.order_status NOT IN ('cancelled', 'canceled') AND orders.paid_at IS NOT NULL
+    default_time_field: orders.paid_at
+    description: 实付金额口径，actual_amount = order_amount + shipping_amount - discount_amount。
   order_count:
     name: 订单量
     formula: COUNT(orders.id)
@@ -26,10 +38,24 @@ metrics:
     formula: COUNT(refunds.id)
     default_time_field: refunds.requested_at
     description: 退款事实表中的退款记录数量。
+  coupon_usage_rate:
+    name: 优惠券使用率
+    formula: COUNT(DISTINCT order_coupons.order_id) / COUNT(DISTINCT orders.id)
+    default_time_field: orders.paid_at
+    description: 统计使用某类或某张优惠券的订单占比，一单多券时订单量必须去重。
+  add_to_pay_conversion_rate:
+    name: 加购到支付转化率
+    formula: payment_success_events / add_to_cart_events
+    default_time_field: user_behavior_log.event_time
+    description: 从行为日志计算支付成功事件数占加购事件数的比例，可按 device_type 分组。
+  avg_selling_price:
+    name: 历史平均售价
+    formula: AVG(product_price_history.price)
+    default_time_field: product_price_history.valid_from
+    description: 查询历史售价时按 valid_from / valid_to 做时间窗口匹配。
   pending_high_priority_ticket_count:
     name: 待处理高优先级工单数
     formula: COUNT(tickets.id)
     filter: tickets.status = 'pending' AND tickets.priority = 'high'
     default_time_field: tickets.created_at
     description: 客服运营中需要优先关注的待处理高优先级工单数量。
-

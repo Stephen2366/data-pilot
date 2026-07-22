@@ -11,6 +11,7 @@
 | id | 商品主键 | join_key | normal |
 | sku | 商品编码 | dimension | normal |
 | product_name | 商品名称 | dimension | normal |
+| category_id | 规范化商品类目 ID | join_key | normal |
 | category | 商品类目 | dimension | normal |
 | status | 商品状态 | filter | normal |
 | price | 商品标价 | metric | normal |
@@ -21,3 +22,14 @@
 ## 评测锚点
 
 - `Aurora Noise Cancelling Headphones` 是 2026-06 退款率最高商品。
+
+## 关联关系
+
+- products.category_id -> product_categories.id
+- order_items.product_id -> products.id
+- orders.product_id -> products.id
+- refunds.product_id -> products.id
+
+## 数据质量说明
+
+- `category` 是历史冗余字符串字段，默认存一级类目；需要类目树或子类目汇总时优先用 `category_id`。

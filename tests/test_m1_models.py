@@ -2,7 +2,22 @@ from sqlalchemy import ForeignKey, create_engine, inspect
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
-from app.models import Channel, KnowledgeDoc, Order, Product, Refund, Ticket, User
+from app.models import (
+    Channel,
+    Coupon,
+    KnowledgeDoc,
+    Order,
+    OrderCoupon,
+    OrderItem,
+    OrderWide,
+    Product,
+    ProductCategory,
+    ProductPriceHistory,
+    Refund,
+    Ticket,
+    User,
+    UserBehaviorLog,
+)
 from scripts.seed_data import (
     EXPECTED_SEED_COUNTS,
     REQUIRED_ROLES,
@@ -12,16 +27,23 @@ from scripts.seed_data import (
 
 
 def test_m1_metadata_contains_all_business_tables() -> None:
-    # ★ 这个测试守住 M1 的底线：7 张业务表必须全部注册进 Base.metadata。
+    # ★ 这个测试守住数据底座底线：14 张物理表必须全部注册进 Base.metadata。
     # Alembic 后续就是从这个 metadata 里读取表结构并生成 / 校验迁移。
     expected_tables = {
         "users",
         "products",
         "channels",
         "orders",
+        "order_items",
         "refunds",
         "tickets",
         "knowledge_docs",
+        "product_categories",
+        "coupons",
+        "order_coupons",
+        "user_behavior_log",
+        "product_price_history",
+        "orders_wide",
     }
 
     assert expected_tables <= set(Base.metadata.tables)
@@ -32,15 +54,32 @@ def test_m1_tables_have_primary_keys_foreign_keys_and_indexes() -> None:
     assert [column.name for column in User.__table__.primary_key] == ["id"]
     assert [column.name for column in Product.__table__.primary_key] == ["id"]
     assert [column.name for column in Channel.__table__.primary_key] == ["id"]
+    assert [column.name for column in ProductCategory.__table__.primary_key] == ["id"]
     assert [column.name for column in Order.__table__.primary_key] == ["id"]
+    assert [column.name for column in OrderItem.__table__.primary_key] == ["id"]
     assert [column.name for column in Refund.__table__.primary_key] == ["id"]
     assert [column.name for column in Ticket.__table__.primary_key] == ["id"]
     assert [column.name for column in KnowledgeDoc.__table__.primary_key] == ["id"]
+    assert [column.name for column in Coupon.__table__.primary_key] == ["id"]
+    assert [column.name for column in OrderCoupon.__table__.primary_key] == ["id"]
+    assert [column.name for column in UserBehaviorLog.__table__.primary_key] == ["id"]
+    assert [column.name for column in ProductPriceHistory.__table__.primary_key] == ["id"]
+    assert [column.name for column in OrderWide.__table__.primary_key] == ["id"]
 
     # 订单、退款、工单是事实表，必须能连回用户、商品、渠道、订单等维表 / 主事实。
     foreign_key_targets = {
         fk.target_fullname
-        for table in (Order.__table__, Refund.__table__, Ticket.__table__)
+        for table in (
+            Product.__table__,
+            Order.__table__,
+            OrderItem.__table__,
+            Refund.__table__,
+            Ticket.__table__,
+            OrderCoupon.__table__,
+            UserBehaviorLog.__table__,
+            ProductPriceHistory.__table__,
+            OrderWide.__table__,
+        )
         for column in table.columns
         for fk in column.foreign_keys
         if isinstance(fk, ForeignKey)
@@ -51,6 +90,9 @@ def test_m1_tables_have_primary_keys_foreign_keys_and_indexes() -> None:
         "products.id",
         "channels.id",
         "orders.id",
+        "order_items.id",
+        "product_categories.id",
+        "coupons.id",
     } <= foreign_key_targets
     # 高频筛选字段必须有索引：后续 API 和 SQL 模板会按角色、状态、优先级过滤。
     assert User.role.property.columns[0].index is True
@@ -83,6 +125,12 @@ def test_m1_seed_data_counts_roles_and_business_facts_are_stable() -> None:
         assert facts["top_gmv_channel_june_2026"] == "Mobile App"
         assert facts["top_refund_reason"] == "quality_issue"
         assert facts["pending_high_priority_tickets"] == 12
+        assert facts["june_fixed_50_top_usage_channel"] == "Mobile App"
+        assert facts["top_root_category_by_gmv_june_2026"] == "数码电子"
+        assert facts["aurora_avg_price_june_2026"] == 899
+        assert facts["top_add_to_pay_device_type"] == "mobile_app"
+        assert facts["orders_wide_matches_star_gmv_by_channel"] is True
+        assert facts["amount_mismatch_order_count"] == 5
 
     # 最后从数据库视角再看一次真实建出的表名，防止只检查 Python 对象。
     inspector = inspect(engine)

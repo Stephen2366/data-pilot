@@ -42,7 +42,7 @@ examples:
       FROM orders o
       WHERE o.paid_at >= :month_start
         AND o.paid_at < :month_end
-        AND o.order_status <> 'cancelled'
+        AND o.order_status NOT IN ('cancelled', 'canceled')
   - id: top_refund_reason
     question: Top退款原因是什么？
     route: sql
@@ -64,4 +64,74 @@ examples:
         COUNT(t.id) AS pending_high_priority_tickets
       FROM tickets t
       WHERE t.status = 'pending' AND t.priority = 'high'
-
+  - id: item_gmv_top_products_june_2026
+    question: 2026 年 6 月商品销售额 Top 5 是哪些？
+    route: sql
+    expected_tables: [orders, order_items, products]
+    sql: |
+      SELECT
+        p.product_name,
+        ROUND(SUM(oi.line_amount), 2) AS item_gmv
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      JOIN products p ON p.id = oi.product_id
+      WHERE o.paid_at >= :month_start
+        AND o.paid_at < :month_end
+        AND o.order_status NOT IN ('cancelled', 'canceled')
+      GROUP BY p.id, p.product_name
+      ORDER BY item_gmv DESC, p.product_name ASC
+      LIMIT 5
+  - id: june_fixed_50_channel_usage
+    question: JUNE_FIXED_50 在哪个渠道使用最多？
+    route: sql
+    expected_tables: [orders, channels, order_coupons, coupons]
+    sql: |
+      SELECT
+        c.channel_name,
+        COUNT(DISTINCT o.id) AS coupon_order_count
+      FROM orders o
+      JOIN channels c ON c.id = o.channel_id
+      JOIN order_coupons oc ON oc.order_id = o.id
+      JOIN coupons cp ON cp.id = oc.coupon_id
+      WHERE cp.coupon_code = 'JUNE_FIXED_50'
+      GROUP BY c.id, c.channel_name
+      ORDER BY coupon_order_count DESC, c.channel_name ASC
+      LIMIT 5
+  - id: net_revenue_june_2026
+    question: 2026 年 6 月净收入是多少？
+    route: sql
+    expected_tables: [orders]
+    sql: |
+      SELECT
+        ROUND(SUM(o.actual_amount), 2) AS net_revenue
+      FROM orders o
+      WHERE o.paid_at >= :month_start
+        AND o.paid_at < :month_end
+        AND o.order_status NOT IN ('cancelled', 'canceled')
+  - id: behavior_conversion_by_device
+    question: 哪个设备类型加购到支付转化率最高？
+    route: sql
+    expected_tables: [user_behavior_log]
+    sql: |
+      SELECT
+        device_type,
+        SUM(CASE WHEN event_type = 'payment_success' THEN 1 ELSE 0 END) * 1.0
+          / SUM(CASE WHEN event_type = 'add_to_cart' THEN 1 ELSE 0 END) AS conversion_rate
+      FROM user_behavior_log
+      GROUP BY device_type
+      ORDER BY conversion_rate DESC, device_type ASC
+      LIMIT 5
+  - id: aurora_avg_price_june_2026
+    question: Aurora 耳机 2026 年 6 月历史均价是多少？
+    route: sql
+    expected_tables: [products, product_price_history]
+    sql: |
+      SELECT
+        p.product_name,
+        ROUND(AVG(pph.price), 2) AS avg_price
+      FROM products p
+      JOIN product_price_history pph ON pph.product_id = p.id
+      WHERE p.sku = 'SKU-HIGH-REFUND-01'
+        AND pph.valid_from < :month_end
+        AND (pph.valid_to IS NULL OR pph.valid_to > :month_start)
+      GROUP BY p.id, p.product_name

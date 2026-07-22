@@ -1,0 +1,125 @@
+relations:
+  - id: orders_user
+    relation_type: foreign_key
+    grain: order
+    from_table: orders
+    from_column: user_id
+    to_table: users
+    to_column: id
+    cardinality: many_to_one
+    join_type: inner
+    when_to_use: 订单按用户、用户状态、用户角色分析时使用
+    avoid_when: 只做订单级总量且不需要用户维度时不要 join users
+    aggregation_warning: null
+  - id: products_category
+    relation_type: foreign_key
+    grain: product_to_category
+    from_table: products
+    from_column: category_id
+    to_table: product_categories
+    to_column: id
+    cardinality: many_to_one
+    join_type: left
+    when_to_use: 需要类目层级、一级类目及子类目汇总时使用
+    avoid_when: 只按 products.category 冗余字段粗略展示时可不 join
+    aggregation_warning: 查询一级类目下所有子类目时需要递归展开 parent_id
+  - id: orders_channel
+    relation_type: foreign_key
+    grain: order
+    from_table: orders
+    from_column: channel_id
+    to_table: channels
+    to_column: id
+    cardinality: many_to_one
+    join_type: inner
+    when_to_use: 渠道订单量、渠道 GMV、渠道退款分析时使用
+    avoid_when: 只计算全站 GMV 时不要 join channels
+    aggregation_warning: null
+  - id: orders_primary_product
+    relation_type: compatibility_foreign_key
+    grain: order_primary_product
+    from_table: orders
+    from_column: product_id
+    to_table: products
+    to_column: id
+    cardinality: many_to_one
+    join_type: inner
+    when_to_use: 兼容阶段二旧 SQL 或查询订单主商品时使用
+    avoid_when: 商品维度 GMV / 销量优先使用 order_items
+    aggregation_warning: orders.product_id 只代表主商品，会漏掉一单多商品中的非主商品
+  - id: order_items_order
+    relation_type: foreign_key
+    grain: order_item_to_order
+    from_table: order_items
+    from_column: order_id
+    to_table: orders
+    to_column: id
+    cardinality: many_to_one
+    join_type: inner
+    when_to_use: 商品维度 GMV、销量、明细追溯时使用
+    avoid_when: 只做订单级 GMV 或订单量时优先直接查 orders
+    aggregation_warning: join order_items 后统计订单量必须 COUNT(DISTINCT orders.id)
+  - id: order_items_product
+    relation_type: foreign_key
+    grain: order_item
+    from_table: order_items
+    from_column: product_id
+    to_table: products
+    to_column: id
+    cardinality: many_to_one
+    join_type: inner
+    when_to_use: 商品明细聚合、商品 TopN、商品退款归因时使用
+    avoid_when: 只查订单头状态时不需要 join products
+    aggregation_warning: 商品维度金额默认 SUM(order_items.line_amount)
+  - id: refunds_order_item
+    relation_type: nullable_foreign_key
+    grain: refund_to_item
+    from_table: refunds
+    from_column: order_item_id
+    to_table: order_items
+    to_column: id
+    cardinality: many_to_one
+    join_type: left
+    when_to_use: 商品退款率、明细退款归因时优先使用
+    avoid_when: 整单退款 order_item_id 为空时回退 refunds.order_id / refunds.product_id
+    aggregation_warning: order_item_id 可空，不能用 inner join 丢掉整单退款
+  - id: orders_coupons
+    relation_type: bridge
+    grain: order_to_coupon
+    from_table: orders
+    from_column: id
+    through_table: order_coupons
+    through_from_column: order_id
+    through_to_column: coupon_id
+    to_table: coupons
+    to_column: id
+    cardinality: many_to_many
+    join_type: left
+    when_to_use: 优惠券使用率、优惠金额、券类型分析时使用
+    avoid_when: 只计算 GMV 时不要 join coupons
+    aggregation_warning: 一单可用多张券，统计订单量必须 COUNT(DISTINCT orders.id)
+  - id: product_category_tree
+    relation_type: recursive_hierarchy
+    grain: category
+    from_table: product_categories
+    from_column: parent_id
+    to_table: product_categories
+    to_column: id
+    cardinality: many_to_one
+    join_type: recursive_cte
+    when_to_use: 查询一级类目及其所有子类目 GMV / 销量时使用
+    avoid_when: 只按 products.category 冗余字符串做粗略展示时不要强行递归
+    aggregation_warning: 递归展开后再 join products，避免只统计父类目直属商品
+  - id: product_price_history_temporal
+    relation_type: temporal
+    grain: product_price_version
+    from_table: product_price_history
+    from_column: product_id
+    to_table: products
+    to_column: id
+    cardinality: many_to_one
+    join_type: inner
+    temporal_condition: "target_time >= valid_from AND (target_time < valid_to OR valid_to IS NULL)"
+    when_to_use: 查询历史售价、当时价格、指定月份平均售价时使用
+    avoid_when: 查询当前标价时优先使用 products.price
+    aggregation_warning: 每个商品同一时间点应只命中一个价格版本

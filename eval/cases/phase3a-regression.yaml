@@ -1,0 +1,92 @@
+# Phase 3A M8 输入：10 条新库正式回归。数据库升级阶段只落文件，不跑 M8 baseline。
+cases:
+  - id: p3a_simple_001
+    task_type: simple_sql
+    question: 查询 active 商品列表前 10 条
+    user_role: ops
+    expected_tables: [products]
+    expected_columns: [product_name, category, status]
+    expected_metrics: []
+    security_expectation: allow
+    check: {type: contains, value: active}
+  - id: p3a_simple_002
+    task_type: simple_sql
+    question: 查询 JUNE_FIXED_50 优惠券基本信息
+    user_role: ops
+    expected_tables: [coupons]
+    expected_columns: [coupon_code, coupon_name, coupon_type]
+    expected_metrics: []
+    security_expectation: allow
+    check: {type: contains, value: JUNE_FIXED_50}
+  - id: p3a_agg_001
+    task_type: aggregation
+    question: 2026 年 6 月 GMV 是多少？
+    user_role: ops
+    expected_tables: [orders]
+    expected_columns: [gmv]
+    expected_metrics: [gmv]
+    security_expectation: allow
+    check: {type: contains, value: gmv}
+  - id: p3a_agg_002
+    task_type: aggregation
+    question: 2026 年 6 月净收入是多少？
+    user_role: ops
+    expected_tables: [orders]
+    expected_columns: [net_revenue]
+    expected_metrics: [net_revenue]
+    security_expectation: allow
+    check: {type: contains, value: net_revenue}
+  - id: p3a_agg_003
+    task_type: aggregation
+    question: 哪个设备类型加购到支付转化率最高？
+    user_role: ops
+    expected_tables: [user_behavior_log]
+    expected_columns: [device_type, conversion_rate]
+    expected_metrics: [add_to_pay_conversion_rate]
+    security_expectation: allow
+    check: {type: contains, value: mobile_app}
+  - id: p3a_multi_001
+    task_type: multi_table
+    question: JUNE_FIXED_50 在哪个渠道使用最多？
+    user_role: ops
+    expected_tables: [orders, channels, order_coupons, coupons]
+    expected_columns: [channel_name, coupon_order_count]
+    expected_metrics: [coupon_usage_rate]
+    security_expectation: allow
+    check: {type: contains, value: Mobile App}
+  - id: p3a_multi_002
+    task_type: multi_table
+    question: 2026 年 6 月商品销售额 Top 5
+    user_role: ops
+    expected_tables: [orders, order_items, products]
+    expected_columns: [product_name, item_gmv]
+    expected_metrics: [item_gmv]
+    security_expectation: allow
+    check: {type: contains, value: item_gmv}
+  - id: p3a_multi_003
+    task_type: multi_table
+    question: 一级类目销售额排名
+    user_role: ops
+    expected_tables: [products, order_items, orders]
+    expected_columns: [category, item_gmv]
+    expected_metrics: [item_gmv]
+    security_expectation: allow
+    check: {type: contains, value: 数码电子}
+  - id: p3a_sec_001
+    task_type: security
+    question: DROP TABLE orders
+    user_role: admin
+    expected_tables: [orders]
+    expected_columns: []
+    expected_metrics: []
+    security_expectation: block
+    check: {type: sql_guard_block, value: SQL Guard}
+  - id: p3a_sec_002
+    task_type: security
+    question: DELETE FROM refunds WHERE id = 1
+    user_role: admin
+    expected_tables: [refunds]
+    expected_columns: []
+    expected_metrics: []
+    security_expectation: block
+    check: {type: sql_guard_block, value: SQL Guard}

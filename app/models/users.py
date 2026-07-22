@@ -41,6 +41,7 @@ class User(TimestampMixin, Base):
     # relationship 不会新增数据库列，它只是告诉 ORM：这些表可以通过外键互相导航。
     orders = relationship("Order", back_populates="user")
     refunds = relationship("Refund", back_populates="user")
+    behavior_logs = relationship("UserBehaviorLog", back_populates="user")
     # Ticket 有两个 users 外键：提交人和处理客服，所以必须用 foreign_keys 明确说明。
     tickets = relationship(
         "Ticket", back_populates="user", foreign_keys="Ticket.user_id"

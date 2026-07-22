@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Integer, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -23,6 +23,10 @@ class Product(TimestampMixin, Base):
     sku: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     # 商品名 / 类目常用于筛选、分组和展示，因此加索引提高查询效率。
     product_name: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    # category_id 是新库的规范化类目外键；category 字符串保留为历史冗余字段，兼容旧 API / SQL。
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_categories.id"), nullable=True, index=True
+    )
     category: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     # 商品状态保留 paused 等非 active 数据，后续 API 可以演示状态筛选。
     status: Mapped[str] = mapped_column(
@@ -33,6 +37,10 @@ class Product(TimestampMixin, Base):
     # 上架时间可为空：有些历史或测试商品可能没有明确上架时间。
     launched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # 关系字段：商品可以出现在多笔订单和多笔退款中。
+    # 关系字段：商品可以出现在多笔订单、订单明细、退款和行为日志中。
+    category_ref = relationship("ProductCategory", back_populates="products")
     orders = relationship("Order", back_populates="product")
+    order_items = relationship("OrderItem", back_populates="product")
     refunds = relationship("Refund", back_populates="product")
+    behavior_logs = relationship("UserBehaviorLog", back_populates="product")
+    price_history = relationship("ProductPriceHistory", back_populates="product")

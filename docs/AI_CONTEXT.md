@@ -4,11 +4,11 @@
 
 ## 当前状态（唯一权威出处）
 
-- 当前阶段计划文件：`docs/phase2-plan.md`
-- 当前模块：Phase 2 M6 EvalOps-lite 与演示收尾，已验收
+- 当前阶段计划文件：`docs/database-upgrade-plan-v5.md`
+- 当前模块：Phase 2.7 数据库升级，已完成（未验收）
 - 上一模块验收：M6 已验收（2026-07-21，accept-M6-20260721.md）
 - 阻塞项：无
-- 更新时间：2026-07-21
+- 更新时间：2026-07-22
 
 ## 当前技术选型快照
 
@@ -31,6 +31,26 @@
 - Milvus Standalone 已通过 Docker Desktop 部署成功（2026-07-21 验证），连接 `localhost:19530` 可用；阶段三 RAG 主路径改为 Milvus，不再使用 ChromaDB
 
 ## 模块技术档案（新的在上）
+
+### Phase 2.7 数据库升级（2026-07-22）
+
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`app/models/*`、`app/db/base.py`、`app/schemas/resources.py`、`alembic/versions/20260722_0002_database_upgrade_14_tables.py`、`scripts/seed_data.py`、`domain_pack/schema_desc/*`、`domain_pack/metrics.yaml`、`domain_pack/sql_examples/basic.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-regression.yaml`、`tests/test_m1_models.py`、`tests/test_database_upgrade.py`、`tests/test_m5_agent_response.py`、`docs/phase3a-plan.md`、`.agent_work/temp/database-upgrade-notes.md`、`.agent_work/temp/database-upgrade-seed-summary.md`
+- 关键决策：
+  - 按 `docs/database-upgrade-plan-v5.md` 一次性将 7 表数据底座升级为 14 张物理表：新增 `product_categories`、`order_items`、`coupons`、`order_coupons`、`user_behavior_log`、`product_price_history`、`orders_wide`；旧表增补 `products.category_id`、`orders.source_order_no/external_order_no/shipping_amount/discount_amount/actual_amount`、`orders.paid_at nullable`、`refunds.source_order_no/order_item_id`
+  - 兼容阶段二旧链路：保留 `orders.product_id` 和 `products.category`，让 M2 API、M3/M4 模板 SQL、M6 smoke 继续运行；新指标口径在 `metrics.yaml` / schema_desc 中声明商品维度默认走 `order_items`
+  - Seed 不依赖自增 ID 从 1 开始：外键用 ORM 对象关系，固定事实用 `sku/coupon_code/channel_code/category/device_type` 等稳定业务键定位；不把 10000 行数据逐行写死
+  - 数据质量彩蛋不破坏主表外键 / 唯一约束：重复源单号放在 `source_order_no/external_order_no`，弱关联退款放在 `refunds.source_order_no`，金额不一致控制为 5 条可解释样例
+  - MySQL downgrade 按真实 DDL 行为修正：新表整表 drop 优先，避免外键索引逐个 drop 被拦截；回滚旧 `orders.paid_at NOT NULL` 前先回填 NULL；`coupons.coupon_code` 只保留 unique constraint，避免 Alembic metadata diff
+- 参考资料：未查阅外部参考；本次按 `database-upgrade-plan-v5.md`、现有 M1-M6 ORM / seed / eval 结构和用户明确约束实现，没有启动 Phase 3A M8，也没有提前实现 `schema_retrieval` / `query_plan` / `trace_steps`
+- 验证快照：
+  - 真实 MySQL migration：完整 `alembic downgrade 20260717_0001` -> `alembic upgrade head` -> `python -m scripts.seed_data --reset` 通过；最终 `alembic current` = `20260722_0002 (head)`，`alembic check` 无新增操作
+  - Seed 行数：users 200 / product_categories 15 / products 50 / channels 6 / orders 10000 / order_items 18000 / refunds 1000 / tickets 300 / knowledge_docs 10 / coupons 10 / order_coupons 3000 / user_behavior_log 10000 / product_price_history 150 / orders_wide 10000
+  - 固定事实：GMV 11285752.00；Aurora 仍为 6 月退款率最高商品；Mobile App 仍为 6 月 GMV Top 渠道；Top 退款原因 `quality_issue`；待处理高优先级工单 12；`JUNE_FIXED_50` 在 Mobile App 使用最多；数码电子一级类目 GMV Top；Aurora 6 月历史均价 899.00；`mobile_app` 设备转化率最高；宽表与星型渠道 GMV 一致；金额不一致订单 5 条
+  - 自动化：`pytest` 全量 31 passed, 1 warning；M6 smoke `python -m eval.run_eval --cases eval/cases/smoke.yaml ...` 6/6 passed；`git diff --check` 无 whitespace error，仅 Windows CRLF 提示
+- 遗留：
+  - Phase 2.7 当前为“已完成（未验收）”，等待用户人工检查后可调用 `accept-module`
+  - Phase 3A M8 后续直接基于升级后的 14 表新库跑 baseline；`eval/cases/database-upgrade-challenge.yaml` 只作为数据库升级挑战集和困难诊断素材，不替代 `phase3a-regression.yaml` 的 10 条正式回归
+  - `app.db.base` / `app.models` 循环导入规避方式仍沿用既有约定；本次 seed 命令行入口通过先导入 `app.db.base` 避坑，后续若重构可拆 `base_class.py`
 
 ### M6 EvalOps-lite 与演示收尾（2026-07-20）
 

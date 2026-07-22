@@ -5,9 +5,9 @@
 
 ## 开工前置说明：数据库升级先行
 
-阶段三A正式开工前，计划先执行一次数据库底座升级（暂定 Phase 2.7），当前执行规格以 `docs/database-upgrade-plan-v5.md` 为准。升级目标是把阶段二 v1 的 7 表 toy-ish 数据库，扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
+阶段三A正式开工前，已先执行一次数据库底座升级（Phase 2.7），执行规格以 `docs/database-upgrade-plan-v5.md` 为准。升级结果是把阶段二 v1 的 7 表数据底座扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
 
-这意味着本文档目前仍保留 Phase 3A 的主线设计，但 **M8-M12 的具体输入需要在数据库升级完成后小修一次**。预计调整如下：
+这意味着本文档仍保留 Phase 3A 的主线设计，但 **M8-M12 的具体输入默认基于升级后的新库**。调整如下：
 
 - `eval/cases/phase3a-regression.yaml` 仍保持 10 条正式回归硬门，用于 v1 baseline vs 新 Text2SQL pipeline 对照；但 case 选择应基于新库，不再围绕旧 7 表 schema。
 - 新增的 `eval/cases/database-upgrade-challenge.yaml` 是数据库复杂度挑战集，不替代 Phase 3A 正式 10 条 regression；它主要作为数据库升级验收和困难诊断素材。
@@ -16,7 +16,7 @@
 - M10/M11 的 QueryPlanStep、局部 Schema prompt 和 trace_steps 需要覆盖新库里的订单明细、多对多 JOIN、金额口径、宽表选择、递归类目、SCD 时间窗口等场景。
 - 数据库升级阶段只验结构、seed、固定事实、基础 challenge 和安全；`schema_retrieval`、`join_path`、`query_plan` 等完整 trace_steps 仍属于 Phase 3A M11/M12 验收。
 
-数据库升级完成后，先更新本文档的「单一事实源」「当前差异清单」「目录与文件规划」「M8」和「阶段三A验收标准」中与旧库、case 构成、relation 来源相关的文字，再启动 M8。
+启动 M8 时直接使用升级后的 14 表新库；如果继续小修本文档的「目录与文件规划」「M8」和「阶段三A验收标准」，只做新库 case 细节同步，不再回到旧 7 表底座。
 
 ## 阶段三A总目标
 
@@ -58,10 +58,12 @@
 ## 单一事实源
 
 - 阶段三A执行计划：以 `docs/phase3a-plan.md` 为准。
+- 数据库底座升级规格：以 `docs/database-upgrade-plan-v5.md` 和本项目实际 migration `20260722_0002` 为准。
 - 模块实时进度：以 `docs/AI_CONTEXT.md`「当前状态」为准。
 - 项目目录结构：以 `AGENTS.md` / `CLAUDE.md`「目录结构」为准。
 - 阶段三A总路线与技术取舍：以 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`「阶段三A」为准；本计划只把它拆成可施工模块。
 - 阶段三A 10 条回归用例：以 `eval/cases/phase3a-regression.yaml` 为准。
+- 数据库升级 16 条挑战用例：以 `eval/cases/database-upgrade-challenge.yaml` 为准，不替代 Phase 3A 10 条正式回归。
 - 阶段二 32 条用例候选池：以 `eval/cases_plan.md` 为准。
 - `QueryRequest` / `AgentResponse` 对外契约：以 `app/schemas/agent.py` 为准。
 - `trace_steps` 内部结构：以 `engine/trace/recorder.py` 的 Pydantic Schema 为准。

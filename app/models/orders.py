@@ -26,6 +26,9 @@ class Order(TimestampMixin, Base):
     # 主键与业务单号分开：id 适合做外键，order_no 适合给用户或客服查看。
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     order_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # 源系统单号允许重复，用来模拟真实企业里“外部单号不干净”的逻辑脏数据。
+    source_order_no: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    external_order_no: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     # 三个外键把订单连接到“谁买的、买了什么、从哪个渠道来”。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
@@ -45,15 +48,20 @@ class Order(TimestampMixin, Base):
     )
     # 金额字段使用 Decimal / Numeric，适合财务类精确计算。
     order_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    shipping_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    actual_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    # 支付时间是分析时间窗口的核心字段，M3/M4 的“本月 GMV”会依赖它。
-    paid_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    # 支付时间可为空：未支付订单仍可存在，但 GMV 默认必须排除 paid_at IS NULL。
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     # 关系字段 ================================================================
     # 多对一：多笔订单属于同一个用户 / 商品 / 渠道。
     user = relationship("User", back_populates="orders")
     product = relationship("Product", back_populates="orders")
     channel = relationship("Channel", back_populates="orders")
-    # 一对多：一笔订单后续可能有退款记录或客服工单。
+    # 一对多：一笔订单后续可能有明细、优惠券、退款记录或客服工单。
+    order_items = relationship("OrderItem", back_populates="order")
+    order_coupons = relationship("OrderCoupon", back_populates="order")
     refunds = relationship("Refund", back_populates="order")
     tickets = relationship("Ticket", back_populates="order")

@@ -144,4 +144,4 @@ def test_aggregation_questions_generate_three_basic_chart_shapes(tmp_path: Path)
     assert refund_rate["chart_spec"]["encoding"]["x"]["field"] == "refund_rate"
 
     assert june_gmv["chart_spec"]["mark"] == "bar"
-    assert june_gmv["chart_spec"]["data"]["values"] == [{"metric_name": "gmv", "value": 213297.0}]
+    assert june_gmv["chart_spec"]["data"]["values"] == [{"metric_name": "gmv", "value": 11285752.0}]

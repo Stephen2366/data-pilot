@@ -22,6 +22,7 @@ class ProductRead(BaseModel):
     id: int
     sku: str
     product_name: str
+    category_id: int | None
     category: str
     status: str
     price: Decimal
@@ -35,13 +36,18 @@ class OrderRead(BaseModel):
 
     id: int
     order_no: str
+    source_order_no: str | None
+    external_order_no: str | None
     user_id: int
     product_id: int
     channel_id: int
     order_status: str
     order_amount: Decimal
+    shipping_amount: Decimal
+    discount_amount: Decimal
+    actual_amount: Decimal
     quantity: int
-    paid_at: datetime
+    paid_at: datetime | None
 
 
 class RefundRead(BaseModel):
@@ -51,7 +57,9 @@ class RefundRead(BaseModel):
 
     id: int
     refund_no: str
+    source_order_no: str | None
     order_id: int
+    order_item_id: int | None
     user_id: int
     product_id: int
     refund_status: str

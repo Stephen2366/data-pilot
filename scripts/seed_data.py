@@ -1,103 +1,136 @@
-"""种子数据脚本：向 datapilot_dev 库填充确定性的演示数据。
+"""种子数据脚本：生成 Phase 2.7 的 14 表确定性业务数据。
 
-★ 每次重跑生成相同数据（确定性种子），供开发、测试和 demo 使用。
-命令行：python -m scripts.seed_data --reset
+★ 这个文件是 DataPilot 数据底座的“数据工厂”，不是静态 SQL dump。所有 1 万级订单、
+订单明细、优惠券、行为日志和固定事实都由稳定规则生成，重跑可复现，也不依赖自增 ID
+从 1 开始。命令行：`python -m scripts.seed_data --reset`。
 """
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, delete, func, select
+from sqlalchemy import case, create_engine, delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
-from app.db.base import Base
-from app.models import Channel, KnowledgeDoc, Order, Product, Refund, Ticket, User
+from app.db.base import Base  # noqa: F401  # 先注册 metadata，避免 app.models 聚合包循环导入。
+from app.models import (
+    Channel,
+    Coupon,
+    KnowledgeDoc,
+    Order,
+    OrderCoupon,
+    OrderItem,
+    OrderWide,
+    Product,
+    ProductCategory,
+    ProductPriceHistory,
+    Refund,
+    Ticket,
+    User,
+    UserBehaviorLog,
+)
 
 EXPECTED_SEED_COUNTS = {
-    "users": 50,
-    "products": 30,
+    "users": 200,
+    "product_categories": 15,
+    "products": 50,
     "channels": 6,
-    "orders": 500,
-    "refunds": 80,
-    "tickets": 120,
-    "knowledge_docs": 8,
+    "orders": 10_000,
+    "order_items": 18_000,
+    "refunds": 1_000,
+    "tickets": 300,
+    "knowledge_docs": 10,
+    "coupons": 10,
+    "order_coupons": 3_000,
+    "user_behavior_log": 10_000,
+    "product_price_history": 150,
+    "orders_wide": 10_000,
 }
+
 # ★ 这 4 个角色来自 Phase 2 的 RBAC 设计，M4 会继续用它们做权限矩阵。
 REQUIRED_ROLES = {"admin", "ops", "customer_service", "demo_user"}
+SEED_SUMMARY_PATH = Path(".agent_work/temp/database-upgrade-seed-summary.md")
+MONEY = Decimal("0.01")
 
 
-# 固定事实说明 ================================================================
-# ★ 这些事实是后续 SQL 评测的“标准答案锚点”，seed 每次重跑都保持稳定：
-# 1. 2026-06 退款率最高商品：Aurora Noise Cancelling Headphones。
-# 2. 2026-06 GMV 最高渠道：Mobile App。
-# 3. 全量退款 Top 原因：quality_issue。
-# 4. 待处理高优先级工单数量：12。
+def _money(value: Decimal | int | str) -> Decimal:
+    """统一金额四舍五入，避免 Decimal 口径散在各个构造函数里。"""
+
+    return Decimal(value).quantize(MONEY, rounding=ROUND_HALF_UP)
 
 
 def seed_database(session: Session, reset_existing: bool = False) -> dict[str, Any]:
-    """向已迁移完成的数据库中填充确定性的演示数据。
+    """向已迁移完成的数据库中填充确定性模拟业务数据。
 
     参数说明：
-    - session：外部传入事务会话，方便 API、测试和命令行复用同一套逻辑。
-    - reset_existing：为 True 时先清空 7 张业务表；生产环境不要对真实库使用。
+    - session：外部传入事务会话，测试、eval 和命令行共用同一入口。
+    - reset_existing：为 True 时按外键依赖顺序清空 14 张物理表；不重置自增 ID。
     """
 
-    # 步骤 1：按需清空旧数据 =================================================
-    # reset 模式用于本地反复验收。真实生产库不应直接清空业务表。
     if reset_existing:
         _delete_existing_rows(session)
 
-    # 步骤 2：先创建“父表 / 维表” ============================================
-    # 订单、退款、工单都有外键，必须先让用户、商品、渠道、文档拥有主键 id。
+    categories = _build_product_categories()
     users = _build_users()
-    products = _build_products()
     channels = _build_channels()
+    products = _build_products(categories)
     docs = _build_knowledge_docs()
+    coupons = _build_coupons()
+    price_history = _build_product_price_history(products)
 
-    session.add_all([*users, *products, *channels, *docs])
-    # flush 会把对象写入数据库事务并拿到自增 id，但暂时不 commit。
-    # 这样后续 orders 可以直接通过 user/product/channel 关系建立外键。
+    session.add_all([*categories, *users, *channels, *products, *docs, *coupons, *price_history])
     session.flush()
 
-    # 步骤 3：再创建“子表 / 事实表” ==========================================
-    # orders 依赖用户、商品、渠道；refunds 和 tickets 又依赖 orders。
-    orders = _build_orders(users=users, products=products, channels=channels)
-    session.add_all(orders)
+    orders, order_items = _build_orders_and_items(users=users, products=products, channels=channels)
+    session.add_all([*orders, *order_items])
+    session.flush()
+
+    order_coupons = _build_order_coupons(orders=orders, coupons=coupons)
+    session.add_all(order_coupons)
     session.flush()
 
     refunds = _build_refunds(orders)
     tickets = _build_tickets(users=users, orders=orders)
-    session.add_all([*refunds, *tickets])
-    # 所有表一起提交，保证 seed 要么完整成功，要么完整回滚。
+    behavior_logs = _build_user_behavior_logs(users=users, products=products, channels=channels)
+    session.add_all([*refunds, *tickets, *behavior_logs])
+    session.flush()
+
+    orders_wide = _build_orders_wide(orders)
+    session.add_all(orders_wide)
     session.commit()
 
-    # 步骤 4：返回摘要，给命令行输出、测试断言和后续排查使用。====================
-    counts = _count_seed_tables(session)
-    return {
-        "counts": counts,
+    summary = {
+        "counts": _count_seed_tables(session),
         "roles": sorted({user.role for user in users}),
         "facts": verify_business_facts(session),
     }
+    _write_seed_summary(summary)
+    return summary
 
 
 def verify_business_facts(session: Session) -> dict[str, Any]:
-    """对种子数据中内嵌的业务事实执行稳定的 SQL 校验。
+    """查询 Phase 2.7 的固定业务事实，供测试、smoke 和后续 eval 复用。
 
-    ★ 这里不是为了业务功能服务，而是为了”验收可复现”。后续 Agent 生成 SQL 后，
-    可以拿这些事实当标准答案，判断它查出来的关键结果是否正确。
+    ★ 固定事实不用自增 ID 定位，只用商品名、SKU、coupon_code、channel_code 等稳定业务键。
     """
 
-    # 统一定义 2026-06 的左闭右开时间窗口：[2026-06-01, 2026-07-01)。
-    # 这样不需要处理“6 月最后一秒”的边界问题。
     june_start = datetime(2026, 6, 1)
     july_start = datetime(2026, 7, 1)
+    valid_order_filter = (
+        Order.paid_at >= june_start,
+        Order.paid_at < july_start,
+        Order.order_status.notin_(["cancelled", "canceled"]),
+    )
 
-    # 事实 1：按商品统计 2026-06 退款率，退款率 = 退款订单数 / 订单数。
+    gmv = session.execute(
+        select(func.round(func.sum(Order.order_amount), 2)).where(*valid_order_filter)
+    ).scalar_one()
+
     refund_rate_stmt = (
         select(
             Product.product_name,
@@ -115,22 +148,16 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
     )
     highest_refund_rate_product = session.execute(refund_rate_stmt).scalar_one()
 
-    # 事实 2：按渠道统计 2026-06 GMV，排除已取消订单。
-    gmv_stmt = (
+    top_channel_stmt = (
         select(Channel.channel_name, func.sum(Order.order_amount).label("gmv"))
         .join(Order, Order.channel_id == Channel.id)
-        .where(
-            Order.paid_at >= june_start,
-            Order.paid_at < july_start,
-            Order.order_status != "cancelled",
-        )
+        .where(*valid_order_filter)
         .group_by(Channel.id, Channel.channel_name)
         .order_by(func.sum(Order.order_amount).desc(), Channel.channel_name.asc())
         .limit(1)
     )
-    top_gmv_channel = session.execute(gmv_stmt).scalar_one()
+    top_gmv_channel = session.execute(top_channel_stmt).scalar_one()
 
-    # 事实 3：全量退款原因 Top 1。
     reason_stmt = (
         select(Refund.refund_reason, func.count(Refund.id).label("refund_count"))
         .group_by(Refund.refund_reason)
@@ -139,145 +166,284 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
     )
     top_refund_reason = session.execute(reason_stmt).scalar_one()
 
-    # 事实 4：待处理高优先级工单数量。
     pending_ticket_stmt = select(func.count(Ticket.id)).where(Ticket.status == "pending", Ticket.priority == "high")
     pending_high_priority_tickets = session.execute(pending_ticket_stmt).scalar_one()
 
+    coupon_channel_stmt = (
+        select(Channel.channel_name, func.count(func.distinct(Order.id)).label("usage_count"))
+        .join(Order, Order.channel_id == Channel.id)
+        .join(OrderCoupon, OrderCoupon.order_id == Order.id)
+        .join(Coupon, Coupon.id == OrderCoupon.coupon_id)
+        .where(Coupon.coupon_code == "JUNE_FIXED_50")
+        .group_by(Channel.id, Channel.channel_name)
+        .order_by(func.count(func.distinct(Order.id)).desc(), Channel.channel_name.asc())
+        .limit(1)
+    )
+    june_fixed_coupon_top_channel = session.execute(coupon_channel_stmt).scalar_one()
+
+    category_stmt = (
+        select(Product.category, func.sum(OrderItem.line_amount).label("category_gmv"))
+        .join(OrderItem, OrderItem.product_id == Product.id)
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(*valid_order_filter)
+        .group_by(Product.category)
+        .order_by(func.sum(OrderItem.line_amount).desc(), Product.category.asc())
+        .limit(1)
+    )
+    top_root_category = session.execute(category_stmt).scalar_one()
+
+    aurora_price_stmt = (
+        select(func.round(func.avg(ProductPriceHistory.price), 2))
+        .join(Product, Product.id == ProductPriceHistory.product_id)
+        .where(
+            Product.sku == "SKU-HIGH-REFUND-01",
+            ProductPriceHistory.valid_from < july_start,
+            (ProductPriceHistory.valid_to.is_(None)) | (ProductPriceHistory.valid_to > june_start),
+        )
+    )
+    aurora_avg_price = session.execute(aurora_price_stmt).scalar_one()
+
+    conversion_stmt = (
+        select(
+            UserBehaviorLog.device_type,
+            (
+                func.sum(case((UserBehaviorLog.event_type == "payment_success", 1), else_=0))
+                * 1.0
+                / func.sum(case((UserBehaviorLog.event_type == "add_to_cart", 1), else_=0))
+            ).label("conversion_rate"),
+        )
+        .group_by(UserBehaviorLog.device_type)
+        .order_by(
+            (
+                func.sum(case((UserBehaviorLog.event_type == "payment_success", 1), else_=0))
+                * 1.0
+                / func.sum(case((UserBehaviorLog.event_type == "add_to_cart", 1), else_=0))
+            ).desc(),
+            UserBehaviorLog.device_type.asc(),
+        )
+        .limit(1)
+    )
+    top_conversion_device = session.execute(conversion_stmt).scalar_one()
+
+    star_gmv = session.execute(
+        select(Channel.channel_code, func.round(func.sum(Order.order_amount), 2))
+        .join(Order, Order.channel_id == Channel.id)
+        .where(*valid_order_filter)
+        .group_by(Channel.channel_code)
+        .order_by(Channel.channel_code.asc())
+    ).all()
+    wide_gmv = session.execute(
+        select(OrderWide.channel_code, func.round(func.sum(OrderWide.order_amount), 2))
+        .where(
+            OrderWide.paid_at >= june_start,
+            OrderWide.paid_at < july_start,
+            OrderWide.order_status.notin_(["cancelled", "canceled"]),
+        )
+        .group_by(OrderWide.channel_code)
+        .order_by(OrderWide.channel_code.asc())
+    ).all()
+
+    mismatch_count = session.execute(
+        select(func.count())
+        .select_from(
+            select(Order.id)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .group_by(Order.id, Order.order_amount)
+            .having(func.round(func.sum(OrderItem.line_amount) - Order.order_amount, 2) != 0)
+            .subquery()
+        )
+    ).scalar_one()
+
     return {
+        "gmv_june_2026": gmv,
         "highest_refund_rate_product_june_2026": highest_refund_rate_product,
         "top_gmv_channel_june_2026": top_gmv_channel,
         "top_refund_reason": top_refund_reason,
         "pending_high_priority_tickets": pending_high_priority_tickets,
+        "june_fixed_50_top_usage_channel": june_fixed_coupon_top_channel,
+        "top_root_category_by_gmv_june_2026": top_root_category,
+        "aurora_avg_price_june_2026": aurora_avg_price,
+        "top_add_to_pay_device_type": top_conversion_device,
+        "orders_wide_matches_star_gmv_by_channel": star_gmv == wide_gmv,
+        "amount_mismatch_order_count": mismatch_count,
     }
 
 
 def _delete_existing_rows(session: Session) -> None:
-    """按外键依赖顺序清空 7 张业务表，避免 MySQL 外键约束阻止删除。"""
-    # 按外键依赖从子表到父表删除，避免 MySQL 外键约束阻止清空。
-    for model in (Ticket, Refund, Order, KnowledgeDoc, Product, Channel, User):
+    """按外键依赖顺序清空 14 张物理表，不依赖自增 ID 回到 1。"""
+
+    for model in (
+        OrderWide,
+        UserBehaviorLog,
+        Ticket,
+        Refund,
+        OrderCoupon,
+        OrderItem,
+        ProductPriceHistory,
+        Order,
+        Coupon,
+        KnowledgeDoc,
+        Product,
+        ProductCategory,
+        Channel,
+        User,
+    ):
         session.execute(delete(model))
     session.flush()
 
 
-# 50 个真实感中文姓名，适合演示和面试截图。
-_REALISTIC_NAMES: list[str] = [
-    "陈米娅", "王逸凡", "张雨薇", "李思源", "刘若晴",
-    "黄子轩", "赵晓萌", "吴俊杰", "杨雨桐", "周明哲",
-    "徐悦然", "孙博文", "马晓琳", "郭浩然", "林芷若",
-    "何志远", "高语嫣", "唐瑞霖", "程一诺", "罗嘉懿",
-    "彭婉清", "潘奕辰", "邓梓涵", "肖景行", "冯书瑶",
-    "石承宇", "任雅静", "万子骞", "杜若溪", "傅正阳",
-    "谢安然", "段思齐", "姜语桐", "韩铭远", "秦乐瑶",
-    "廖凯文", "熊芷萱", "崔敬轩", "毕雨晴", "瞿天佑",
-    "孔令仪", "阮启航", "侯静怡", "左逸凡", "童雅琪",
-    "顾砚书", "邵灵犀", "裴宇轩", "连以安", "聂朗清",
+_BASE_NAMES = [
+    "陈米娅", "王逸凡", "张雨薇", "李思源", "刘若晴", "黄子轩", "赵晓萌", "吴俊杰", "杨雨桐", "周明哲",
+    "徐悦然", "孙博文", "马晓琳", "郭浩然", "林芷若", "何志远", "高语嫣", "唐瑞霖", "程一诺", "罗嘉懿",
+    "彭婉清", "潘奕辰", "邓梓涵", "肖景行", "冯书瑶", "石承宇", "任雅静", "万子骞", "杜若溪", "傅正阳",
+    "谢安然", "段思齐", "姜语桐", "韩铭远", "秦乐瑶", "廖凯文", "熊芷萱", "崔敬轩", "毕雨晴", "瞿天佑",
+    "孔令仪", "阮启航", "侯静怡", "左逸凡", "童雅琪", "顾砚书", "邵灵犀", "裴宇轩", "连以安", "聂朗清",
 ]
 
-# 姓名的拼音映射，用于生成邮箱地址（first.last@datapilot.example）。
-_REALISTIC_NAME_PINYIN: list[str] = [
-    "miya.chen", "yifan.wang", "yuwei.zhang", "siyuan.li", "ruoqing.liu",
-    "zixuan.huang", "xiaomeng.zhao", "junjie.wu", "yutong.yang", "mingzhe.zhou",
-    "yueran.xu", "bowen.sun", "xiaolin.ma", "haoran.guo", "zhiruo.lin",
-    "zhiyuan.he", "yuyan.gao", "ruilin.tang", "yinuo.cheng", "jiayi.luo",
-    "wanqing.peng", "yichen.pan", "zihan.deng", "jingxing.xiao", "shuyao.feng",
-    "chengyu.shi", "yajing.ren", "ziqian.wan", "ruoxi.du", "zhengyang.fu",
-    "anran.xie", "siqi.duan", "yutong.jiang", "mingyuan.han", "leyao.qin",
-    "kaiwen.liao", "zhixuan.xiong", "jingxuan.cui", "yuqing.bi", "tianyou.qu",
-    "lingyi.kong", "qihang.ruan", "jingyi.hou", "yifan.zuo", "yaqi.tong",
-    "yanshu.gu", "lingxi.shao", "yuxuan.peui", "yian.lian", "langqing.nie",
+_PINYIN = [
+    "miya.chen", "yifan.wang", "yuwei.zhang", "siyuan.li", "ruoqing.liu", "zixuan.huang", "xiaomeng.zhao",
+    "junjie.wu", "yutong.yang", "mingzhe.zhou", "yueran.xu", "bowen.sun", "xiaolin.ma", "haoran.guo",
+    "zhiruo.lin", "zhiyuan.he", "yuyan.gao", "ruilin.tang", "yinuo.cheng", "jiayi.luo", "wanqing.peng",
+    "yichen.pan", "zihan.deng", "jingxing.xiao", "shuyao.feng", "chengyu.shi", "yajing.ren", "ziqian.wan",
+    "ruoxi.du", "zhengyang.fu", "anran.xie", "siqi.duan", "yutong.jiang", "mingyuan.han", "leyao.qin",
+    "kaiwen.liao", "zhixuan.xiong", "jingxuan.cui", "yuqing.bi", "tianyou.qu", "lingyi.kong", "qihang.ruan",
+    "jingyi.hou", "yifan.zuo", "yaqi.tong", "yanshu.gu", "lingxi.shao", "yuxuan.pei", "yian.lian", "langqing.nie",
 ]
 
 
 def _build_users() -> list[User]:
-    """构建 50 个用户，覆盖所有 RBAC 角色。"""
+    """构建 200 个用户，包含少量 disabled 用户但仍保留历史订单。"""
 
-    users: list[User] = []
     roles = ["admin", "ops", "customer_service", "demo_user"]
-
+    users: list[User] = []
     for index in range(EXPECTED_SEED_COUNTS["users"]):
-        # 用取模轮转角色，保证 4 类角色都出现，并且数量大致均匀。
-        role = roles[index % len(roles)]
+        base_index = index % len(_BASE_NAMES)
+        suffix = "" if index < len(_BASE_NAMES) else f"{index // len(_BASE_NAMES) + 1:02d}"
         users.append(
             User(
-                user_name=_REALISTIC_NAMES[index],
-                role=role,
-                email=f"{_REALISTIC_NAME_PINYIN[index]}@datapilot.example",
-                phone=f"1380000{index + 1:04d}",
-                status="active" if index < 46 else "disabled",
+                user_name=f"{_BASE_NAMES[base_index]}{suffix}",
+                role=roles[index % len(roles)],
+                email=f"{_PINYIN[base_index]}{index + 1:03d}@datapilot.example",
+                phone=f"138{index + 1:08d}",
+                status="disabled" if index in {11, 47, 113, 179} else "active",
             )
         )
-
     return users
 
 
-# 29 个真实感商品/SaaS 套餐名（中文），按类目分组，适合演示和面试截图。
-# 索引 0 为锚点商品 Aurora Noise Cancelling Headphones 预留。
-_REALISTIC_PRODUCTS: list[dict[str, Any]] = [
-    {"sku": "SKU-WL-EB-002", "name": "真无线降噪耳机 Pro",         "category": "数码电子", "price": Decimal("399.00")},
-    {"sku": "SKU-SD-LP-003", "name": "智能护眼台灯",               "category": "家居生活",        "price": Decimal("249.00")},
-    {"sku": "SKU-MK-K2-004", "name": "机械键盘 K2 红轴",           "category": "数码电子", "price": Decimal("549.00")},
-    {"sku": "SKU-MS-PL-005", "name": "记忆棉护颈枕",               "category": "家居生活",        "price": Decimal("179.00")},
-    {"sku": "SKU-VC-SR-006", "name": "VC 焕白精华液 30ml",         "category": "个护美妆",      "price": Decimal("128.00")},
-    {"sku": "SKU-CRM-ST-007","name": "CRM 入门版（月付）",          "category": "SaaS 软件",        "price": Decimal("299.00")},
-    {"sku": "SKU-HB-45-008", "name": "户外登山包 45L",              "category": "户外运动",     "price": Decimal("459.00")},
-    {"sku": "SKU-4K-WC-009", "name": "4K 高清摄像头",               "category": "数码电子", "price": Decimal("679.00")},
-    {"sku": "SKU-BM-SH-010", "name": "楠竹置物架三层",             "category": "家居生活",        "price": Decimal("189.00")},
-    {"sku": "SKU-HA-TN-011", "name": "玻尿酸保湿爽肤水",           "category": "个护美妆",      "price": Decimal("98.00")},
-    {"sku": "SKU-AN-PR-012", "name": "Analytics Pro（月付）",      "category": "SaaS 软件",        "price": Decimal("599.00")},
-    {"sku": "SKU-CT-2P-013", "name": "双人露营帐篷 防暴雨",        "category": "户外运动",     "price": Decimal("899.00")},
-    {"sku": "SKU-UG-CG-014", "name": "氮化镓快充头 65W",           "category": "数码电子", "price": Decimal("149.00")},
-    {"sku": "SKU-AR-DR-015", "name": "超声波香薰机 Mini",          "category": "家居生活",        "price": Decimal("139.00")},
-    {"sku": "SKU-SP-FD-016", "name": "清爽防晒日霜 SPF50",         "category": "个护美妆",      "price": Decimal("158.00")},
-    {"sku": "SKU-MK-ST-017", "name": "全渠道营销套件入门版",       "category": "SaaS 软件",        "price": Decimal("899.00")},
-    {"sku": "SKU-UL-TT-018", "name": "超轻徒步帐篷 单人",          "category": "户外运动",     "price": Decimal("1299.00")},
-    {"sku": "SKU-BT-SK-019", "name": "便携蓝牙音箱 Mini",          "category": "数码电子", "price": Decimal("219.00")},
-    {"sku": "SKU-SL-PL-020", "name": "真丝枕套套装 一对装",        "category": "家居生活",        "price": Decimal("99.00")},
-    {"sku": "SKU-RT-MK-021", "name": "视黄醇抗皱面霜",             "category": "个护美妆",      "price": Decimal("189.00")},
-    {"sku": "SKU-CS-PT-022", "name": "智能客服 Pro（月付）",       "category": "SaaS 软件",        "price": Decimal("399.00")},
-    {"sku": "SKU-PC-JK-023", "name": "便携轻薄羽绒服",             "category": "户外运动",     "price": Decimal("549.00")},
-    {"sku": "SKU-TB-PS-024", "name": "铝合金平板支架",             "category": "数码电子", "price": Decimal("79.00")},
-    {"sku": "SKU-CX-FM-025", "name": "纯棉针织盖毯",               "category": "家居生活",        "price": Decimal("159.00")},
-    {"sku": "SKU-CC-CM-026", "name": "校色遮瑕膏 三色盘",          "category": "个护美妆",      "price": Decimal("109.00")},
-    {"sku": "SKU-WH-PL-027", "name": "仓储管理 Pro（月付）",       "category": "SaaS 软件",        "price": Decimal("699.00")},
-    {"sku": "SKU-FS-RD-028", "name": "碳素台钓竿 2.4m",            "category": "户外运动",     "price": Decimal("329.00")},
-    {"sku": "SKU-KS-SC-029", "name": "儿童智能手表",               "category": "数码电子", "price": Decimal("259.00")},
-    {"sku": "SKU-RC-CK-030", "name": "迷你电饭煲 3 杯量",          "category": "家居生活",        "price": Decimal("119.00")},
+def _build_product_categories() -> list[ProductCategory]:
+    """构建 15 个类目节点，形成 3 层树。"""
+
+    roots = {
+        "数码电子": ProductCategory(name="数码电子", level=1, sort_order=10),
+        "家居生活": ProductCategory(name="家居生活", level=1, sort_order=20),
+        "个护美妆": ProductCategory(name="个护美妆", level=1, sort_order=30),
+        "户外运动": ProductCategory(name="户外运动", level=1, sort_order=40),
+        "SaaS 软件": ProductCategory(name="SaaS 软件", level=1, sort_order=50),
+    }
+    children = [
+        ProductCategory(name="手机通讯", parent=roots["数码电子"], level=2, sort_order=11),
+        ProductCategory(name="电脑办公", parent=roots["数码电子"], level=2, sort_order=12),
+        ProductCategory(name="智能穿戴", parent=roots["数码电子"], level=2, sort_order=13),
+        ProductCategory(name="家纺", parent=roots["家居生活"], level=2, sort_order=21),
+        ProductCategory(name="厨具", parent=roots["家居生活"], level=2, sort_order=22),
+        ProductCategory(name="护肤", parent=roots["个护美妆"], level=2, sort_order=31),
+        ProductCategory(name="彩妆", parent=roots["个护美妆"], level=2, sort_order=32),
+        ProductCategory(name="露营装备", parent=roots["户外运动"], level=2, sort_order=41),
+    ]
+    grandchildren = [
+        ProductCategory(name="笔记本", parent=children[1], level=3, sort_order=121),
+        ProductCategory(name="台式机", parent=children[1], level=3, sort_order=122),
+    ]
+    return [*roots.values(), *children, *grandchildren]
+
+
+_PRODUCT_SPECS: list[tuple[str, str, str, Decimal]] = [
+    ("SKU-HIGH-REFUND-01", "Aurora Noise Cancelling Headphones", "智能穿戴", Decimal("899.00")),
+    ("SKU-WL-EB-002", "真无线降噪耳机 Pro", "智能穿戴", Decimal("399.00")),
+    ("SKU-SD-LP-003", "智能护眼台灯", "家纺", Decimal("249.00")),
+    ("SKU-MK-K2-004", "机械键盘 K2 红轴", "电脑办公", Decimal("549.00")),
+    ("SKU-MS-PL-005", "记忆棉护颈枕", "家纺", Decimal("179.00")),
+    ("SKU-VC-SR-006", "VC 焕白精华液 30ml", "护肤", Decimal("128.00")),
+    ("SKU-CRM-ST-007", "CRM 入门版（月付）", "SaaS 软件", Decimal("299.00")),
+    ("SKU-HB-45-008", "户外登山包 45L", "露营装备", Decimal("459.00")),
+    ("SKU-4K-WC-009", "4K 高清摄像头", "电脑办公", Decimal("679.00")),
+    ("SKU-BM-SH-010", "楠竹置物架三层", "家纺", Decimal("189.00")),
+    ("SKU-HA-TN-011", "玻尿酸保湿爽肤水", "护肤", Decimal("98.00")),
+    ("SKU-AN-PR-012", "Analytics Pro（月付）", "SaaS 软件", Decimal("599.00")),
+    ("SKU-CT-2P-013", "双人露营帐篷 防暴雨", "露营装备", Decimal("899.00")),
+    ("SKU-UG-CG-014", "氮化镓快充头 65W", "手机通讯", Decimal("149.00")),
+    ("SKU-AR-DR-015", "超声波香薰机 Mini", "家纺", Decimal("139.00")),
+    ("SKU-SP-FD-016", "清爽防晒日霜 SPF50", "护肤", Decimal("158.00")),
+    ("SKU-MK-ST-017", "全渠道营销套件入门版", "SaaS 软件", Decimal("899.00")),
+    ("SKU-UL-TT-018", "超轻徒步帐篷 单人", "露营装备", Decimal("1299.00")),
+    ("SKU-BT-SK-019", "便携蓝牙音箱 Mini", "智能穿戴", Decimal("219.00")),
+    ("SKU-SL-PL-020", "真丝枕套套装 一对装", "家纺", Decimal("99.00")),
+    ("SKU-RT-MK-021", "视黄醇抗皱面霜", "护肤", Decimal("189.00")),
+    ("SKU-CS-PT-022", "智能客服 Pro（月付）", "SaaS 软件", Decimal("399.00")),
+    ("SKU-PC-JK-023", "便携轻薄羽绒服", "露营装备", Decimal("549.00")),
+    ("SKU-TB-PS-024", "铝合金平板支架", "电脑办公", Decimal("79.00")),
+    ("SKU-CX-FM-025", "纯棉针织盖毯", "家纺", Decimal("159.00")),
+    ("SKU-CC-CM-026", "校色遮瑕膏 三色盘", "彩妆", Decimal("109.00")),
+    ("SKU-WH-PL-027", "仓储管理 Pro（月付）", "SaaS 软件", Decimal("699.00")),
+    ("SKU-FS-RD-028", "碳素台钓竿 2.4m", "露营装备", Decimal("329.00")),
+    ("SKU-KS-SC-029", "儿童智能手表", "智能穿戴", Decimal("259.00")),
+    ("SKU-RC-CK-030", "迷你电饭煲 3 杯量", "厨具", Decimal("119.00")),
+    ("SKU-NB-AIR-031", "轻薄商务笔记本 14 寸", "笔记本", Decimal("4699.00")),
+    ("SKU-DT-MINI-032", "迷你主机 i5 办公版", "台式机", Decimal("2999.00")),
+    ("SKU-MB-5G-033", "5G 商务手机 SE", "手机通讯", Decimal("2199.00")),
+    ("SKU-WT-HR-034", "心率监测运动手环", "智能穿戴", Decimal("299.00")),
+    ("SKU-KT-POT-035", "不粘锅三件套", "厨具", Decimal("329.00")),
+    ("SKU-BD-QT-036", "四季纯棉被套", "家纺", Decimal("229.00")),
+    ("SKU-SK-MA-037", "修护面膜 20 片装", "护肤", Decimal("169.00")),
+    ("SKU-MU-LP-038", "丝绒哑光口红套装", "彩妆", Decimal("199.00")),
+    ("SKU-CM-CH-039", "折叠露营椅", "露营装备", Decimal("269.00")),
+    ("SKU-SA-BI-040", "BI 报表企业版（月付）", "SaaS 软件", Decimal("1299.00")),
+    ("SKU-SA-ETL-041", "数据同步基础版（月付）", "SaaS 软件", Decimal("499.00")),
+    ("SKU-DS-MON-042", "27 寸 4K 显示器", "电脑办公", Decimal("1799.00")),
+    ("SKU-DS-MOU-043", "静音无线鼠标", "电脑办公", Decimal("129.00")),
+    ("SKU-PH-CASE-044", "抗摔手机壳", "手机通讯", Decimal("69.00")),
+    ("SKU-PH-PWR-045", "磁吸充电宝 10000mAh", "手机通讯", Decimal("199.00")),
+    ("SKU-KT-RICE-046", "低糖电饭煲 4L", "厨具", Decimal("499.00")),
+    ("SKU-BD-PIL-047", "乳胶枕经典款", "家纺", Decimal("299.00")),
+    ("SKU-SK-ESS-048", "烟酰胺精华组合", "护肤", Decimal("259.00")),
+    ("SKU-MU-FDN-049", "持妆粉底液", "彩妆", Decimal("189.00")),
+    ("SKU-CM-LAMP-050", "营地充电照明灯", "露营装备", Decimal("239.00")),
 ]
 
 
-def _build_products() -> list[Product]:
-    """构建商品数据，包含一个用于退款率评测的锚点商品。"""
+def _root_category_name(category: ProductCategory) -> str:
+    """从任意层级类目向上找到一级类目名称，用于保留 products.category 冗余字段。"""
 
-    # 第 1 个商品是固定事实锚点：后续 refunds 会集中指向它，
-    # 确保它成为 2026-06 退款率最高商品。
-    products = [
-        Product(
-            sku="SKU-HIGH-REFUND-01",
-            product_name="Aurora Noise Cancelling Headphones",
-            category="数码电子",
-            status="active",
-            price=Decimal("899.00"),
-            launched_at=datetime(2026, 1, 10),
-        )
-    ]
+    current = category
+    while current.parent is not None:
+        current = current.parent
+    return current.name
 
-    for index, prod in enumerate(_REALISTIC_PRODUCTS):
+
+def _build_products(categories: list[ProductCategory]) -> list[Product]:
+    """构建 50 个商品，category_id 指向规范化类目，category 保留一级类目冗余。"""
+
+    category_by_name = {category.name: category for category in categories}
+    products: list[Product] = []
+    for index, (sku, name, category_name, price) in enumerate(_PRODUCT_SPECS):
+        category = category_by_name[category_name]
         products.append(
             Product(
-                sku=prod["sku"],
-                product_name=prod["name"],
-                category=prod["category"],
-                status="active" if (index + 1) % 11 else "paused",
-                price=prod["price"],
-                launched_at=datetime(2026, 1, 1) + timedelta(days=(index + 1) * 3),
+                sku=sku,
+                product_name=name,
+                category_ref=category,
+                category=_root_category_name(category),
+                status="paused" if index in {17, 35, 48} else "active",
+                price=price,
+                launched_at=datetime(2026, 1, 1) + timedelta(days=index * 2),
             )
         )
-
     return products
 
 
 def _build_channels() -> list[Channel]:
-    """构建 6 个渠道，覆盖自有、平台、付费和合作伙伴流量来源。"""
+    """构建 6 个渠道，沿用 Phase 2 的业务键和展示名。"""
 
     return [
         Channel(channel_code="mobile_app", channel_name="Mobile App", channel_type="owned"),
@@ -289,270 +455,323 @@ def _build_channels() -> list[Channel]:
     ]
 
 
-def _build_orders(users: list[User], products: list[Product], channels: list[Channel]) -> list[Order]:
-    """构建确定性订单数据，模拟 6 月/5 月的时间分布和渠道锚点。"""
+def _build_coupons() -> list[Coupon]:
+    """构建 10 张优惠券，其中 JUNE_FIXED_50 是固定事实锚点。"""
 
-    orders: list[Order] = []
+    valid_from = datetime(2026, 5, 20)
+    valid_to = datetime(2026, 7, 5)
+    specs = [
+        ("JUNE_FIXED_50", "六月满 300 减 50", "fixed_amount", Decimal("50.00"), Decimal("300.00")),
+        ("FREESHIP_JUNE", "六月免运费券", "free_shipping", Decimal("18.00"), Decimal("99.00")),
+        ("VIP_100_OFF", "VIP 满 800 减 100", "fixed_amount", Decimal("100.00"), Decimal("800.00")),
+        ("APP_ONLY_30", "App 专享减 30", "fixed_amount", Decimal("30.00"), Decimal("199.00")),
+        ("BEAUTY_20", "美妆护理减 20", "fixed_amount", Decimal("20.00"), Decimal("99.00")),
+        ("SAAS_TRIAL_80", "SaaS 新客减 80", "fixed_amount", Decimal("80.00"), Decimal("399.00")),
+        ("OUTDOOR_60", "户外装备减 60", "fixed_amount", Decimal("60.00"), Decimal("499.00")),
+        ("HOME_25", "家居生活减 25", "fixed_amount", Decimal("25.00"), Decimal("159.00")),
+        ("DIGITAL_5PCT", "数码 95 折券", "percentage", Decimal("5.00"), Decimal("499.00")),
+        ("RETENTION_40", "沉默用户唤醒减 40", "fixed_amount", Decimal("40.00"), Decimal("199.00")),
+    ]
+    return [
+        Coupon(
+            coupon_code=code,
+            coupon_name=name,
+            coupon_type=coupon_type,
+            discount_value=value,
+            min_order_amount=min_amount,
+            status="active",
+            valid_from=valid_from,
+            valid_to=valid_to,
+        )
+        for code, name, coupon_type, value, min_amount in specs
+    ]
+
+
+def _build_orders_and_items(
+    *, users: list[User], products: list[Product], channels: list[Channel]
+) -> tuple[list[Order], list[OrderItem]]:
+    """构建 1 万订单头和 1.8 万订单明细。"""
+
+    products_by_sku = {product.sku: product for product in products}
+    aurora = products_by_sku["SKU-HIGH-REFUND-01"]
+    digital_products = [product for product in products if product.category == "数码电子"]
+    non_anchor_products = [product for product in products if product is not aurora]
     june_start = datetime(2026, 6, 1, 9, 0, 0)
     may_start = datetime(2026, 5, 1, 9, 0, 0)
-    # 加权分布模拟真实电商：大部分已送达，少量取消。delivered 200 + shipped 150 + paid 100 + cancelled 50 = 500。
-    statuses = ["delivered"] * 200 + ["shipped"] * 150 + ["paid"] * 100 + ["cancelled"] * 50
+    orders: list[Order] = []
+    order_items: list[OrderItem] = []
 
     for index in range(EXPECTED_SEED_COUNTS["orders"]):
-        # 前 40 单集中给锚点商品，配合退款数据制造“退款率最高商品”。
-        if index < 40:
-            product = products[0]
+        paid_at = None if index < 20 else (june_start if index < 7_000 else may_start) + timedelta(
+            days=index % 28,
+            hours=index % 9,
+            minutes=index % 37,
+        )
+        if paid_at is None:
+            status = "pending_payment"
+        elif index < 300:
+            status = "delivered"
+        elif 300 <= index < 308:
+            status = "canceled"
+        elif index % 23 == 0:
+            status = "cancelled"
         else:
-            product = products[(index % (len(products) - 1)) + 1]
+            status = ["paid", "shipped", "delivered"][index % 3]
 
-        # 前 170 单集中给 Mobile App 且金额较高，制造“6 月 GMV 最高渠道”。
-        if index < 170:
-            channel = channels[0]
-            amount = Decimal("899.00") + Decimal(index % 5) * Decimal("50.00")
-        else:
-            channel = channels[(index % (len(channels) - 1)) + 1]
-            amount = Decimal("109.00") + Decimal(index % 17) * Decimal("23.00")
+        channel = channels[0] if index < 4_500 else channels[(index % (len(channels) - 1)) + 1]
+        primary_product = aurora if index < 300 else (
+            digital_products[index % len(digital_products)] if index % 5 in {0, 1, 2} else non_anchor_products[index % len(non_anchor_products)]
+        )
+        item_count = 1 if index % 10 < 4 else 2 if index % 10 < 8 else 3
+        selected_products = [primary_product]
+        for offset in range(1, item_count):
+            selected_products.append(non_anchor_products[(index + offset * 7) % len(non_anchor_products)])
 
-        # 前 320 单落在 6 月，剩余订单落在 5 月，方便后续测试时间筛选。
-        paid_at = (june_start if index < 320 else may_start) + timedelta(days=index % 28, hours=index % 7)
-        status = statuses[index]
+        line_amount_total = Decimal("0.00")
+        quantity_total = 0
+        order = Order(
+            order_no=f"ORD-2026-{index + 1:05d}",
+            source_order_no=f"SRC-2026-{(index // 2) + 1:05d}" if 100 <= index < 120 else f"SRC-2026-{index + 1:05d}",
+            external_order_no=f"EXT-MKT-{(index // 2) + 1:05d}" if 100 <= index < 120 else f"EXT-MKT-{index + 1:05d}",
+            user=users[index % len(users)],
+            product=primary_product,
+            channel=channel,
+            order_status=status,
+            order_amount=Decimal("0.00"),
+            shipping_amount=Decimal("0.00") if index % 7 == 0 else Decimal("12.00") + Decimal(index % 4) * Decimal("3.00"),
+            discount_amount=Decimal("0.00"),
+            actual_amount=Decimal("0.00"),
+            quantity=0,
+            paid_at=paid_at,
+        )
 
-        orders.append(
-            Order(
-                order_no=f"ORD-2026-{index + 1:05d}",
-                user=users[index % len(users)],
-                product=product,
-                channel=channel,
-                order_status=status,
-                order_amount=amount,
-                quantity=1 + (index % 3),
-                paid_at=paid_at,
+        for line_no, product in enumerate(selected_products, start=1):
+            quantity = 1 + ((index + line_no) % 3 == 0)
+            unit_price = _money(product.price + Decimal(index % 4) * Decimal("3.00"))
+            line_amount = _money(unit_price * Decimal(quantity))
+            line_amount_total += line_amount
+            quantity_total += quantity
+            order_items.append(
+                OrderItem(
+                    order=order,
+                    product=product,
+                    line_no=line_no,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    line_amount=line_amount,
+                    item_discount_amount=Decimal("0.00"),
+                    item_actual_amount=line_amount,
+                    sku_snapshot=product.sku,
+                    product_name_snapshot=product.product_name,
+                    created_at=paid_at or datetime(2026, 6, 1, 8, 0, 0),
+                )
+            )
+
+        # DQ-04：末尾 5 单故意制造订单头金额和明细汇总不一致，不影响核心 6 月锚点。
+        order.order_amount = _money(line_amount_total + (Decimal("10.00") if index >= 9_995 else Decimal("0.00")))
+        order.quantity = quantity_total
+        order.actual_amount = _money(order.order_amount + order.shipping_amount - order.discount_amount)
+        orders.append(order)
+
+    return orders, order_items
+
+
+def _build_order_coupons(*, orders: list[Order], coupons: list[Coupon]) -> list[OrderCoupon]:
+    """构建 3000 条订单优惠券关系，并回写订单折扣与实付金额。"""
+
+    coupons_by_code = {coupon.coupon_code: coupon for coupon in coupons}
+    result: list[OrderCoupon] = []
+    used_order_coupon_pairs: set[tuple[int, str]] = set()
+
+    def attach(order: Order, coupon_code: str, amount: Decimal) -> None:
+        pair = (id(order), coupon_code)
+        if pair in used_order_coupon_pairs:
+            return
+        used_order_coupon_pairs.add(pair)
+        coupon = coupons_by_code[coupon_code]
+        discount = min(_money(amount), _money(order.order_amount + order.shipping_amount))
+        order.discount_amount = _money(order.discount_amount + discount)
+        order.actual_amount = _money(order.order_amount + order.shipping_amount - order.discount_amount)
+        result.append(
+            OrderCoupon(
+                order=order,
+                coupon=coupon,
+                discount_amount=discount,
+                applied_at=order.paid_at or datetime(2026, 6, 1, 8, 0, 0),
             )
         )
 
-    return orders
+    for index, order in enumerate(orders):
+        if len(result) >= EXPECTED_SEED_COUNTS["order_coupons"]:
+            break
+        if index < 650 and order.channel.channel_code == "mobile_app":
+            attach(order, "JUNE_FIXED_50", Decimal("50.00"))
+        elif index % 4 == 0:
+            attach(order, "FREESHIP_JUNE", min(order.shipping_amount, Decimal("18.00")))
+        elif index % 5 == 0:
+            attach(order, "APP_ONLY_30", Decimal("30.00"))
+        elif index % 7 == 0:
+            attach(order, "DIGITAL_5PCT", _money(order.order_amount * Decimal("0.05")))
+        elif index % 9 == 0:
+            attach(order, "RETENTION_40", Decimal("40.00"))
+
+    # 不足 3000 时继续补稳定优惠券，保证行数精确。
+    cursor = 0
+    fill_codes = ["HOME_25", "BEAUTY_20", "SAAS_TRIAL_80", "OUTDOOR_60", "VIP_100_OFF"]
+    while len(result) < EXPECTED_SEED_COUNTS["order_coupons"]:
+        order = orders[cursor % len(orders)]
+        attach(order, fill_codes[cursor % len(fill_codes)], Decimal("20.00") + Decimal(cursor % 5) * Decimal("5.00"))
+        cursor += 1
+    return result
 
 
 def _build_refunds(orders: list[Order]) -> list[Refund]:
-    """构建退款数据，包含稳定的原因分布和商品退款率锚点。"""
+    """构建 1000 条退款，优先指向订单明细，同时保留少量整单退款。"""
 
     refunds: list[Refund] = []
-    # quality_issue 出现 42 次，确保它稳定成为 Top 退款原因。
-    reasons = ["quality_issue"] * 42 + ["late_delivery"] * 15 + ["wrong_item"] * 12 + ["changed_mind"] * 11
     statuses = ["approved", "completed", "requested", "rejected"]
+    reasons = ["quality_issue"] * 420 + ["late_delivery"] * 210 + ["wrong_item"] * 160 + ["changed_mind"] * 130 + ["price_protection"] * 80
+    refund_orders = [order for order in orders[:260] if order.paid_at is not None]
+    refund_orders.extend(order for order in orders[500:500 + EXPECTED_SEED_COUNTS["refunds"] - len(refund_orders)])
 
-    # 先集中给锚点商品生成 18 条退款，确保它在 2026-06 的退款率最高。
-    refund_order_indexes = list(range(18))
-    refund_order_indexes.extend(range(60, 60 + EXPECTED_SEED_COUNTS["refunds"] - 18))
-
-    for index, order_index in enumerate(refund_order_indexes):
-        order = orders[order_index]
-        requested_at = order.paid_at + timedelta(days=2 + index % 5)
-        processed_at = requested_at + timedelta(days=1) if index % 4 != 2 else None
+    for index, order in enumerate(refund_orders[: EXPECTED_SEED_COUNTS["refunds"]]):
+        order_item = order.order_items[0] if index % 10 != 0 else None
+        amount = _money((order_item.item_actual_amount if order_item else order.actual_amount) * Decimal("0.80"))
+        if index >= EXPECTED_SEED_COUNTS["refunds"] - 3:
+            amount = Decimal("-20.00")
         refunds.append(
             Refund(
                 refund_no=f"REF-2026-{index + 1:05d}",
+                source_order_no=f"SRC-MISSING-{index + 1:03d}" if index < 5 else order.source_order_no,
                 order=order,
+                order_item=order_item,
                 user=order.user,
-                product=order.product,
+                product=(order_item.product if order_item else order.product),
                 refund_status=statuses[index % len(statuses)],
                 refund_reason=reasons[index],
-                refund_amount=(order.order_amount * Decimal("0.90")).quantize(Decimal("0.01")),
-                requested_at=requested_at,
-                processed_at=processed_at,
+                refund_amount=amount,
+                requested_at=(order.paid_at or datetime(2026, 6, 1)) + timedelta(days=2 + index % 5),
+                processed_at=((order.paid_at or datetime(2026, 6, 1)) + timedelta(days=4 + index % 5)) if index % 4 != 2 else None,
             )
         )
-
     return refunds
 
 
-# 工单标题词库：按 ticket_type 分组，生成真实客服场景的 subject。
 _TICKET_SUBJECTS: dict[str, list[str]] = {
-    "refund": [
-        "申请 Aurora 耳机质量问题退款",
-        "收到的商品外包装破损，要求退货",
-        "护肤品过敏反应，申请退款退货",
-        "订单重复扣款，申请退回多付金额",
-        "商品与页面描述不符，要求退款",
-        "7 天无理由退货申请",
-        "赠品缺失，申请部分退款",
-        "活动期间买贵了，申请退差价",
-        "退货后物流显示签收但未退款",
-    ],
-    "shipping": [
-        "物流信息 72 小时未更新，查询包裹状态",
-        "发货地址填写错误，请求修改",
-        "物流延迟超过预计到货时间 5 天",
-        "包裹显示已签收但本人未收到",
-        "跨境物流清关中，咨询预计放行时间",
-        "加急订单未按承诺时效发货",
-        "收货地址变更，请转寄到新地址",
-        "部分商品漏发，请求补发",
-    ],
-    "invoice": [
-        "电子发票抬头修改为公司名称",
-        "发票金额与实付金额不符",
-        "需要补开增值税专用发票",
-        "发票税号填写错误，申请重开",
-        "订单完成后发票未自动推送",
-        "批量采购需要合并开票",
-    ],
-    "account": [
-        "账号绑定手机号已停用，申请换绑",
-        "多次登录失败，账号疑似被锁定",
-        "会员等级未正确升级，积分异常",
-        "无法修改默认收货地址",
-        "账号注销申请被驳回，查询原因",
-        "实名认证审核超过 3 个工作日",
-    ],
-    "product_quality": [
-        "耳机降噪功能与宣传效果差距大",
-        "商品缺少中文使用说明书",
-        "SaaS 套餐功能权限与购买页面不一致",
-        "查询商品是否支持固件升级",
-        "电饭煲内胆涂层出现脱落",
-        "商品保质期剩余不足 3 个月",
-    ],
+    "refund": ["质量问题申请退款", "退货后未收到退款", "价保补差申请", "退款审核进度咨询"],
+    "shipping": ["物流 72 小时未更新", "收货地址需要修改", "包裹签收异常", "部分商品漏发"],
+    "invoice": ["电子发票抬头修改", "专票资质审核", "发票金额与实付不符", "合并开票申请"],
+    "account": ["手机号换绑申请", "账号登录失败", "会员积分异常", "默认地址无法修改"],
+    "product_quality": ["商品缺少说明书", "耳机降噪效果异常", "SaaS 权限不一致", "电饭煲内胆涂层问题"],
 }
 
 
-def _build_tickets(users: list[User], orders: list[Order]) -> list[Ticket]:
-    """构建客服工单，固定包含 12 个待处理高优先级工单。"""
+def _build_tickets(*, users: list[User], orders: list[Order]) -> list[Ticket]:
+    """构建 300 条客服工单，保留 12 个 pending high 锚点。"""
 
-    tickets: list[Ticket] = []
-    # 加权分布让工单类型不那么均匀，退款和物流比发票和账号更常见。
-    ticket_types = ["refund"] * 30 + ["shipping"] * 28 + ["invoice"] * 22 + ["account"] * 20 + ["product_quality"] * 20
     service_users = [user for user in users if user.role == "customer_service"]
-
+    ticket_types = ["refund"] * 80 + ["shipping"] * 75 + ["invoice"] * 55 + ["account"] * 45 + ["product_quality"] * 45
+    tickets: list[Ticket] = []
     for index in range(EXPECTED_SEED_COUNTS["tickets"]):
-        ttype = ticket_types[index]
-        # 前 12 条固定为 pending + high，作为后续客服工单评测锚点。
-        is_anchor_ticket = index < 12
-        priority = "high" if is_anchor_ticket else ["low", "medium", "urgent"][index % 3]
-        status = "pending" if is_anchor_ticket else ["processing", "resolved", "closed"][index % 3]
-        created_at = datetime(2026, 6, 1, 10, 0, 0) + timedelta(hours=index * 3)
-        resolved_at = None if status in {"pending", "processing"} else created_at + timedelta(days=2)
-
-        # 从对应类型的词库中轮转选取标题，保证每次 seed 结果确定。
-        subjects_pool = _TICKET_SUBJECTS[ttype]
-        subject = subjects_pool[index % len(subjects_pool)]
-
+        ticket_type = ticket_types[index]
+        is_anchor = index < 12
+        status = "pending" if is_anchor else ["processing", "resolved", "closed"][index % 3]
+        priority = "high" if is_anchor else ["low", "medium", "urgent"][index % 3]
+        created_at = datetime(2026, 6, 1, 10, 0, 0) + timedelta(hours=index * 2)
+        subject = _TICKET_SUBJECTS[ticket_type][index % len(_TICKET_SUBJECTS[ticket_type])]
         tickets.append(
             Ticket(
                 ticket_no=f"TCK-2026-{index + 1:05d}",
                 user=users[index % len(users)],
-                order=orders[index % len(orders)] if index % 5 != 0 else None,
+                order=orders[(index * 13) % len(orders)] if index % 5 != 0 else None,
                 assigned_user=service_users[index % len(service_users)],
-                ticket_type=ttype,
+                ticket_type=ticket_type,
                 priority=priority,
                 status=status,
                 subject=subject,
-                description=f"用户 {users[index % len(users)].user_name} 提交工单：{subject}。请客服团队尽快处理。",
-                resolved_at=resolved_at,
+                description=f"用户 {users[index % len(users)].user_name} 提交工单：{subject}。请客服团队根据 SLA 优先级处理。",
+                resolved_at=None if status in {"pending", "processing"} else created_at + timedelta(days=2),
                 created_at=created_at,
             )
         )
-
     return tickets
 
 
-# 知识库文档正文库：每个 doc_key 对应一份真实感政策文档（2-5 段），供 RAG 检索使用。
-_KB_CONTENTS: dict[str, str] = {
-    "refund_policy_basic": (
-        "本平台支持以下退款类型：7 天无理由退货、质量问题退款、物流损坏退款以及价保补差。"
-        "7 天无理由退货需确保商品完好、配件齐全且不影响二次销售；用户需在签收后 168 小时内提交申请，"
-        "审核通过后 3 个工作日内原路退款。"
-        "质量问题退款不受 7 天限制，用户在质保期内凭有效凭证（订单号 + 商品照片）发起申请，"
-        "客服将在 24 小时内响应并安排上门取件，退货运费由平台承担。"
-        "物流损坏退款需用户在签收时当面验货并拍照留存；若快递员已离开，需在签收后 4 小时内提交"
-        "损坏照片和开箱视频，超时将按普通质量问题流程处理。"
-        "价保补差适用于标有「价保」标签的商品，用户在购买后 15 天内发现同 SKU 降价，可申请退还差价，"
-        "每单限申请一次。"
-    ),
-    "refund_policy_quality": (
-        "质量问题指商品存在影响正常使用的缺陷，包括但不限于：功能故障（如电子产品无法开机）、"
-        "外观严重瑕疵（如服装大面积染色、鞋类开胶）、保质期内变质（如护肤品油水分离、食品发霉）"
-        "以及配件缺失导致无法使用。"
-        "用户提交质量问题退款时需提供以下材料：① 清晰展示缺陷部位的照片至少 3 张；"
-        "② 开箱视频（如为签收时即发现）；③ 商品外包装的快递单号照片。材料不全将退回补充，"
-        "累计退回 2 次仍未补全的将自动转为线下人工审核。"
-        "平台在收到退货商品后 48 小时内完成质检。确认为质量问题的，全额退款并补偿 50 元优惠券；"
-        "确认为用户使用不当的，将原路寄回并由用户承担来回运费。"
-    ),
-    "shipping_delay_rule": (
-        "订单发货时效以商品详情页标注的「预计发货时间」为准：现货商品支付后 48 小时内出库，"
-        "预售商品以页面标注的「最晚发货日」为承诺截止时间。"
-        "物流延迟定义为「超过承诺发货时间 72 小时仍未出库」或「出库后物流信息超过 120 小时无更新」。"
-        "发生延迟时，用户可申请延迟补偿：每延迟 1 天补偿 10 元无门槛优惠券，单笔订单补偿上限 100 元。"
-        "因不可抗力（自然灾害、疫情封控、海关抽检等）导致的延迟不适用补偿规则，但平台将主动推送"
-        "延迟通知并在物流恢复正常后优先发货。"
-        "加急订单（标记为「加急配送」）未在承诺时效内送达的，除延迟补偿外额外退还加急费用的 50%。"
-    ),
-    "invoice_rule": (
-        "平台支持开具电子普通发票和增值税专用发票。电子普通发票在订单完成后自动推送至用户邮箱，"
-        "也可在「我的订单 → 申请发票」中手动触发；增值税专用发票需先完成企业认证并填写完整的"
-        "开票信息（公司名称、税号、地址、电话、开户行及账号）。"
-        "发票抬头默认为收货人姓名，用户可在下单时修改为个人或企业名称。订单支付后 30 天内可修改"
-        "抬头，超过 30 天需联系客服人工处理。已开具的发票若信息有误，可在开票后 7 天内申请红冲重开。"
-        "发票金额以订单实付金额为准（已扣除优惠券、积分抵扣等），不含运费和保险费。合并开票需在"
-        "所有关联订单均完成后的 15 天内提交申请，跨月订单不支持合并开票。"
-    ),
-    "vip_service_rule": (
-        "高价值客户（定义：近 12 个月累计消费金额 ≥ 20,000 元或月均消费 ≥ 2,000 元）自动进入"
-        "VIP 服务通道，享受专属客服、优先处理和柔性退款政策。"
-        "VIP 客户提交工单后，系统自动分配高级客服（Level 3 及以上），首次响应时间承诺 ≤ 2 小时。"
-        "退款方面，VIP 客户享受扩大的无理由退货窗口（15 天而非标准 7 天），且年度内 3 次以内"
-        "无理由退货免收退回运费。"
-        "每季度平台会重新评估 VIP 资格，降级客户将收到通知并保留 30 天缓冲期，缓冲期内仍享受"
-        "VIP 权益。"
-    ),
-    "sensitive_data_policy": (
-        "敏感字段包括但不限于：用户真实姓名、手机号、邮箱、身份证号、银行卡号、收货地址的精确门牌号、"
-        "IP 地址以及用户行为轨迹数据。以上字段在数据库中以加密存储（AES-256-GCM），应用层按角色"
-        "脱敏展示。"
-        "各角色访问权限如下：admin 可查看所有字段明文，但每次访问均记录审计日志；ops 可查看脱敏后"
-        "的手机号（138****0001）和邮箱前缀（miy***）；customer_service 仅可在处理工单时临时查看"
-        "关联用户的手机号和地址，工单关闭后 24 小时权限自动回收；demo_user 角色仅能访问匿名化的"
-        "演示数据，严禁接触任何真实 PII。"
-        "数据导出操作需双人审批：申请人提交导出原因和范围，由 admin 角色两人依次审批后方可执行，"
-        "导出文件自动加水印并设置 72 小时后失效。所有敏感数据访问日志保留不少于 180 天。"
-    ),
-    "demo_user_scope": (
-        "演示账号（demo_user 角色）用于产品演示和新员工培训，所有可访问数据均为系统生成的模拟数据，"
-        "不包含任何真实用户个人信息或业务记录。演示账号的数据范围限定在：seed 脚本生成的订单、退款、"
-        "工单和知识库文档，且所有金额、姓名、地址均为虚构。"
-        "演示账号默认关闭以下能力：数据导出、批量删除、API Key 创建以及外部系统集成。若培训需要"
-        "开放部分能力，需由 admin 在演示沙箱环境中单独配置，培训结束后立即回收。"
-        "每个演示账号的有效期为创建后 90 天，到期自动禁用。需继续使用的，由 admin 手动续期，"
-        "每次续期最长 90 天。"
-    ),
-    "gmv_metric_note": (
-        "GMV（Gross Merchandise Volume，成交总额）是平台核心业务指标之一，统计口径需在跨部门"
-        "协作中保持一致以避免数据分歧。"
-        "本平台 GMV 口径定义为：在统计周期内，已支付且未被取消的订单金额总和。具体规则如下："
-        "① 仅统计 order_status 为 'paid'、'shipped' 或 'delivered' 的订单，排除 'cancelled'；"
-        "② 金额取 order_amount 字段，单位为人民币元；③ 统计时间以 paid_at（支付时间）为基准，"
-        "而非下单时间或发货时间。"
-        "退款订单不影响 GMV 计算——即使订单后续发生了退款，只要未取消，其金额仍计入 GMV。"
-        "如需分析「实收口径」的收入，应使用 NAR（Net Revenue After Refund）= 支付金额 − 实际退款金额。"
-        "月度 GMV 报表在次月第 3 个工作日前由系统自动生成，如遇节假日顺延。"
-    ),
+def _build_user_behavior_logs(*, users: list[User], products: list[Product], channels: list[Channel]) -> list[UserBehaviorLog]:
+    """构建 1 万条行为日志，mobile_app 设备加购到支付转化率最高。"""
+
+    device_events = {
+        "mobile_app": (1200, 800, 560, 440),
+        "desktop_web": (1300, 650, 260, 290),
+        "mobile_web": (1250, 600, 210, 240),
+        "mini_program": (1150, 550, 190, 310),
+    }
+    event_names = ["view_product", "add_to_cart", "payment_success", "search"]
+    logs: list[UserBehaviorLog] = []
+    event_time = datetime(2026, 6, 1, 8, 0, 0)
+    for device, counts in device_events.items():
+        for event_name, count in zip(event_names, counts, strict=True):
+            for offset in range(count):
+                index = len(logs)
+                logs.append(
+                    UserBehaviorLog(
+                        user=users[index % len(users)],
+                        product=products[index % len(products)] if event_name != "search" else None,
+                        channel=channels[0] if device == "mobile_app" else channels[(index % (len(channels) - 1)) + 1],
+                        session_id=f"SES-{device}-{offset % 1800:05d}",
+                        event_type=event_name,
+                        device_type=device,
+                        page_url=f"/products/{products[index % len(products)].sku}" if event_name != "search" else "/search",
+                        referrer=["organic", "paid_search", "push", "email"][index % 4],
+                        duration_ms=None if index % 10 == 0 else 300 + (index % 200) * 17,
+                        event_time=event_time + timedelta(minutes=index % 43, seconds=index % 59),
+                    )
+                )
+    return logs
+
+
+def _build_product_price_history(products: list[Product]) -> list[ProductPriceHistory]:
+    """为每个商品构建 3 段价格历史，总计 150 行。"""
+
+    rows: list[ProductPriceHistory] = []
+    for index, product in enumerate(products):
+        base_price = _money(product.price)
+        historical = [
+            (datetime(2026, 1, 1), datetime(2026, 4, 1), _money(base_price * Decimal("0.92"))),
+            (datetime(2026, 4, 1), datetime(2026, 7, 1), _money(base_price)),
+            (datetime(2026, 7, 1), None, _money(base_price + (Decimal("12.00") if index in {3, 9} else Decimal("0.00")))),
+        ]
+        for valid_from, valid_to, price in historical:
+            rows.append(
+                ProductPriceHistory(
+                    product=product,
+                    price=price,
+                    valid_from=valid_from,
+                    valid_to=valid_to,
+                    is_current=valid_to is None,
+                    price_source="seed",
+                )
+            )
+    return rows
+
+
+_KB_CONTENTS: dict[str, tuple[str, str, str, str]] = {
+    "refund_policy_basic": ("基础退款政策", "refund_policy", "customer_service", "支持 7 天无理由、质量问题、物流损坏和价保补差。质量问题退款需提供照片、订单号和必要视频，审核通过后原路退款。"),
+    "refund_policy_quality": ("质量问题退款规则", "refund_policy", "customer_service", "质量问题包括功能故障、外观严重瑕疵、保质期异常和配件缺失。平台质检确认后全额退款并补偿优惠券。"),
+    "shipping_delay_rule": ("物流延迟处理规则", "support_rule", "customer_service", "现货 48 小时内出库，物流超过 120 小时无更新视为延迟。延迟补偿按天发放优惠券。"),
+    "invoice_rule": ("发票开具规则", "support_rule", "customer_service", "支持电子普通发票和增值税专用发票，发票金额以订单实付金额为准，红冲重开需在 7 天内申请。"),
+    "vip_service_rule": ("高价值客户服务规则", "support_rule", "ops", "近 12 个月累计消费超过 20000 元的客户进入 VIP 通道，享受专属客服和更长退货窗口。"),
+    "sensitive_data_policy": ("敏感字段访问规范", "security_policy", "admin", "邮箱、手机号、精确地址和行为轨迹属于敏感数据。非 admin 角色默认只看脱敏或匿名化结果。"),
+    "demo_user_scope": ("演示账号数据范围", "security_policy", "demo_user", "demo_user 只能访问 seed 生成的模拟数据，默认关闭导出、删除和外部系统集成能力。"),
+    "gmv_metric_note": ("GMV 指标口径说明", "metric_definition", "ops", "GMV 统计已支付且未取消订单的 order_amount，不含运费，不扣优惠，退款不回冲 GMV。"),
+    "coupon_rule": ("优惠券核销规则", "metric_definition", "ops", "优惠券分析以 order_coupons 为准。一单多券时统计订单量必须 COUNT(DISTINCT orders.id)。"),
+    "behavior_funnel_rule": ("行为漏斗口径说明", "metric_definition", "ops", "加购到支付转化率以 user_behavior_log 中 payment_success / add_to_cart 计算，duration_ms 为空不影响事件数。"),
 }
 
 
 def _build_knowledge_docs() -> list[KnowledgeDoc]:
-    """构建政策与指标文档，供后续 RAG 模块使用。"""
+    """构建 10 篇知识库文档，补入优惠券和行为漏斗口径。"""
 
-    docs = [
-        ("refund_policy_basic", "基础退款政策", "refund_policy", "customer_service"),
-        ("refund_policy_quality", "质量问题退款规则", "refund_policy", "customer_service"),
-        ("shipping_delay_rule", "物流延迟处理规则", "support_rule", "customer_service"),
-        ("invoice_rule", "发票开具规则", "support_rule", "customer_service"),
-        ("vip_service_rule", "高价值客户服务规则", "support_rule", "ops"),
-        ("sensitive_data_policy", "敏感字段访问规范", "security_policy", "admin"),
-        ("demo_user_scope", "演示账号数据范围", "security_policy", "demo_user"),
-        ("gmv_metric_note", "GMV 指标口径说明", "metric_definition", "ops"),
-    ]
     return [
         KnowledgeDoc(
             doc_key=doc_key,
@@ -560,9 +779,46 @@ def _build_knowledge_docs() -> list[KnowledgeDoc]:
             doc_type=doc_type,
             audience_role=audience_role,
             status="active",
-            content=_KB_CONTENTS[doc_key],
+            content=content,
         )
-        for doc_key, title, doc_type, audience_role in docs
+        for doc_key, (title, doc_type, audience_role, content) in _KB_CONTENTS.items()
+    ]
+
+
+def _build_orders_wide(orders: list[Order]) -> list[OrderWide]:
+    """把订单头常用维度冗余成宽表快照，行数与 orders 一一对应。"""
+
+    snapshot_at = datetime(2026, 7, 1, 3, 0, 0)
+    return [
+        OrderWide(
+            order_id=order.id,
+            order_no=order.order_no,
+            source_order_no=order.source_order_no,
+            external_order_no=order.external_order_no,
+            user_id=order.user.id,
+            user_name=order.user.user_name,
+            user_status=order.user.status,
+            product_id=order.product.id,
+            sku=order.product.sku,
+            product_name=order.product.product_name,
+            category_id=order.product.category_id,
+            category=order.product.category,
+            channel_id=order.channel.id,
+            channel_code=order.channel.channel_code,
+            channel_name=order.channel.channel_name,
+            channel_type=order.channel.channel_type,
+            order_status=order.order_status,
+            order_amount=order.order_amount,
+            shipping_amount=order.shipping_amount,
+            discount_amount=order.discount_amount,
+            actual_amount=order.actual_amount,
+            quantity=order.quantity,
+            paid_at=order.paid_at,
+            source_updated_at=order.updated_at or snapshot_at,
+            snapshot_at=snapshot_at,
+            batch_id="orders_wide_20260701_0300",
+        )
+        for order in orders
     ]
 
 
@@ -571,38 +827,58 @@ def _count_seed_tables(session: Session) -> dict[str, int]:
 
     models = {
         "users": User,
+        "product_categories": ProductCategory,
         "products": Product,
         "channels": Channel,
         "orders": Order,
+        "order_items": OrderItem,
         "refunds": Refund,
         "tickets": Ticket,
         "knowledge_docs": KnowledgeDoc,
+        "coupons": Coupon,
+        "order_coupons": OrderCoupon,
+        "user_behavior_log": UserBehaviorLog,
+        "product_price_history": ProductPriceHistory,
+        "orders_wide": OrderWide,
     }
     return {table_name: session.execute(select(func.count(model.id))).scalar_one() for table_name, model in models.items()}
 
 
+def _write_seed_summary(summary: dict[str, Any]) -> None:
+    """把 seed 行数和固定事实写成 Markdown，方便人工检查和 AI_CONTEXT 引用。"""
+
+    SEED_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Phase 2.7 Seed Summary",
+        "",
+        "## Counts",
+        "",
+    ]
+    for table_name, count in summary["counts"].items():
+        lines.append(f"- {table_name}: {count}")
+    lines.extend(["", "## Facts", ""])
+    for fact_key, fact_value in summary["facts"].items():
+        lines.append(f"- {fact_key}: {fact_value}")
+    SEED_SUMMARY_PATH.write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> None:
-    """命令行入口：连接数据库 → 填充种子数据 → 校验业务事实 → 打印统计。"""
-    # 命令行入口 ==============================================================
-    # 设计成 python -m scripts.seed_data --reset，方便 README 和 dev-log 复用。
-    parser = argparse.ArgumentParser(description="Seed DataPilot M1 demo data.")
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="Delete existing M1 business rows before seeding.",
-    )
+    """命令行入口：连接数据库 → seed → 固定事实查询 → 打印摘要。"""
+
+    parser = argparse.ArgumentParser(description="Seed DataPilot Phase 2.7 demo data.")
+    parser.add_argument("--reset", action="store_true", help="Delete existing business rows before seeding.")
     args = parser.parse_args()
 
     settings = get_settings()
     engine = create_engine(settings.database_url, pool_pre_ping=True)
     SessionLocal = sessionmaker(bind=engine)
 
-    # 命令行脚本只负责写数据，不调用 create_all；建表主路径必须走 Alembic。
     with SessionLocal() as session:
         summary = seed_database(session, reset_existing=args.reset)
 
     print("Seed completed.")
     print(summary)
+    print(f"seed_summary={SEED_SUMMARY_PATH}")
 
 
 if __name__ == "__main__":

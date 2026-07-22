@@ -24,9 +24,13 @@ class Refund(TimestampMixin, Base):
     # refund_no 是业务单号，id 是数据库主键；二者分开更适合后续扩展。
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     refund_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    source_order_no: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     # 同时冗余 user_id / product_id，是为了退款分析时减少不必要的多表跳转。
     order_id: Mapped[int] = mapped_column(
         ForeignKey("orders.id"), nullable=False, index=True
+    )
+    order_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("order_items.id"), nullable=True, index=True
     )
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
@@ -52,5 +56,6 @@ class Refund(TimestampMixin, Base):
 
     # 关系字段：退款可以回查对应订单、用户和商品。
     order = relationship("Order", back_populates="refunds")
+    order_item = relationship("OrderItem", back_populates="refunds")
     user = relationship("User", back_populates="refunds")
     product = relationship("Product", back_populates="refunds")

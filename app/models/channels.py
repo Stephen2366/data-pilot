@@ -32,3 +32,4 @@ class Channel(TimestampMixin, Base):
 
     # 一个渠道可以带来多笔订单。
     orders = relationship("Order", back_populates="channel")
+    behavior_logs = relationship("UserBehaviorLog", back_populates="channel")

@@ -17,7 +17,22 @@ class RolePolicy:
     allow_sensitive_fields: bool = False
 
 
-ALL_TABLES = {"users", "products", "channels", "orders", "refunds", "tickets", "knowledge_docs"}
+ALL_TABLES = {
+    "users",
+    "products",
+    "channels",
+    "orders",
+    "order_items",
+    "refunds",
+    "tickets",
+    "knowledge_docs",
+    "product_categories",
+    "coupons",
+    "order_coupons",
+    "user_behavior_log",
+    "product_price_history",
+    "orders_wide",
+}
 
 ROLE_POLICIES: dict[str, RolePolicy] = {
     "admin": RolePolicy(allowed_tables=set(ALL_TABLES), allow_sensitive_fields=True),
@@ -27,7 +42,7 @@ ROLE_POLICIES: dict[str, RolePolicy] = {
         allow_sensitive_fields=False,
     ),
     "demo_user": RolePolicy(
-        allowed_tables={"products", "channels", "knowledge_docs"},
+        allowed_tables={"products", "channels", "knowledge_docs", "product_categories", "orders_wide"},
         allow_sensitive_fields=False,
     ),
 }
