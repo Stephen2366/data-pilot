@@ -5,10 +5,11 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：Phase 3A M8 回归基线冻结（已完成，待 accept-module）
-- 上一模块验收：Phase 3A M8 未验收（待 accept-module）
+- 当前模块：Phase 3A M8 回归基线冻结（已验收）
+- 下一模块：M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线
+- 上一模块验收：Phase 3A M8 已验收（2026-07-23，accept-M8-20260723.md）
 - 阻塞项：无；旧链路 formal baseline 允许类 SQL 为 6/8，challenge baseline 为 11/16，已按用户确认作为真实 baseline 冻结
-- 更新时间：2026-07-22
+- 更新时间：2026-07-23
 
 ## 当前技术选型快照
 
@@ -230,6 +231,8 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-23 Phase 3A plan 增补 M8.5：按用户确认将 `docs/phase3a-diagnostic-benchmark-proposal-v5.md` 的落地任务写入 `docs/phase3a-plan.md`，新增 M8.5「Diagnostic Benchmark 骨架与旧链路诊断基线」。边界：只新建 16 条 extra diagnostic case、扩展 eval runner 的 `--extra-cases` / `--pipeline-mode` / `skipped_due_to_pipeline_mode` / `source_file` 报告字段，并生成旧链路 32 条 diagnostic baseline；不提前实现 M9 Schema Retrieval、M10 QueryPlanStep 或 M11 trace_steps。当前下一模块已改为 M8.5。
+- 2026-07-23 Phase 3A M8 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 38 passed），报告 `accept-M8-20260723.md`。当时后续可进入 M9 Schema Retrieval 与 JoinPath；现已按上方 M8.5 补充记录调整为先进入 M8.5。
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v5：按用户要求生成 `docs/phase3a-diagnostic-benchmark-proposal-v5.md`，在 v4 基础上吸收 review-v4 中有效意见。v5 保持 32 条结构，但改为 `database-upgrade-challenge.yaml` 作为 16 条 challenge 唯一源，`phase3a-diagnostic-benchmark.yaml` 只维护新增 16 条，并由 runner `--cases + --extra-cases` 合并；明确 `pipeline_mode` 推荐值 / runner 覆盖 / 实际模式记录，旧链路无法验证的新 check 标 `skipped_due_to_pipeline_mode`；重算 capability 覆盖总数和自动门分母；补 `metric_mapping_match`、local_schema_prompt block/warn 分层、pipeline robustness 单测边界、`quality_reasons` 和 golden path 调整。当前仍未落 benchmark YAML、未改 M8 baseline。
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v4 审查：新增 `docs/phase3a-diagnostic-benchmark-review-v4.md`，按 AI_CONTEXT 和 phase3a-plan.md 口径审查 v4 proposal。总体评价 v4 质量高、主体结构无需大改；列出 P0 级 3 点（16 条 challenge 重复维护 drift、能力覆盖矩阵数字不一致、pipeline_mode 语义歧义）、P1 级 3 点（db_hard_002 blocking 矛盾、local_schema_prompt 评分缺分层、chart_decision 覆盖不足）、P2 级 3 点（缺 pipeline 错误路径 case、quality_win 主观、golden path 选择），并给出调整方案：runner 参数组合替代物理复制、能力通过率计算规则、pipeline_mode 三级优先级、local_schema_prompt block/warn 分层。当前仍未落 benchmark YAML、未改 M8 baseline。
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v4：按用户要求生成 `docs/phase3a-diagnostic-benchmark-proposal-v4.md`，吸收 `docs/phase3a-diagnostic-benchmark-review-v3.md` 的审查意见。v4 保持 `10 formal / 16 challenge / 32 diagnostic` 三层结构和 32 条总数；用 `db_prompt_003` 替换低价值 `db_schema_001`；补 `pipeline_mode`、`source_case_file`、`expected_tables_alternatives.required_columns`、`optional_steps.chart_decision`、golden path、improvement 计算伪代码和 manual 统计口径；明确短期采用 `source_case_id + 独立 YAML + --check-consistency`，`includes` 留后续。当前仍未落 benchmark YAML、未改 M8 baseline。

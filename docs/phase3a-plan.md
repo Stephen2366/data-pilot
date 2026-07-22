@@ -24,12 +24,13 @@
 
 - 能用 10 条 SQL / 聚合 / 多表 / 安全正式回归用例冻结阶段二 v1 baseline，观察点是 `eval/reports/phase3a-baseline.md` 记录旧链路通过率、SQL、trace_id 和失败原因。
 - 能同步运行 16 条 challenge superset，观察点是 `eval/reports/phase3a-challenge-baseline.md` 和后续 challenge 报告记录扩展通过率、manual review 标记、issue tags 和困难诊断素材。
+- 能在 M8.5 形成 32 条 diagnostic benchmark 骨架，观察点是 `eval/cases/phase3a-diagnostic-benchmark.yaml` 只维护新增 16 条，runner 通过 `--cases + --extra-cases` 与 challenge 16 条组合运行。
 - 能从 `domain_pack/schema_desc/`、`domain_pack/metrics.yaml` 和 SQL examples 构建字段、指标、关系三类 Schema 检索文档，观察点是 8 条允许类 SQL 的 expected_tables 命中率 100%，expected_columns / expected_metrics 召回命中率不低于 80%。
 - 能为一次问题生成轻量 SchemaGraph / JoinPath，只包含相关表、字段、指标和关系，观察点是多表 case trace 中可看到 join path，并且 Join 条件来自 `domain_pack/schema_desc/*` 的关联关系。
 - 能让 LLM 先输出 `QueryPlan(steps=[QueryPlanStep])`，再基于局部 Schema 生成 SQL，观察点是计划通过 Pydantic 校验、字段来源校验、Join 来源校验和敏感字段预检；Phase 3A 只允许一个可执行 `sql_query` step。
 - 能在评测入口强制走新 Text2SQL pipeline，观察点是 `force_new_pipeline` 或同等开关绕过模板提前命中，让 10 条正式回归和 16 条 challenge 覆盖 schema_retrieval、query_plan、local_schema_prompt、sql_generation、sql_guard、sql_execution。
 - 能记录分步骤 `trace_steps`，观察点是每次请求至少记录 `schema_retrieval`、`schema_context`、`join_path`、`query_plan`、`plan_validation`、`sql_generation`、`sql_guard`、`sql_execution`，图表成功时记录 `chart_decision`。
-- 能产出新旧链路对照报告，观察点是 `eval/reports/phase3a-comparison.md` 展示全量 Schema prompt 与局部 Schema prompt 的表字段数量差异、2 个多表 case 的 Join 路径、10 条正式回归通过率、16 条 challenge 诊断摘要和最小 issue tags。
+- 能产出新旧链路对照报告，观察点是 `eval/reports/phase3a-comparison.md` 展示全量 Schema prompt 与局部 Schema prompt 的表字段数量差异、2 个多表 case 的 Join 路径、10 条正式回归通过率、16 条 challenge 诊断摘要、32 条 diagnostic capability 摘要和最小 issue tags。
 
 ## 架构底线与可降级边界
 
@@ -40,6 +41,7 @@
 | 先冻结旧链路 baseline，再改造新链路 | `python -m eval.run_eval --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-baseline.md --trace .agent_work/temp/phase3a-baseline-traces.jsonl` |
 | 阶段三A回归固定为 10 条：2 simple、3 aggregation、3 multi_table、2 security | 人工回读 `eval/cases/phase3a-regression.yaml`；报告 total=10 |
 | 16 条 challenge 作为 10 条 formal 的 superset 每模块陪跑 | 人工回读 `eval/cases/database-upgrade-challenge.yaml`；报告 total=16；10 条 formal question 均包含在 challenge 中 |
+| 32 条 diagnostic benchmark 只在 M8.5 / M12 作为深度诊断集 | `eval.run_eval --cases ... --extra-cases ...` 报告 total=32；`phase3a-diagnostic-benchmark.yaml` 只含新增 16 条 |
 | 生产链路保留模板优先，但评测链路必须支持强制新 pipeline | API / eval 测试覆盖 `force_new_pipeline=true`，并在 trace 中出现新 pipeline steps |
 | Schema 文档必须分为 `field_doc`、`metric_doc`、`relation_doc` | `tests/test_phase3a_schema_retrieval.py` 检查 doc_type 分布 |
 | Schema Retriever 必须有关键词召回 + 向量召回主链路，结果字段预留 `score/source/rank/doc_type` | `tests/test_phase3a_schema_retrieval.py` 检查两路命中和返回结构 |
@@ -70,6 +72,7 @@
 - 阶段三A总路线与技术取舍：以 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`「阶段三A」为准；本计划只把它拆成可施工模块。
 - 阶段三A 10 条正式回归用例：以 `eval/cases/phase3a-regression.yaml` 为准，是 M8-M12 主硬门。
 - 阶段三A 16 条 challenge 用例：以 `eval/cases/database-upgrade-challenge.yaml` 为准，是 10 条 formal 的 superset，每模块同步运行并生成诊断摘要。
+- 阶段三A 32 条 diagnostic benchmark：以 `eval/cases/database-upgrade-challenge.yaml` + `eval/cases/phase3a-diagnostic-benchmark.yaml` 的 runner 组合结果为准；前者是 16 条 challenge 唯一源，后者只维护新增 16 条。
 - 阶段二 32 条用例候选池：以 `eval/cases_plan.md` 为历史参考，不作为 M8 新库 regression 的重新抽样来源。
 - `QueryRequest` / `AgentResponse` 对外契约：以 `app/schemas/agent.py` 为准。
 - `trace_steps` 内部结构：以 `engine/trace/recorder.py` 的 Pydantic Schema 为准，必须预留 `step_index / step_type / parent_step_id` 以支持后续多步骤分析链路。
@@ -81,6 +84,7 @@
 ## 当前差异清单
 
 - ROADMAP 要求阶段三A正式回归 10 条，当前 `eval/cases/phase3a-regression.yaml` 已由 Phase 2.7 落地；M8 校验 10 条新库 formal case 并生成旧链路 baseline，不再新建 YAML。16 条 `database-upgrade-challenge.yaml` 作为 superset 陪跑诊断报告。M6 的 `eval/cases/smoke.yaml` 仍保留 6 条 smoke 历史口径。
+- `docs/phase3a-diagnostic-benchmark-proposal-v5.md` 已收敛 32 条诊断 benchmark 方案；本计划新增 M8.5 把它落成评测骨架和旧链路诊断 baseline，但不提前实现 M9-M11 的 Schema Retrieval、QueryPlan 或 trace_steps 新链路能力。
 - ROADMAP 要求评测入口支持 `force_new_pipeline` 或同等开关，当前 `app/schemas/agent.py::QueryRequest` 只有 `question/user_role`；计划在 M11 增量扩展请求字段。
 - ROADMAP 要求分步骤 `trace_steps`，当前 `engine/trace/recorder.py::TraceRecord` 只有一次请求摘要和 `tool_calls`；计划在 M11 增量扩展内部 trace，不要求前端立即展示。
 - ROADMAP 长期会进入 RAG / Hybrid / Agent 编排，Phase 3A 不实现多 SQL Agent，但 `QueryPlan`、`TraceStep` 和 `EvalCase.pipeline_mode` 不能写死为单 SQL；M10/M11 以校验限制保证本阶段仍是 single-step。
@@ -90,7 +94,7 @@
 
 ## 模块推进原则
 
-- 模块编号从 M8 开始，M8-M12 串成一个完整的 Text2SQL 深化闭环。
+- 模块编号从 M8 开始，M8-M12 串成一个完整的 Text2SQL 深化闭环；M8.5 是 M8 和 M9 之间的轻量评测底座增强，不改变后续主线编号。
 - 每个模块都必须能独立学习、实现、验证和复盘；测试、smoke、README 小修跟随对应功能模块，不单独拆模块。
 - 每个模块开始时在 `.agent_work/temp/m<module>-notes.md` 写 5-8 条极短 checklist，开发中同步记录关键决策、踩坑和验证素材。
 - 每个模块完成后先跑本模块验收门，再用 `finish-module` 收工整理；用户人工检查后再跑 `accept-module` 验收。
@@ -102,18 +106,22 @@
 | 路径 | 类型 | 所属模块 | 职责 |
 |---|---|---|---|
 | `.agent_work/temp/m8-notes.md` | 新建 | M8 | M8 开工 checklist、baseline 选择理由和验证素材 |
+| `.agent_work/temp/m8.5-notes.md` | 新建 | M8.5 | M8.5 诊断 benchmark 字段取舍、runner 扩展和旧链路 baseline 记录 |
 | `.agent_work/temp/m9-notes.md` | 新建 | M9 | M9 Schema Retrieval 决策和召回验证素材 |
 | `.agent_work/temp/m10-notes.md` | 新建 | M10 | M10 QueryPlanStep 决策和失败样例 |
 | `.agent_work/temp/m11-notes.md` | 新建 | M11 | M11 新 pipeline、trace_steps 和集成验证素材 |
 | `.agent_work/temp/m12-notes.md` | 新建 | M12 | M12 对照报告、验收截图和收尾记录 |
 | `eval/cases/phase3a-regression.yaml` | 已有/校验 | M8 | 10 条阶段三A新库 SQL 回归用例，M8 只做校验和必要小修 |
-| `eval/cases/database-upgrade-challenge.yaml` | 已有/校验 | M8-M12 | 16 条 challenge superset，每模块同步运行并记录诊断摘要 |
+| `eval/cases/database-upgrade-challenge.yaml` | 已有/校验 | M8-M12 | 16 条 challenge superset，每模块同步运行并记录诊断摘要；M8.5 作为 32 条 diagnostic 的前 16 条唯一源 |
+| `eval/cases/phase3a-diagnostic-benchmark.yaml` | 新建 | M8.5 | 只维护 v5 新增 16 条 capability-focused case，不复制 challenge 16 条 |
 | `eval/reports/phase3a-baseline.md` | 新建/生成 | M8 | 旧链路 baseline 报告 |
 | `eval/reports/phase3a-challenge-baseline.md` | 新建/生成 | M8 | 旧链路 challenge baseline 报告 |
+| `eval/reports/phase3a-diagnostic-baseline.md` | 新建/生成 | M8.5 | 旧链路跑 32 条 diagnostic benchmark 的诊断 baseline 报告 |
 | `eval/reports/phase3a-new-pipeline.md` | 新建/生成 | M12 | 新链路回归报告 |
 | `eval/reports/phase3a-challenge-new-pipeline.md` | 新建/生成 | M12 | 新链路 challenge 诊断报告 |
+| `eval/reports/phase3a-diagnostic-new-pipeline.md` | 新建/生成 | M12 | 新链路 32 条 diagnostic 诊断报告 |
 | `eval/reports/phase3a-comparison.md` | 新建/生成 | M12 | 新旧链路对照报告 |
-| `eval/run_eval.py` | 修改 | M8/M12 | 支持阶段三A case 字段、issue tags、pipeline mode、报告输出 |
+| `eval/run_eval.py` | 修改 | M8/M8.5/M12 | 支持阶段三A case 字段、issue tags、pipeline mode、`--extra-cases`、报告输出 |
 | `engine/schema_retrieval/__init__.py` | 新建 | M9 | Schema Retrieval 包入口 |
 | `engine/schema_retrieval/objects.py` | 新建 | M9 | `SchemaDocument`、`SchemaHit`、`SchemaGraph`、`JoinPath` 等结构 |
 | `engine/schema_retrieval/document_builder.py` | 新建 | M9 | 从 domain_pack 构建 field / metric / relation docs |
@@ -127,20 +135,21 @@
 | `app/schemas/agent.py` | 修改 | M11 | `QueryRequest.force_new_pipeline`，必要时增加 trace metadata |
 | `app/api/query.py` | 修改 | M11 | 生产模板优先 + 评测强制新 pipeline 的入口整合 |
 | `engine/trace/recorder.py` | 修改 | M11 | 增加 `TraceStep` 和 `TraceRecord.trace_steps`，预留 `step_index / step_type / parent_step_id` |
-| `tests/test_phase3a_eval.py` | 新建 | M8/M12 | 阶段三A eval case、issue tags、报告字段测试 |
+| `tests/test_phase3a_eval.py` | 新建 | M8/M8.5/M12 | 阶段三A eval case、issue tags、报告字段和 diagnostic 合并测试 |
 | `tests/test_phase3a_schema_retrieval.py` | 新建 | M9 | Schema 文档构建、召回、SchemaGraph / JoinPath 测试 |
 | `tests/test_phase3a_planner.py` | 新建 | M10 | QueryPlanStep 解析和自检测试 |
 | `tests/test_phase3a_pipeline.py` | 新建 | M11 | 强制新 pipeline、trace_steps、SQL Guard 集成测试 |
-| `scripts/smoke_phase3a_text2sql.py` | 新建 | M12 | 阶段三A 本地 smoke，一键跑 10 条 formal、16 条 challenge 和对照报告 |
+| `scripts/smoke_phase3a_text2sql.py` | 新建 | M12 | 阶段三A 本地 smoke，一键跑 10 条 formal、16 条 challenge、32 条 diagnostic 和对照报告 |
 | `README.md` | 修改 | M12 | 阶段三A 入口、命令、能力边界和 Milvus 实际状态 |
 | `docs/AI_CONTEXT.md` | 修改 | 每模块 | 当前状态、技术档案、补充记录 |
 | `docs/dev-log.md` | 修改 | 每模块 | 面向用户的学习复盘 |
 
 ## 模块划分说明
 
-本阶段按 Text2SQL 中间层的认知闭环拆成 5 个模块，而不是按文件或工具拆：
+本阶段按 Text2SQL 中间层的认知闭环拆成 5 个主模块，加 1 个轻量 M8.5 评测底座模块，而不是按文件或工具拆：
 
 - M8 先冻结 baseline，因为后续所有改造都需要和 v1 对比，不能边改边猜收益。
+- M8.5 把 `docs/phase3a-diagnostic-benchmark-proposal-v5.md` 落成 32 条诊断 benchmark 骨架和旧链路 baseline，只扩展评测 runner，不实现新 Text2SQL pipeline。
 - M9 合并 Schema 文档、召回和 SchemaGraph，因为它们共同回答“LLM 应该看到哪些表字段关系”，通常一起实现、一起验收。
 - M10 单独做 QueryPlan / QueryPlanStep，因为结构化计划和自检是阶段三A的 P0 风险点，适合独立学习和复盘；本阶段只执行单个 `sql_query` step，但容器不写死为单 SQL。
 - M11 合并新 pipeline、`force_new_pipeline` 和 `trace_steps`，因为它们共同形成端到端可诊断链路；只做任一部分都不是完整能力。
@@ -155,10 +164,11 @@
 | 模块 | 顺序 | 依赖 | 模块目标 | 关键产出 |
 |---|---|---|---|---|
 | M8 阶段三A回归基线 | 1 | Phase 2.7 已验收 | 校验现有 10 条 formal regression 和 16 条 challenge，并冻结旧链路 baseline | `eval/cases/phase3a-regression.yaml`、`eval/reports/phase3a-baseline.md`、`eval/reports/phase3a-challenge-baseline.md` |
-| M9 Schema Retrieval 与 JoinPath | 2 | M8 | 构建 field / metric / relation docs，完成 keyword + vector 召回和轻量 SchemaGraph | `engine/schema_retrieval/*` |
+| M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线 | 1.5 | M8 | 按 proposal v5 落地新增 16 条诊断 case、runner 多文件组合和旧链路 32 条 baseline | `eval/cases/phase3a-diagnostic-benchmark.yaml`、`eval/reports/phase3a-diagnostic-baseline.md` |
+| M9 Schema Retrieval 与 JoinPath | 2 | M8.5 | 构建 field / metric / relation docs，完成 keyword + vector 召回和轻量 SchemaGraph | `engine/schema_retrieval/*` |
 | M10 QueryPlanStep 与自检 | 3 | M9 | 定义可扩展结构化查询计划，并校验表字段指标 Join 与敏感字段；Phase 3A 执行单个 `sql_query` step | `engine/nl2sql/planner.py` |
 | M11 新 Text2SQL Pipeline 与 Trace Steps | 4 | M9/M10 | 串起 schema_retrieval -> plan -> local prompt -> SQL -> Guard -> execution，并支持强制新链路 | `engine/nl2sql/pipeline.py`、`trace_steps` |
-| M12 对照报告与阶段收尾 | 5 | M11 | 跑 10 条 formal 与 16 条 challenge 新旧对照，输出报告、README 边界和阶段验收材料 | `eval/reports/phase3a-comparison.md`、`scripts/smoke_phase3a_text2sql.py` |
+| M12 对照报告与阶段收尾 | 5 | M11/M8.5 | 跑 10 条 formal、16 条 challenge 和 32 条 diagnostic 新旧对照，输出报告、README 边界和阶段验收材料 | `eval/reports/phase3a-comparison.md`、`scripts/smoke_phase3a_text2sql.py` |
 
 这组模块避免了“为某个中间文件拆模块”的碎片化，也避免把 Schema Retrieval、Planner、Pipeline、Eval 全塞进一个超大模块导致复盘失控。
 
@@ -220,12 +230,70 @@
 | `eval/run_eval.py` 扩展影响 M6 smoke | M6 smoke 报错或报告字段缺失 | 回滚本模块对 M6 路径的破坏性改动，新增兼容分支而非改旧字段含义 | 阶段三A YAML |
 | Windows pytest basetemp 锁住 | `PermissionError` 删除 `.agent_work/temp/pytest-tmp` | 使用新的 `--basetemp=.agent_work/temp/pytest-m8-tmp-2` 复跑 | 所有业务验收 |
 
+## M8.5：Diagnostic Benchmark 骨架与旧链路诊断基线
+
+| 项 | 内容 |
+|---|---|
+| 目标 | 按 `docs/phase3a-diagnostic-benchmark-proposal-v5.md` 落地 32 条 diagnostic benchmark 的最小可运行骨架，并用旧链路生成一次真实诊断 baseline。 |
+| 输入 | `docs/phase3a-diagnostic-benchmark-proposal-v5.md`、`eval/cases/database-upgrade-challenge.yaml`、`eval/run_eval.py`、`tests/test_phase3a_eval.py`、M8 baseline 报告 |
+| 关键产出 | `eval/cases/phase3a-diagnostic-benchmark.yaml`、`eval/reports/phase3a-diagnostic-baseline.md`、`tests/test_phase3a_eval.py` 增量测试 |
+
+**需用户确认的决策点**
+
+默认按 proposal v5 执行：不复制 16 条 challenge，`database-upgrade-challenge.yaml` 继续作为 challenge 唯一源；`phase3a-diagnostic-benchmark.yaml` 只维护新增 16 条 capability-focused case；runner 用 `--cases + --extra-cases` 合并成 32 条。M8.5 只做评测骨架和旧链路 baseline，不提前实现 M9 Schema Retrieval、M10 QueryPlanStep、M11 trace_steps 或新 pipeline。
+
+如果实现时发现某条新增 case 依赖当前 seed 中不存在的稳定事实，优先把它标为 `phase3a_blocking=false` 或 `check.type=manual`，不要为了凑通过率修改业务 seed；若必须换题，需要先说明替换理由并问用户确认。
+
+### 参考资料
+
+| 参考文件 | 借鉴点 | 怎么落地 |
+|---|---|---|
+| `docs/phase3a-diagnostic-benchmark-proposal-v5.md` | 32 条结构、能力标签、check 类型、统计口径 | 作为 M8.5 唯一方案来源；plan 只落执行边界 |
+| `eval/cases/database-upgrade-challenge.yaml` | 16 条 challenge 唯一源 | runner 合并读取，不复制到 diagnostic YAML |
+| `eval/run_eval.py` | M8 已有 case loader、issue tags、Markdown 报告 | 增量支持 `--extra-cases`、`--pipeline-mode` 覆盖和 skipped 口径 |
+| `tests/test_phase3a_eval.py` | M8 eval 行为测试 | 增加 diagnostic YAML 字段、合并、跳过规则和报告字段测试 |
+
+### 任务清单
+
+- [ ] [顺序] 创建 `.agent_work/temp/m8.5-notes.md` | 输入：本计划 M8.5 和 proposal v5 | 输出：新增 16 条 case 字段取舍、不能自动测的原因、baseline 命令记录
+- [ ] [顺序] 新建 `eval/cases/phase3a-diagnostic-benchmark.yaml` | 输入：proposal v5 新增 16 条 capability-focused case | 输出：只包含新增 16 条，不复制 `database-upgrade-challenge.yaml` 的 16 条
+- [ ] [顺序] 扩展 `eval/run_eval.py` case loader | 输入：`--cases`、`--extra-cases` | 输出：按顺序合并多份 YAML，校验 case id 全局唯一，并在结果中保留 `source_file`
+- [ ] [顺序] 扩展 `eval/run_eval.py` pipeline mode | 输入：case 内 `pipeline_mode`、runner 参数 `--pipeline-mode` | 输出：报告同时记录 `configured_pipeline_mode` 和 `actual_pipeline_mode`
+- [ ] [顺序] 扩展 skipped 评分规则 | 输入：旧链路 baseline 下的新 pipeline 专属 check | 输出：`expected_plan`、`expected_trace_steps`、`expected_schema_context` 等旧链路不可验证项标记 `skipped_due_to_pipeline_mode`，不计入自动通过率分母
+- [ ] [顺序] 增加 diagnostic 报告字段 | 输入：EvalResult | 输出：报告含 `source_file`、`phase3a_capabilities`、`phase3a_blocking`、`case_properties`、`skipped_due_to_pipeline_mode`
+- [ ] [顺序] 增加一致性检查测试 | 输入：`db_multi_003` 与 `db_plan_001` 等 linked case | 输出：共享问题 case 标注 `linked_case_id`，GMV 等指标口径不漂移；多答案 case 能记录实际命中的 alternative
+- [ ] [顺序] 运行旧链路 32 条 diagnostic baseline | 输入：challenge 16 + extra 16 | 输出：`eval/reports/phase3a-diagnostic-baseline.md` 和 `.agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
+
+### 验收门
+
+- [ ] `eval/cases/phase3a-diagnostic-benchmark.yaml` 只包含 16 条新增 case，不复制 challenge 16 条
+- [ ] `--cases eval/cases/database-upgrade-challenge.yaml --extra-cases eval/cases/phase3a-diagnostic-benchmark.yaml` 合并后 total=32，case id 全局唯一
+- [ ] 新增 16 条 case 均包含 `phase3a_capabilities`、`phase3a_blocking`、`pipeline_mode` 和结构化 `check`
+- [ ] 旧链路 baseline 下，新 pipeline 专属 check 统一标记 `skipped_due_to_pipeline_mode`，不伪装成失败，也不伪装成通过
+- [ ] `local_schema_prompt` 相关 case 使用 block / warn 分层：缺关键表字段为 block，`max_tables` 超标或无关表噪音为 warn
+- [ ] 多答案 case 使用 `expected_tables_alternatives` 并记录实际选择路径；共享问题 case 使用 `linked_case_id` 并防止指标口径漂移
+- [ ] 报告展示 32 条 diagnostic 的 pass/fail/skipped/review_required、source_file、capability 覆盖和 blocking/non-blocking 统计
+- [ ] M8 formal baseline 和 challenge baseline 文件不被重写为新口径；M8.5 另写 `phase3a-diagnostic-baseline.md`
+- [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8_5-tmp`
+- [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pipeline-mode baseline --cases eval/cases/database-upgrade-challenge.yaml --extra-cases eval/cases/phase3a-diagnostic-benchmark.yaml --report eval/reports/phase3a-diagnostic-baseline.md --trace .agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl`
+- [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志
+
+### 降级与停止点
+
+| 卡住场景 | 触发信号 | 降级方案 | 不影响的验收 |
+|---|---|---|---|
+| 旧链路不支持 plan / trace / local schema 检查 | baseline 中大量新 check 无法评分 | 统一标记 `skipped_due_to_pipeline_mode`，保留诊断字段，等 M11/M12 新链路再真正评分 | 32 条 case 组合、报告结构、旧链路结果层 baseline |
+| 新增 case 缺稳定 seed 事实 | 无法写出可靠 expected result 或 SQL 口径 | 标记 `phase3a_blocking=false` 或 `manual`，把稳定性问题写入 notes；不为评测改 seed | runner 合并、baseline 报告 |
+| runner 扩展变成完整 EvalOps 平台 | 开始做历史库、HTML dashboard、复杂 scorer | 停止扩展，只保留多文件合并、pipeline mode、skip 和 Markdown 报告 | M8.5 目标 |
+| 多答案 / linked case 判断复杂 | `expected_tables_alternatives` 或 `linked_case_id` 评分实现膨胀 | M8.5 先报告实际命中路径和 warning，严格质量对照留到 M12 | baseline 可运行、诊断信息不丢 |
+
 ## M9：Schema Retrieval 与 JoinPath
 
 | 项 | 内容 |
 |---|---|
 | 目标 | 把 domain_pack 转换成可召回的 field / metric / relation docs，并生成当前 Query 的轻量 SchemaGraph / JoinPath。 |
-| 输入 | `domain_pack/schema_desc/*`、`domain_pack/metrics.yaml`、`domain_pack/sql_examples/basic.yaml`、M8 10 条 formal case 和 16 条 challenge case |
+| 输入 | `domain_pack/schema_desc/*`、`domain_pack/metrics.yaml`、`domain_pack/sql_examples/basic.yaml`、M8 10 条 formal case、16 条 challenge case 和 M8.5 diagnostic 诊断字段 |
 | 关键产出 | `engine/schema_retrieval/*`、`tests/test_phase3a_schema_retrieval.py` |
 
 **需用户确认的决策点**
@@ -380,9 +448,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 目标 | 跑完阶段三A 10 条 formal 和 16 条 challenge 新旧对照，证明新链路价值，并整理可演示、可复盘材料。 |
-| 输入 | M8 formal / challenge baseline、M11 新 pipeline、`eval/run_eval.py`、`docs/dev-log.md` |
-| 关键产出 | `eval/reports/phase3a-new-pipeline.md`、`eval/reports/phase3a-challenge-new-pipeline.md`、`eval/reports/phase3a-comparison.md`、`scripts/smoke_phase3a_text2sql.py`、README 阶段三A说明 |
+| 目标 | 跑完阶段三A 10 条 formal、16 条 challenge 和 32 条 diagnostic 新旧对照，证明新链路价值，并整理可演示、可复盘材料。 |
+| 输入 | M8 formal / challenge baseline、M8.5 diagnostic baseline、M11 新 pipeline、`eval/run_eval.py`、`docs/dev-log.md` |
+| 关键产出 | `eval/reports/phase3a-new-pipeline.md`、`eval/reports/phase3a-challenge-new-pipeline.md`、`eval/reports/phase3a-diagnostic-new-pipeline.md`、`eval/reports/phase3a-comparison.md`、`scripts/smoke_phase3a_text2sql.py`、README 阶段三A说明 |
 
 **需用户确认的决策点**
 
@@ -393,6 +461,7 @@
 | 参考文件 | 借鉴点 | 怎么落地 |
 |---|---|---|
 | `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md` | 新旧链路对照报告要求 | 报告展示局部表字段数量、trace steps、JoinPath、10 条 formal 通过率和 16 条 challenge 诊断摘要 |
+| `docs/phase3a-diagnostic-benchmark-proposal-v5.md` | 32 条 diagnostic benchmark 报告口径 | M12 输出 capability / improvement / blocking / skipped / manual 多维摘要 |
 | `eval/run_eval.py` | Markdown 报告生成 | 扩展对照报告，不引入新平台 |
 | `docs/dev-log.md` | 学习复盘风格 | 写清 Schema Retrieval、QueryPlanStep、Trace Steps 的面试讲法 |
 
@@ -402,8 +471,9 @@
 - [ ] [顺序] 扩展 `eval/run_eval.py` 或新建 `eval/compare_phase3a.py` | 输入：baseline report、新 pipeline report、trace JSONL | 输出：`phase3a-comparison.md`
 - [ ] [顺序] 运行新 pipeline 10 条回归 | 输入：`force_new_pipeline=true` | 输出：`eval/reports/phase3a-new-pipeline.md`、`.agent_work/temp/phase3a-new-traces.jsonl`
 - [ ] [顺序] 运行新 pipeline 16 条 challenge | 输入：`force_new_pipeline=true` | 输出：`eval/reports/phase3a-challenge-new-pipeline.md`、`.agent_work/temp/phase3a-challenge-new-traces.jsonl`
-- [ ] [顺序] 生成新旧链路对照报告 | 输入：baseline + new traces | 输出：局部表字段数量变化、2 个多表 JoinPath、trace_steps 摘要、issue tags、通过率
-- [ ] [顺序] 新建 `scripts/smoke_phase3a_text2sql.py` | 输入：评测入口 | 输出：一键生成 formal baseline / challenge baseline / formal new / challenge new / comparison 报告的本地 smoke
+- [ ] [顺序] 运行新 pipeline 32 条 diagnostic | 输入：`force_new_pipeline=true`、challenge 16 + diagnostic extra 16 | 输出：`eval/reports/phase3a-diagnostic-new-pipeline.md`、`.agent_work/temp/phase3a-diagnostic-new-traces.jsonl`
+- [ ] [顺序] 生成新旧链路对照报告 | 输入：formal / challenge / diagnostic baseline 与 new traces | 输出：局部表字段数量变化、2 个多表 JoinPath、trace_steps 摘要、issue tags、通过率、capability / improvement 摘要
+- [ ] [顺序] 新建 `scripts/smoke_phase3a_text2sql.py` | 输入：评测入口 | 输出：一键生成 formal baseline / challenge baseline / diagnostic baseline / formal new / challenge new / diagnostic new / comparison 报告的本地 smoke
 - [ ] [顺序] 修改 `README.md` | 输入：阶段三A真实实现 | 输出：命令入口、能力边界、Milvus 当前实际状态、未实现 P1/P2 不虚报
 - [ ] [顺序] 运行阶段三A最终门禁 | 输入：全量测试 + smoke | 输出：验收快照写入 AI_CONTEXT
 - [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
@@ -412,11 +482,12 @@
 
 - [ ] 新链路 10 条回归可批量运行
 - [ ] 新链路 16 条 challenge 可批量运行，并记录 manual review 和 issue tags
+- [ ] 新链路 32 条 diagnostic 可批量运行，并按 capability、improvement、blocking/non-blocking、manual/skipped 统计
 - [ ] 安全用例 2/2 blocked
 - [ ] 允许类 SQL 8 条中至少 7 条结果正确
 - [ ] Schema Retriever expected_tables 命中率 100%，expected_columns / expected_metrics 召回命中率不低于 80%
 - [ ] QueryPlanStep 对 10 条 formal case 均有 trace；16 条 challenge 有诊断摘要；失败 case 有 issue tag
-- [ ] `phase3a-comparison.md` 至少展示局部表字段数量变化、关键 trace steps、2 个多表 case JoinPath、10 条 formal 回归通过率和 16 条 challenge 摘要
+- [ ] `phase3a-comparison.md` 至少展示局部表字段数量变化、关键 trace steps、2 个多表 case JoinPath、10 条 formal 回归通过率、16 条 challenge 摘要和 32 条 diagnostic capability 摘要
 - [ ] README 不把 RRF / Rerank / SQL 自动修复 / LangGraph / MCP 写成已完成
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m12-full`
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3a_text2sql.py`
@@ -436,6 +507,7 @@
 | 模块 | 验收门通过 |
 |---|---|
 | M8 | □ |
+| M8.5 | □ |
 | M9 | □ |
 | M10 | □ |
 | M11 | □ |
@@ -443,6 +515,7 @@
 
 - [ ] 10 条 SQL / 聚合 / 多表 / 安全 formal 回归用例可批量运行
 - [ ] 16 条 challenge superset 可批量运行，且包含 10 条 formal question
+- [ ] 32 条 diagnostic benchmark 可通过 challenge 16 + extra 16 合并运行；旧链路不支持的新 pipeline 专属 check 必须标记 skipped，不计入自动通过率分母
 - [ ] 安全用例 2/2 必须拦截
 - [ ] 允许类 SQL 8 条中至少 7 条结果正确
 - [ ] Schema Retriever 对 8 条允许类 SQL 的 expected_tables 命中率 100%
@@ -453,16 +526,19 @@
 - [ ] SQL Guard 仍是最终安全门，危险 SQL 和越权字段不能被 planner 绕过
 - [ ] 旧链路 vs 新链路对照报告输出
 - [ ] challenge 诊断报告输出，困难题有 manual review / issue tag，不把早期诊断失败伪装成 formal 通过
+- [ ] diagnostic 诊断报告输出，包含 capability / improvement / blocking / skipped / manual 摘要，不把 proposal 中的示例数字写成真实结果
 - [ ] README / dev-log / AI_CONTEXT 如实记录已完成、简化、未实现能力
 
 ## 依赖关系总览
 
 ```mermaid
 flowchart TD
-  M8["M8 阶段三A回归基线"] --> M9["M9 Schema Retrieval 与 JoinPath"]
+  M8["M8 阶段三A回归基线"] --> M85["M8.5 Diagnostic Benchmark 骨架"]
+  M85 --> M9["M9 Schema Retrieval 与 JoinPath"]
   M9 --> M10["M10 QueryPlanStep 与自检"]
   M9 --> M11["M11 新 Text2SQL Pipeline 与 Trace Steps"]
   M10 --> M11
+  M85 --> M12["M12 对照报告与阶段收尾"]
   M11 --> M12["M12 对照报告与阶段收尾"]
 ```
 
@@ -473,7 +549,7 @@ flowchart TD
 | Milvus 主路径与自动化测试环境冲突 | M9/M12 | Docker / client 连接不稳定，pytest 依赖外部服务 | 自动化测试使用 in-memory vector index；Milvus adapter 和 README 实际状态分开说明 | Schema doc、召回、JoinPath、10 条 formal 和 16 条 challenge 报告 |
 | LLM 输出计划或 SQL 不稳定 | M10/M11/M12 | JSON 解析失败、字段幻觉、SQL 执行失败 | 强化结构化 prompt 与 plan validation；失败写 issue tag，不做 SQL 自修复 | trace_steps、安全、对照报告 |
 | 新 pipeline 破坏旧模板优先链路 | M11 | M4/M5/M6 既有测试失败 | `force_new_pipeline` 默认 False，旧路径保持原行为 | 新链路强制评测 |
-| eval 扩展超出阶段三A | M8/M12 | 开始做历史库、HTML dashboard、复杂 scorer | 只保留 Markdown + issue tags；完整能力交给阶段四 AgentEvalOps | 阶段三A报告 |
+| eval 扩展超出阶段三A | M8/M8.5/M12 | 开始做历史库、HTML dashboard、复杂 scorer | 只保留 Markdown + issue tags / skipped / capability 摘要；完整能力交给阶段四 AgentEvalOps | 阶段三A报告 |
 | SchemaGraph 复杂化 | M9/M10 | 开始引入图数据库或复杂路径搜索 | 只做当前问题相关表关系视图；JoinPath 来自已知 relation | 多表 Join 约束 |
 | 安全边界前移导致误判 | M10/M11 | planner 预检和 SQL Guard 结果冲突 | 以 SQL Guard 为最终安全门，planner 只做提前诊断 | 最终安全用例 |
 | Windows 临时目录锁 | 全模块 | pytest basetemp PermissionError | 换新的 `.agent_work/temp/pytest-mx-tmp-*` 复跑 | 业务验证 |
