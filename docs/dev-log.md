@@ -713,3 +713,117 @@ python -m streamlit run demo\streamlit_app.py
 
 打开 `http://localhost:8501` 后，可以点左侧预置问题，例如“各渠道订单量是多少？”。大致结果：主区域展示自然语言答案、SQL、表格、柱状图和 trace；如果点 `DROP TABLE orders`，会看到 `safety_status=blocked` 和 `sql_guard_blocked`。
 
+## ★ Phase 2.7 数据库升级（2026-07-22）
+
+**简述**：把阶段二的 7 表数据底座升级成 **14 张物理表 + 1 万级订单数据**，让后续 Phase 3A Text2SQL 深化面对的不是小 demo 库，而是更接近真实企业分析系统的复杂 schema。
+
+### 这次做了什么
+
+阶段二 M0-M6 已经跑通了 SQL Agent v1：能查库、能安全拦截、能出图表、能跑 smoke。但 7 张表的数据底座仍然偏“教学版”：订单是一单一商品，类目只是字符串，没有优惠券多对多、行为日志、价格历史、宽表和数据质量问题。这样的库可以证明链路能跑，却不够支撑 Phase 3A 要做的 **Schema Retrieval、JoinPath、QueryPlanStep 和局部 Schema Prompt**。
+
+所以 Phase 2.7 先做了一次数据库底座升级。表结构上，从原来的用户、商品、渠道、订单、退款、工单、知识库 7 张表，扩展为 **13 张业务分析表 + 1 张桥接表**。新增内容包括：**订单明细 `order_items`**、**类目树 `product_categories`**、**优惠券 `coupons` + 桥接表 `order_coupons`**、**行为日志 `user_behavior_log`**、**价格历史 `product_price_history`** 和 **订单宽表 `orders_wide`**。旧表没有简单推倒重来，而是保留 `orders.product_id` 和 `products.category`，让阶段二 API、模板 SQL 和 M6 smoke 继续兼容。
+
+数据上，`scripts/seed_data.py` 不写死 10000 行，而是用确定性规则生成真实感模拟业务数据：**10000 张订单、18000 条订单明细、1000 条退款、3000 条用券记录、10000 条用户行为日志**。同时保留一组固定业务事实，例如 2026 年 6 月 GMV、Aurora 耳机退款率最高、Mobile App 渠道 GMV Top、`JUNE_FIXED_50` 在 Mobile App 使用最多、数码电子类目 GMV Top、mobile_app 设备转化率最高等。这样后续 Agent 生成 SQL 时，不只要“能跑”，还可以被稳定标准答案检查。
+
+最后补齐了领域知识和评测素材：`domain_pack/schema_desc/relations.yaml` 把外键、桥接表、递归层级、SCD 时间窗口和聚合风险结构化写出来；`metrics.yaml` 明确 GMV、商品维度 GMV、净收入、优惠券使用率、转化率和历史售价口径；`database-upgrade-challenge.yaml` 放 16 条数据库挑战用例，`phase3a-regression.yaml` 放 10 条 Phase 3A 正式回归输入。注意：这次只升级数据库和数据，不进入 Phase 3A M8，也不提前要求 trace_steps 通过。
+
+### 新概念
+
+- **订单头 / 订单明细**：真实电商里一笔订单可能买多个商品，所以订单头 `orders` 记录“这笔订单整体状态和总金额”，订单明细 `order_items` 记录“这一单里每个商品买了几件、多少钱”。以后问订单级 GMV 可以查 `orders.order_amount`，问商品销售额就应该走 `order_items.line_amount`。
+- **桥接表**：`orders` 和 `coupons` 是多对多关系，一笔订单可能用多张券，一张券也会被多笔订单使用，所以中间需要 `order_coupons`。面试里可以把它类比成 Java 里订单和标签的关联表：统计订单数时要 `COUNT(DISTINCT orders.id)`，否则一单多券会把订单量放大。
+- **类目树 / 递归 CTE**：`product_categories` 不是平铺枚举，而是父子层级。用户问“数码电子及其子类目 GMV”时，SQL 需要递归展开子类目，再关联商品和订单明细。
+- **SCD Type 2 价格历史**：`products.price` 是当前价，`product_price_history` 保存历史价格窗口。问“6 月当时售价”不能直接用当前价，而要用 `valid_from / valid_to` 做时间窗口匹配。
+- **宽表 `orders_wide`**：把订单、用户、商品、渠道常用字段冗余到一张表，适合看板汇总，但不适合明细追溯和强一致校验。它用来训练 Agent 判断“这题用宽表快，还是用规范化星型模型更准”。
+- **数据质量彩蛋**：新 seed 故意加入少量真实业务常见问题，例如未支付订单 `paid_at IS NULL`、`canceled/cancelled` 状态拼写差异、源系统单号重复、少量金额不一致、负数退款冲销。这不是把数据库做脏，而是在不破坏主键 / 外键 / 唯一约束的前提下模拟真实数据挑战。
+
+### 关键文件
+
+- `app/models/`：新增和改造 ORM 模型，描述 14 张物理表。
+- `alembic/versions/20260722_0002_database_upgrade_14_tables.py`：Phase 2.7 数据库迁移，负责把旧 7 表升级到 14 表。
+- `scripts/seed_data.py`：确定性 seed 数据工厂，生成 1 万级订单、固定事实和 seed summary。
+- `domain_pack/schema_desc/relations.yaml`：结构化关系事实源，后续 M9 生成 relation_doc / JoinPath 会优先读它。
+- `domain_pack/metrics.yaml`：指标口径单一事实源，明确订单级 GMV、商品维度 GMV、净收入等默认口径。
+- `eval/cases/database-upgrade-challenge.yaml`：16 条数据库挑战集，验证新库复杂度和固定事实。
+- `eval/cases/phase3a-regression.yaml`：10 条 Phase 3A 正式回归输入，给 M8 baseline 使用。
+- `tests/test_database_upgrade.py`：数据库升级专用测试，验证 challenge case 结构、expected SQL 基础稳定和安全拦截。
+
+### 代码阅读路线
+
+1. **表结构入口**：`app/models/`
+   先看新增模型，不要急着背字段。重点理解每张表引入的 SQL 难题：`OrderItem` 解决一单多商品，`OrderCoupon` 解决多对多，`ProductCategory` 解决层级类目，`ProductPriceHistory` 解决历史价格，`OrderWide` 解决宽表 vs 星型模型选择。
+
+2. **迁移脚本**：`alembic/versions/20260722_0002_database_upgrade_14_tables.py`
+   把它当成“真实数据库结构变化清单”读。先看 `upgrade()` 如何按依赖顺序建新表、给旧表加列，再看 `downgrade()`。这里的阅读重点是 **MySQL DDL 不是事务性的**：外键索引不能随便先删，`paid_at` 从可空回滚到非空前也必须回填 NULL。
+
+3. **Seed 数据工厂**：`scripts/seed_data.py`
+   主角是 `seed_database()` 和 `verify_business_facts()`。前者按父表、事实表、桥接表、宽表的顺序生成数据；后者用真实 SQL 查固定事实。读的时候重点看：外键靠 ORM 对象关系，不靠自增 ID；固定事实靠 `sku/coupon_code/channel_code` 等业务键，不靠 `id=1`。
+
+4. **业务语义层**：`domain_pack/schema_desc/` 和 `domain_pack/metrics.yaml`
+   这里不是给数据库执行的，而是给后续 Text2SQL 中间层理解业务的。重点看 `orders.md`、`order_items.md`、`refunds.md` 和 `relations.yaml`：它们告诉 Agent 什么时候查订单头、什么时候查明细、什么时候要 `COUNT(DISTINCT)`。
+
+5. **评测素材**：`eval/cases/database-upgrade-challenge.yaml` 和 `eval/cases/phase3a-regression.yaml`
+   先看两者边界：challenge 是 16 条数据库复杂度素材，不替代正式硬门；regression 是 10 条 Phase 3A M8-M12 主线回归。这个拆分能避免一上来把 Phase 3A 验收压成复杂 SQL 全能力攻坚。
+
+一次真实 seed 的数据流向：
+
+`seed_database()`
+→ `_build_product_categories/users/products/channels/coupons()`
+→ `_build_orders_and_items()`
+→ `_build_order_coupons()`
+→ `_build_refunds/tickets/user_behavior_logs()`
+→ `_build_orders_wide()`
+→ `verify_business_facts()`
+→ `.agent_work/temp/database-upgrade-seed-summary.md`
+
+**模块闭环**：Phase 2.7 不是新增 Agent 智能，而是把 Phase 3A 要训练和评测的“地形”铺出来。没有这一步，Schema Retriever、JoinPath 和 QueryPlanStep 很容易只是在小库上自嗨；有了 14 表和固定事实，后续每个优化都能被真实复杂 schema 检验。
+
+### 设计要点
+
+- **不推倒阶段二旧契约**：保留 `orders.product_id` 和 `products.category`，让旧 API、旧模板、M6 smoke 都能继续跑；新口径通过 metrics 和 schema_desc 引导后续新链路。
+- **seed 生成逻辑优先于静态数据**：不把 10000 行逐行写死，避免数据不可维护。规则化生成既能规模化，又能保证固定事实稳定。
+- **固定事实用业务键定位**：MySQL 多次 reset 后自增 ID 不一定从 1 开始，所以 seed 和测试都不依赖具体 ID。这是后端项目里很重要的可迁移性习惯。
+- **challenge 和 regression 分开**：16 条 challenge 证明数据库复杂度，10 条 regression 才是 Phase 3A 主线硬门。这样既有技术深度，又不会把 M8 变成过度验收。
+- **脏数据不破坏工程约束**：真实业务会乱，但主业务表仍然应该守住外键和唯一约束。逻辑脏数据放进源系统字段和少量金额不一致样例里，既真实又可控。
+
+### 面试怎么讲
+
+Phase 2.7 可以讲成“我为了让 Text2SQL 项目从 demo 走向真实业务复杂度，专门升级了数据库底座”。原来只有 7 张表，Agent 很容易靠全量 schema prompt 硬猜；升级后有 **14 张物理表、1 万级订单、1.8 万级订单明细、多对多优惠券、递归类目、SCD 价格历史、行为漏斗和宽表快照**。我还把固定业务事实和数据质量彩蛋写进确定性 seed，并用 Alembic 管理可逆迁移。这样后续做 Schema Retriever、JoinPath 和 QueryPlanStep 时，不是凭感觉优化 prompt，而是在一套可复现的新库上验证选表、Join、指标口径和安全边界喵
+
+### 验证与下一步
+
+- 验证：真实 MySQL 完整跑过 `alembic downgrade 20260717_0001` → `alembic upgrade head` → `python -m scripts.seed_data --reset`；最终 `alembic current` 为 `20260722_0002 (head)`，`alembic check` 无新增操作。
+- 自动化：全量 pytest **31 passed, 1 warning**；M6 smoke **6/6 passed**；`git diff --check` 无 whitespace error，仅 Windows CRLF 提示。
+- 下一步：先运行 `accept-module` 验收 Phase 2.7；验收通过后，再系统对齐 `docs/phase3a-plan.md` 的 M8-M12 新库口径，然后进入 Phase 3A M8 baseline。
+
+可复制验证命令：
+
+```powershell
+# 查看当前数据库迁移版本。预期：20260722_0002 (head)。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+
+# 检查 ORM metadata 与真实 MySQL 是否一致。预期：No new upgrade operations detected.
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+
+# 重置并写入 14 表确定性 seed。预期：输出 14 张表行数和固定业务事实。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
+
+# 跑全量测试。预期：31 passed, 1 warning。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-db-upgrade-full
+
+# 跑阶段二 M6 smoke 回归。预期：passed=6/6。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\smoke.yaml --report eval\reports\latest.md --trace .agent_work\temp\database-upgrade-m6-smoke-traces.jsonl
+```
+
+**本地启动体验：**
+
+```powershell
+# 1. 准备新库。预期：MySQL datapilot_dev 迁移到 14 表，并写入 1 万级 seed 数据。
+python -m alembic upgrade head
+python -m scripts.seed_data --reset
+
+# 2. 启动 FastAPI。预期：Uvicorn running on http://127.0.0.1:8000。
+python -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs` 后，可以继续用 `POST /api/query` 测阶段二旧问题，例如“2026年6月本月GMV是多少？”。大致结果：`safety_status=passed`，`chart_spec` 是单指标柱图，GMV 会变成新库的 **11285752.0**。如果测“各渠道订单量是多少？”，仍会返回 Mobile App 等渠道结果，说明旧链路在新库上保持兼容。
+
