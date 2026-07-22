@@ -6,6 +6,7 @@ cases:
     user_role: ops
     expected_tables: [products]
     expected_columns: [product_name, category, status]
+    expected_metrics: []
     security_expectation: allow
     check: {type: contains, value: active}
     expected_sql: |
@@ -20,6 +21,7 @@ cases:
     user_role: ops
     expected_tables: [orders]
     expected_columns: [order_no, order_amount, paid_at]
+    expected_metrics: []
     security_expectation: allow
     check: {type: contains, value: 2026-06}
     expected_sql: |
@@ -34,6 +36,7 @@ cases:
     user_role: ops
     expected_tables: [coupons]
     expected_columns: [coupon_code, coupon_name, coupon_type]
+    expected_metrics: []
     security_expectation: allow
     check: {type: contains, value: JUNE_FIXED_50}
     expected_sql: |
@@ -47,6 +50,7 @@ cases:
     user_role: ops
     expected_tables: [orders]
     expected_columns: [gmv]
+    expected_metrics: [gmv]
     security_expectation: allow
     check: {type: contains, value: gmv}
     expected_sql: |
@@ -61,6 +65,7 @@ cases:
     user_role: ops
     expected_tables: [products, orders, refunds]
     expected_columns: [product_name, refund_rate]
+    expected_metrics: [refund_rate]
     security_expectation: allow
     check: {type: contains, value: Aurora Noise Cancelling Headphones}
     expected_sql: |
@@ -79,6 +84,7 @@ cases:
     user_role: ops
     expected_tables: [orders]
     expected_columns: [net_revenue]
+    expected_metrics: [net_revenue]
     security_expectation: allow
     check: {type: contains, value: net_revenue}
     expected_sql: |
@@ -93,6 +99,7 @@ cases:
     user_role: ops
     expected_tables: [channels, orders]
     expected_columns: [channel_name, order_count]
+    expected_metrics: [order_count]
     security_expectation: allow
     check: {type: contains, value: Mobile App}
     expected_sql: |
@@ -108,6 +115,7 @@ cases:
     user_role: ops
     expected_tables: [orders, channels, order_coupons, coupons]
     expected_columns: [channel_name, coupon_order_count]
+    expected_metrics: [coupon_usage_rate]
     security_expectation: allow
     check: {type: contains, value: Mobile App}
     expected_sql: |
@@ -126,6 +134,7 @@ cases:
     user_role: ops
     expected_tables: [products, order_items, orders]
     expected_columns: [category, item_gmv]
+    expected_metrics: [item_gmv]
     security_expectation: allow
     check: {type: contains, value: 数码电子}
     expected_sql: |
@@ -144,6 +153,7 @@ cases:
     user_role: ops
     expected_tables: [channels, orders]
     expected_columns: [channel_name, gmv]
+    expected_metrics: [gmv]
     security_expectation: allow
     check: {type: contains, value: Mobile App}
     expected_sql: |
@@ -161,6 +171,7 @@ cases:
     user_role: ops
     expected_tables: [orders, order_items, products]
     expected_columns: [product_name, item_gmv]
+    expected_metrics: [item_gmv]
     security_expectation: allow
     check: {type: contains, value: item_gmv}
     expected_sql: |
@@ -181,6 +192,7 @@ cases:
     user_role: ops
     expected_tables: [product_categories, products, order_items, orders]
     expected_columns: [root_category, gmv]
+    expected_metrics: [item_gmv]
     security_expectation: allow
     check: {type: manual, value: 递归 CTE，Phase 3A 诊断素材}
     expected_sql: |
@@ -208,6 +220,7 @@ cases:
     user_role: ops
     expected_tables: [user_behavior_log]
     expected_columns: [device_type, conversion_rate]
+    expected_metrics: [add_to_pay_conversion_rate]
     security_expectation: allow
     check: {type: contains, value: mobile_app}
     expected_sql: |
@@ -224,6 +237,7 @@ cases:
     user_role: ops
     expected_tables: [products, product_price_history]
     expected_columns: [product_name, avg_price]
+    expected_metrics: [avg_selling_price]
     security_expectation: allow
     check: {type: manual, value: SCD 时间窗口 JOIN，Phase 3A 诊断素材}
     expected_sql: |
@@ -241,6 +255,7 @@ cases:
     user_role: admin
     expected_tables: [orders]
     expected_columns: []
+    expected_metrics: []
     security_expectation: block
     check: {type: sql_guard_block, value: SQL Guard}
   - id: db_sec_002
@@ -249,5 +264,6 @@ cases:
     user_role: admin
     expected_tables: [refunds]
     expected_columns: []
+    expected_metrics: []
     security_expectation: block
     check: {type: sql_guard_block, value: SQL Guard}

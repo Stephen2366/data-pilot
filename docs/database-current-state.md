@@ -1,10 +1,10 @@
-# DataPilot 数据库当前状态速查（Phase 2.7 后）
+# DataPilot 数据库当前状态速查（Phase 2.7 / 2.7.1 后）
 
-> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。完整施工计划见 `docs/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/AI_CONTEXT.md` 的「Phase 2.7 数据库升级」模块技术档案。
+> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/AI_CONTEXT.md` 的「Phase 2.7 数据库升级」和「Phase 2.7.1 数据库 polish」模块技术档案。
 
 ## 一句话结论
 
-DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 张物理表**，主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。后续 Phase 3A Text2SQL 深化应直接基于这个 14 表新库，不再回到旧 7 表库。
+DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 张物理表**，并通过 `20260722_0003` polish 补齐宽表字段、优惠券有效期索引和价格历史调价原因字段。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。后续 Phase 3A Text2SQL 深化应直接基于这个 14 表新库，不再回到旧 7 表库。
 
 ## 关键入口
 
@@ -18,7 +18,8 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - 指标口径事实源：`domain_pack/metrics.yaml`
 - Few-shot 示例：`domain_pack/sql_examples/basic.yaml`
 - 数据库升级挑战集：`eval/cases/database-upgrade-challenge.yaml`
-- Phase 3A 正式回归输入：`eval/cases/phase3a-regression.yaml`
+- Phase 3A 正式回归输入：`eval/cases/phase3a-regression.yaml`（10 条 formal 主硬门）
+- Phase 3A challenge 输入：`eval/cases/database-upgrade-challenge.yaml`（16 条 challenge superset，包含 10 条 formal question）
 - 数据库升级测试：`tests/test_database_upgrade.py`
 - Seed 摘要输出：`.agent_work/temp/database-upgrade-seed-summary.md`
 
@@ -124,8 +125,8 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 ## Phase 3A 使用边界
 
 - Phase 3A M8 baseline 直接跑在 14 表新库上，不做旧 7 表 vs 新 14 表对照。
-- `eval/cases/phase3a-regression.yaml` 是 Phase 3A 正式 10 条回归输入。
-- `eval/cases/database-upgrade-challenge.yaml` 是数据库升级挑战集和困难诊断素材，不替代 Phase 3A 回归硬门。
+- `eval/cases/phase3a-regression.yaml` 是 Phase 3A 正式 10 条 formal 回归输入，是 M8-M12 主硬门。
+- `eval/cases/database-upgrade-challenge.yaml` 是 16 条 challenge superset，包含 10 条 formal question，并额外覆盖 6 条数据库复杂度诊断题；后续每个模块应同步运行并记录诊断摘要。
 - 数据库升级阶段已经验证结构、seed、固定事实、challenge 基础用例、安全和 pytest；不要要求 Phase 3A `trace_steps` 在这个阶段全部通过。
 - `schema_retrieval`、`join_path`、`query_plan`、`trace_steps` 属于 Phase 3A M9-M12 的主线工作，不要倒灌回 Phase 2.7。
 
@@ -174,6 +175,6 @@ git diff --check
 - 先读 `docs/AI_CONTEXT.md` 当前状态，确认是否仍是 Phase 2.7 已验收。
 - 如果要做 Phase 3A，读 `docs/phase3a-plan.md` 顶部数据库升级前置说明。
 - 如果要写 SQL / Text2SQL plan，读本文件、`domain_pack/metrics.yaml`、`domain_pack/schema_desc/relations.yaml`。
-- 如果要改数据库，读 `docs/database-upgrade-plan-v5.md` 和当前 Alembic head。
+- 如果要改数据库，先读本文档和当前 Alembic head；如需理解历史设计取舍，再读 `docs/archive/database-upgrade-plan-v5.md`。
 - 如果看到测试中自增 ID 不从 1 开始，不要修成依赖 ID；改用稳定业务键。
 - 如果遇到 challenge 用例失败，先判断是数据库固定事实坏了，还是旧 Text2SQL 链路能力不足；不要误判为 Phase 3A 已失败。

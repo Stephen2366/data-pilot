@@ -7,7 +7,7 @@
 - 当前阶段计划文件：`docs/phase3a-plan.md`
 - 当前模块：Phase 3A M8 回归基线冻结（已完成，待 accept-module）
 - 上一模块验收：Phase 3A M8 未验收（待 accept-module）
-- 阻塞项：无；旧链路 baseline 允许类 SQL 为 6/8，已按用户确认作为真实 baseline 冻结
+- 阻塞项：无；旧链路 formal baseline 允许类 SQL 为 6/8，challenge baseline 为 11/16，已按用户确认作为真实 baseline 冻结
 - 更新时间：2026-07-22
 
 ## 当前技术选型快照
@@ -34,21 +34,23 @@
 
 ### Phase 3A M8 回归基线冻结（2026-07-22）
 
-- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`eval/run_eval.py`、`tests/test_phase3a_eval.py`、`eval/reports/phase3a-baseline.md`、`.agent_work/temp/m8-notes.md`、`.agent_work/temp/phase3a-baseline-traces.jsonl`
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`eval/run_eval.py`、`tests/test_phase3a_eval.py`、`eval/reports/phase3a-baseline.md`、`eval/reports/phase3a-challenge-baseline.md`、`docs/phase3a-plan.md`、`docs/database-current-state.md`、`.agent_work/temp/m8-notes.md`、`.agent_work/temp/phase3a-baseline-traces.jsonl`、`.agent_work/temp/phase3a-challenge-baseline-traces.jsonl`
 - 关键决策：
   - M8 只扩展 EvalOps-lite 的 case 结构和 baseline 报告，不引入新 Text2SQL pipeline、Schema Retrieval、QueryPlanStep 或 trace_steps，避免把 M9-M12 的工作提前倒灌。
   - `EvalCase` 前向兼容 `expected_metrics`、`expected_trace_steps`、`pipeline_mode`，但旧 `smoke.yaml` 默认仍是 `pipeline_mode=baseline`，旧 M6 smoke 不需要补新字段。
-  - `_score_case()` 从 tuple 改为 `EvalScore`，新增最小 `issue_tags`：`missing_table`、`missing_column`、`safety_mismatch`、`unexpected_error`；这只服务 baseline 和后续对照报告，不扩展成完整 scorer 平台。
+  - `_score_case()` 从 tuple 改为 `EvalScore`，新增最小 `issue_tags`：`missing_table`、`missing_column`、`safety_mismatch`、`unexpected_error`；补充轻量 `manual` 语义，困难诊断题无论通过或失败都可在报告中标记 `review_required`。这只服务 baseline 和后续对照报告，不扩展成完整 scorer 平台。
+  - 10 条 formal 与 16 条 challenge 的最终口径：10 条 formal 是主硬门；16 条 challenge 是 superset，包含 10 条 formal question，额外 6 条用于扩展数据库复杂度诊断。后续每个模块同步跑两套报告。
   - 用户确认：baseline 首轮结果为 8/10 overall、2/2 security blocked、允许类 SQL 6/8；可选项是 ① 按真实 baseline 继续收工整理、② 调整 regression expected columns、③ 先修旧链路别名再重跑。风险分别是保留低于计划门槛的真实旧链路事实、可能弱化后续对照硬门、可能扩大 M8 到旧链路修复。我的建议是选 ①，用户最终确认选 ①。
 - 参考资料：未查阅外部参考；本次按 `docs/phase3a-plan.md` M8、`docs/database-current-state.md`、`domain_pack/schema_desc/relations.yaml`、`domain_pack/metrics.yaml` 和现有 M6 eval runner 实现，没有照搬参考项目。
 - 验证快照：
   - TDD 红灯：`pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8-red` 首次 1 passed / 3 failed，失败点为 `EvalCase` 缺 M8 字段、`_score_case` 仍返回 tuple、报告不能接收 issue tags，符合预期。
-  - 聚焦 pytest：`pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8-tmp` 4 passed, 1 warning（Starlette TestClient / httpx deprecation，既有警告）。
+  - 聚焦 pytest：`pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8-final-align` 7 passed, 1 warning（Starlette TestClient / httpx deprecation，既有警告）。
   - 旧 smoke 兼容：`python -m eval.run_eval --cases eval/cases/smoke.yaml --report .agent_work/temp/m8-smoke-compat.md --trace .agent_work/temp/m8-smoke-compat-traces.jsonl` 6/6 passed。
-  - M8 baseline：`python -m eval.run_eval --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-baseline.md --trace .agent_work/temp/phase3a-baseline-traces.jsonl` 8/10 passed；安全 2/2 blocked；允许类 SQL 6/8 passed。
+  - M8 formal baseline：`python -m eval.run_eval --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-baseline.md --trace .agent_work/temp/phase3a-baseline-traces.jsonl` 8/10 passed；安全 2/2 blocked；允许类 SQL 6/8 passed。
+  - M8 challenge baseline：`python -m eval.run_eval --cases eval/cases/database-upgrade-challenge.yaml --report eval/reports/phase3a-challenge-baseline.md --trace .agent_work/temp/phase3a-challenge-baseline-traces.jsonl` 11/16 passed；安全 2/2 blocked；`db_hard_001` / `db_hard_003` 失败且 `review_required=True`。
   - baseline 失败明细：`p3a_multi_001` 生成 `order_count`，case 期望 `coupon_order_count`；`p3a_multi_003` 生成 `category_name`，case 期望 `category`；均记录为 `missing_column`。
 - 遗留：
-  - M8 不修改 regression case，也不修旧链路别名；后续 M9-M12 应以 `eval/reports/phase3a-baseline.md` 的真实失败点证明新 pipeline 的 schema / plan / prompt 改进价值。
+  - M8 不修改 regression / challenge case，也不修旧链路别名；后续 M9-M12 应以 `eval/reports/phase3a-baseline.md` 和 `eval/reports/phase3a-challenge-baseline.md` 的真实失败点证明新 pipeline 的 schema / plan / prompt 改进价值。
   - `expected_trace_steps` 字段已可加载，但 trace_steps 结构仍属于 M11，不要误判为 M8 已实现。
 
 ### Phase 2.7.1 数据库 polish（2026-07-22）

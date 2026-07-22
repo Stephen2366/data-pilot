@@ -69,6 +69,7 @@ class EvalScore:
     passed: bool
     reason: str
     issue_tags: list[str]
+    review_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ class EvalResult:
     passed: bool
     reason: str
     issue_tags: list[str]
+    review_required: bool
     status_code: int
     route: str | None
     safety_status: str | None
@@ -188,23 +190,40 @@ def _score_case(case: EvalCase, body: dict[str, Any], status_code: int) -> EvalS
 
     if safety_status != "passed":
         tag = "unexpected_error" if body.get("error_type") else "safety_mismatch"
-        return EvalScore(False, f"safety_status={safety_status}, error_type={body.get('error_type')}", [tag])
+        return EvalScore(
+            False,
+            f"safety_status={safety_status}, error_type={body.get('error_type')}",
+            [tag],
+            review_required=case.check_type == "manual",
+        )
 
     actual_tables = set(body.get("tables_used") or [])
     missing_tables = [table for table in case.expected_tables if table not in actual_tables]
     if missing_tables:
-        return EvalScore(False, f"missing_tables={missing_tables}", ["missing_table"])
+        return EvalScore(
+            False,
+            f"missing_tables={missing_tables}",
+            ["missing_table"],
+            review_required=case.check_type == "manual",
+        )
 
     actual_columns = set(body.get("columns") or [])
     missing_columns = [column for column in case.expected_columns if column not in actual_columns]
     if missing_columns:
-        return EvalScore(False, f"missing_columns={missing_columns}", ["missing_column"])
+        return EvalScore(
+            False,
+            f"missing_columns={missing_columns}",
+            ["missing_column"],
+            review_required=case.check_type == "manual",
+        )
 
     text = _body_text(body)
     if case.check_type == "contains" and case.check_value not in text:
         return EvalScore(False, f"missing_text={case.check_value}", ["unexpected_error"])
     if case.check_type == "equals" and case.check_value not in text:
         return EvalScore(False, f"expected_value={case.check_value}", ["unexpected_error"])
+    if case.check_type == "manual":
+        return EvalScore(True, "manual_review_required", [], review_required=True)
 
     return EvalScore(True, "ok", [])
 
@@ -229,6 +248,7 @@ def run_cases(cases: list[EvalCase], client: TestClient) -> list[EvalResult]:
                 passed=score.passed,
                 reason=score.reason,
                 issue_tags=score.issue_tags,
+                review_required=score.review_required,
                 status_code=response.status_code,
                 route=body.get("route"),
                 safety_status=body.get("safety_status"),
@@ -255,17 +275,18 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
         f"- passed: {passed_count}",
         f"- failed: {failed_count}",
         "",
-        "| id | type | pass | reason | issue_tags | safety | error_type | trace_id |",
-        "|---|---|---:|---|---|---|---|---|",
+        "| id | type | pass | reason | issue_tags | review_required | safety | error_type | trace_id |",
+        "|---|---|---:|---|---|---|---|---|---|",
     ]
     for result in results:
         lines.append(
-            "| {id} | {type} | {passed} | {reason} | {issue_tags} | {safety} | {error_type} | {trace_id} |".format(
+            "| {id} | {type} | {passed} | {reason} | {issue_tags} | {review_required} | {safety} | {error_type} | {trace_id} |".format(
                 id=result.case.case_id,
                 type=result.case.task_type,
                 passed="yes" if result.passed else "no",
                 reason=result.reason,
                 issue_tags=",".join(result.issue_tags) or "-",
+                review_required="yes" if result.review_required else "no",
                 safety=result.safety_status,
                 error_type=result.error_type,
                 trace_id=result.trace_id,
@@ -286,6 +307,7 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
                 f"- safety_status: {result.safety_status}",
                 f"- error_type: {result.error_type}",
                 f"- issue_tags: {', '.join(result.issue_tags) or '-'}",
+                f"- review_required: {'yes' if result.review_required else 'no'}",
                 f"- trace_id: {result.trace_id}",
                 "",
                 "```sql",
@@ -319,7 +341,8 @@ def main(argv: list[str] | None = None) -> int:
     for result in results:
         print(
             f"{result.case.case_id}: passed={result.passed} reason={result.reason} "
-            f"issue_tags={','.join(result.issue_tags) or '-'} safety={result.safety_status} "
+            f"issue_tags={','.join(result.issue_tags) or '-'} review_required={result.review_required} "
+            f"safety={result.safety_status} "
             f"error_type={result.error_type} trace_id={result.trace_id}"
         )
     return 0
