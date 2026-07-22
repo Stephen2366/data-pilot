@@ -3,6 +3,21 @@
 > 阶段三A：DataPilot Text2SQL 深化
 > 核心目标：把阶段二 v1 的 SQL 主链路升级为可检索、可计划、可校验、可追踪的 Text2SQL 中间层。
 
+## 开工前置说明：数据库升级先行
+
+阶段三A正式开工前，计划先执行一次数据库底座升级（暂定 Phase 2.7），当前执行规格以 `docs/database-upgrade-plan-v5.md` 为准。升级目标是把阶段二 v1 的 7 表 toy-ish 数据库，扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
+
+这意味着本文档目前仍保留 Phase 3A 的主线设计，但 **M8-M12 的具体输入需要在数据库升级完成后小修一次**。预计调整如下：
+
+- `eval/cases/phase3a-regression.yaml` 仍保持 10 条正式回归硬门，用于 v1 baseline vs 新 Text2SQL pipeline 对照；但 case 选择应基于新库，不再围绕旧 7 表 schema。
+- 新增的 `eval/cases/database-upgrade-challenge.yaml` 是数据库复杂度挑战集，不替代 Phase 3A 正式 10 条 regression；它主要作为数据库升级验收和困难诊断素材。
+- M8 baseline 直接在升级后的新库上跑旧链路，不再做旧库 vs 新库对照。
+- M9 的 `relation_doc` / JoinPath 应优先从 `domain_pack/schema_desc/relations.yaml` 生成，而不是只解析各表 Markdown 中的自然语言关系。
+- M10/M11 的 QueryPlanStep、局部 Schema prompt 和 trace_steps 需要覆盖新库里的订单明细、多对多 JOIN、金额口径、宽表选择、递归类目、SCD 时间窗口等场景。
+- 数据库升级阶段只验结构、seed、固定事实、基础 challenge 和安全；`schema_retrieval`、`join_path`、`query_plan` 等完整 trace_steps 仍属于 Phase 3A M11/M12 验收。
+
+数据库升级完成后，先更新本文档的「单一事实源」「当前差异清单」「目录与文件规划」「M8」和「阶段三A验收标准」中与旧库、case 构成、relation 来源相关的文字，再启动 M8。
+
 ## 阶段三A总目标
 
 - 能用 10 条 SQL / 聚合 / 多表 / 安全回归用例冻结阶段二 v1 baseline，观察点是 `eval/reports/phase3a-baseline.md` 记录旧链路通过率、SQL、trace_id 和失败原因。
@@ -57,7 +72,6 @@
 
 ## 当前差异清单
 
-- `docs/AI_CONTEXT.md` 补充记录曾提到新增 `docs/phase3a-plan.md` 占位，但当前工作树没有该文件；本次直接新增正式计划。
 - ROADMAP 要求阶段三A回归 10 条，当前 `eval/cases/smoke.yaml` 只有 M6 的 6 条 smoke；计划在 M8 新建阶段三A专用 YAML，不改 M6 smoke 的历史口径。
 - ROADMAP 要求评测入口支持 `force_new_pipeline` 或同等开关，当前 `app/schemas/agent.py::QueryRequest` 只有 `question/user_role`；计划在 M11 增量扩展请求字段。
 - ROADMAP 要求分步骤 `trace_steps`，当前 `engine/trace/recorder.py::TraceRecord` 只有一次请求摘要和 `tool_calls`；计划在 M11 增量扩展内部 trace，不要求前端立即展示。
