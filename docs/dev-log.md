@@ -855,3 +855,90 @@ Phase 2.7 把 7 表升级到了 14 张物理表，但外部审查后发现几处
 
 - 验证：聚焦 pytest `tests/test_m1_models.py tests/test_database_upgrade.py` 7 passed；全量 pytest 31 passed, 1 warning；`alembic current` = `20260722_0003 (head)`，`alembic check` 无新增操作；seed reset 后 14 表行数和固定事实保持稳定。
 - 下一步：进入 Phase 3A M8 回归基线冻结。
+
+## ★ Phase 3A M8 回归基线冻结（2026-07-22）
+
+**简述**：把阶段二旧 SQL 链路放到 Phase 3A 的 10 条新库 regression 上跑一遍，像做性能优化前先量一次旧机器的真实速度，后续 M9-M12 才有可信对照。
+
+### 这次做了什么
+
+Phase 3A 的目标不是立刻让 Text2SQL 变聪明，而是先回答一个很朴素的问题：**旧链路在 14 表新库上到底是什么水平？** 如果没有这个 baseline，后面做 Schema Retrieval、JoinPath、QueryPlanStep 时，就很容易只凭感觉说“新链路更好”，但说不清好在哪里。
+
+这次 M8 没有改数据库、没改 `/api/query` 默认行为，也没有提前做新 pipeline。主要做了三件事：第一，检查 `eval/cases/phase3a-regression.yaml` 仍然是 **10 条正式回归**，比例为 2 条 simple、3 条 aggregation、3 条 multi_table、2 条 security；第二，把 `eval/run_eval.py` 从 M6 smoke runner 扩展成能读 Phase 3A 字段的 runner，新增 `expected_metrics / expected_trace_steps / pipeline_mode`，但旧 `smoke.yaml` 不需要补字段；第三，报告里新增 **issue_tags**，把失败原因稳定标成 `missing_column`、`missing_table`、`safety_mismatch` 或 `unexpected_error`，避免后续对照报告靠解析自然语言字符串。
+
+最终 baseline 很诚实：**10 条里 8 条通过**，其中 **安全题 2/2 拦截**；但允许类 SQL 只有 **6/8 通过**，低于计划里“7/8”的理想门槛。两个失败都不是危险 SQL，而是旧链路输出列别名和 regression 期望不一致：`p3a_multi_001` 返回 `order_count`，期望 `coupon_order_count`；`p3a_multi_003` 返回 `category_name`，期望 `category`。我没有删 case、没有放宽门槛，也没有回头修旧链路；用户确认后，按真实旧链路状态冻结为 baseline。
+
+### 新概念
+
+- **Baseline（基线）**：做优化前先保存旧系统的真实表现。它不一定好看，但必须真实。类比做 Java 服务性能优化前先记录 QPS / P95 延迟；没有基线，就不知道优化到底有没有价值。
+- **Regression Case（回归用例）**：一组固定问题，每次改链路都跑同一批，防止“修了一个场景，弄坏另一个场景”。Phase 3A 固定 10 条，是后续新旧链路对照的尺子。
+- **Issue Tag**：把失败原因变成稳定标签，而不是只写一句人类描述。`missing_column` 这样的标签后续可以直接被 Markdown 对照报告、失败统计或 EvalOps 平台消费。
+- **Pipeline Mode**：评测入口预留的链路选择字段。M8 默认都是 `baseline`，后续 M11/M12 才会用类似 `force_new_pipeline` 的方式强制走新 Text2SQL pipeline。
+
+### 关键文件
+
+- `eval/cases/phase3a-regression.yaml`：Phase 3A 10 条正式 regression 输入，M8 只校验和运行，不重选题。
+- `eval/run_eval.py`：评测执行入口，负责加载 YAML、调用真实 `/api/query`、评分并生成 Markdown 报告。
+- `tests/test_phase3a_eval.py`：M8 新增测试，守住 case 比例、新字段默认值、issue tags 和报告字段。
+- `eval/reports/phase3a-baseline.md`：旧链路 baseline 报告，记录 10 条 case 的 pass/fail、SQL、trace_id 和 issue tag。
+- `.agent_work/temp/m8-notes.md`：M8 开工 checklist、TDD 红绿灯、baseline 失败明细和用户确认记录。
+
+### 代码阅读路线
+
+1. **正式题本**：`eval/cases/phase3a-regression.yaml`
+   先看 10 条 case 的结构：每条都有 `id / task_type / question / expected_tables / expected_columns / expected_metrics / security_expectation / check`。重点理解它不是“随手问几个问题”，而是 Phase 3A 后续模块共同使用的**固定回归尺子**。
+
+2. **评测入口**：`eval/run_eval.py`
+   可以按“一条 case 的旅程”来读：`load_cases()` 把 YAML 变成 `EvalCase`，其中新字段有默认值，保证旧 smoke 不坏；`seeded_api_client()` 继续用 **内存 SQLite + FastAPI dependency override** 调真实 `/api/query`；`run_cases()` 按 `pipeline_mode` 组装请求，M8 默认 baseline；`_score_case()` 返回 `EvalScore`，把 pass/fail、reason 和 issue_tags 分开；`write_report()` 生成 Markdown baseline 报告。
+
+3. **测试反推契约**：`tests/test_phase3a_eval.py`
+   这份测试最适合用来理解 M8 到底改了什么。先看比例测试，确认 10 条 case 的组成；再看 loader 测试，确认新字段不会绑架旧 smoke；最后看 issue tag 和 report 测试，确认失败可以被后续对照脚本稳定消费。
+
+4. **真实 baseline 报告**：`eval/reports/phase3a-baseline.md`
+   先看顶部总览表，快速定位 8/10 结果和两个 `missing_column`；再往下看 Case Details 里的 SQL。阅读重点不是“旧链路怎么修”，而是理解旧链路在哪些多表场景已经能 join、在哪些输出契约上还不稳定。
+
+一次 M8 baseline 的数据流向：
+
+`phase3a-regression.yaml`
+→ `EvalCase`
+→ `TestClient POST /api/query`
+→ 旧 SQL 链路 `AgentResponse`
+→ `EvalScore(issue_tags)`
+→ `EvalResult`
+→ `phase3a-baseline.md`
+
+**模块闭环**：M8 把 Phase 3A 从“准备做优化”推进到“已有旧链路对照样本”。后续 M9 做 Schema Retrieval、M10 做 QueryPlanStep、M11 做新 pipeline、M12 做对照报告时，都可以拿这份 baseline 做参照。
+
+### 设计要点
+
+- **不美化旧链路**：允许类 SQL 只有 6/8 通过，低于计划门槛；用户确认后仍按真实 baseline 冻结。这比为了好看改 case 更有工程价值。
+- **前向兼容，不破坏旧 smoke**：`expected_metrics / expected_trace_steps / pipeline_mode` 都有默认值，所以 M6 的 `smoke.yaml` 仍然 6/6 通过。
+- **issue tags 只做最小集合**：M8 不扩展完整 EvalOps，不做复杂 SQL 语义判等，只先落 `missing_table / missing_column / safety_mismatch / unexpected_error`，服务后续新旧对照。
+- **M8 不提前做新 pipeline**：`expected_trace_steps` 只是可加载字段，真正 trace_steps 结构仍在 M11；这能保持模块边界清楚。
+
+### 面试怎么讲
+
+M8 可以讲成“我在 Text2SQL 深化前先做了一个真实 baseline 冻结”。我没有一上来就改 prompt，而是先把 10 条固定 regression 跑在旧链路上，报告里记录 SQL、trace_id、安全状态和 issue tag。结果显示旧链路整体 8/10，安全 2/2 能拦截，但允许类 SQL 只有 6/8，失败集中在多表输出列契约。这说明后续 Schema Retrieval 和 QueryPlanStep 的目标不是抽象地“更智能”，而是要针对可观测失败点提升选表、指标口径和输出结构稳定性喵
+
+### 验证与下一步
+
+- 验证：TDD 红灯先失败于 M8 字段和结构化 score 缺失；实现后 `tests/test_phase3a_eval.py` **4 passed**；旧 `smoke.yaml` **6/6 passed**；Phase 3A baseline **8/10 passed**，安全 **2/2 blocked**，允许类 SQL **6/8 passed**。
+- warning：Starlette TestClient / httpx deprecation 是既有 warning，不影响 M8；Windows CRLF 提示仍为既有换行提示。
+- 下一步：用户人工检查后可运行 `accept-module` 做 M8 最终验收；通过后进入 M9 Schema Retrieval 与 JoinPath。
+
+可复制验证命令：
+
+```powershell
+# 跑 M8 eval 契约测试。预期：4 passed，可能有既有 TestClient warning。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8-tmp
+
+# 跑旧 M6 smoke 兼容验证。预期：passed=6/6。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval/cases/smoke.yaml --report .agent_work/temp/m8-smoke-compat.md --trace .agent_work/temp/m8-smoke-compat-traces.jsonl
+
+# 生成 Phase 3A 旧链路 baseline。预期：passed=8/10；安全 2/2 blocked；允许类 SQL 6/8。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-baseline.md --trace .agent_work/temp/phase3a-baseline-traces.jsonl
+```
+
+**本地启动体验：**
+
+本模块暂无新的交互页面；它的交互方式是评测报告。运行上面的 baseline 命令后，打开 `eval/reports/phase3a-baseline.md`，可以看到每条 case 的 pass/fail、issue tag、trace_id 和实际 SQL。这个报告就是后续 M12 新旧链路对照的旧链路输入。

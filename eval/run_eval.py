@@ -38,7 +38,11 @@ DEFAULT_TRACE_PATH = PROJECT_ROOT / ".agent_work" / "temp" / "m6-eval-traces.jso
 
 @dataclass(frozen=True)
 class EvalCase:
-    """一条 smoke case 的稳定结构，对应 `eval/cases_plan.md` 的 YAML 字段草案。"""
+    """一条 eval case 的稳定结构。
+
+    ★ M8 起同一个 loader 同时服务 M6 smoke 和 Phase 3A regression：旧 smoke 字段不能被新字段
+    反向绑架，新字段则先在数据结构里预留，方便 M9-M12 继续扩展。
+    """
 
     case_id: str
     task_type: str
@@ -46,9 +50,25 @@ class EvalCase:
     user_role: str
     expected_tables: list[str]
     expected_columns: list[str]
+    expected_metrics: list[str]
+    expected_trace_steps: list[str]
+    pipeline_mode: str
     security_expectation: Literal["allow", "block"]
     check_type: str
     check_value: str
+
+
+@dataclass(frozen=True)
+class EvalScore:
+    """评分函数的结构化输出。
+
+    reason 给人读，issue_tags 给后续报告 / 对照脚本稳定消费；M8 只落最小标签集合，不提前做
+    完整 scorer 平台。
+    """
+
+    passed: bool
+    reason: str
+    issue_tags: list[str]
 
 
 @dataclass(frozen=True)
@@ -58,6 +78,7 @@ class EvalResult:
     case: EvalCase
     passed: bool
     reason: str
+    issue_tags: list[str]
     status_code: int
     route: str | None
     safety_status: str | None
@@ -85,6 +106,9 @@ def load_cases(path: Path = DEFAULT_CASES_PATH) -> list[EvalCase]:
                 user_role=str(item.get("user_role", "ops")),
                 expected_tables=list(item.get("expected_tables") or []),
                 expected_columns=list(item.get("expected_columns") or []),
+                expected_metrics=list(item.get("expected_metrics") or []),
+                expected_trace_steps=list(item.get("expected_trace_steps") or []),
+                pipeline_mode=str(item.get("pipeline_mode", "baseline")),
                 security_expectation=item.get("security_expectation", "allow"),
                 check_type=str(check.get("type", "contains")),
                 check_value=str(check.get("value", "")),
@@ -142,46 +166,47 @@ def _body_text(body: dict[str, Any]) -> str:
     return json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def _score_case(case: EvalCase, body: dict[str, Any], status_code: int) -> tuple[bool, str]:
-    """按 M6 最小评分规则判断单条 case。
+def _score_case(case: EvalCase, body: dict[str, Any], status_code: int) -> EvalScore:
+    """按 EvalOps-lite 最小评分规则判断单条 case。
 
     评分只覆盖接口成功、route、表/列命中、安全期望和简单内容检查；它故意不做复杂 SQL
-    语义判等，避免阶段二收尾扩大成完整评测平台。
+    语义判等，避免 M8 baseline 扩大成完整评测平台。
     """
 
     if status_code != 200:
-        return False, f"http_status={status_code}"
+        return EvalScore(False, f"http_status={status_code}", ["unexpected_error"])
     if body.get("route") != "sql":
-        return False, f"route={body.get('route')}"
+        return EvalScore(False, f"route={body.get('route')}", ["unexpected_error"])
 
     safety_status = body.get("safety_status")
     if case.security_expectation == "block":
         if safety_status != "blocked":
-            return False, f"safety_status={safety_status}"
+            return EvalScore(False, f"safety_status={safety_status}", ["safety_mismatch"])
         if case.check_type == "sql_guard_block" and not body.get("blocked_reason"):
-            return False, "blocked_reason_empty"
-        return True, "blocked_as_expected"
+            return EvalScore(False, "blocked_reason_empty", ["safety_mismatch"])
+        return EvalScore(True, "blocked_as_expected", [])
 
     if safety_status != "passed":
-        return False, f"safety_status={safety_status}, error_type={body.get('error_type')}"
+        tag = "unexpected_error" if body.get("error_type") else "safety_mismatch"
+        return EvalScore(False, f"safety_status={safety_status}, error_type={body.get('error_type')}", [tag])
 
     actual_tables = set(body.get("tables_used") or [])
     missing_tables = [table for table in case.expected_tables if table not in actual_tables]
     if missing_tables:
-        return False, f"missing_tables={missing_tables}"
+        return EvalScore(False, f"missing_tables={missing_tables}", ["missing_table"])
 
     actual_columns = set(body.get("columns") or [])
     missing_columns = [column for column in case.expected_columns if column not in actual_columns]
     if missing_columns:
-        return False, f"missing_columns={missing_columns}"
+        return EvalScore(False, f"missing_columns={missing_columns}", ["missing_column"])
 
     text = _body_text(body)
     if case.check_type == "contains" and case.check_value not in text:
-        return False, f"missing_text={case.check_value}"
+        return EvalScore(False, f"missing_text={case.check_value}", ["unexpected_error"])
     if case.check_type == "equals" and case.check_value not in text:
-        return False, f"expected_value={case.check_value}"
+        return EvalScore(False, f"expected_value={case.check_value}", ["unexpected_error"])
 
-    return True, "ok"
+    return EvalScore(True, "ok", [])
 
 
 def run_cases(cases: list[EvalCase], client: TestClient) -> list[EvalResult]:
@@ -189,17 +214,21 @@ def run_cases(cases: list[EvalCase], client: TestClient) -> list[EvalResult]:
 
     results: list[EvalResult] = []
     for case in cases:
+        request_body: dict[str, Any] = {"question": case.question, "user_role": case.user_role}
+        if case.pipeline_mode != "baseline":
+            request_body["force_new_pipeline"] = True
         response = client.post(
             "/api/query",
-            json={"question": case.question, "user_role": case.user_role},
+            json=request_body,
         )
         body = response.json()
-        passed, reason = _score_case(case, body, response.status_code)
+        score = _score_case(case, body, response.status_code)
         results.append(
             EvalResult(
                 case=case,
-                passed=passed,
-                reason=reason,
+                passed=score.passed,
+                reason=score.reason,
+                issue_tags=score.issue_tags,
                 status_code=response.status_code,
                 route=body.get("route"),
                 safety_status=body.get("safety_status"),
@@ -226,16 +255,17 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
         f"- passed: {passed_count}",
         f"- failed: {failed_count}",
         "",
-        "| id | type | pass | reason | safety | error_type | trace_id |",
-        "|---|---|---:|---|---|---|---|",
+        "| id | type | pass | reason | issue_tags | safety | error_type | trace_id |",
+        "|---|---|---:|---|---|---|---|---|",
     ]
     for result in results:
         lines.append(
-            "| {id} | {type} | {passed} | {reason} | {safety} | {error_type} | {trace_id} |".format(
+            "| {id} | {type} | {passed} | {reason} | {issue_tags} | {safety} | {error_type} | {trace_id} |".format(
                 id=result.case.case_id,
                 type=result.case.task_type,
                 passed="yes" if result.passed else "no",
                 reason=result.reason,
+                issue_tags=",".join(result.issue_tags) or "-",
                 safety=result.safety_status,
                 error_type=result.error_type,
                 trace_id=result.trace_id,
@@ -249,10 +279,13 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
                 f"### {result.case.case_id} {result.case.question}",
                 "",
                 f"- user_role: {result.case.user_role}",
+                f"- pipeline_mode: {result.case.pipeline_mode}",
+                f"- expected_metrics: {', '.join(result.case.expected_metrics) or '-'}",
                 f"- status_code: {result.status_code}",
                 f"- route: {result.route}",
                 f"- safety_status: {result.safety_status}",
                 f"- error_type: {result.error_type}",
+                f"- issue_tags: {', '.join(result.issue_tags) or '-'}",
                 f"- trace_id: {result.trace_id}",
                 "",
                 "```sql",
@@ -286,7 +319,8 @@ def main(argv: list[str] | None = None) -> int:
     for result in results:
         print(
             f"{result.case.case_id}: passed={result.passed} reason={result.reason} "
-            f"safety={result.safety_status} error_type={result.error_type} trace_id={result.trace_id}"
+            f"issue_tags={','.join(result.issue_tags) or '-'} safety={result.safety_status} "
+            f"error_type={result.error_type} trace_id={result.trace_id}"
         )
     return 0
 
