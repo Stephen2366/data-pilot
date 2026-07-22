@@ -3,20 +3,20 @@
 > 阶段三A：DataPilot Text2SQL 深化
 > 核心目标：把阶段二 v1 的 SQL 主链路升级为可检索、可计划、可校验、可追踪的 Text2SQL 中间层。
 
-## 开工前置说明：数据库升级先行
+## 开工前置说明：Phase 2.7 数据库升级已完成
 
-阶段三A正式开工前，已先执行一次数据库底座升级（Phase 2.7），执行规格以 `docs/database-upgrade-plan-v5.md` 为准。升级结果是把阶段二 v1 的 7 表数据底座扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
+阶段三A正式开工前，已经完成 Phase 2.7 数据库底座升级，并通过 accept-module（2026-07-22，报告 `accept-Phase2.7-20260722.md`）。数据库当前状态速查以 `docs/database-current-state.md` 为入口，升级规格以 `docs/database-upgrade-plan-v5.md` 和 migration `20260722_0002` 为准。升级结果是把阶段二 v1 的 7 表数据底座扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
 
 这意味着本文档仍保留 Phase 3A 的主线设计，但 **M8-M12 的具体输入默认基于升级后的新库**。调整如下：
 
-- `eval/cases/phase3a-regression.yaml` 仍保持 10 条正式回归硬门，用于 v1 baseline vs 新 Text2SQL pipeline 对照；但 case 选择应基于新库，不再围绕旧 7 表 schema。
-- 新增的 `eval/cases/database-upgrade-challenge.yaml` 是数据库复杂度挑战集，不替代 Phase 3A 正式 10 条 regression；它主要作为数据库升级验收和困难诊断素材。
+- `eval/cases/phase3a-regression.yaml` 已落地为 10 条新库正式回归硬门，用于 v1 baseline vs 新 Text2SQL pipeline 对照；M8 只校验和冻结 baseline，不再回到旧 7 表 schema 重新选题。
+- `eval/cases/database-upgrade-challenge.yaml` 是数据库复杂度挑战集，不替代 Phase 3A 正式 10 条 regression；它主要作为数据库升级验收和困难诊断素材。
 - M8 baseline 直接在升级后的新库上跑旧链路，不再做旧库 vs 新库对照。
 - M9 的 `relation_doc` / JoinPath 应优先从 `domain_pack/schema_desc/relations.yaml` 生成，而不是只解析各表 Markdown 中的自然语言关系。
 - M10/M11 的 QueryPlanStep、局部 Schema prompt 和 trace_steps 需要覆盖新库里的订单明细、多对多 JOIN、金额口径、宽表选择、递归类目、SCD 时间窗口等场景。
 - 数据库升级阶段只验结构、seed、固定事实、基础 challenge 和安全；`schema_retrieval`、`join_path`、`query_plan` 等完整 trace_steps 仍属于 Phase 3A M11/M12 验收。
 
-启动 M8 时直接使用升级后的 14 表新库；如果继续小修本文档的「目录与文件规划」「M8」和「阶段三A验收标准」，只做新库 case 细节同步，不再回到旧 7 表底座。
+启动 M8 时直接使用升级后的 14 表新库；后续本文档只围绕新库 case、baseline 和 Text2SQL 中间层细节同步，不再回到旧 7 表底座。
 
 ## 阶段三A总目标
 
@@ -59,12 +59,13 @@
 
 - 阶段三A执行计划：以 `docs/phase3a-plan.md` 为准。
 - 数据库底座升级规格：以 `docs/database-upgrade-plan-v5.md` 和本项目实际 migration `20260722_0002` 为准。
+- 数据库当前状态速查：以 `docs/database-current-state.md` 为准，覆盖 14 表清单、固定 seed 事实、指标口径、RBAC 和后续写 plan 注意事项。
 - 模块实时进度：以 `docs/AI_CONTEXT.md`「当前状态」为准。
 - 项目目录结构：以 `AGENTS.md` / `CLAUDE.md`「目录结构」为准。
 - 阶段三A总路线与技术取舍：以 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`「阶段三A」为准；本计划只把它拆成可施工模块。
 - 阶段三A 10 条回归用例：以 `eval/cases/phase3a-regression.yaml` 为准。
 - 数据库升级 16 条挑战用例：以 `eval/cases/database-upgrade-challenge.yaml` 为准，不替代 Phase 3A 10 条正式回归。
-- 阶段二 32 条用例候选池：以 `eval/cases_plan.md` 为准。
+- 阶段二 32 条用例候选池：以 `eval/cases_plan.md` 为历史参考，不作为 M8 新库 regression 的重新抽样来源。
 - `QueryRequest` / `AgentResponse` 对外契约：以 `app/schemas/agent.py` 为准。
 - `trace_steps` 内部结构：以 `engine/trace/recorder.py` 的 Pydantic Schema 为准。
 - Schema 检索文档结构：以 `engine/schema_retrieval/objects.py` 为准。
@@ -74,7 +75,7 @@
 
 ## 当前差异清单
 
-- ROADMAP 要求阶段三A回归 10 条，当前 `eval/cases/smoke.yaml` 只有 M6 的 6 条 smoke；计划在 M8 新建阶段三A专用 YAML，不改 M6 smoke 的历史口径。
+- ROADMAP 要求阶段三A回归 10 条，当前 `eval/cases/phase3a-regression.yaml` 已由 Phase 2.7 落地；M8 只校验 10 条新库 case 并生成旧链路 baseline，不再新建 YAML。M6 的 `eval/cases/smoke.yaml` 仍保留 6 条 smoke 历史口径。
 - ROADMAP 要求评测入口支持 `force_new_pipeline` 或同等开关，当前 `app/schemas/agent.py::QueryRequest` 只有 `question/user_role`；计划在 M11 增量扩展请求字段。
 - ROADMAP 要求分步骤 `trace_steps`，当前 `engine/trace/recorder.py::TraceRecord` 只有一次请求摘要和 `tool_calls`；计划在 M11 增量扩展内部 trace，不要求前端立即展示。
 - ROADMAP 要求 Milvus 是 Schema Retriever / 后续 RAG 主路径，当前 `pyproject.toml` 尚无 Milvus client 依赖；本计划保留 Milvus adapter 边界，自动化测试使用 in-memory vector index，实际是否声明 Milvus 完成以 adapter smoke 为准。
@@ -99,7 +100,7 @@
 | `.agent_work/temp/m10-notes.md` | 新建 | M10 | M10 QueryPlanStep 决策和失败样例 |
 | `.agent_work/temp/m11-notes.md` | 新建 | M11 | M11 新 pipeline、trace_steps 和集成验证素材 |
 | `.agent_work/temp/m12-notes.md` | 新建 | M12 | M12 对照报告、验收截图和收尾记录 |
-| `eval/cases/phase3a-regression.yaml` | 新建 | M8 | 10 条阶段三A SQL 回归用例 |
+| `eval/cases/phase3a-regression.yaml` | 已有/校验 | M8 | 10 条阶段三A新库 SQL 回归用例，M8 只做校验和必要小修 |
 | `eval/reports/phase3a-baseline.md` | 新建/生成 | M8 | 旧链路 baseline 报告 |
 | `eval/reports/phase3a-new-pipeline.md` | 新建/生成 | M12 | 新链路回归报告 |
 | `eval/reports/phase3a-comparison.md` | 新建/生成 | M12 | 新旧链路对照报告 |
@@ -144,7 +145,7 @@
 
 | 模块 | 顺序 | 依赖 | 模块目标 | 关键产出 |
 |---|---|---|---|---|
-| M8 阶段三A回归基线 | 1 | M6 已验收 | 从 32 条候选中固化 10 条回归，并冻结旧链路 baseline | `eval/cases/phase3a-regression.yaml`、`eval/reports/phase3a-baseline.md` |
+| M8 阶段三A回归基线 | 1 | Phase 2.7 已验收 | 校验现有 10 条新库 regression，并冻结旧链路 baseline | `eval/cases/phase3a-regression.yaml`、`eval/reports/phase3a-baseline.md` |
 | M9 Schema Retrieval 与 JoinPath | 2 | M8 | 构建 field / metric / relation docs，完成 keyword + vector 召回和轻量 SchemaGraph | `engine/schema_retrieval/*` |
 | M10 QueryPlanStep 与自检 | 3 | M9 | 定义结构化查询计划，并校验表字段指标 Join 与敏感字段 | `engine/nl2sql/planner.py` |
 | M11 新 Text2SQL Pipeline 与 Trace Steps | 4 | M9/M10 | 串起 schema_retrieval -> plan -> local prompt -> SQL -> Guard -> execution，并支持强制新链路 | `engine/nl2sql/pipeline.py`、`trace_steps` |
@@ -156,13 +157,13 @@
 
 | 项 | 内容 |
 |---|---|
-| 目标 | 固化 10 条阶段三A回归用例，先证明旧链路 baseline 的真实状态。 |
-| 输入 | `eval/cases_plan.md`、`eval/cases/smoke.yaml`、`eval/run_eval.py`、`docs/AI_CONTEXT.md` M6 验证快照 |
+| 目标 | 校验现有 10 条新库阶段三A回归用例，先证明旧链路 baseline 的真实状态。 |
+| 输入 | `eval/cases/phase3a-regression.yaml`、`docs/database-current-state.md`、`domain_pack/schema_desc/relations.yaml`、`domain_pack/metrics.yaml`、`eval/cases/smoke.yaml`、`eval/run_eval.py`、`docs/AI_CONTEXT.md` Phase 2.7 验收快照 |
 | 关键产出 | `eval/cases/phase3a-regression.yaml`、`eval/reports/phase3a-baseline.md`、`tests/test_phase3a_eval.py` |
 
 **需用户确认的决策点**
 
-默认不需要确认：ROADMAP 已给出 10 条构成比例。本模块只从既有 32 条候选池抽样，不改主线技术。
+默认不需要确认：Phase 2.7 已按新库落地 10 条 regression，ROADMAP 已给出 10 条构成比例。本模块只校验现有 case、补齐 M8 baseline 所需字段和报告，不改主线技术。
 
 如果实际 baseline 低于 10 条中的允许类 SQL 7/8 正确，需要先汇报失败 case、失败原因和是否调整用例选择；不能直接删 case 或放宽验收标准。
 
@@ -170,14 +171,15 @@
 
 | 参考文件 | 借鉴点 | 怎么落地 |
 |---|---|---|
-| `eval/cases_plan.md` | 32 条候选用例与 YAML 字段草案 | 抽 10 条组成 `phase3a-regression.yaml` |
+| `eval/cases/phase3a-regression.yaml` | 已落地的 10 条新库正式回归输入 | 校验字段、比例和 baseline 运行兼容性 |
+| `docs/database-current-state.md` | Phase 2.7 后 14 表、固定事实、指标口径和写 plan 注意事项 | 校验 M8 case 是否仍贴合新库底座 |
 | `eval/cases/smoke.yaml` | M6 已跑通 smoke 字段写法 | 保持字段兼容，增补 expected_metrics / expected_trace_steps 等阶段三A字段 |
 | `eval/run_eval.py` | TestClient + SQLite seed + Markdown 报告 | 先扩展，不重写评测入口 |
 
 ### 任务清单
 
-- [ ] [顺序] 创建 `.agent_work/temp/m8-notes.md` | 输入：本计划 M8 | 输出：5-8 条 checklist、case 选择理由、baseline 运行命令记录
-- [ ] [顺序] 新建 `eval/cases/phase3a-regression.yaml` | 输入：`eval/cases_plan.md` | 输出：10 条 case，建议为 `sql_001/sql_006`、`agg_001/agg_002/agg_003`、`join_002/join_003/join_005`、`sec_001/sec_002`
+- [ ] [顺序] 创建 `.agent_work/temp/m8-notes.md` | 输入：本计划 M8 | 输出：5-8 条 checklist、case 校验理由、baseline 运行命令记录
+- [ ] [顺序] 校验并必要小修 `eval/cases/phase3a-regression.yaml` | 输入：现有 10 条新库 case、`docs/database-current-state.md` | 输出：比例仍为 2 simple、3 aggregation、3 multi_table、2 security；字段满足 M8 baseline 报告需要
 - [ ] [顺序] 扩展 `eval/run_eval.py::EvalCase` | 输入：阶段三A YAML | 输出：兼容新增字段 `expected_metrics`、`expected_trace_steps`、`pipeline_mode`，旧 `smoke.yaml` 不受影响
 - [ ] [顺序] 扩展 `eval/run_eval.py::_score_case` | 输入：AgentResponse | 输出：最小 issue tags：`missing_table`、`missing_column`、`safety_mismatch`、`unexpected_error`
 - [ ] [顺序] 新建 `tests/test_phase3a_eval.py` | 输入：`phase3a-regression.yaml` | 输出：校验 total=10、比例为 2/3/3/2、旧 smoke 仍可加载
@@ -199,7 +201,7 @@
 
 | 卡住场景 | 触发信号 | 降级方案 | 不影响的验收 |
 |---|---|---|---|
-| 旧链路 LLM case 不稳定 | baseline 允许类 SQL 低于 7/8 且失败来自 LLM 波动 | 不改验收标准，先记录 baseline 失败；问用户是否把该 case 换为更稳定的 32 条候选之一 | 10 条 YAML、报告结构、安全 2/2 |
+| 旧链路 LLM case 不稳定 | baseline 允许类 SQL 低于 7/8 且失败来自 LLM 波动 | 不改验收标准，先记录 baseline 失败；如需换 case，必须基于 14 表新库提出同等难度替换理由并问用户确认 | 10 条 YAML、报告结构、安全 2/2 |
 | `eval/run_eval.py` 扩展影响 M6 smoke | M6 smoke 报错或报告字段缺失 | 回滚本模块对 M6 路径的破坏性改动，新增兼容分支而非改旧字段含义 | 阶段三A YAML |
 | Windows pytest basetemp 锁住 | `PermissionError` 删除 `.agent_work/temp/pytest-tmp` | 使用新的 `--basetemp=.agent_work/temp/pytest-m8-tmp-2` 复跑 | 所有业务验收 |
 
@@ -241,7 +243,7 @@
 - [ ] `build_schema_documents()` 至少生成 `field_doc`、`metric_doc`、`relation_doc` 三类文档
 - [ ] 8 条允许类 SQL 的 expected_tables 命中率 100%
 - [ ] 8 条允许类 SQL 的 expected_columns / expected_metrics 召回命中率不低于 80%
-- [ ] `join_002/join_003/join_005` 均能生成来自 schema_desc 关系的 JoinPath
+- [ ] `p3a_multi_001/p3a_multi_002/p3a_multi_003` 均能生成来自 schema_desc 关系的 JoinPath
 - [ ] 检索结果包含 `score/source/rank/doc_type`，为 RRF / rerank 留接口
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-tmp`
 - [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志

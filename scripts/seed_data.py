@@ -272,6 +272,10 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
 def _delete_existing_rows(session: Session) -> None:
     """按外键依赖顺序清空 14 张物理表，不依赖自增 ID 回到 1。"""
 
+    # ★ product_categories 是自引用类目树。MySQL 会在同表父子外键下拦截整表 DELETE，
+    # 所以 reset 时先断开 parent_id，再按父表删除顺序清空。
+    session.query(ProductCategory).update({ProductCategory.parent_id: None}, synchronize_session=False)
+    session.flush()
     for model in (
         OrderWide,
         UserBehaviorLog,
@@ -292,22 +296,27 @@ def _delete_existing_rows(session: Session) -> None:
     session.flush()
 
 
-_BASE_NAMES = [
+_USER_NAMES = [
     "陈米娅", "王逸凡", "张雨薇", "李思源", "刘若晴", "黄子轩", "赵晓萌", "吴俊杰", "杨雨桐", "周明哲",
     "徐悦然", "孙博文", "马晓琳", "郭浩然", "林芷若", "何志远", "高语嫣", "唐瑞霖", "程一诺", "罗嘉懿",
     "彭婉清", "潘奕辰", "邓梓涵", "肖景行", "冯书瑶", "石承宇", "任雅静", "万子骞", "杜若溪", "傅正阳",
     "谢安然", "段思齐", "姜语桐", "韩铭远", "秦乐瑶", "廖凯文", "熊芷萱", "崔敬轩", "毕雨晴", "瞿天佑",
     "孔令仪", "阮启航", "侯静怡", "左逸凡", "童雅琪", "顾砚书", "邵灵犀", "裴宇轩", "连以安", "聂朗清",
-]
-
-_PINYIN = [
-    "miya.chen", "yifan.wang", "yuwei.zhang", "siyuan.li", "ruoqing.liu", "zixuan.huang", "xiaomeng.zhao",
-    "junjie.wu", "yutong.yang", "mingzhe.zhou", "yueran.xu", "bowen.sun", "xiaolin.ma", "haoran.guo",
-    "zhiruo.lin", "zhiyuan.he", "yuyan.gao", "ruilin.tang", "yinuo.cheng", "jiayi.luo", "wanqing.peng",
-    "yichen.pan", "zihan.deng", "jingxing.xiao", "shuyao.feng", "chengyu.shi", "yajing.ren", "ziqian.wan",
-    "ruoxi.du", "zhengyang.fu", "anran.xie", "siqi.duan", "yutong.jiang", "mingyuan.han", "leyao.qin",
-    "kaiwen.liao", "zhixuan.xiong", "jingxuan.cui", "yuqing.bi", "tianyou.qu", "lingyi.kong", "qihang.ruan",
-    "jingyi.hou", "yifan.zuo", "yaqi.tong", "yanshu.gu", "lingxi.shao", "yuxuan.pei", "yian.lian", "langqing.nie",
+    "陈澈", "王遥", "张弛", "李想", "刘畅", "黄骁", "赵宁", "吴越", "杨帆", "周砚",
+    "徐朗", "孙晴", "马骁", "郭宁", "林溪", "何川", "高岚", "唐栩", "程墨", "罗晗",
+    "彭越", "潘澈", "邓楠", "肖遥", "冯澜", "石岩", "任舟", "万宁", "杜衡", "傅野",
+    "谢舟", "段然", "姜澈", "韩越", "秦川", "廖宁", "熊辰", "崔遥", "毕然", "瞿墨",
+    "孔晴", "阮川", "侯澈", "左言", "童宁", "顾南", "邵岚", "裴然", "连舟", "聂远",
+    "苏晚晴", "许知夏", "梁嘉树", "宋若溪", "郑清欢", "蒋明远", "沈亦辰", "韩知意", "曹沐阳", "袁嘉宁",
+    "邱景和", "方予安", "孟星河", "丁若初", "邵云起", "陆嘉禾", "白舒然", "贺南星", "夏以沫", "顾星辞",
+    "叶清越", "乔安然", "江予白", "尹疏桐", "薛明朗", "戴雨辰", "钟子墨", "汪若琳", "汤嘉懿", "谭亦舟",
+    "魏初夏", "邹景行", "丁芷晴", "卢一诺", "姚星辰", "郝思齐", "毛语晨", "钱若楠", "康逸晨", "赖书宁",
+    "严清扬", "莫子涵", "章雨眠", "龙嘉泽", "雷沐辰", "辛念初", "伍若宁", "常明熙", "申以安", "葛云舒",
+    "林小北", "周小满", "陈一一", "李木子", "王可心", "赵知行", "张之遥", "刘嘉木", "杨若白", "吴念慈",
+    "徐简", "孙棠", "马越", "郭一帆", "何以宁", "高予夏", "唐一鸣", "程知远", "罗曼", "彭小雅",
+    "Alex Chen", "Emma Wang", "Kevin Liu", "Olivia Zhang", "Jason Li", "Mia Huang", "Leo Zhao", "Grace Wu", "Daniel Yang", "Sophia Zhou",
+    "Aaron Xu", "Nina Sun", "Eric Ma", "Ivy Guo", "Ryan Lin", "Chloe He", "Victor Gao", "Luna Tang", "Ethan Cheng", "Ruby Luo",
+    "沈清和", "陆明轩", "许安乔", "梁若安", "宋知微", "郑子衿", "蒋云深", "曹嘉许", "袁可为", "邱雨棠",
 ]
 
 
@@ -317,13 +326,13 @@ def _build_users() -> list[User]:
     roles = ["admin", "ops", "customer_service", "demo_user"]
     users: list[User] = []
     for index in range(EXPECTED_SEED_COUNTS["users"]):
-        base_index = index % len(_BASE_NAMES)
-        suffix = "" if index < len(_BASE_NAMES) else f"{index // len(_BASE_NAMES) + 1:02d}"
+        # ★ 用户名直接来自 200 个固定姓名池，混合二字名、三字名和少量英文名，兼顾真实感与可复现。
+        user_name = _USER_NAMES[index]
         users.append(
             User(
-                user_name=f"{_BASE_NAMES[base_index]}{suffix}",
+                user_name=user_name,
                 role=roles[index % len(roles)],
-                email=f"{_PINYIN[base_index]}{index + 1:03d}@datapilot.example",
+                email=f"user{index + 1:03d}@datapilot.example",
                 phone=f"138{index + 1:08d}",
                 status="disabled" if index in {11, 47, 113, 179} else "active",
             )

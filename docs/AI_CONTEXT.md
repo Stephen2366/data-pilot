@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/database-upgrade-plan-v5.md`
-- 当前模块：Phase 2.7 数据库升级，已完成（未验收）
-- 上一模块验收：M6 已验收（2026-07-21，accept-M6-20260721.md）
+- 当前模块：Phase 2.7 数据库升级（已验收）
+- 上一模块验收：Phase 2.7 已验收（2026-07-22，accept-Phase2.7-20260722.md）
 - 阻塞项：无
 - 更新时间：2026-07-22
 
@@ -14,6 +14,7 @@
 
 - 后端框架：FastAPI + Pydantic Schema；`/api/query` 使用结构化 `AgentResponse`
 - 数据库主路径：MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic migration；SQLite 仅用于测试 / smoke
+- 数据库状态速查：`docs/database-current-state.md` 记录 Phase 2.7 后 14 表清单、指标口径、固定 seed 事实和后续写 plan 注意事项
 - 数据准备：`scripts/seed_data.py` 写入确定性电商 / SaaS 运营数据和固定业务事实
 - NL2SQL：M3 模板 SQL 优先；M4 起模板未命中时走 DeepSeek，Schema / KPI / few-shot 从 `domain_pack/` 加载
 - SQL 安全：sqlglot AST 只读检查 + 表级 RBAC + `users.email/users.phone` 敏感字段策略；安全能力不只靠 prompt
@@ -187,6 +188,10 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-22 seed 用户姓名真实感小修：按用户反馈，`scripts/seed_data.py` 不再用 50 个基础姓名追加 `02/03/04` 后缀生成 200 用户，改为固定 200 个姓名池，包含二字名、三字名和少量英文名；保留邮箱 / 手机号唯一性和角色分布。执行 `seed --reset` 时发现 MySQL 自引用类目树会拦截 `DELETE FROM product_categories`，已在 reset 前先断开 `ProductCategory.parent_id` 再删除。验证：`python -m scripts.seed_data --reset` 成功，14 表行数和固定事实全部匹配；数据库前 12 个用户已为新姓名 + `user001...` 邮箱；`pytest tests/test_database_upgrade.py tests/test_m1_models.py` 7 passed。
+- 2026-07-22 Phase 3A 计划对齐 Phase 2.7 已验收状态：按用户确认修改 `docs/phase3a-plan.md`，将顶部「数据库升级先行」改为「Phase 2.7 数据库升级已完成」，补入 `docs/database-current-state.md` 为单一事实源入口；M8 从“新建 regression / 从 32 条候选抽样”改为“校验现有 10 条新库 regression 并冻结 baseline”；目录规划把 `eval/cases/phase3a-regression.yaml` 标为已有/校验；M9 JoinPath 验收 case 改为 `p3a_multi_001/002/003`。仅文档口径同步，未进入 M8 实现。
+- 2026-07-22 新增数据库状态速查：按用户要求新增 `docs/database-current-state.md`，作为后续 AI 快速获取 Phase 2.7 后 14 表数据库现状、seed 固定事实、指标口径、RBAC、安全边界和后续写 plan 注意事项的入口；同步在「当前技术选型快照」挂入口链接。仅文档整理，未改代码。
+- 2026-07-22 Phase 2.7 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 31 passed），报告 `accept-Phase2.7-20260722.md`。阶段二数据库底座升级验收完成，后续可进入 Phase 3A M8 baseline。
 - 2026-07-22 补 Phase 2.7 dev-log：按用户要求在 `docs/dev-log.md` 末尾追加「Phase 2.7 数据库升级」学习复盘，覆盖 14 表升级、确定性 seed、固定业务事实、challenge / regression 分层、代码阅读路线和面试讲法。该记录仅说明本次文档补写；Phase 2.7 大改主体仍保留在「模块技术档案（新的在上）」。
 - 2026-07-22 Phase 3A 计划补数据库升级前置说明：按用户确认，在 `docs/phase3a-plan.md` 顶部新增「开工前置说明：数据库升级先行」。明确 Phase 3A 正式 M8 前先执行 Phase 2.7 数据库升级，执行规格以 `docs/database-upgrade-plan-v5.md` 为准；升级后 M8 baseline 直接在新库上跑旧链路，不做旧库 vs 新库对照；16 条 `database-upgrade-challenge.yaml` 只作为数据库升级验收和困难诊断素材，不替代 10 条 `phase3a-regression.yaml` 正式硬门；M9 relation_doc / JoinPath 优先来自 `domain_pack/schema_desc/relations.yaml`；数据库升级阶段不要求完整 `schema_retrieval` / `query_plan` / trace_steps，仍留到 Phase 3A M11/M12 验收。后续数据库升级完成后，需要小修本文档的单一事实源、当前差异清单、目录规划、M8 和阶段三A验收标准。
 - 2026-07-22 生成数据库升级计划 v5：按用户要求复制 `docs/database-upgrade-plan-v4.md` 为 `docs/database-upgrade-plan-v5.md`，并落入上一轮评审的 P0/P1 修正。① 明确 seed reset 与自增 ID 策略：MySQL 多次 reset 后 ID 不从 1 开始是正常现象，后续 seed 不依赖硬编码 ID，固定事实用 `sku` / `coupon_code` / `channel_name` / `category.name` / `device_type` 等业务键定位，并输出 seed_summary。② 修复 `orders_wide` DDL：`ix_category` 改为索引 `primary_category`，并把 `snapshot_at` / `batch_id` / `source_updated_at` 写入正式字段。③ 明确退款粒度：新增 `refunds.order_item_id` 可空外键，商品退款率优先按订单明细归因，同时兼容整单退款和旧 `product_id` 冗余字段。④ 拆分验收门：数据库升级阶段只验结构、seed、固定事实、基础 challenge 和安全；Phase 3A M11/M12 再验 `schema_retrieval` / `join_path` / `query_plan` 等 trace_steps。⑤ 扩展 `relations.yaml` 规格，补 `relation_type` / `grain` / bridge / recursive / temporal / aggregation_warning，覆盖 order_coupons、多级类目、SCD 时间窗口和聚合放大风险。⑥ 补影响文件清单：`app/db/base.py`、`app/models/__init__.py`、`app/schemas/resources.py`、`eval/run_eval.py`、`engine/nl2sql/schema_loader.py` 等。
