@@ -5,7 +5,7 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/database-upgrade-plan-v5.md`
-- 当前模块：Phase 2.7 数据库升级（已验收）
+- 当前模块：Phase 2.7.1 数据库 polish（已完成，待人工确认；未进入 Phase 3A M8）
 - 上一模块验收：Phase 2.7 已验收（2026-07-22，accept-Phase2.7-20260722.md）
 - 阻塞项：无
 - 更新时间：2026-07-22
@@ -32,6 +32,27 @@
 - Milvus Standalone 已通过 Docker Desktop 部署成功（2026-07-21 验证），连接 `localhost:19530` 可用；阶段三 RAG 主路径改为 Milvus，不再使用 ChromaDB
 
 ## 模块技术档案（新的在上）
+
+### Phase 2.7.1 数据库 polish（2026-07-22）
+
+- 背景：外部 AI 对 Phase 2.7 审查后指出若干 plan v5 与实现偏差。本轮不重开 Phase 3A M8，只处理进入 M8 前值得补齐且低扰动的数据库口径问题。
+- 改动范围：`app/models/orders_wide.py`、`app/models/coupons.py`、`app/models/product_price_history.py`、`alembic/versions/20260722_0003_phase27_database_polish.py`、`scripts/seed_data.py`、`tests/test_m1_models.py`、`domain_pack/schema_desc/{orders_wide,coupons,product_price_history,user_behavior_log}.md`、`docs/database-current-state.md`、`.agent_work/temp/phase2.7.1-notes.md`
+- 关键决策：
+  - `orders_wide` 不重命名旧字段，保留 `product_name/category/user_status` 等已通过用例依赖的兼容列；仅追加 plan v5 需要的 `user_role`、`primary_product_price`、`item_count`、`refund_count`、`total_refund`、`has_refund`、`updated_at`，让宽表具备“看板预聚合 vs 星型强一致”的后续挑战价值。
+  - `user_behavior_log` 不回退到 `target_type/target_id` 多态列；当前显式 `product_id/channel_id` 外键更适合参照完整性和 Text2SQL join path，偏离理由写入 schema_desc 和数据库速查。
+  - `coupons` 补 `ix_valid_range(valid_from, valid_to)`，服务优惠券有效期查询；`coupon_code VARCHAR(64)` 保持不动，属于无害兼容差异。
+  - `product_price_history` 追加 `change_reason`，同时保留 `price_source`。前者是业务调价原因，后者是数据来源元数据，两者不要混用。
+  - seed 仍然保持确定性生成：宽表退款字段从 `order.refunds` 聚合，明细行数从 `order.order_items` 计算；没有逐行写死 10000 行数据，也不依赖自增 ID 从 1 开始。
+- 验证快照：
+  - 聚焦 pytest：`tests/test_m1_models.py tests/test_database_upgrade.py` 7 passed
+  - 真实 MySQL：`alembic current` 从 `20260722_0002` 升级到 `20260722_0003 (head)`；`alembic check` 输出 `No new upgrade operations detected.`
+  - `python -m scripts.seed_data --reset` 成功；14 表行数保持 users 200 / orders 10000 / order_items 18000 / refunds 1000 / product_price_history 150 / orders_wide 10000 等既定数量
+  - 固定事实保持不变：2026 年 6 月 GMV `11285752.00`、Aurora 退款率最高、Mobile App GMV Top、Top 退款原因 `quality_issue`、高优 pending 工单 12、金额不一致订单 5
+  - 新增字段抽查：`orders_wide` 中 `has_refund=1` 的订单 1000 笔，`sum(refund_count)=1000`，`sum(total_refund)=893612.80`，`max(item_count)=3`；`product_price_history.change_reason` 分布为 current_price 48 / new_year_clearance 50 / spring_price_restore 50 / summer_price_refresh 2；MySQL `coupons` 上存在 `ix_valid_range`
+  - 全量 pytest：31 passed, 1 warning（Starlette TestClient / httpx deprecation，既有警告）
+- 遗留：
+  - 本轮 polish 是 Phase 2.7 验收后的补强，建议新会话复审时重点看 `0003` migration 与文档口径是否一致；不要求 Phase 3A trace_steps 通过。
+  - `resources.py` 模块 docstring 位置仍是已知 cosmetic issue，未在本轮扩大处理。
 
 ### Phase 2.7 数据库升级（2026-07-22）
 

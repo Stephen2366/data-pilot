@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -30,9 +30,11 @@ class OrderWide(Base):
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     user_name: Mapped[str] = mapped_column(String(80), nullable=False)
     user_status: Mapped[str] = mapped_column(String(24), nullable=False)
+    user_role: Mapped[str] = mapped_column(String(32), nullable=False)
     product_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     sku: Mapped[str] = mapped_column(String(64), nullable=False)
     product_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    primary_product_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     category_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     category: Mapped[str] = mapped_column(String(80), nullable=False)
     channel_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
@@ -45,8 +47,13 @@ class OrderWide(Base):
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     actual_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    refund_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_refund: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    has_refund: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     source_updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     snapshot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     batch_id: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())

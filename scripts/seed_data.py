@@ -746,11 +746,21 @@ def _build_product_price_history(products: list[Product]) -> list[ProductPriceHi
     for index, product in enumerate(products):
         base_price = _money(product.price)
         historical = [
-            (datetime(2026, 1, 1), datetime(2026, 4, 1), _money(base_price * Decimal("0.92"))),
-            (datetime(2026, 4, 1), datetime(2026, 7, 1), _money(base_price)),
-            (datetime(2026, 7, 1), None, _money(base_price + (Decimal("12.00") if index in {3, 9} else Decimal("0.00")))),
+            (
+                datetime(2026, 1, 1),
+                datetime(2026, 4, 1),
+                _money(base_price * Decimal("0.92")),
+                "new_year_clearance",
+            ),
+            (datetime(2026, 4, 1), datetime(2026, 7, 1), _money(base_price), "spring_price_restore"),
+            (
+                datetime(2026, 7, 1),
+                None,
+                _money(base_price + (Decimal("12.00") if index in {3, 9} else Decimal("0.00"))),
+                "summer_price_refresh" if index in {3, 9} else "current_price",
+            ),
         ]
-        for valid_from, valid_to, price in historical:
+        for valid_from, valid_to, price, change_reason in historical:
             rows.append(
                 ProductPriceHistory(
                     product=product,
@@ -759,6 +769,7 @@ def _build_product_price_history(products: list[Product]) -> list[ProductPriceHi
                     valid_to=valid_to,
                     is_current=valid_to is None,
                     price_source="seed",
+                    change_reason=change_reason,
                 )
             )
     return rows
@@ -798,37 +809,48 @@ def _build_orders_wide(orders: list[Order]) -> list[OrderWide]:
     """把订单头常用维度冗余成宽表快照，行数与 orders 一一对应。"""
 
     snapshot_at = datetime(2026, 7, 1, 3, 0, 0)
-    return [
-        OrderWide(
-            order_id=order.id,
-            order_no=order.order_no,
-            source_order_no=order.source_order_no,
-            external_order_no=order.external_order_no,
-            user_id=order.user.id,
-            user_name=order.user.user_name,
-            user_status=order.user.status,
-            product_id=order.product.id,
-            sku=order.product.sku,
-            product_name=order.product.product_name,
-            category_id=order.product.category_id,
-            category=order.product.category,
-            channel_id=order.channel.id,
-            channel_code=order.channel.channel_code,
-            channel_name=order.channel.channel_name,
-            channel_type=order.channel.channel_type,
-            order_status=order.order_status,
-            order_amount=order.order_amount,
-            shipping_amount=order.shipping_amount,
-            discount_amount=order.discount_amount,
-            actual_amount=order.actual_amount,
-            quantity=order.quantity,
-            paid_at=order.paid_at,
-            source_updated_at=order.updated_at or snapshot_at,
-            snapshot_at=snapshot_at,
-            batch_id="orders_wide_20260701_0300",
+    rows: list[OrderWide] = []
+    for order in orders:
+        # ★ 宽表保留“快照可直接聚合”的指标，但不替代明细表做强一致诊断。
+        refund_count = len(order.refunds)
+        total_refund = _money(sum((refund.refund_amount for refund in order.refunds), Decimal("0.00")))
+        rows.append(
+            OrderWide(
+                order_id=order.id,
+                order_no=order.order_no,
+                source_order_no=order.source_order_no,
+                external_order_no=order.external_order_no,
+                user_id=order.user.id,
+                user_name=order.user.user_name,
+                user_status=order.user.status,
+                user_role=order.user.role,
+                product_id=order.product.id,
+                sku=order.product.sku,
+                product_name=order.product.product_name,
+                primary_product_price=order.product.price,
+                category_id=order.product.category_id,
+                category=order.product.category,
+                channel_id=order.channel.id,
+                channel_code=order.channel.channel_code,
+                channel_name=order.channel.channel_name,
+                channel_type=order.channel.channel_type,
+                order_status=order.order_status,
+                order_amount=order.order_amount,
+                shipping_amount=order.shipping_amount,
+                discount_amount=order.discount_amount,
+                actual_amount=order.actual_amount,
+                quantity=order.quantity,
+                item_count=len(order.order_items),
+                refund_count=refund_count,
+                total_refund=total_refund,
+                has_refund=refund_count > 0,
+                paid_at=order.paid_at,
+                source_updated_at=order.updated_at or snapshot_at,
+                snapshot_at=snapshot_at,
+                batch_id="orders_wide_20260701_0300",
+            )
         )
-        for order in orders
-    ]
+    return rows
 
 
 def _count_seed_tables(session: Session) -> dict[str, int]:

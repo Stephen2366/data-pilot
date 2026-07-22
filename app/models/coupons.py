@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Integer, Numeric, String
+from sqlalchemy import DateTime, Index, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -16,6 +16,9 @@ class Coupon(TimestampMixin, Base):
     """
 
     __tablename__ = "coupons"
+    __table_args__ = (
+        Index("ix_valid_range", "valid_from", "valid_to"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     coupon_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)

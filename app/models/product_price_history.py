@@ -27,6 +27,7 @@ class ProductPriceHistory(Base):
     valid_to: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     price_source: Mapped[str] = mapped_column(String(48), nullable=False, default="seed")
+    change_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     product = relationship("Product", back_populates="price_history")

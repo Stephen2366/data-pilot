@@ -8,7 +8,8 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 
 ## 关键入口
 
-- 迁移文件：`alembic/versions/20260722_0002_database_upgrade_14_tables.py`
+- 基础升级迁移：`alembic/versions/20260722_0002_database_upgrade_14_tables.py`
+- 审查后 polish 迁移：`alembic/versions/20260722_0003_phase27_database_polish.py`
 - Seed 主逻辑：`scripts/seed_data.py`
 - ORM 模型：`app/models/`
 - Alembic metadata 注册：`app/db/base.py`
@@ -38,7 +39,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 | `order_coupons` | 3000 | 订单-优惠券桥接 | 优惠券使用率、券渠道分析 | 多对多桥接表，一单可多券，订单数要去重 |
 | `user_behavior_log` | 10000 | 用户行为事件 | 加购到支付转化率、设备分析 | 转化率按 `event_type` 事件计数，不是订单表 |
 | `product_price_history` | 150 | 商品价格版本 | 历史售价、指定时间价格 | 查询历史价格必须匹配 `valid_from` / `valid_to` |
-| `orders_wide` | 10000 | 订单宽表快照 | 看板类渠道 / 商品 / 用户汇总 | 适合快速汇总，不适合强一致明细追溯 |
+| `orders_wide` | 10000 | 订单宽表快照 | 看板类渠道 / 商品 / 用户 / 退款汇总 | 含预聚合退款字段，适合快速汇总，不适合强一致明细追溯 |
 
 ## 兼容字段和新旧口径
 
@@ -48,6 +49,8 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - `orders.paid_at` 现在允许为空；GMV、净收入等成交口径默认排除 `paid_at IS NULL`。
 - `order_status` 兼容 `cancelled` 和 `canceled` 两种拼写；成交口径要同时排除两者。
 - `orders.source_order_no` / `orders.external_order_no` 和 `refunds.source_order_no` 用来模拟外部源系统弱一致，不等同于主表唯一业务键。
+- `orders_wide` 保留 `refund_count` / `total_refund` / `has_refund` / `item_count` 等快照字段，用于看板选表挑战；强一致诊断仍回到星型模型。
+- `product_price_history.price_source` 是数据来源，`change_reason` 是业务调价原因；后续写 prompt / plan 时不要混成一个字段。
 
 ## 关键关系
 
@@ -61,6 +64,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - `products.category_id -> product_categories.id`：规范类目关系。
 - `product_categories.parent_id -> product_categories.id`：类目树递归关系。
 - `product_price_history.product_id -> products.id`：SCD Type 2 风格价格历史，查询历史价要带时间窗口。
+- `user_behavior_log` 当前采用显式 `product_id` / `channel_id` 外键，而不是 plan 草案里的 `target_type` / `target_id` 多态列；这是为了参照完整性和 SQL 可生成性保留的有意偏离。
 
 更完整的机器可读关系在 `domain_pack/schema_desc/relations.yaml`，后续 M9 relation_doc / JoinPath 应优先从这里生成，不要靠 prompt 临场猜。
 
@@ -143,6 +147,7 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 - MySQL DDL 非事务性：downgrade 失败后可能留下半迁移状态，修 migration 时要考虑表和索引真实存在情况。
 - 回滚 `orders.paid_at` 为 NOT NULL 前必须先处理 NULL 值。
 - `coupons.coupon_code` 当前只保留 unique constraint，不额外建同名普通索引，避免 Alembic diff。
+- `coupons` 已有 `ix_valid_range(valid_from, valid_to)`，优惠券有效期查询优先使用这组字段。
 - `app.db.base` 目前兼具 Base 定义和模型注册，导入顺序不当可能触发循环导入；脚本入口优先导入 `app.db.base` 再用模型。
 
 ## 常用验证命令
@@ -158,7 +163,7 @@ git diff --check
 
 预期基线：
 
-- Alembic head：`20260722_0002`
+- Alembic head：`20260722_0003`
 - `alembic check`：无新增 migration 操作
 - Seed：14 表行数与本文件一致，固定事实与本文件一致
 - Pytest：Phase 2.7 验收时为 `31 passed, 1 warning`

@@ -100,6 +100,17 @@ def test_m1_tables_have_primary_keys_foreign_keys_and_indexes() -> None:
     assert Refund.refund_status.property.columns[0].index is True
     assert Ticket.priority.property.columns[0].index is True
 
+    order_wide_columns = set(OrderWide.__table__.columns.keys())
+    assert {
+        "user_role",
+        "primary_product_price",
+        "item_count",
+        "refund_count",
+        "total_refund",
+        "has_refund",
+        "updated_at",
+    } <= order_wide_columns
+
 
 def test_m1_seed_data_counts_roles_and_business_facts_are_stable() -> None:
     # SQLite 只在测试里做快速兜底；阶段二主路径仍然是 MySQL + Alembic。
@@ -132,6 +143,11 @@ def test_m1_seed_data_counts_roles_and_business_facts_are_stable() -> None:
         assert facts["orders_wide_matches_star_gmv_by_channel"] is True
         assert facts["amount_mismatch_order_count"] == 5
 
+        wide_refund_summary = session.query(OrderWide).filter(OrderWide.has_refund.is_(True)).count()
+        assert wide_refund_summary > 0
+
     # 最后从数据库视角再看一次真实建出的表名，防止只检查 Python 对象。
     inspector = inspect(engine)
     assert sorted(inspector.get_table_names()) == sorted(EXPECTED_SEED_COUNTS)
+    coupon_indexes = {index["name"] for index in inspector.get_indexes("coupons")}
+    assert "ix_valid_range" in coupon_indexes
