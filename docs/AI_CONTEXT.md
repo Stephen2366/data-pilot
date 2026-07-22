@@ -230,6 +230,7 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-22 Phase 3A 多 SQL Agent 边界预留：按用户确认小修 `docs/phase3a-plan.md`，明确 Phase 3A 仍是 single-step Text2SQL pipeline，不实现多 SQL Agent / SQL+RAG 迭代分析；但 `QueryPlan.steps`、`QueryPlanStep.step_type/depends_on`、`TraceStep.step_index/step_type/parent_step_id`、`EvalCase.pipeline_mode/expected_trace_steps` 需避免写死为单 SQL。本阶段多 `sql_query` step 映射 `unsupported_multi_step_plan`，复杂 Plan-and-Execute 留后续 Hybrid / Data Analysis Agent。
 - 2026-07-22 Phase 2.7.1 验收完成、plan v5 归档、切入 Phase 3A M8：① 将 `docs/database-upgrade-plan-v5.md` 归档至 `docs/archive/`；② 补全 AI_CONTEXT Phase 2.7.1 模块档案的「参考资料」小节；③ 当前阶段计划文件切换为 `docs/phase3a-plan.md`，当前模块改为 Phase 3A M8；④ 上一模块验收更新为 Phase 2.7.1 已验收。
 - 2026-07-22 Phase 2.7.1 验收未通过（accept-Phase2.7.1-20260722.md）：7 项检查中 2 项 ❌。检查 3 进度状态不一致（plan v5 已移至 archive 但 AI_CONTEXT 仍指向原路径；dev-log Phase 2.7 下一步指针过时未指向 2.7.1）；检查 4 最新日志不完整（AI_CONTEXT 2.7.1 模块档案缺「参考资料」小节；dev-log 无 2.7.1 条目）。其余 5 项 ✅（废弃口径清零、目录地图一致、注释合规、单一事实源抽查 4 项一致、pytest 31 passed）。待用户修复 ❌ 项后复检。
 - 2026-07-22 seed 用户姓名真实感小修：按用户反馈，`scripts/seed_data.py` 不再用 50 个基础姓名追加 `02/03/04` 后缀生成 200 用户，改为固定 200 个姓名池，包含二字名、三字名和少量英文名；保留邮箱 / 手机号唯一性和角色分布。执行 `seed --reset` 时发现 MySQL 自引用类目树会拦截 `DELETE FROM product_categories`，已在 reset 前先断开 `ProductCategory.parent_id` 再删除。验证：`python -m scripts.seed_data --reset` 成功，14 表行数和固定事实全部匹配；数据库前 12 个用户已为新姓名 + `user001...` 邮箱；`pytest tests/test_database_upgrade.py tests/test_m1_models.py` 7 passed。
