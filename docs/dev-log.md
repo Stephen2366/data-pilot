@@ -1192,3 +1192,96 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_1_mil
 **本地启动体验：**
 
 本模块暂无 Swagger 页面；体验方式是先启动 Docker Milvus，再运行上面的 smoke 脚本。打开 `.agent_work/temp/m9_1-milvus-smoke.md` 后，对比每组的 **in_memory** 和 **milvus** 数字。如果两边一样，说明只是 adapter 跑通；如果后续接真实 embedding 后 Milvus 明显提升，再考虑合入主线。
+
+## ★ M9.2 真实中文 Embedding + Milvus 效果测试（2026-07-24）
+
+**简述**：这次把 M9.1 的 Milvus adapter 接上 **SiliconFlow 真实中文 embedding**，验证它是否真的比 fake embedding 更会“理解中文业务问题”。
+
+### 这次做了什么
+
+M9.1 已经证明 Milvus adapter 能工作，但当时用的还是 deterministic fake embedding，所以 Milvus 只是换了存储方式，召回数字没有提升。M9.2 补上真正关键的一步：新增 `SiliconFlowEmbeddingProvider`，调用 SiliconFlow 的 embeddings API，把 schema 文档和 query 都转成真实语义向量，再写入 Milvus 检索。
+
+这次测了两个模型：**BAAI/bge-m3** 和 **Qwen/Qwen3-Embedding-0.6B**。为了避免默认测试联网，单元测试只用 fake transport；真实 API 调用放在 `scripts/smoke_m9_2_real_embedding.py`。Smoke 同时输出两种视角：**merged_top30** 模拟 M9 当前“keyword + vector + relation”的主策略，**vector_only_top12** 单独观察 embedding 的排序能力。
+
+结果很清楚：在 **merged_top30** 下，BGE-M3 和 Qwen3 都与 M9 持平，formal 仍是 **15/15 tables、16/18 items、3/3 join**，diagnostic 仍是 **54/54 tables、54/62 items、14/14 join**。这说明当前主链路的硬门已经主要由 keyword 和 relations.yaml 补满，真实 embedding 没有进一步提高最终 recall。
+
+但在 **vector_only_top12** 下，Qwen3-0.6B 有明显收益：diagnostic item recall 从 fake 的 **47/62** 提到 **55/62**，JoinPath 从 **13/14** 到 **14/14**。所以结论不是“embedding 没用”，而是：**真实 embedding 的排序能力更好，但当前 M9 的最终瓶颈不在 embedding，而在派生列 alias 和后续 QueryPlan / SQL 生成。**
+
+### 新概念
+
+- **真实 embedding**：不再用规则或 hash 模拟相似度，而是让模型把文本转成语义向量。它能把“渠道 GMV”“成交额”“销售额排名”这类表达拉得更近。
+- **merged_top30**：M9 当前主策略，综合 keyword、vector 和 relation。这个视角代表“真实系统最终可用上下文”。
+- **vector_only_top12**：只看向量召回前 12 个结果。这个视角更适合观察 embedding 模型本身的质量。
+- **模型维度 dimensions**：Qwen3 embedding 支持指定输出维度。本次用 `1024` 维，既能控制成本和存储，也比 M9.1 的 128 维 fake dense vector更接近真实语义检索。
+- **缓存 embedding**：同一批文档和问题在一次 smoke 中可能重复出现，provider 用内存缓存避免重复调用 API，省钱也更稳。
+
+### 关键文件
+
+- `engine/schema_retrieval/embedding_provider.py`：新增 SiliconFlow embedding provider，支持 batch、cache、Qwen3 dimensions。
+- `engine/schema_retrieval/vector_index.py`：Milvus adapter 支持 dense vector，并能从真实 embedding 自动推断维度。
+- `scripts/smoke_m9_2_real_embedding.py`：真实 embedding + Milvus 对比 smoke。
+- `tests/test_m9_2_siliconflow_embedding.py`：用 fake transport 验证 provider 请求和响应解析，不消耗 API 额度。
+- `.agent_work/temp/m9_2-real-embedding-smoke-bge-m3.md`：BGE-M3 对比报告。
+- `.agent_work/temp/m9_2-real-embedding-smoke-qwen3-0.6b.md`：Qwen3-0.6B 对比报告。
+
+### 代码阅读路线
+
+1. **先看 provider**：`engine/schema_retrieval/embedding_provider.py`
+   从 `SiliconFlowEmbeddingProvider.embed_texts()` 读起。它组装 `/embeddings` 请求、按 index 还原向量顺序，并用 `_cache` 避免重复请求。重点理解这里是 **真实 API provider**，所以只在 smoke 中显式使用。
+
+2. **再看 Milvus 维度推断**：`engine/schema_retrieval/vector_index.py`
+   M9.1 默认把 fake embedding 哈希成 128 维；M9.2 接真实 embedding 后，维度可能是 1024 或模型默认值。因此 `MilvusVectorIndex` 要先生成文档向量、推断维度，再创建 collection。
+
+3. **然后看真实 smoke**：`scripts/smoke_m9_2_real_embedding.py`
+   它从 `.env` 读取 `SILICONFLOW_API_KEY`、`SILICONFLOW_BASE_URL`、`MILVUS_URI`，也允许用 `SILICONFLOW_EMBEDDING_MODEL` 和 `SILICONFLOW_EMBEDDING_DIMENSIONS` 临时切模型。重点看报告里的 merged 和 vector-only 两组数字。
+
+4. **最后看测试边界**：`tests/test_m9_2_siliconflow_embedding.py`
+   这份测试不联网，而是用 fake transport 验证 provider 会发送正确 payload、Authorization header 和 dimensions。这样主线 pytest 不会因为 API 余额、网络或 Docker 状态变红。
+
+M9.2 的实验流向：
+
+`SchemaDocument`
+→ `SiliconFlowEmbeddingProvider`
+→ `dense vectors`
+→ `Milvus collection`
+→ `retrieve_schema(vector_index=real_index)`
+→ `merged_top30 / vector_only_top12`
+→ recall 对比报告
+
+### 设计要点
+
+- **真实 embedding 不放默认链路**：M9.2 仍然是实验分支；默认 M9/M10 不联网，不依赖 SiliconFlow 或 Milvus。
+- **Qwen3 比 BGE-M3 更适合当前实验**：在 vector-only_top12 下，Qwen3-0.6B 的 diagnostic item recall 更高，JoinPath 也更完整。
+- **不把派生列问题归咎于 embedding**：`coupon_order_count`、`conversion_rate`、`avg_price` 是 SQL 输出别名或计划层概念，embedding 很难直接“召回”它们。后续应在 M10 QueryPlan 和 M11 SQL prompt 中解决。
+- **合并建议保守**：可以合入 optional provider / adapter / smoke，但不建议把默认 Schema Retrieval 改成 SiliconFlow + Milvus。
+
+### 面试怎么讲
+
+M9.2 可以讲成“我不是为了堆技术栈而接 Milvus，而是做了真实 embedding 对比实验”。我先用 fake embedding + Milvus 验证 adapter，再接 SiliconFlow 的 BGE-M3 和 Qwen3 Embedding，用同一套 formal / challenge / diagnostic case 对比 merged recall 和 vector-only recall。结论是：在当前 keyword+relations 已经很强的情况下，真实 embedding 没提高最终 merged 硬门；但 Qwen3 在向量单路严格召回上明显优于 fake embedding。这说明后续如果做 RAG 或更大规模 schema retrieval，Qwen3 + Milvus 有价值；但当前 Text2SQL 主线应该先推进 QueryPlan 和 SQL 生成喵
+
+### 验证与下一步
+
+- 验证：M9.2 provider + M9.1/M9 相关测试 **10 passed**；BGE-M3 和 Qwen3-0.6B 两次真实 smoke 均成功。
+- warning：Starlette TestClient / httpx deprecation 是既有 warning；首次真实 smoke 因沙箱网络权限失败，提权后成功；运行真实 smoke 建议设置 `OPENBLAS_NUM_THREADS=1`。
+- 下一步：如果要合并，只建议合入 optional provider / smoke，不建议默认切到联网 embedding；主线仍建议回到 M10 QueryPlanStep。
+
+可复制验证命令：
+
+```powershell
+# 跑 M9.2 单元和相关集成测试。预期：10 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m9_2_siliconflow_embedding.py tests\test_m9_1_milvus_schema_retrieval.py tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9_2-related
+
+# 跑 BGE-M3 真实 embedding smoke。预期：生成 m9_2-real-embedding-smoke.md，可复制为 bge-m3 报告。
+$env:OPENBLAS_NUM_THREADS='1'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_2_real_embedding.py
+
+# 跑 Qwen3-0.6B 真实 embedding smoke。预期：生成 Qwen3 对比报告。
+$env:OPENBLAS_NUM_THREADS='1'
+$env:SILICONFLOW_EMBEDDING_MODEL='Qwen/Qwen3-Embedding-0.6B'
+$env:SILICONFLOW_EMBEDDING_DIMENSIONS='1024'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_2_real_embedding.py
+```
+
+**本地启动体验：**
+
+本模块没有 Swagger 页面；它的体验方式是实验报告。先确认 Docker Milvus 已启动、`.env` 里有 `SILICONFLOW_API_KEY`，再运行 smoke。报告会写到 `.agent_work/temp/`，重点看 `milvus_siliconflow / merged_top30` 和 `milvus_siliconflow / vector_only_top12` 两组数字：前者判断当前系统是否受益，后者判断 embedding 模型本身是否更强。

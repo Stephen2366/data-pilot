@@ -5,11 +5,11 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：Phase 3A M9.1 Milvus Adapter 实验（实验分支已完成，待用户决定是否合并）
+- 当前模块：Phase 3A M9.2 真实中文 Embedding + Milvus 效果测试（实验分支已完成，待用户决定是否合并）
 - 下一模块：M10 QueryPlanStep 与自检
 - 上一模块验收：Phase 3A M9 已验收（2026-07-23，accept-M9-20260723.md）
-- 阻塞项：无；M9.1 在 `codex-m9.1-milvus-experiment` 分支验证 Milvus adapter 可用，但在 deterministic embedding 下召回数字与 in-memory 持平，暂不建议仅因本实验直接替换主线
-- 更新时间：2026-07-23
+- 阻塞项：无；M9.2 在 `codex-m9.2-real-embedding-experiment` 分支验证 SiliconFlow BGE-M3 / Qwen3-0.6B + Milvus 可用；merged_top30 与 M9 持平，Qwen3 在 vector-only_top12 视角提升明显但不足以单独替代 keyword+relations
+- 更新时间：2026-07-24
 
 ## 当前技术选型快照
 
@@ -32,6 +32,29 @@
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
 ## 模块技术档案（新的在上）
+
+### Phase 3A M9.2 真实中文 Embedding + Milvus 效果测试（2026-07-24）
+
+- 改动范围：未提供模块起始 commit，本次按当前实验分支工作树变更检查；`engine/schema_retrieval/embedding_provider.py`、`engine/schema_retrieval/vector_index.py`、`scripts/smoke_m9_2_real_embedding.py`、`tests/test_m9_2_siliconflow_embedding.py`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9.2-notes.md`、`.agent_work/temp/m9_2-real-embedding-smoke-bge-m3.md`、`.agent_work/temp/m9_2-real-embedding-smoke-qwen3-0.6b.md`
+- 关键决策：
+  - M9.2 从 M9.1 实验状态切出 `codex-m9.2-real-embedding-experiment`，继续遵守“不合并前先询问用户”。M10 主线仍建议基于已验收 M9 / main，而不是实验分支。
+  - 新增 `SiliconFlowEmbeddingProvider`，默认模型 `BAAI/bge-m3`；通过环境变量可切换 `SILICONFLOW_EMBEDDING_MODEL` 和 `SILICONFLOW_EMBEDDING_DIMENSIONS`。真实 API 调用只放 smoke，pytest 用 fake transport，不消耗额度、不依赖网络。
+  - `MilvusVectorIndex` 支持 provider 返回 dense vector，并先批量 embedding 文档、推断真实维度，再创建 Milvus collection；否则真实 embedding 维度与默认 128 维不一致会导致 Milvus schema 错误。
+  - Provider 增加内存缓存，避免同一文档 / query 在一次 smoke 中重复请求 SiliconFlow。
+  - Smoke 同时输出 `merged_top30` 和 `vector_only_top12`：前者模拟 M9 当前主召回策略，后者观察真实 embedding 自身排序能力。
+- 参考资料：
+  - 查阅 SiliconFlow 官方 embeddings API，确认 `POST /v1/embeddings`、Bearer token、`BAAI/bge-m3`、`Qwen/Qwen3-Embedding-0.6B` 与 Qwen3 `dimensions` 参数。
+  - 本次未查外部 benchmark，只用项目 M9 formal/challenge/diagnostic case 做本地效果对比。
+- 验证快照：
+  - TDD 红灯：`pytest tests\test_m9_2_siliconflow_embedding.py ... --basetemp=.agent_work/temp/pytest-m9_2-red` 失败于 `ModuleNotFoundError: No module named 'engine.schema_retrieval.embedding_provider'`。
+  - 单元/集成绿灯：`pytest tests\test_m9_2_siliconflow_embedding.py tests\test_m9_1_milvus_schema_retrieval.py tests\test_phase3a_schema_retrieval.py ... --basetemp=.agent_work/temp/pytest-m9_2-related` 10 passed，1 warning（Starlette TestClient / httpx deprecation，既有警告）。
+  - 真实 API：首次 `scripts\smoke_m9_2_real_embedding.py` 因沙箱网络权限失败，`WinError 10013`；提权后成功调用 SiliconFlow。运行时设置 `OPENBLAS_NUM_THREADS=1`，避免 Windows 下 OpenBLAS 偶发线程/内存分配问题。
+  - BGE-M3：`BAAI/bge-m3` + Milvus + `merged_top30` 与 M9 持平：formal 15/15 tables、16/18 items、3/3 join；challenge 29/29、29/33、6/6；diagnostic 54/54、54/62、14/14。`vector_only_top12` 下 challenge 27/29、28/33、5/6；diagnostic 51/54、50/62、12/14。
+  - Qwen3-0.6B：`Qwen/Qwen3-Embedding-0.6B` + `dimensions=1024` + Milvus + `merged_top30` 与 M9 持平：formal 15/15、16/18、3/3；challenge 29/29、29/33、6/6；diagnostic 54/54、54/62、14/14。`vector_only_top12` 下 challenge 28/29、29/33、6/6；diagnostic 51/54、55/62、14/14。
+- 遗留：
+  - 当前 M9 的 keyword + relation merge 已经覆盖硬门，真实 embedding 对最终 merged_top30 没有提升；派生 SQL alias（如 `coupon_order_count`、`conversion_rate`、`avg_price`）仍不是 embedding 能直接解决的问题，留给 M10/M11。
+  - Qwen3-0.6B 在 vector-only_top12 比 fake / BGE-M3 更好，说明后续如果做真正语义检索，优先试 Qwen3；但主线不宜默认联网 embedding。
+  - 若合并实验分支，建议只合入 optional provider / adapter / smoke，不把默认 retriever 改成 SiliconFlow + Milvus。
 
 ### Phase 3A M9.1 Milvus Adapter 实验（2026-07-23）
 

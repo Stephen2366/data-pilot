@@ -19,13 +19,14 @@ from engine.schema_retrieval.objects import SchemaDocument, SchemaHit
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
 DEFAULT_MILVUS_URI = "http://127.0.0.1:19530"
 DEFAULT_MILVUS_DIMENSION = 128
+EmbeddingVector = dict[str, float] | list[float]
 
 
 class EmbeddingProvider(Protocol):
     """Embedding 协议：后续真实 BGE / text2vec / OpenAI embedding 都可以实现它。"""
 
-    def embed(self, text: str) -> dict[str, float]:
-        """把文本转成稀疏向量。"""
+    def embed(self, text: str) -> EmbeddingVector:
+        """把文本转成稀疏或稠密向量。"""
 
 
 class VectorIndex(Protocol):
@@ -81,6 +82,8 @@ class InMemoryVectorIndex:
         """按 cosine 分数返回向量召回结果。"""
 
         query_vector = self.embedding_provider.embed(query)
+        if not isinstance(query_vector, dict):
+            raise TypeError("InMemoryVectorIndex only supports sparse dict embeddings.")
         scored = [
             (document, _cosine(query_vector, self._vectors[document.doc_id]))
             for document in self.documents
@@ -127,8 +130,10 @@ class MilvusVectorIndex:
         self.documents = documents
         self.embedding_provider = embedding_provider
         self.collection_name = collection_name
-        self.dimension = dimension
         self._documents_by_id = {document.doc_id: document for document in documents}
+        document_vectors = self._embed_texts([document.vector_text for document in documents])
+        inferred_dimension = len(document_vectors[0]) if document_vectors and isinstance(document_vectors[0], list) else dimension
+        self.dimension = inferred_dimension
         self._client = MilvusClient(uri=uri, timeout=timeout)
 
         if reset_collection and self._client.has_collection(collection_name):
@@ -136,7 +141,7 @@ class MilvusVectorIndex:
         if not self._client.has_collection(collection_name):
             schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
             schema.add_field("doc_id", DataType.VARCHAR, is_primary=True, max_length=512)
-            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dimension)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self.dimension)
             index_params = MilvusClient.prepare_index_params()
             index_params.add_index(field_name="vector", metric_type="COSINE", index_type="AUTOINDEX")
             self._client.create_collection(
@@ -149,20 +154,35 @@ class MilvusVectorIndex:
         rows = [
             {
                 "doc_id": document.doc_id,
-                "vector": self._to_dense_vector(self.embedding_provider.embed(document.vector_text)),
+                "vector": self._to_dense_vector(document_vector),
             }
-            for document in documents
+            for document, document_vector in zip(
+                documents,
+                document_vectors,
+                strict=True,
+            )
         ]
         if rows:
             self._client.insert(collection_name=collection_name, data=rows)
             self._client.flush(collection_name=collection_name)
         self._client.load_collection(collection_name)
 
-    def _to_dense_vector(self, sparse_vector: dict[str, float]) -> list[float]:
-        """把 M9 稀疏 embedding 哈希到固定维度 dense vector，供 Milvus FLOAT_VECTOR 使用。"""
+    def _embed_texts(self, texts: list[str]) -> list[EmbeddingVector]:
+        """优先使用 provider 的 batch API，降低真实 embedding 请求次数。"""
+
+        batch_embed = getattr(self.embedding_provider, "embed_texts", None)
+        if callable(batch_embed):
+            return list(batch_embed(texts))
+        return [self.embedding_provider.embed(text) for text in texts]
+
+    def _to_dense_vector(self, vector: EmbeddingVector) -> list[float]:
+        """把 provider 输出统一成 Milvus FLOAT_VECTOR。"""
+
+        if isinstance(vector, list):
+            return [float(value) for value in vector]
 
         dense = [0.0] * self.dimension
-        for token, value in sparse_vector.items():
+        for token, value in vector.items():
             # ★ 不能用 Python 内置 hash()：它有进程级随机盐，会让 Milvus 实验召回排序不可复现。
             stable_index = int(sha1(token.encode("utf-8")).hexdigest(), 16) % self.dimension
             dense[stable_index] += value
