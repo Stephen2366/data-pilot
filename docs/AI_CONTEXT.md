@@ -259,6 +259,14 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-23 Phase 3A plan P2 增强取舍：按用户补充建议更新 `docs/phase3a-plan.md`，把聚合函数 × 列类型校验登记为 M10 P2 可选增强，`SchemaDocument.metadata` 可选保留 `data_type`；增加 `QueryPlan.to_human_explanation()` 作为 trace/report/dev-log 可读解释预留；暂不把 `display_type` 放入 QueryPlanStep 执行字段，最终展示仍归 M11 `chart_decision`。仅文档，未跑测试
+
+- 2026-07-23 Phase 3A plan DB-GPT 改动审查：新增 `docs/phase3a-plan-dbgpt-review.md`，审查 `DB-GPT对比+修改plan` 提交中 plan 的改动质量。总体评价改动质量高、边界清晰；列出 8 条改进建议（P0 3 条、P1 3 条、P2 2 条），覆盖 M9 中文别名/embedding 选型/大表拆分/Schema Linking 预留、M10 `to_prompt_schema()`/fallback 策略/thoughts 取舍理由、M11 `observations` 字段。建议在进入 M9 前由用户审查此文档。仅文档，未跑测试
+
+- 2026-07-23 Phase 3A plan 吸收 DB-GPT 审查意见：按 `docs/phase3a-plan-dbgpt-review.md` 补强 M9 中文 `keyword_text`、metadata/table_name、大表字段拆分预留、fake embedding 与中文 embedding 候选方向；M10 补 `to_prompt_schema()`、不保留 CoT 理由和 plan JSON 失败不回退策略；M11 只把 SQL 执行观察放入 TraceStep metadata，不新增自由文本 observations 顶层字段。仅文档，未跑测试
+
+- 2026-07-23 Phase 3A plan 二次审查补强：按用户提供的补充审查意见继续更新 `docs/phase3a-plan.md`，明确 `pipeline_mode=new_text2sql` 在 eval 中必须映射为 `force_new_pipeline=true` API 请求，Schema Retrieval 命中不足时返回 `insufficient_schema_context` blocked 且不降级全量 schema prompt，并在 M9 增加 `relations.yaml` 对 formal/challenge/diagnostic 多表 case 的 JoinPath 覆盖度校验。仅文档，未跑测试
+
 - 2026-07-23 Phase 3A plan 同步 DB-GPT 报告：更新 `docs/phase3a-plan.md`，把 DB-GPT 明确登记为 M9-M12 的结构参考，新增 Schema Retriever、Action schema、AWEL trace、evaluate 抽象的具体借鉴入口，同时强化不引入 DB-GPT/AWEL/Skill/Sandbox 运行时、不基于 DB-GPT 重开的边界。仅文档，未跑测试
 
 - 2026-07-23 DB-GPT 参考项目解读：新增 `docs/reference-dbgpt-analysis.md`，分析其 AWEL/Agent/Skill/沙箱架构，提炼 DataPilot 可借鉴点（Action 抽象、Skill 统一 domain_pack、DAG 编排预留、上下文管理）。仅文档，未跑测试

@@ -60,8 +60,16 @@
 | 测试环境使用 deterministic in-memory vector index 或 fake embedding，不依赖 Docker Milvus | `VectorIndex` / `EmbeddingProvider` 协议保留 Milvus adapter 入口 | Milvus 连接阻塞超过半天时先跑通阶段三A；阶段三 RAG 前补 Milvus smoke |
 | RRF 先做简单融合或接口空实现，P0 只要求 keyword + vector 都可用 | `source`、`rank`、`score`、`rrf_score` 字段 | 10 条回归出现相似字段混淆时升级 |
 | Rerank 不做主线实现，只保留候选列表和 rerank hook | `rerank_score`、`rerank_reason` 可选字段 | 向量召回稳定后或阶段四 EvalOps 需要失败归因时补 |
+| Schema Linking 不做 M9 主线 LLM 二次筛选，只保留后续 hook 位置 | `retrieve_schema()` 输出保留 `merged_hits`，`build_schema_graph()` 前可插入可选 filter | 局部 Schema prompt 噪音明显影响 M10/M11 时再评估；Phase 3A 先靠召回融合 + plan validation |
 | `user_role` 预过滤先只在检索入参和结果 metadata 中保留，最终安全仍靠 SQL Guard | `SchemaRetrievalRequest.user_role` | 若 prompt 中频繁出现越权字段再前移实现 |
 | 对照报告先输出 Markdown，不做 HTML 仪表盘和历史结果库 | `ComparisonCaseResult` 数据结构保留可序列化字段 | 阶段四 AgentEvalOps 独立平台补 |
+
+### P2：锦上添花，不阻塞模块验收
+
+| 增强点 | 预留接口/字段 | 后续何时补 |
+|---|---|---|
+| 聚合函数 × 列类型语义校验 | `SchemaDocument.metadata.data_type` 可选；`validate_query_plan()` 若拿得到类型，则拦截 `SUM/AVG` 作用于非数值字段 | M10 主校验稳定后补，不因为 schema_desc 暂缺类型信息阻塞验收 |
+| QueryPlan 人类可读解释 | `QueryPlan.to_human_explanation()` 或等价 helper；用于 trace、报告和面试讲法 | M10/M12 需要更清晰计划解释时补；展示方式仍以 M11 `chart_decision` 为最终决策 |
 
 ## 单一事实源
 
@@ -318,10 +326,12 @@
 
 - [ ] [顺序] 创建 `.agent_work/temp/m9-notes.md` | 输入：本计划 M9 | 输出：Schema doc 字段、检索策略、Milvus 边界记录
 - [ ] [顺序] 新建 `engine/schema_retrieval/objects.py` | 输入：ROADMAP P0 | 输出：`SchemaDocument(doc_id, doc_type, table, column, metric_key, relation, keyword_text, vector_text, metadata)`、`SchemaHit`、`SchemaRetrievalResult`、`SchemaGraph`、`JoinPath`
-- [ ] [顺序] 新建 `engine/schema_retrieval/document_builder.py::build_schema_documents` | 输入：`DomainSchema` | 输出：三类 docs：字段文档、指标文档、关系文档
-- [ ] [顺序] 新建 `engine/schema_retrieval/vector_index.py` | 输入：documents | 输出：`EmbeddingProvider` 协议、`InMemoryVectorIndex`，Milvus adapter 接口保留但不虚报可用
+- [ ] [顺序] 新建 `engine/schema_retrieval/document_builder.py::build_schema_documents` | 输入：`DomainSchema` | 输出：三类 docs：字段文档、指标文档、关系文档；`keyword_text` 必须包含英文表/字段名、schema_desc 中文描述和常见业务别名
+- [ ] [顺序] 明确 `SchemaDocument.metadata` 最小字段 | 输入：field / metric / relation docs | 输出：至少含 `doc_type`、`table_name`，字段文档含 `column_name`，可选保留 `data_type`；为大表字段拆分、表级召回后字段级过滤和后续聚合类型校验预留入口
+- [ ] [顺序] 新建 `engine/schema_retrieval/vector_index.py` | 输入：documents | 输出：`EmbeddingProvider` 协议、deterministic fake embedding、`InMemoryVectorIndex`，Milvus adapter 接口保留但不虚报可用；生产候选优先中文/多语开源 embedding（如 BGE / text2vec 系列），M9 不接真实模型
 - [ ] [顺序] 新建 `engine/schema_retrieval/retriever.py::retrieve_schema` | 输入：question、user_role、top_k、domain_schema | 输出：keyword_hits、vector_hits、merged_hits，字段含 `score/source/rank/doc_type`
 - [ ] [顺序] 新建 `engine/schema_retrieval/graph.py::build_schema_graph` | 输入：merged_hits、domain_schema | 输出：相关表字段指标关系、JoinPath，自动补 Join key
+- [ ] [顺序] 校验 `relations.yaml` 覆盖度 | 输入：10 条 formal、16 条 challenge 和 32 条 diagnostic 中 multi_table / `join_path` 相关 case 的 `expected_tables` | 输出：必要表组合都能从 `domain_pack/schema_desc/relations.yaml` 找到 JoinPath；缺关系时优先补 `relations.yaml`，不让模型猜 Join
 - [ ] [顺序] 新建 `tests/test_phase3a_schema_retrieval.py` | 输入：8 条允许类 case | 输出：expected_tables 100% 命中、expected_columns / expected_metrics >= 80%、多表 case 有合法 join path
 - [ ] [顺序] 同步记录 challenge 召回表现 | 输入：16 条 challenge | 输出：challenge expected_tables / expected_columns / expected_metrics 命中摘要，困难题可标记 manual review
 - [ ] [顺序] 同步记录 diagnostic 召回表现 | 输入：32 条 diagnostic 中带 `schema_retrieval` / `join_path` capability 的 case | 输出：按 capability 汇总 expected_tables / expected_columns / expected_metrics / JoinPath 命中摘要；不属于 M9 的 `query_plan` / `trace_steps` 检查只保留 skipped 或待后续模块处理
@@ -331,11 +341,14 @@
 ### 验收门
 
 - [ ] `build_schema_documents()` 至少生成 `field_doc`、`metric_doc`、`relation_doc` 三类文档
+- [ ] `SchemaDocument.keyword_text` 能命中中文业务说法，如“订单表 / 渠道 GMV / 退款商品”；别名来源优先取 `domain_pack/schema_desc/*` 和 `metrics.yaml`，不新增独立别名文件
+- [ ] `SchemaDocument.metadata` 至少包含 `doc_type/table_name`，字段文档额外包含 `column_name`
 - [ ] 8 条允许类 SQL 的 expected_tables 命中率 100%
 - [ ] 8 条允许类 SQL 的 expected_columns / expected_metrics 召回命中率不低于 80%
 - [ ] 16 条 challenge 同步跑召回诊断并记录 issue tags；困难题不在 M9 早期作为硬阻塞
 - [ ] 32 条 diagnostic 中带 `schema_retrieval` / `join_path` capability 的 case 有 M9 召回诊断摘要；不要求 M9 提前通过 QueryPlan / local schema prompt / trace_steps 专属 check
 - [ ] `p3a_multi_001/p3a_multi_002/p3a_multi_003` 均能生成来自 schema_desc 关系的 JoinPath
+- [ ] 10 条 formal、16 条 challenge 和 32 条 diagnostic 中 multi_table / `join_path` 相关 case 的 `expected_tables` 组合均已被 `relations.yaml` 覆盖；缺失关系必须在 M9 暴露并修正
 - [ ] 检索结果包含 `score/source/rank/doc_type`，为 RRF / rerank 留接口
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-tmp`
 - [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志
@@ -360,6 +373,10 @@
 
 默认采用 ROADMAP 的 `QueryPlanStep`，不使用 AskData 的“四元组计划”作为实现名词，不暴露原始 CoT。`QueryPlan` 使用 `steps` 容器预留未来多 SQL / SQL+RAG 分析链路，但 M10-M12 只允许一个可执行 `sql_query` step。若实现中需要让模型真正输出多步骤执行计划、基于中间结果继续追问数据库，或暴露原始 reasoning 才能稳定生成 SQL，必须先问用户，因为这会增加 prompt 泄漏、测试复杂度和面试讲法成本。
 
+`QueryPlanStep` 不包含 `thoughts` / CoT 字段：Phase 3A 的可校验性依赖结构化字段（表、字段、指标、Join、过滤条件），不是自由文本推理；`purpose` 字段负责表达每步意图摘要；不暴露原始 CoT 也能降低 prompt 泄漏和调试噪音。若后续需要排查模型稳定性，只把 `raw_llm_output` 写入内部 trace 或 notes，不进入 prompt 和公开响应。
+
+`QueryPlanStep` 暂不把 `display_type` 作为执行字段；展示策略最终归 M11 `chart_decision`，因为真实展示方式应结合 SQL 结果行列形态再判断。若后续确需提前表达模型展示偏好，只能使用可选 `preferred_display_type`，且不得覆盖 `chart_decision` 的最终决策。
+
 ### 参考资料
 
 | 参考文件 | 借鉴点 | 怎么落地 |
@@ -376,8 +393,11 @@
 - [ ] [顺序] 新建 `engine/nl2sql/planner.py::QueryPlanStep` | 输入：ROADMAP | 输出：字段含 `step_id/step_index/step_type/purpose/depends_on/task_type/tables/columns/metrics/filters/joins/aggregations/group_by/order_by/limit/output_columns`
 - [ ] [顺序] 新建 `engine/nl2sql/planner.py::QueryPlan` | 输入：QueryPlanStep | 输出：`steps: list[QueryPlanStep]` 容器；Phase 3A 校验最多 1 个 `step_type=sql_query` 可执行步骤
 - [ ] [顺序] 新建 `engine/nl2sql/planner.py::validate_query_plan` | 输入：QueryPlan、SchemaGraph、DomainSchema、user_role | 输出：`PlanValidationResult(is_valid, issue_tags, errors)`
+- [ ] [顺序] 新建 `engine/nl2sql/planner.py::query_plan_prompt_schema` 或 `QueryPlanStep.to_prompt_schema()` | 输入：Pydantic 字段与 `Field(description=...)` | 输出：自动生成 JSON 格式说明注入 prompt，避免手写示例和 Pydantic Schema 漂移
 - [ ] [顺序] 扩展 `engine/nl2sql/prompt.py::build_query_plan_prompt` | 输入：question、SchemaGraph、metrics、JoinPath | 输出：要求 LLM 只返回 JSON plan，不返回 CoT 原文
 - [ ] [顺序] 扩展 `engine/nl2sql/generator.py` | 输入：LLM 原始输出 | 输出：`extract_query_plan()`，兼容 JSON fenced block，但失败映射 `invalid_query_plan`
+- [ ] [可选] 增强聚合函数类型校验 | 输入：`QueryPlanStep.aggregations` 与 `SchemaDocument.metadata.data_type` | 输出：若类型信息存在，`SUM/AVG` 只能作用于数值字段，非法时映射 `invalid_aggregation_column`
+- [ ] [可选] 增加 `QueryPlan.to_human_explanation()` | 输入：QueryPlan、SchemaGraph、JoinPath | 输出：把结构化计划转成可读解释，用于 trace / report / dev-log；不承担展示决策
 - [ ] [顺序] 新建 `tests/test_phase3a_planner.py` | 输入：合法 / 非法 plan fixture | 输出：合法计划通过；不存在字段、非法 Join、敏感字段计划被拦截
 - [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
 
@@ -397,6 +417,7 @@
 | 卡住场景 | 触发信号 | 降级方案 | 不影响的验收 |
 |---|---|---|---|
 | LLM plan JSON 波动 | 真实 LLM 返回 fenced JSON、额外解释或字段名小偏差 | 解析层兼容 fenced JSON；字段名偏差只兼容明确同义词，不放宽校验 | Pydantic 结构、自检规则 |
+| Plan JSON 完全无法解析 | 没有可提取 JSON、JSON 结构不符合 `QueryPlan` 或字段缺失严重 | 直接返回 `PlanValidationResult(is_valid=False, issue_tags=["invalid_query_plan"])` 并 blocked；不降级回旧链路、不做 SQL 自动修复，避免掩盖新链路质量问题 | 对照报告真实性、trace_steps |
 | 多步骤计划范围膨胀 | 一个问题拆出多个 SQL step 且需要中间结果 | 保留 `QueryPlan.steps` / `TraceStep.parent_step_id` 结构，但 M10/M11 以 `unsupported_multi_step_plan` 拦截真实多步执行；复杂 Plan-and-Execute 留阶段三 Hybrid / Data Analysis Agent | 当前 10 条回归 |
 | 敏感字段预检与 SQL Guard 口径不一致 | planner 放行但 Guard 拦截，或反之 | 以 SQL Guard 为最终准绳，记录为 plan_validation issue，先修 planner | 安全最终拦截 |
 
@@ -411,6 +432,8 @@
 **需用户确认的决策点**
 
 默认只给 `QueryRequest` 增加可选 `force_new_pipeline: bool = False`，不破坏旧调用方。`eval` 内部的 `pipeline_mode` 继续使用字符串字段，当前只允许 `baseline` / `new_text2sql`，后续可扩展 `plan_execute`；M11 不新增公开多步骤 Agent 模式。若实现时发现需要改 `AgentResponse` 必填字段、改变 `/api/query` 默认模板优先行为，或让 API 根据中间 SQL 结果继续发起新 SQL，先问用户确认，因为这会影响 demo、M6 smoke 和后续 README 截图。
+
+`pipeline_mode` 是评测侧配置，`force_new_pipeline` 是 API 侧开关，二者必须在 `eval.run_eval` 中显式联动：当 case 或 runner 参数解析后的 `configured_pipeline_mode=new_text2sql` 时，runner 必须自动构造 `QueryRequest(force_new_pipeline=true)`；当 mode 为 `baseline` 时不设置该开关。报告继续记录 `configured_pipeline_mode` 和 `actual_pipeline_mode`，并用 trace_steps 校验实际链路，避免“报告写新链路、API 走旧链路”的失真。
 
 ### 参考资料
 
@@ -427,12 +450,13 @@
 ### 任务清单
 
 - [ ] [顺序] 创建 `.agent_work/temp/m11-notes.md` | 输入：本计划 M11 | 输出：入口兼容、trace_steps 字段、失败路径记录
-- [ ] [顺序] 修改 `engine/trace/recorder.py` | 输入：ROADMAP trace step 建议 | 输出：`TraceStep(name, step_index, step_type, status, input_summary, output_summary, latency_ms, error_type, metadata, parent_step_id)` 与 `TraceRecord.trace_steps`
+- [ ] [顺序] 修改 `engine/trace/recorder.py` | 输入：ROADMAP trace step 建议 | 输出：`TraceStep(name, step_index, step_type, status, input_summary, output_summary, latency_ms, error_type, metadata, parent_step_id)` 与 `TraceRecord.trace_steps`；SQL 执行元观察（如 `row_count/column_count/latency_ms`）优先放入 `metadata`，不新增自由文本 `observations` 顶层字段
 - [ ] [顺序] 修改 `app/schemas/agent.py::QueryRequest` | 输入：评测强制新链路需求 | 输出：`force_new_pipeline: bool = False`
 - [ ] [顺序] 新建 `engine/nl2sql/pipeline.py::run_text2sql_pipeline` | 输入：question、user_role、db、trace_id、force_new_pipeline | 输出：单个 SQLToolResult / AgentResponse 所需数据、trace_steps、issue_tags；遇到多 `sql_query` step 返回 `unsupported_multi_step_plan`
 - [ ] [顺序] 扩展 `engine/nl2sql/prompt.py::build_local_schema_sql_prompt` | 输入：QueryPlanStep、SchemaGraph、JoinPath | 输出：局部 Schema SQL prompt，禁止编造表字段
 - [ ] [顺序] 扩展 `engine/nl2sql/generator.py` | 输入：local schema prompt | 输出：复用 `GeneratedSQL`，记录 sql_generation trace step
 - [ ] [顺序] 修改 `app/api/query.py` | 输入：`QueryRequest.force_new_pipeline` | 输出：默认模板优先；`force_new_pipeline=true` 强制走新 pipeline；两条路径最终都写 trace
+- [ ] [顺序] 修改 `eval/run_eval.py` 的 pipeline mode 映射 | 输入：`configured_pipeline_mode` | 输出：`new_text2sql` 自动以 `force_new_pipeline=true` 调 API，`baseline` 保持旧链路；报告记录 `actual_pipeline_mode`
 - [ ] [顺序] 新建 `tests/test_phase3a_pipeline.py` | 输入：fake LLM / seeded TestClient | 输出：强制新链路 trace_steps 完整、模板问题也能绕过模板、新 SQL 仍过 SQL Guard
 - [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
 
@@ -440,8 +464,10 @@
 
 - [ ] 默认 `/api/query` 保持模板优先，M6 / M5 既有测试不破
 - [ ] `force_new_pipeline=true` 时，模板问题也走新 Text2SQL pipeline
+- [ ] `pipeline_mode=new_text2sql` 的 eval case 必须自动以 `force_new_pipeline=true` 调 API；报告中的 `actual_pipeline_mode` 和 trace_steps 必须证明实际走新链路
 - [ ] 新 pipeline trace_steps 至少包含 `schema_retrieval/schema_context/join_path/query_plan/plan_validation/sql_generation/sql_guard/sql_execution`
 - [ ] trace_steps 每步包含 `step_index` 和 `step_type`；当前 SQL 执行 step 的 `step_type=sql_query`，未来多 SQL / RAG step 可在不改 JSONL 顶层结构的情况下追加
+- [ ] SQL 执行 step 的 `metadata` 区分执行元信息和业务摘要：`metadata` 记录行数、列数、耗时等诊断观察，`output_summary` 记录给人看的业务结果摘要
 - [ ] 图表成功时记录 `chart_decision`，失败或无图表时不影响 SQL 答案
 - [ ] 新 pipeline 生成的 SQL 仍统一进入 `run_sql_tool()`，安全用例不能绕过 SQL Guard
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_pipeline.py tests\test_m5_agent_response.py tests\test_m4_nl2sql.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-tmp`
@@ -453,6 +479,7 @@
 |---|---|---|---|
 | `force_new_pipeline` 影响旧请求 | M5/M6 测试失败，旧请求响应字段变化 | 保持字段默认 False，旧路径不读取新字段；新逻辑只在显式 true 时生效 | 新 pipeline 聚焦测试 |
 | trace_steps 过大影响响应 | AgentResponse 体积明显膨胀或前端展示混乱 | trace_steps 只写 JSONL，不放进公开响应必填字段 | Eval trace 检查 |
+| Schema Retrieval 命中不足 | `merged_hits` 为空、缺少必要表字段，或无法构建最小 SchemaGraph / JoinPath | 返回 blocked，issue tag 写 `insufficient_schema_context`；不降级全量 schema prompt，避免新链路失败被旧链路能力掩盖 | 对照报告真实性、SQL Guard、安全用例 |
 | pipeline mode 提前膨胀 | 开始在 M11 暴露 `plan_execute` 或多 SQL Agent 模式 | `pipeline_mode` 仅保留枚举预留；公开 API 仍只有默认链路和 `force_new_pipeline` 评测开关 | M11 single-step Text2SQL |
 | SQL 生成失败频繁 | LLM 输出 SQL 不符合 plan 或 schema | 返回结构化 blocked 响应，issue tag 写 `invalid_query_plan` / `missing_column`，不做 SQL 自动修复 | trace_steps、自检、安全 |
 
