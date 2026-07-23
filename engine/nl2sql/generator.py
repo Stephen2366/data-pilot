@@ -15,12 +15,19 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from engine.nl2sql.planner import QueryPlan
 from engine.nl2sql.prompt import build_sql_prompt
 from engine.nl2sql.schema_loader import DomainSchema
 
 
 class LLMGenerationError(RuntimeError):
     """LLM SQL 生成失败，调用方应转成结构化拦截响应。"""
+
+
+class QueryPlanExtractionError(LLMGenerationError):
+    """QueryPlan 解析失败，固定映射到 M10 的 `invalid_query_plan`。"""
+
+    issue_tag = "invalid_query_plan"
 
 
 class LLMClient(Protocol):
@@ -139,6 +146,38 @@ def extract_generated_sql(raw_text: str) -> GeneratedSQL:
         return GeneratedSQL(sql=stripped, confidence=0.5, reasoning_summary="从纯 SQL 文本提取。")
 
     raise LLMGenerationError("无法从 LLM 输出中提取 SQL。")
+
+
+def _extract_json_object(raw_text: str) -> str:
+    """从 LLM 原文中提取 JSON 对象，兼容 fenced JSON 和少量前后解释。"""
+
+    stripped = raw_text.strip()
+
+    # 步骤 1：优先兼容 ```json ... ```，这是真实模型最常见的格式波动。--------------
+    fenced_match = re.search(r"```(?:json)?\s*(.*?)```", stripped, flags=re.IGNORECASE | re.DOTALL)
+    if fenced_match:
+        return fenced_match.group(1).strip()
+
+    # 步骤 2：如果模型在 JSON 前后加了短解释，只取第一个对象边界。-------------------
+    if not stripped.startswith("{"):
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return stripped[start : end + 1]
+    return stripped
+
+
+def extract_query_plan(raw_text: str) -> QueryPlan:
+    """从模型原始输出中提取 M10 `QueryPlan`。
+
+    与 SQL 提取器不同，这里不接受纯文本兜底；计划不可解析就返回 `invalid_query_plan`，
+    避免新链路悄悄降级回不可校验的自由文本。
+    """
+
+    try:
+        return QueryPlan.model_validate_json(_extract_json_object(raw_text))
+    except (ValueError, TypeError) as exc:
+        raise QueryPlanExtractionError("无法从 LLM 输出中提取 QueryPlan。") from exc
 
 
 def generate_sql(

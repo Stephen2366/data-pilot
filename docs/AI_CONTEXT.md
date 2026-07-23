@@ -5,10 +5,10 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：M10 QueryPlanStep 与自检（待开工）
-- 下一模块：M11 新 Text2SQL Pipeline 与 Trace Steps
-- 上一模块验收：Phase 3A M9 已验收（2026-07-23，accept-M9-20260723.md）
-- 阻塞项：无；M9.1/M9.2 optional Milvus + SiliconFlow embedding 能力已验证，默认 Schema Retrieval 仍不联网、不依赖 Milvus；主线可继续 M10
+- 当前模块：M11 新 Text2SQL Pipeline 与 Trace Steps（待开工，需先验收 M10）
+- 下一模块：M12 对照报告与阶段收尾
+- 上一模块验收：Phase 3A M10 未验收（待 accept-module）
+- 阻塞项：无；M10 QueryPlanStep 与自检已完成收工整理，进入 M11 前按流程先跑 accept-module
 - 更新时间：2026-07-24
 
 ## 当前技术选型快照
@@ -32,6 +32,33 @@
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
 ## 模块技术档案（新的在上）
+
+### Phase 3A M10 QueryPlanStep 与自检（2026-07-24）
+
+- 改动范围：未提供模块起始 commit，本次按 `git status --short`、`git diff --name-only` 和未跟踪文件检查；`engine/nl2sql/planner.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`tests/test_phase3a_planner.py`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m10-notes.md`
+- 关键决策：
+  - 新增 `QueryPlanStep` / `QueryPlan`，字段覆盖 `step_id/step_index/step_type/purpose/depends_on/task_type/tables/columns/metrics/filters/joins/aggregations/group_by/order_by/limit/output_columns`；`QueryPlan.steps` 保留未来多步骤扩展，但 M10 校验阶段把多个可执行 `sql_query` step 映射为 `unsupported_multi_step_plan`。
+  - `QueryPlanStep` 不包含 `thoughts` / CoT，也不把 `display_type` 作为执行字段；只用 `purpose` 表达意图摘要，展示策略留给 M11 `chart_decision`。
+  - Join 自检使用 M9 `SchemaGraph.join_paths` / `relations.yaml` 的 relation id，不接受自由文本编造 Join；表、字段、指标也必须来自局部 SchemaGraph 和 DomainSchema。
+  - 敏感字段在 SQL 生成前预检为 `sensitive_field_access`，但 SQL Guard 仍是最终安全门；本模块没有改变 RBAC / SQL Guard 策略。
+  - `build_query_plan_prompt()` 通过 `QueryPlan.model_json_schema()` 生成 JSON 格式说明，减少 Pydantic 字段和 prompt 示例漂移；`extract_query_plan()` 只兼容 JSON / fenced JSON / 前后短解释中的 JSON，不做字段名猜测式放宽。
+  - 用户确认：本模块没有出现需要偏离计划的新方案；沿用 `docs/phase3a-plan.md` M10 默认边界。
+- 参考资料：
+  - 查阅 `D:\.Work\Practice\Python-Practice\references\askdata_agent\cot_planning\cot_planner.py`：借鉴“Schema Retrieval 与 SQL 生成之间先有可解析中间计划”的位置，但没有照搬四元组计划，也没有暴露原始 CoT。
+  - 查阅 `D:\.Work\Practice\Python-Practice\references\askdata_agent\sql_generation\prompt_builder.py`：借鉴 SQL prompt 只能使用局部 Schema 的约束，M10 先落到 QueryPlan prompt。
+  - 查阅 `D:\.Work\Practice\Python-Practice\references\DB-GPT\packages\dbgpt-core\src\dbgpt\agent\core\action\base.py`：借鉴 Pydantic 输出结构生成 JSON 格式说明的思路，没有引入 DB-GPT Action 框架。
+  - 查阅 `D:\.Work\Practice\Python-Practice\references\DB-GPT\packages\dbgpt-app\src\dbgpt_app\scene\chat_db\auto_execute\prompt.py`：只借鉴结构化输出约束；没有让模型直接决定执行或绕过 SQL Tool。
+  - 查阅本地 `engine/sql_guard/policy.py` / `engine/sql_guard/rbac.py`：确认敏感字段和角色策略口径。
+- 验证快照：
+  - TDD 红灯：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_planner.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m10-red` 失败于 `ImportError: cannot import name 'QueryPlanExtractionError'`，符合 M10 缺口。
+  - M10 指定验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_planner.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m10-tmp` 9 passed。
+  - 相关回归：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m4_nl2sql.py tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m10-related-2` 11 passed，1 warning。
+  - 全量 pytest：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m10-full` 63 passed，1 warning（既有 Starlette TestClient / httpx deprecation，不影响 M10）。
+  - `git diff --check`：无 whitespace error，仅 `engine/nl2sql/generator.py`、`engine/nl2sql/prompt.py` 的 Windows LF→CRLF 提示。
+- 遗留：
+  - M10 只定义和验证 QueryPlan，不把它接入 `/api/query` 或 eval runner；M11 负责 `force_new_pipeline`、new Text2SQL pipeline 和 `trace_steps`。
+  - 聚合函数 × 字段类型校验属于计划 P2/可选增强，本模块未提前做；后续若 schema metadata 有稳定 data_type 再补。
+  - 当前 `extract_query_plan()` 不做同义字段名兼容，真实 LLM 若输出严重偏离 JSON Schema，会按 `invalid_query_plan` 暴露，留给 M11/M12 报告真实失败。
 
 ### Phase 3A M9.2 真实中文 Embedding + Milvus 效果测试（2026-07-24）
 

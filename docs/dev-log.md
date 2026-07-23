@@ -1220,3 +1220,89 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_2_rea
 **本地启动体验：**
 
 本章节没有 Swagger 页面；它的体验方式是对比报告。日常开发不需要启动 Milvus，也不需要调用 SiliconFlow。只有想验证真实向量检索时，才启动 Docker Milvus，并运行 `scripts/smoke_m9_2_real_embedding.py`。报告会写到 `.agent_work/temp/`，重点看 `merged_top30` 判断当前系统是否受益，看 `vector_only_top12` 判断 embedding 模型本身是否更强。
+
+## ★ M10 QueryPlanStep 与自检（2026-07-24）
+
+**简述**：M10 给 Text2SQL 加了一个 **SQL 生成前的结构化计划层**，像后端接口里的 DTO + Validator，先检查“准备查什么”是否合法，再交给后续 SQL 生成。
+
+### 这次做了什么
+
+M9 已经能把问题相关的表、字段、指标和 JoinPath 召回出来，但如果直接让模型拿这些上下文生成 SQL，中间仍有一个黑盒风险：模型可能编造不存在字段、乱连 Join、或者在 SQL 生成前就计划查询敏感字段。
+
+M10 做的就是在这个位置加一道 **QueryPlan 自检门**。模型后续会先输出 `QueryPlan(steps=[QueryPlanStep])`，每个 step 必须写清楚要用哪些表、字段、指标、过滤条件、Join relation id 和输出列。`validate_query_plan()` 会把这些内容逐项对照 M9 的 `SchemaGraph` 和 `DomainSchema`：不存在的表字段会被打 `missing_table / missing_column`，非法 Join 会被打 `invalid_join_path`，多个可执行 SQL step 会被打 `unsupported_multi_step_plan`，普通角色查询 `users.email` 这类敏感字段会提前打 `sensitive_field_access`。
+
+这层还刻意保留了未来扩展空间：`QueryPlan.steps` 是列表，`step_id / step_index / depends_on` 可以接后续 Plan-and-Execute；但 **Phase 3A 只允许一个 `sql_query` step**。也就是说，结构可以长远，执行边界仍然收紧。
+
+### 新概念
+
+- **QueryPlanStep**：一次查询计划里的一个步骤。可以理解成 SQL 生成前的“施工单”：写明要查哪些表、用哪些字段、按什么指标聚合、需要哪些 Join。
+- **Plan Validation**：计划自检。它不是执行 SQL，而是检查计划引用的东西是否都在可信 Schema 里，类似 SpringBoot Controller 收到请求后先做参数校验。
+- **CoT 不外露**：M10 不保存 `thoughts` 或原始推理过程，只保留 `purpose` 这种一句话意图摘要。这样既能调试，又不会把模型自由推理塞进公开响应。
+- **Join relation id**：Join 不靠自然语言猜，而是使用 `relations.yaml` 里的关系 ID，例如 `order_items_order`。这让“能不能这么连表”变成可校验事实。
+- **unsupported_multi_step_plan**：当前阶段的边界标签。系统知道未来可能有多 SQL、多步骤分析，但 M10-M12 不执行这种计划。
+
+### 关键文件
+
+- `engine/nl2sql/planner.py`：M10 主角文件，定义 `QueryPlanStep`、`QueryPlan`、`PlanValidationResult` 和 `validate_query_plan()`。
+- `engine/nl2sql/prompt.py`：新增 `build_query_plan_prompt()`，把局部 Schema、指标、JoinPath 和 Pydantic JSON Schema 组装给 LLM。
+- `engine/nl2sql/generator.py`：新增 `extract_query_plan()`，从 LLM 原始输出中解析 JSON / fenced JSON。
+- `tests/test_phase3a_planner.py`：M10 的行为规格，覆盖合法计划、缺表缺字段、非法 Join、敏感字段和多 SQL step。
+
+### 代码阅读路线
+
+1. **计划结构**：`engine/nl2sql/planner.py`
+   先看 `QueryPlanStep` 的字段。重点理解它不是 SQL AST，而是 **业务层可读的查询意图结构**：表、字段、指标、过滤、Join、聚合和输出列都拆成列表，方便校验和 trace。`QueryPlan.steps` 是列表，但 validator 会限制 Phase 3A 只能有一个可执行 SQL step。
+
+2. **自检入口**：`engine/nl2sql/planner.py`
+   然后看 `validate_query_plan()`。它先检查多 SQL step，再调用 `_check_table_and_column_scope()`、`_check_metric_scope()`、`_check_join_scope()` 和 `_check_sensitive_fields()`。阅读重点是：**planner 只做 SQL 前诊断，不替代 SQL Guard**。
+
+3. **Prompt 生成**：`engine/nl2sql/prompt.py`
+   看 `build_query_plan_prompt()`。它用 `query_plan_prompt_schema()` 把 Pydantic Schema 自动变成 JSON 格式说明，再拼上 M9 的局部表字段、局部指标和 JoinPath。这样后续改字段时，不需要手写两份示例。
+
+4. **LLM 输出解析**：`engine/nl2sql/generator.py`
+   看 `extract_query_plan()` 和 `_extract_json_object()`。它只兼容 JSON、fenced JSON 和前后有短解释的 JSON；完全不可解析就抛 `QueryPlanExtractionError(issue_tag="invalid_query_plan")`，不降级回自由文本 SQL。
+
+数据流可以这样记：
+
+`SchemaGraph / JoinPath`
+→ `build_query_plan_prompt()`
+→ `extract_query_plan()`
+→ `validate_query_plan()`
+→ M11 SQL 生成 / trace_steps
+
+### 设计要点
+
+- **结构预留，执行收紧**：`steps` 支持未来多步骤，但当前多个 `sql_query` step 直接拦截，避免 M10 偷偷变成多 SQL Agent。
+- **不用 CoT 当契约**：计划校验依赖表、字段、指标、Join 这些结构化字段，而不是模型的自由推理文本。
+- **Join 来自关系事实源**：`joins` 使用 relation id，和 M9 的 `relations.yaml` 对齐，不让模型自己发明连接条件。
+- **敏感字段提前诊断**：planner 可以提前发现 `users.email`，但最终安全仍交给 SQL Guard，安全边界没有被 prompt 或 planner 替代。
+
+### 面试怎么讲
+
+M10 可以讲成“我在 Text2SQL 里加了一层可校验的中间表示”。普通 NL2SQL 是直接从问题到 SQL，失败时很难知道是 schema 召回错了、Join 错了，还是 SQL 生成错了；我把中间层拆成 `QueryPlanStep`，让模型先声明表、字段、指标和 Join，再用本地 validator 检查。这样后续 eval 可以打出 `missing_column / invalid_join_path / sensitive_field_access` 这类 issue tag，问题定位会比只看 SQL 错误清楚很多喵
+
+### 验证与下一步
+
+- 验证：M10 指定测试 **9 passed**；相关回归 **11 passed**；全量 pytest **63 passed**。
+- warning：只有既有 Starlette TestClient / httpx deprecation warning，不影响 M10。
+- 下一步：M11 把 QueryPlan 接进新 Text2SQL pipeline，补 `force_new_pipeline` 和 `trace_steps`。
+
+可复制验证命令：
+
+```powershell
+# M10 指定验证。预期：9 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_planner.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m10-tmp
+
+# 相关回归。预期：M4 SQL 生成和 M9 Schema Retrieval 不被破坏。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m4_nl2sql.py tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m10-related
+
+# 全量验证。预期：63 passed，可能出现既有 Starlette/httpx warning。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m10-full
+
+# 检查 whitespace。预期：无 whitespace error，可能出现 Windows LF->CRLF 提示。
+git diff --check
+```
+
+**本地启动体验：**
+
+本模块暂无独立 Swagger 或页面入口，因为 M10 还没有接入 `/api/query`。学习体验建议直接读 `tests/test_phase3a_planner.py`：它就是一组可运行的小样例，展示合法计划如何通过，以及缺字段、非法 Join、敏感字段、多 SQL step 会怎样被拦截。M11 接入 pipeline 后，才会出现通过 API 强制走新 Text2SQL 链路的体验流程。

@@ -5,7 +5,9 @@ Prompt 的职责是“尽量让模型生成好 SQL”；真正的安全门仍在
 
 from __future__ import annotations
 
+from engine.nl2sql.planner import query_plan_prompt_schema
 from engine.nl2sql.schema_loader import DomainSchema
+from engine.schema_retrieval.objects import JoinPath, SchemaGraph
 
 
 def _format_tables(domain_schema: DomainSchema) -> str:
@@ -66,6 +68,82 @@ def build_sql_prompt(*, question: str, user_role: str, domain_schema: DomainSche
 
 few-shot 示例：
 {_format_examples(domain_schema)}
+
+用户问题：{question}
+"""
+
+
+def _format_schema_graph(schema_graph: SchemaGraph) -> str:
+    """把 M9 局部 SchemaGraph 压成 QueryPlan prompt 可读的上下文。"""
+
+    lines: list[str] = []
+    for table in schema_graph.tables:
+        fields = ", ".join(schema_graph.fields.get(table, [])) or "无字段"
+        lines.append(f"- 表 `{table}` 可用字段：{fields}")
+    return "\n".join(lines)
+
+
+def _format_plan_metrics(domain_schema_metrics: dict[str, object], schema_graph: SchemaGraph) -> str:
+    """只展示局部 Schema 召回到的指标，避免计划引用全量 KPI 噪音。"""
+
+    lines: list[str] = []
+    for metric_key in schema_graph.metrics:
+        metric = domain_schema_metrics.get(metric_key)
+        if metric is None:
+            continue
+        name = getattr(metric, "name", metric_key)
+        formula = getattr(metric, "formula", "")
+        description = getattr(metric, "description", "")
+        lines.append(f"- {metric_key}（{name}）：{formula}。{description}")
+    return "\n".join(lines) or "无"
+
+
+def _format_join_paths(join_paths: list[JoinPath]) -> str:
+    """列出允许使用的 Join relation id，后续 validator 也按这些 id 校验。"""
+
+    lines: list[str] = []
+    for path in join_paths:
+        for edge in path.edges:
+            through = f"，桥表 {edge.through_table}" if edge.through_table else ""
+            lines.append(
+                f"- {edge.relation_id}: {edge.left_table}.{edge.left_column} -> "
+                f"{edge.right_table}.{edge.right_column}（{edge.join_type}{through}）"
+            )
+    return "\n".join(lines) or "无"
+
+
+def build_query_plan_prompt(
+    *,
+    question: str,
+    schema_graph: SchemaGraph,
+    metrics: dict[str, object],
+    join_paths: list[JoinPath] | None = None,
+) -> str:
+    """构造 M10 QueryPlan prompt。
+
+    ★ 这里明确禁止原始 CoT：计划层只要结构化字段和一句话 `purpose`，不要让模型把自由推理
+    带进公开响应或后续 SQL prompt。
+    """
+
+    available_join_paths = join_paths if join_paths is not None else schema_graph.join_paths
+    return f"""你是 DataPilot 的 QueryPlan 规划器。请严格遵守：
+1. 只返回 JSON，不要返回 Markdown、解释文字或代码块。
+2. 不要输出原始推理过程；每个 step 只用 `purpose` 写一句话意图摘要。
+3. 表、字段、指标和 joins 必须只来自下面的局部 Schema；字段推荐写成 `table.column`。
+4. Phase 3A 只允许一个 `step_type="sql_query"` 的可执行步骤；不要规划多个 SQL 查询。
+5. 展示方式不在本步骤决定，不要输出 display_type。
+
+QueryPlan JSON Schema：
+{query_plan_prompt_schema()}
+
+局部表字段：
+{_format_schema_graph(schema_graph)}
+
+局部指标：
+{_format_plan_metrics(metrics, schema_graph)}
+
+允许的 JoinPath relation id：
+{_format_join_paths(available_join_paths)}
 
 用户问题：{question}
 """
