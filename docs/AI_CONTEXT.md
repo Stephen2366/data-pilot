@@ -329,6 +329,7 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-24 dev-log M9.1/M9.2 章节合并：按用户要求将两个实验复盘合并为一个“可选 Milvus + SiliconFlow Embedding”章节，补充合并后主线口径（默认 in-memory，不强制 Milvus/联网 API）、使用时机和注意事项；未改代码。
 - 2026-07-23 M9 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 50 passed），报告 `accept-M9-20260723.md`。后续可进入 M10 QueryPlanStep 与自检。
 
 - 2026-07-23 Phase 3A plan P2 增强取舍：按用户补充建议更新 `docs/phase3a-plan.md`，把聚合函数 × 列类型校验登记为 M10 P2 可选增强，`SchemaDocument.metadata` 可选保留 `data_type`；增加 `QueryPlan.to_human_explanation()` 作为 trace/report/dev-log 可读解释预留；暂不把 `display_type` 放入 QueryPlanStep 执行字段，最终展示仍归 M11 `chart_decision`。仅文档，未跑测试
