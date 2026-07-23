@@ -1306,3 +1306,117 @@ git diff --check
 **本地启动体验：**
 
 本模块暂无独立 Swagger 或页面入口，因为 M10 还没有接入 `/api/query`。学习体验建议直接读 `tests/test_phase3a_planner.py`：它就是一组可运行的小样例，展示合法计划如何通过，以及缺字段、非法 Join、敏感字段、多 SQL step 会怎样被拦截。M11 接入 pipeline 后，才会出现通过 API 强制走新 Text2SQL 链路的体验流程。
+
+## ★ M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
+
+**简述**：M11 把 M9 的 **Schema Retrieval / JoinPath**、M10 的 **QueryPlanStep 自检** 和 M5 的 **SQL Tool / Trace** 串成了一条真正能从 `/api/query` 触发的新 Text2SQL 链路。旧接口默认仍走模板优先，保证 M5/M6 演示不被破坏；评测或调试时传 `force_new_pipeline=true`，就会强制绕过模板，走 `schema_retrieval -> query_plan -> local_schema_sql -> sql_guard -> sql_execution`，并把每一步写进 JSONL 的 `trace_steps`。这一步的价值是让系统第一次具备“能证明自己走了新链路”的证据，而不只是报告里写了新链路。
+
+### 这次做了什么
+
+M10 做完后，DataPilot 已经能把“准备查什么”变成 QueryPlan，但还没有接到真实请求里。M11 做的就是把这条中间层真正串起来：API 收到请求后，如果 `force_new_pipeline=false`，旧模板链路照常工作；如果 `force_new_pipeline=true`，就进入 `run_text2sql_pipeline()`。
+
+新 pipeline 会先召回局部 Schema，再构建 `SchemaGraph / JoinPath`，然后让 LLM 生成 `QueryPlan`，通过本地 validator 后再用局部 Schema prompt 生成 SQL。生成出来的 SQL 不会直接执行，而是统一交给 `run_sql_tool()`，继续经过 SQL Guard、RBAC 和敏感字段策略。执行成功后，结果会尝试生成图表；无图表也不影响 SQL 答案。
+
+最重要的是：这条链路会把每一步写成 `TraceStep`，包括步骤名、顺序、类型、状态、耗时、错误类型和 metadata。后续 M12 做对照报告时，就能从 trace 里看见“到底走了哪些步骤、在哪一步失败、局部 Schema 有多少表字段、SQL 执行返回了几行”。
+
+### 新概念
+
+- **force_new_pipeline**：API 侧的显式开关。默认 `False` 保持旧模板优先；设为 `True` 才强制走新 Text2SQL pipeline。它像 SpringBoot 里一个只给灰度/评测用的开关，不改变普通用户默认路径。
+- **pipeline_mode**：eval 侧的配置字段。`pipeline_mode=new_text2sql` 会让 runner 自动给 `/api/query` 发送 `force_new_pipeline=true`，避免报告写“新链路”，实际却跑旧模板。
+- **TraceStep**：一次请求里的分步骤日志。它比 `tool_calls` 更细：`tool_calls` 只记录工具调用，`trace_steps` 会记录 schema 检索、计划生成、自检、SQL 生成、SQL Guard、SQL 执行和图表决策。
+- **局部 Schema SQL prompt**：M11 不再把全库表字段都塞给 SQL 生成器，而是只给 QueryPlanStep 和 SchemaGraph 里出现的上下文。这样可以减少 prompt 噪音，也方便失败归因。
+- **结构化 blocked**：新链路失败时不偷偷回到旧模板，也不自动修 SQL，而是返回 blocked 响应和 issue tag。这样对照报告会诚实暴露新链路质量。
+
+### 关键文件
+
+- `engine/nl2sql/pipeline.py`：M11 主角文件，负责编排新 Text2SQL pipeline 和生成 trace_steps。
+- `engine/trace/recorder.py`：新增 `TraceStep`，并让 `TraceRecord` 支持 `trace_steps`。
+- `app/schemas/agent.py`：给 `QueryRequest` 增加 `force_new_pipeline`。
+- `app/api/query.py`：接入新 pipeline，同时保留默认模板优先旧路径。
+- `engine/nl2sql/prompt.py`：新增 `build_local_schema_sql_prompt()`。
+- `engine/nl2sql/generator.py`：新增 QueryPlan 生成和基于计划的 SQL 生成入口。
+- `tests/test_phase3a_pipeline.py`：M11 的 API seam / trace seam / SQL Guard 回归测试。
+
+### 代码阅读路线
+
+1. **API 开关**：`app/schemas/agent.py` 和 `app/api/query.py`
+   先看 `QueryRequest.force_new_pipeline`，再看 `query()` 里最前面的 M11 分支。重点理解：**旧请求完全不变**，只有显式传 true 才绕过模板。这样 M11 能给评测一个强制入口，又不会让 M5/M6 既有 demo 忽然变成依赖 LLM 的路径。
+
+2. **Pipeline 编排**：`engine/nl2sql/pipeline.py`
+   按 `run_text2sql_pipeline()` 的步骤注释读：Schema Retrieval、SchemaGraph、JoinPath、QueryPlan、Plan Validation、SQL Generation、SQL Guard、SQL Execution、Chart Decision。不要先抠每个 metadata 字段，先抓住主线：**每个业务阶段都对应一条 TraceStep**。
+
+3. **局部 SQL prompt**：`engine/nl2sql/prompt.py`
+   看 `build_local_schema_sql_prompt()`。它把 `QueryPlanStep`、局部表字段、局部指标和允许的 JoinPath 放在同一个 prompt 里，明确禁止编造表字段。这里的关键设计是：SQL 生成只消费已经检索和自检过的上下文。
+
+4. **LLM 入口复用**：`engine/nl2sql/generator.py`
+   看 `generate_query_plan()` 和 `generate_sql_from_plan_step()`。两个函数都复用同一个 `LLMClient` 协议，所以测试能用 fake client 替换真实 DeepSeek；真实运行时仍走已有配置。
+
+5. **Trace 结构**：`engine/trace/recorder.py`
+   看 `TraceStep` 的字段。`metadata` 放行数、列数、表数量、join relation id 等机器可读信息；`output_summary` 放人能快速读懂的摘要。这个分工很重要，避免把诊断字段写成一大段自由文本。
+
+数据流可以这样记：
+
+`/api/query(force_new_pipeline=true)`
+→ `run_text2sql_pipeline()`
+→ `retrieve_schema()`
+→ `build_schema_graph()`
+→ `generate_query_plan()`
+→ `validate_query_plan()`
+→ `generate_sql_from_plan_step()`
+→ `run_sql_tool()`
+→ `TraceRecord.trace_steps`
+
+### 设计要点
+
+- **默认不破坏旧链路**：模板优先仍是生产默认路径；新 pipeline 只在显式开关下触发。
+- **证据写进 trace，不塞进响应体**：`trace_steps` 只进入 JSONL，避免公开 `AgentResponse` 变重，也不影响 demo 页面。
+- **安全边界不前移成 prompt**：QueryPlan 和 prompt 可以减少错误，但 SQL Guard 才是最终门。测试里 fake LLM 返回 `DELETE FROM orders`，仍被 `sql_guard_blocked` 拦住。
+- **失败不降级**：如果 schema 不足、plan 不合法、LLM 输出异常，新链路直接 blocked；这样 M12 对照报告不会被旧模板能力“兜底污染”。
+- **结构预留多步骤，但当前只执行单 SQL**：`TraceStep.parent_step_id` 和 `step_type` 为未来 Plan-and-Execute 留口子，M11 不新增公开多步骤 Agent。
+
+### 面试怎么讲
+
+M11 可以讲成“我把 Text2SQL 从一条黑盒调用升级成可观测 pipeline”。以前用户问一句话，系统直接给 SQL，失败时很难知道错在 schema、计划、SQL 生成还是安全拦截；现在我把请求拆成 schema retrieval、schema context、join path、query plan、plan validation、sql generation、sql guard、sql execution 等步骤，并把每一步写进 trace。这样评测报告能基于证据定位问题，而不是只看最终 SQL 对不对。更重要的是，我没有为了新 pipeline 破坏旧接口，而是用 `force_new_pipeline` 做显式灰度开关，安全仍由 SQL Guard 兜底喵
+
+### 验证与下一步
+
+- 验证：M11 聚焦测试 **4 passed**；计划指定组合 **12 passed**；全量 pytest **67 passed**。
+- warning：只有既有 Starlette TestClient / httpx deprecation warning，不影响 M11。
+- 下一步：M12 跑 formal / challenge / diagnostic 新链路报告，生成新旧链路对照报告和 smoke 脚本。
+
+可复制验证命令：
+
+```powershell
+# M11 聚焦验证。预期：4 passed，覆盖强制新链路、默认旧链路、eval 联动和 SQL Guard 拦截。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_pipeline.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-tmp-3
+
+# M11 计划指定验证。预期：12 passed，确认 M5 响应契约和 M4 NL2SQL 旧能力不破。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_pipeline.py tests\test_m5_agent_response.py tests\test_m4_nl2sql.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-related-2
+
+# 全量验证。预期：67 passed，可能出现既有 Starlette/httpx warning。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-full-2
+
+# 检查 whitespace。预期：无 whitespace error，可能出现 Windows LF->CRLF 提示。
+git diff --check
+```
+
+**本地启动体验：**
+
+M11 已经有 Swagger 体验入口，但强制新 pipeline 会调用真实 LLM，所以需要先配置 DeepSeek key。未配置 key 时，建议先用上面的 pytest fake LLM 测结构。
+
+```powershell
+# 启动 FastAPI。环境未激活时使用 AGENTS.md 里的完整 Python 路径。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs`，找到 `POST /api/query`，点 **Try it out**，填：
+
+```json
+{
+  "question": "各渠道订单量是多少？",
+  "user_role": "ops",
+  "force_new_pipeline": true
+}
+```
+
+点 Execute 后，响应体仍是原来的 `AgentResponse` 形状；分步骤证据写在 JSONL trace 里。真实 LLM 的 SQL 质量留到 M12 用批量报告评估，不建议只凭一次 Swagger 结果判断新链路效果。

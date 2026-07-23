@@ -18,12 +18,13 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, ToolCallTrace
 from engine.nl2sql.generator import LLMGenerationError, generate_sql
+from engine.nl2sql.pipeline import run_text2sql_pipeline
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.nl2sql.templates import match_template
 from engine.sql_guard.guard import validate_readonly_sql
 from engine.tools.chart_tool import build_chart_spec
 from engine.tools.sql_tool import SQLToolResult, run_sql_tool
-from engine.trace.recorder import TraceRecord, append_trace
+from engine.trace.recorder import TraceRecord, TraceStep, append_trace
 
 
 router = APIRouter(prefix="/api", tags=["query"])
@@ -74,6 +75,7 @@ def _record_trace(
     request: Request,
     request_body: QueryRequest,
     response: AgentResponse,
+    trace_steps: list[TraceStep] | None = None,
 ) -> None:
     """把 AgentResponse 的关键信息同步追加到 JSONL trace。"""
 
@@ -93,6 +95,7 @@ def _record_trace(
         blocked_reason=response.blocked_reason,
         cost=response.cost,
         tool_calls=response.tool_calls,
+        trace_steps=trace_steps or [],
         error_type=response.error_type,
     )
     path = _trace_path(request)
@@ -112,6 +115,7 @@ def _blocked_response(
     started_at: float,
     tool_call: ToolCallTrace | None = None,
     error_type: str = "sql_guard_blocked",
+    trace_steps: list[TraceStep] | None = None,
 ) -> AgentResponse:
     """构造统一的拦截响应，并同步写 trace。"""
 
@@ -143,7 +147,7 @@ def _blocked_response(
         error_type=error_type,
         trace_id=trace_id,
     )
-    _record_trace(request=request, request_body=request_body, response=response)
+    _record_trace(request=request, request_body=request_body, response=response, trace_steps=trace_steps)
     return response
 
 
@@ -187,10 +191,14 @@ def _success_response(
     answer_hint: str,
     tool_result: SQLToolResult,
     started_at: float,
+    trace_steps: list[TraceStep] | None = None,
+    chart_spec: dict[str, Any] | None = None,
 ) -> AgentResponse:
     """把 SQL Tool 结果整理成 M5 AgentResponse，并追加 trace。"""
 
-    chart_spec = build_chart_spec(columns=tool_result.columns, rows=tool_result.rows, question=request_body.question)
+    resolved_chart_spec = chart_spec
+    if resolved_chart_spec is None:
+        resolved_chart_spec = build_chart_spec(columns=tool_result.columns, rows=tool_result.rows, question=request_body.question)
     response = AgentResponse(
         route="sql",
         answer=_build_answer(answer_hint, tool_result.rows),
@@ -199,7 +207,7 @@ def _success_response(
         rows=tool_result.rows,
         tables_used=tool_result.tables_used,
         docs_used=[],
-        chart_spec=chart_spec,
+        chart_spec=resolved_chart_spec,
         safety_status="passed",
         blocked_reason=None,
         cost=CostInfo(
@@ -213,7 +221,7 @@ def _success_response(
         error_type=None,
         trace_id=trace_id,
     )
-    _record_trace(request=request, request_body=request_body, response=response)
+    _record_trace(request=request, request_body=request_body, response=response, trace_steps=trace_steps)
     return response
 
 
@@ -232,6 +240,38 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
     started_at = perf_counter()
     trace_id = _trace_id(request)
     matched = match_template(request_body.question)
+
+    # 步骤 0：M11 评测开关显式绕过模板优先，只走新 Text2SQL pipeline。-----------------------
+    if request_body.force_new_pipeline:
+        pipeline_result = run_text2sql_pipeline(
+            question=request_body.question,
+            user_role=request_body.user_role,
+            db=db,
+            trace_id=trace_id,
+        )
+        if pipeline_result.tool_result is None or pipeline_result.safety_status != "passed":
+            return _blocked_response(
+                request=request,
+                request_body=request_body,
+                trace_id=trace_id,
+                sql=pipeline_result.sql,
+                blocked_reason=pipeline_result.blocked_reason or "新 Text2SQL pipeline 已拦截该请求。",
+                started_at=started_at,
+                tool_call=pipeline_result.tool_call,
+                error_type=pipeline_result.error_type or "text2sql_pipeline_blocked",
+                trace_steps=pipeline_result.trace_steps,
+            )
+        return _success_response(
+            request=request,
+            request_body=request_body,
+            trace_id=trace_id,
+            sql=pipeline_result.sql or "",
+            answer_hint=pipeline_result.answer_hint,
+            tool_result=pipeline_result.tool_result,
+            started_at=started_at,
+            trace_steps=pipeline_result.trace_steps,
+            chart_spec=pipeline_result.chart_spec,
+        )
 
     if matched is None and _looks_like_dangerous_sql(request_body.question):
         guard_result = validate_readonly_sql(request_body.question)

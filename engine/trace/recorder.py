@@ -17,6 +17,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TRACE_PATH = PROJECT_ROOT / "eval" / "traces" / "traces.jsonl"
 
 
+class TraceStep(BaseModel):
+    """M11 分步骤 trace 结构。
+
+    ★ 这里不是把 pipeline 做成 DAG 引擎，而是先把“每一步发生了什么”固定成可评测字段。
+    `parent_step_id` 和 `step_type` 为后续 Plan-and-Execute 预留；Phase 3A 仍只执行单条 SQL。
+    """
+
+    name: str
+    step_index: int = Field(ge=1)
+    step_type: str
+    status: str
+    input_summary: str = ""
+    output_summary: str = ""
+    latency_ms: float = Field(default=0.0, ge=0.0)
+    error_type: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    parent_step_id: str | None = None
+
+
 class TraceRecord(BaseModel):
     """一次 Agent 查询的完整 trace 行。
 
@@ -39,6 +58,7 @@ class TraceRecord(BaseModel):
     blocked_reason: str | None = None
     cost: CostInfo
     tool_calls: list[ToolCallTrace] = Field(default_factory=list)
+    trace_steps: list[TraceStep] = Field(default_factory=list)
     error_type: str | None = None
 
 

@@ -5,9 +5,9 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：M11 新 Text2SQL Pipeline 与 Trace Steps（待开工）
+- 当前模块：M11 新 Text2SQL Pipeline 与 Trace Steps（已收工，待验收）
 - 下一模块：M12 对照报告与阶段收尾
-- 上一模块验收：Phase 3A M10 已验收（2026-07-24，报告 accept-M10-20260724.md）
+- 上一模块验收：M11 未验收（待 accept-module）
 - 阻塞项：无
 - 更新时间：2026-07-24
 
@@ -32,6 +32,32 @@
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
 ## 变更记录（新的在上）
+
+### Phase 3A M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
+
+- 改动范围：未提供模块起始 commit，本次按 `git status --short`、`git diff --name-only` 和未跟踪文件检查；`engine/nl2sql/pipeline.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/trace/recorder.py`、`app/schemas/agent.py`、`app/api/query.py`、`tests/test_phase3a_pipeline.py`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m11-notes.md`
+- 关键决策：
+  - `QueryRequest.force_new_pipeline: bool = False` 作为 API 侧显式评测开关，默认旧请求仍模板优先；没有修改 `AgentResponse` 必填字段，也没有暴露 `plan_execute` / 多 SQL Agent 模式。
+  - `trace_steps` 只写入 JSONL `TraceRecord`，不放进公开响应体；每步包含 `step_index/step_type/status/input_summary/output_summary/latency_ms/error_type/metadata/parent_step_id`，SQL 执行 step 的 `step_type=sql_query`，执行元信息放 `metadata`。
+  - 新增 `run_text2sql_pipeline()` 串起 `schema_retrieval -> schema_context -> join_path -> query_plan -> plan_validation -> sql_generation -> sql_guard -> sql_execution -> chart_decision`；任何一步失败都结构化 blocked，不降级到模板、全量 schema prompt 或 SQL 自动修复。
+  - 新 pipeline 生成 SQL 后仍统一进入 `run_sql_tool()`，SQL Guard / RBAC / 敏感字段策略仍是最终安全门；测试中 fake LLM 返回 `DELETE FROM orders` 已被 `sql_guard_blocked` 拦截。
+  - `eval.run_eval` 的 `pipeline_mode=new_text2sql` 到 `force_new_pipeline=true` 映射已在 M8.5 落地，本模块未重复改动；M11 通过 API 侧接入和 trace_steps 证明实际链路。
+  - 用户确认：M11 采用计划默认方案，没有出现需要偏离计划的新方案；未引入 LangGraph、MCP、DB-GPT AWEL、AskData MCP、多智能体或 SQL 自修复。
+- 参考资料：
+  - 查阅 `references/askdata_agent/askdata_pipeline/text2sql_pipeline.py`：借鉴端到端 step log 和 Schema Retrieval -> Plan -> SQL -> Execute 的串联位置；没有引入 MCP Router。
+  - 查阅 `references/askdata_agent/sql_generation/prompt_builder.py`：借鉴“当前计划 + 局部 Schema”生成 SQL 的 prompt 边界；DataPilot 保留 JSON 结构化输出。
+  - 查阅 `references/DB-GPT/examples/awel/simple_nl_schema_sql_chart_example.py`：借鉴 `schema_linking -> prompt_join -> sql_gen -> sql_exec -> chart` 的阶段覆盖，用于校验 trace_steps 命名完整。
+  - 查阅 `references/DB-GPT/packages/dbgpt-core/src/dbgpt/core/awel/dag/base.py` 和 `references/DB-GPT/packages/dbgpt-app/src/dbgpt_app/scene/base_chat.py`：只借 node/context/trace 分段思想；没有新增 `dbgpt-*` 依赖或运行时框架。
+- 验证快照：
+  - TDD 红灯：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_pipeline.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-red` 失败于 `ImportError: cannot import name 'pipeline' from 'engine.nl2sql'`，符合 M11 缺口。
+  - M11 聚焦：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_pipeline.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-tmp-3` 4 passed，1 warning。
+  - M11 指定验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_pipeline.py tests\test_m5_agent_response.py tests\test_m4_nl2sql.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-related-2` 12 passed，1 warning。
+  - 全量 pytest：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-full-2` 67 passed，1 warning（既有 Starlette TestClient / httpx deprecation，不影响 M11）。
+  - `git diff --check`：无 whitespace error，仅 `app/api/query.py`、`app/schemas/agent.py`、`engine/nl2sql/generator.py`、`engine/nl2sql/prompt.py`、`engine/trace/recorder.py` 的 Windows LF→CRLF 提示。
+- 遗留：
+  - M11 只完成新 pipeline 接入和 trace_steps；M12 负责跑 formal / challenge / diagnostic 新链路报告、生成对照报告、smoke 脚本和 README 阶段收尾。
+  - 当前测试用 fake LLM 固定 QueryPlan / SQL 验证链路结构；真实 LLM 质量、通过率和 issue tags 需要 M12 批量报告如实呈现。
+  - `trace_steps` 已写 JSONL，但公开 API 响应暂不展示；后续若 demo 需要展示 trace，可在不改 JSONL 顶层结构的前提下增量做。
 
 ### M10 QueryPlanStep 与自检 验收通过（2026-07-24）
 accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 63 passed），报告 `accept-M10-20260724.md`。⚠️ 目录地图 `engine/schema_retrieval/` 漏登待补。后续可进入 M11。

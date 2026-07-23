@@ -5,7 +5,7 @@ Prompt 的职责是“尽量让模型生成好 SQL”；真正的安全门仍在
 
 from __future__ import annotations
 
-from engine.nl2sql.planner import query_plan_prompt_schema
+from engine.nl2sql.planner import QueryPlanStep, query_plan_prompt_schema
 from engine.nl2sql.schema_loader import DomainSchema
 from engine.schema_retrieval.objects import JoinPath, SchemaGraph
 
@@ -146,4 +146,45 @@ QueryPlan JSON Schema：
 {_format_join_paths(available_join_paths)}
 
 用户问题：{question}
+"""
+
+
+def build_local_schema_sql_prompt(
+    *,
+    question: str,
+    user_role: str,
+    plan_step: QueryPlanStep,
+    schema_graph: SchemaGraph,
+    metrics: dict[str, object],
+    join_paths: list[JoinPath] | None = None,
+) -> str:
+    """构造 M11 局部 Schema SQL prompt。
+
+    ★ 和 M4 的全量 schema prompt 不同，这里只把 QueryPlanStep 已验证过的局部表字段、指标
+    和 JoinPath 交给模型。这样 SQL 生成失败时也能归因：是检索/计划上下文不足，而不是全库
+    prompt 噪音把模型带偏。
+    """
+
+    available_join_paths = join_paths if join_paths is not None else schema_graph.join_paths
+    return f"""你是 DataPilot 的局部 Schema SQL 生成器。请严格遵守：
+1. 只生成单条 SELECT 查询；禁止 DROP/DELETE/UPDATE/INSERT/ALTER/TRUNCATE。
+2. 只能使用下面局部 Schema、指标和 JoinPath 中出现的表字段；不得编造表、字段或关联关系。
+3. 必须服务于 QueryPlanStep 的 `purpose`、`filters`、`aggregations`、`group_by`、`order_by` 和 `limit`。
+4. SQL 使用 MySQL 兼容语法，并尽量保持 SQLite 测试路径也能运行；日期范围使用明确字面值。
+5. 只返回 JSON：{{"sql": "...", "tables_used": ["..."], "confidence": 0.0-1.0, "reasoning_summary": "一句话说明"}}。
+
+用户角色：{user_role}
+用户问题：{question}
+
+QueryPlanStep：
+{plan_step.model_dump_json(ensure_ascii=False)}
+
+局部表字段：
+{_format_schema_graph(schema_graph)}
+
+局部指标：
+{_format_plan_metrics(metrics, schema_graph)}
+
+允许的 JoinPath relation id：
+{_format_join_paths(available_join_paths)}
 """

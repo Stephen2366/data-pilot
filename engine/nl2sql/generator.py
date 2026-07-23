@@ -15,9 +15,10 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
-from engine.nl2sql.planner import QueryPlan
-from engine.nl2sql.prompt import build_sql_prompt
+from engine.nl2sql.planner import QueryPlan, QueryPlanStep
+from engine.nl2sql.prompt import build_local_schema_sql_prompt, build_query_plan_prompt, build_sql_prompt
 from engine.nl2sql.schema_loader import DomainSchema
+from engine.schema_retrieval.objects import SchemaGraph
 
 
 class LLMGenerationError(RuntimeError):
@@ -191,5 +192,49 @@ def generate_sql(
 
     client = llm_client or get_default_llm_client()
     prompt = build_sql_prompt(question=question, user_role=user_role, domain_schema=domain_schema)
+    raw_text = client.complete(prompt=prompt)
+    return extract_generated_sql(raw_text)
+
+
+def generate_query_plan(
+    *,
+    question: str,
+    schema_graph: SchemaGraph,
+    domain_schema: DomainSchema,
+    llm_client: LLMClient | None = None,
+) -> QueryPlan:
+    """调用 LLM 生成 M10 `QueryPlan`，不可解析时交给上层结构化拦截。"""
+
+    client = llm_client or get_default_llm_client()
+    prompt = build_query_plan_prompt(
+        question=question,
+        schema_graph=schema_graph,
+        metrics=domain_schema.metrics,
+        join_paths=schema_graph.join_paths,
+    )
+    raw_text = client.complete(prompt=prompt)
+    return extract_query_plan(raw_text)
+
+
+def generate_sql_from_plan_step(
+    *,
+    question: str,
+    user_role: str,
+    plan_step: QueryPlanStep,
+    schema_graph: SchemaGraph,
+    domain_schema: DomainSchema,
+    llm_client: LLMClient | None = None,
+) -> GeneratedSQL:
+    """基于已验证的 QueryPlanStep 和局部 Schema 生成 SQL。"""
+
+    client = llm_client or get_default_llm_client()
+    prompt = build_local_schema_sql_prompt(
+        question=question,
+        user_role=user_role,
+        plan_step=plan_step,
+        schema_graph=schema_graph,
+        metrics=domain_schema.metrics,
+        join_paths=schema_graph.join_paths,
+    )
     raw_text = client.complete(prompt=prompt)
     return extract_generated_sql(raw_text)
