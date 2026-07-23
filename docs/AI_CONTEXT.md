@@ -259,48 +259,94 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-23 Phase 3A plan 同步 DB-GPT 报告：更新 `docs/phase3a-plan.md`，把 DB-GPT 明确登记为 M9-M12 的结构参考，新增 Schema Retriever、Action schema、AWEL trace、evaluate 抽象的具体借鉴入口，同时强化不引入 DB-GPT/AWEL/Skill/Sandbox 运行时、不基于 DB-GPT 重开的边界。仅文档，未跑测试
+
+- 2026-07-23 DB-GPT 参考项目解读：新增 `docs/reference-dbgpt-analysis.md`，分析其 AWEL/Agent/Skill/沙箱架构，提炼 DataPilot 可借鉴点（Action 抽象、Skill 统一 domain_pack、DAG 编排预留、上下文管理）。仅文档，未跑测试
+
 - 2026-07-23 M8.5 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 44 passed），报告 `accept-M8.5-20260723.md`。后续可进入 M9 Schema Retrieval 与 JoinPath。
+
 - 2026-07-23 Phase 3A plan 口径小修：按用户要求执行 M9 diagnostic 消费与安全统计澄清。`docs/phase3a-plan.md` 新增 M9-M11 分阶段消费 32 条 diagnostic capability 标签的要求；M9 任务清单和验收门明确要对带 `schema_retrieval` / `join_path` capability 的 diagnostic case 输出召回诊断摘要，但不提前要求 QueryPlan / local schema prompt / trace_steps 专属 check 通过；M12 安全验收拆成 formal 2/2 主硬门 + diagnostic security 4 条单独统计，避免 `db_sec_003/db_sec_004` 这类诊断安全失败被 2/2 口径掩盖。`D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md` 只补全程总览可能过时、以项目计划为准、不要混淆 Phase 3A diagnostic 32 与 AgentEvalOps 基础 32 的说明。
+
 - 2026-07-23 Phase 3A plan 增补 M8.5：按用户确认将 `docs/phase3a-diagnostic-benchmark-proposal-v5.md` 的落地任务写入 `docs/phase3a-plan.md`，新增 M8.5「Diagnostic Benchmark 骨架与旧链路诊断基线」。边界：只新建 16 条 extra diagnostic case、扩展 eval runner 的 `--extra-cases` / `--pipeline-mode` / `skipped_due_to_pipeline_mode` / `source_file` 报告字段，并生成旧链路 32 条 diagnostic baseline；不提前实现 M9 Schema Retrieval、M10 QueryPlanStep 或 M11 trace_steps。当前下一模块已改为 M8.5。
+
 - 2026-07-23 Phase 3A M8 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 38 passed），报告 `accept-M8-20260723.md`。当时后续可进入 M9 Schema Retrieval 与 JoinPath；现已按上方 M8.5 补充记录调整为先进入 M8.5。
+
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v5：按用户要求生成 `docs/phase3a-diagnostic-benchmark-proposal-v5.md`，在 v4 基础上吸收 review-v4 中有效意见。v5 保持 32 条结构，但改为 `database-upgrade-challenge.yaml` 作为 16 条 challenge 唯一源，`phase3a-diagnostic-benchmark.yaml` 只维护新增 16 条，并由 runner `--cases + --extra-cases` 合并；明确 `pipeline_mode` 推荐值 / runner 覆盖 / 实际模式记录，旧链路无法验证的新 check 标 `skipped_due_to_pipeline_mode`；重算 capability 覆盖总数和自动门分母；补 `metric_mapping_match`、local_schema_prompt block/warn 分层、pipeline robustness 单测边界、`quality_reasons` 和 golden path 调整。当前仍未落 benchmark YAML、未改 M8 baseline。
+
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v4 审查：新增 `docs/phase3a-diagnostic-benchmark-review-v4.md`，按 AI_CONTEXT 和 phase3a-plan.md 口径审查 v4 proposal。总体评价 v4 质量高、主体结构无需大改；列出 P0 级 3 点（16 条 challenge 重复维护 drift、能力覆盖矩阵数字不一致、pipeline_mode 语义歧义）、P1 级 3 点（db_hard_002 blocking 矛盾、local_schema_prompt 评分缺分层、chart_decision 覆盖不足）、P2 级 3 点（缺 pipeline 错误路径 case、quality_win 主观、golden path 选择），并给出调整方案：runner 参数组合替代物理复制、能力通过率计算规则、pipeline_mode 三级优先级、local_schema_prompt block/warn 分层。当前仍未落 benchmark YAML、未改 M8 baseline。
+
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v4：按用户要求生成 `docs/phase3a-diagnostic-benchmark-proposal-v4.md`，吸收 `docs/phase3a-diagnostic-benchmark-review-v3.md` 的审查意见。v4 保持 `10 formal / 16 challenge / 32 diagnostic` 三层结构和 32 条总数；用 `db_prompt_003` 替换低价值 `db_schema_001`；补 `pipeline_mode`、`source_case_file`、`expected_tables_alternatives.required_columns`、`optional_steps.chart_decision`、golden path、improvement 计算伪代码和 manual 统计口径；明确短期采用 `source_case_id + 独立 YAML + --check-consistency`，`includes` 留后续。当前仍未落 benchmark YAML、未改 M8 baseline。
+
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v3：按用户要求复制 `docs/phase3a-diagnostic-benchmark-proposal-v2.md` 为 `docs/phase3a-diagnostic-benchmark-proposal-v3.md`，并吸收 `docs/phase3a-diagnostic-benchmark-review-v2.md` 的落地性审查。v3 明确 `difficult_diagnosis` 是 `case_properties` 而非 capability；补 `expected_tables_alternatives`、`accept_paths`、完整 `expected_plan`、`expected_schema_context`、`expected_trace_steps` 和 security YAML 示例；规定单表查询 `join_path` trace 记为 `skipped`；M12 示例数字标注为格式示例。当前仍未落 benchmark YAML、未改 M8 baseline。
+
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v2：阅读 `docs/phase3a-diagnostic-benchmark-review.md` 后新增 `docs/phase3a-diagnostic-benchmark-proposal-v2.md`。v2 保留 `10/16/32` 三层结构，但按 Phase 3A 能力维度重排，新增 `phase3a_capabilities`、`improvement` 分类、`plan_diagnosis`、`local_schema_prompt`、`trace_steps` 检查建议；将 dirty data / edge case 移出主 benchmark，作为后续 robustness 候选。当前仍未落 YAML、未改 M8 baseline。
+
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal：按用户要求新增 `docs/phase3a-diagnostic-benchmark-proposal.md`，用于新会话审查方案；内容建议三层评测结构 `10 formal / 16 challenge / 32 diagnostic benchmark`，并列出 32 条候选 case、分层、审查问题和落地步骤。当前仅为 proposal，尚未新增 `eval/cases/phase3a-diagnostic-benchmark.yaml`，也未改变 M8 已冻结 baseline。
+
 - 2026-07-22 Phase 3A 多 SQL Agent 边界预留：按用户确认小修 `docs/phase3a-plan.md`，明确 Phase 3A 仍是 single-step Text2SQL pipeline，不实现多 SQL Agent / SQL+RAG 迭代分析；但 `QueryPlan.steps`、`QueryPlanStep.step_type/depends_on`、`TraceStep.step_index/step_type/parent_step_id`、`EvalCase.pipeline_mode/expected_trace_steps` 需避免写死为单 SQL。本阶段多 `sql_query` step 映射 `unsupported_multi_step_plan`，复杂 Plan-and-Execute 留后续 Hybrid / Data Analysis Agent。
+
 - 2026-07-22 Phase 2.7.1 验收完成、plan v5 归档、切入 Phase 3A M8：① 将 `docs/database-upgrade-plan-v5.md` 归档至 `docs/archive/`；② 补全 AI_CONTEXT Phase 2.7.1 模块档案的「参考资料」小节；③ 当前阶段计划文件切换为 `docs/phase3a-plan.md`，当前模块改为 Phase 3A M8；④ 上一模块验收更新为 Phase 2.7.1 已验收。
+
 - 2026-07-22 Phase 2.7.1 验收未通过（accept-Phase2.7.1-20260722.md）：7 项检查中 2 项 ❌。检查 3 进度状态不一致（plan v5 已移至 archive 但 AI_CONTEXT 仍指向原路径；dev-log Phase 2.7 下一步指针过时未指向 2.7.1）；检查 4 最新日志不完整（AI_CONTEXT 2.7.1 模块档案缺「参考资料」小节；dev-log 无 2.7.1 条目）。其余 5 项 ✅（废弃口径清零、目录地图一致、注释合规、单一事实源抽查 4 项一致、pytest 31 passed）。待用户修复 ❌ 项后复检。
+
 - 2026-07-22 seed 用户姓名真实感小修：按用户反馈，`scripts/seed_data.py` 不再用 50 个基础姓名追加 `02/03/04` 后缀生成 200 用户，改为固定 200 个姓名池，包含二字名、三字名和少量英文名；保留邮箱 / 手机号唯一性和角色分布。执行 `seed --reset` 时发现 MySQL 自引用类目树会拦截 `DELETE FROM product_categories`，已在 reset 前先断开 `ProductCategory.parent_id` 再删除。验证：`python -m scripts.seed_data --reset` 成功，14 表行数和固定事实全部匹配；数据库前 12 个用户已为新姓名 + `user001...` 邮箱；`pytest tests/test_database_upgrade.py tests/test_m1_models.py` 7 passed。
+
 - 2026-07-22 Phase 3A 计划对齐 Phase 2.7 已验收状态：按用户确认修改 `docs/phase3a-plan.md`，将顶部「数据库升级先行」改为「Phase 2.7 数据库升级已完成」，补入 `docs/database-current-state.md` 为单一事实源入口；M8 从“新建 regression / 从 32 条候选抽样”改为“校验现有 10 条新库 regression 并冻结 baseline”；目录规划把 `eval/cases/phase3a-regression.yaml` 标为已有/校验；M9 JoinPath 验收 case 改为 `p3a_multi_001/002/003`。仅文档口径同步，未进入 M8 实现。
+
 - 2026-07-22 新增数据库状态速查：按用户要求新增 `docs/database-current-state.md`，作为后续 AI 快速获取 Phase 2.7 后 14 表数据库现状、seed 固定事实、指标口径、RBAC、安全边界和后续写 plan 注意事项的入口；同步在「当前技术选型快照」挂入口链接。仅文档整理，未改代码。
+
 - 2026-07-22 Phase 2.7 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 31 passed），报告 `accept-Phase2.7-20260722.md`。阶段二数据库底座升级验收完成，后续可进入 Phase 3A M8 baseline。
+
 - 2026-07-22 补 Phase 2.7 dev-log：按用户要求在 `docs/dev-log.md` 末尾追加「Phase 2.7 数据库升级」学习复盘，覆盖 14 表升级、确定性 seed、固定业务事实、challenge / regression 分层、代码阅读路线和面试讲法。该记录仅说明本次文档补写；Phase 2.7 大改主体仍保留在「模块技术档案（新的在上）」。
+
 - 2026-07-22 Phase 3A 计划补数据库升级前置说明：按用户确认，在 `docs/phase3a-plan.md` 顶部新增「开工前置说明：数据库升级先行」。明确 Phase 3A 正式 M8 前先执行 Phase 2.7 数据库升级，执行规格以 `docs/database-upgrade-plan-v5.md` 为准；升级后 M8 baseline 直接在新库上跑旧链路，不做旧库 vs 新库对照；16 条 `database-upgrade-challenge.yaml` 只作为数据库升级验收和困难诊断素材，不替代 10 条 `phase3a-regression.yaml` 正式硬门；M9 relation_doc / JoinPath 优先来自 `domain_pack/schema_desc/relations.yaml`；数据库升级阶段不要求完整 `schema_retrieval` / `query_plan` / trace_steps，仍留到 Phase 3A M11/M12 验收。后续数据库升级完成后，需要小修本文档的单一事实源、当前差异清单、目录规划、M8 和阶段三A验收标准。
+
 - 2026-07-22 生成数据库升级计划 v5：按用户要求复制 `docs/database-upgrade-plan-v4.md` 为 `docs/database-upgrade-plan-v5.md`，并落入上一轮评审的 P0/P1 修正。① 明确 seed reset 与自增 ID 策略：MySQL 多次 reset 后 ID 不从 1 开始是正常现象，后续 seed 不依赖硬编码 ID，固定事实用 `sku` / `coupon_code` / `channel_name` / `category.name` / `device_type` 等业务键定位，并输出 seed_summary。② 修复 `orders_wide` DDL：`ix_category` 改为索引 `primary_category`，并把 `snapshot_at` / `batch_id` / `source_updated_at` 写入正式字段。③ 明确退款粒度：新增 `refunds.order_item_id` 可空外键，商品退款率优先按订单明细归因，同时兼容整单退款和旧 `product_id` 冗余字段。④ 拆分验收门：数据库升级阶段只验结构、seed、固定事实、基础 challenge 和安全；Phase 3A M11/M12 再验 `schema_retrieval` / `join_path` / `query_plan` 等 trace_steps。⑤ 扩展 `relations.yaml` 规格，补 `relation_type` / `grain` / bridge / recursive / temporal / aggregation_warning，覆盖 order_coupons、多级类目、SCD 时间窗口和聚合放大风险。⑥ 补影响文件清单：`app/db/base.py`、`app/models/__init__.py`、`app/schemas/resources.py`、`eval/run_eval.py`、`engine/nl2sql/schema_loader.py` 等。
+
 - 2026-07-22 生成数据库升级计划 v4：按用户要求复制 `docs/database-upgrade-plan-v3.md` 为 `docs/database-upgrade-plan-v4.md`，并执行评审 P0/P1 修改。① 新增 `order_items` 订单明细表，数据库升级目标改为 13 张业务分析表 + 1 张桥接表，即 14 张物理表；`orders.product_id` 保留为 primary product 兼容字段，商品维度 GMV / 销量默认走 `order_items`。② 评测口径拆成两层：16 条 `database-upgrade-challenge.yaml` 证明新库复杂度和困难诊断素材，10 条 `phase3a-regression.yaml` 继续作为 Phase 3A 新旧链路对照硬门。③ 新增 `domain_pack/schema_desc/relations.yaml` 作为结构化关系事实源，M9 relation_doc / JoinPath 直接从这里生成。④ 修复 `paid_at IS NULL` 与 `orders_wide` 全量同步冲突，要求 `orders.paid_at` / `orders_wide.paid_at` 可空且 GMV 默认排除未支付订单。⑤ 为逻辑脏数据明确新增 `orders.source_order_no` / `orders.external_order_no` / `refunds.source_order_no`，不破坏主表外键和唯一约束。⑥ 补 P1 口径：SCD 改为 50 商品 × 平均 3 版本约 150 行；免运费券通过 `orders.shipping_amount` 实现且不抵扣商品 GMV；施工时间估算调整为约 1.5~2 天。
+
 - 2026-07-22 生成数据库升级计划 v3：按用户要求复制 `docs/database-upgrade-plan-v2.md` 为 `docs/database-upgrade-plan-v3.md`，并吸收评审后的确认项。① 表数量口径修正为 12 张业务分析表 + 1 张桥接表，即 13 张物理表。② 数据量改为 `orders=10000`、`orders_wide=10000`、`refunds≈1000`、`order_coupons≈3000`、`user_behavior_log=10000`，不上 20000，兼顾面试中的一万级数据量讲法和本地 seed / pytest 成本。③ Phase 3A 验收改为 16 条分层用例：简单 3、核心指标 4、中等多表 4、困难诊断 3、安全 2；硬门为安全 2/2、简单 3/3、核心+中等 6/8、困难 1/3 正确且 3/3 可诊断。④ 脏数据策略改为不破坏主表外键/唯一约束，用 `source_order_no` / 外部单号等逻辑脏数据模拟重复和弱关联；强脏数据后续可放 raw_import 表。⑤ 新增固定业务事实和指标默认口径章节，明确 GMV、净收入、优惠金额、退款总额、当前价格、历史售价和宽表使用策略。⑥ 施工时间从约 4h 修正为约 1~1.5 天。
+
 - 2026-07-22 生成阶段三A施工计划：按用户要求新增 `docs/phase3a-plan.md`，以 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`「阶段三A」、`docs/phaseX-plan-template.md`、`docs/AI_CONTEXT.md` 当前状态 / 技术选型 / 已知坑和 `references/askdata_agent` 指定文件为依据。结论：未发现 ROADMAP、AI_CONTEXT、模板之间需要停工确认的主线矛盾；小差异包括 `phase3a-plan.md` 原占位未实际存在、现有 M6 smoke 为 6 条而阶段三A需新增 10 条、现有 `QueryRequest` 尚无 `force_new_pipeline`、Trace 尚无 `trace_steps`、Milvus client 依赖尚未落入项目。计划将模块拆为 M8-M12：M8 冻结 10 条 baseline，M9 Schema Retrieval + JoinPath，M10 QueryPlanStep + 自检，M11 新 pipeline + trace_steps，M12 新旧链路对照报告与收尾；文档更新、测试、smoke 跟随对应模块，不单独拆模块。备注：当前工作树已有用户文档归档改动（`docs/archive/*` 与原 docs 文件删除），本次未回滚。
+
 - 2026-07-21 阶段三A路线收敛二次确认：按用户确认，执行阶段三A优化建议中的 1~3 和 5，调整 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`：① 阶段三A改为“Text2SQL 可校验中间层改造”，强调先用 10 条 SQL 回归冻结 v1 baseline，再改造 Schema Retriever / Join Path / QueryPlanStep / trace_steps；生产链路保留模板优先，但评测链路需支持强制走新 Text2SQL pipeline。② 主线优先级表补充 10 条回归基线、局部 Schema Prompt、新旧链路对照报告，并明确阶段三A目标不是新增更多查询能力，而是让 SQL 生成过程可检索、可计划、可校验、可追踪。③ 量化验收新增阶段三A最低标准：10 条回归（2 简单 / 3 聚合 / 3 多表 / 2 安全）、安全 2/2 拦截、允许类 8 条至少 7 条正确、expected_tables 命中 100%、expected_columns / expected_metrics 命中 ≥80%、QueryPlanStep 通过 Pydantic 和局部 Schema 校验、trace_steps 完整、产出对照报告。④ P1 只作为不阻塞增强：`user_role` 预过滤、Join Path 可解释展示、RRF / Rerank、SQL 错误样例库结构化都不抢 P0。另新增 `docs/phase3a-plan.md`，按用户要求只放结构框架和待补充占位，不写具体施工内容。
+
 - 2026-07-21 seed 数据真实化升级：按用户要求将 `scripts/seed_data.py` 的演示数据从占位名改为真实感数据。① 用户名：`Demo User 01` → `陈米娅` 等 50 个中文姓名，邮箱同步改为拼音 `miya.chen@datapilot.example`。② 商品名：`DataPilot Demo Product xx` → `真无线降噪耳机 Pro`、`CRM 入门版（月付）` 等 29 个中文商品/SaaS 名；锚点商品 `Aurora Noise Cancelling Headphones` 保持不变。③ 工单标题：`Demo support ticket 001` → 按 ticket_type 配 5 组共 35 条真实客服标题词库；描述从统一占位文改为 `用户 {姓名} 提交工单：{标题}`。④ 知识库正文：8 篇 `knowledge_docs.content` 从"阶段二 M1 的知识库草稿"改为 2-5 段完整政策文档正文。⑤ 同时将类目从英文改为中文（`Electronics`→`数码电子`、`Home`→`家居生活` 等），`ticket_type` 从 5 种各 24 条均匀分布改为加权分布（refund 30/shipping 28/invoice 22/account 20/product_quality 20），且 `product` 改名为 `product_quality`，`order_status` 从 4×125 均匀分布改为 delivered 200/shipped 150/paid 100/cancelled 50。固定事实（Aurora 退款率最高/Mobile App GMV 最高/quality_issue Top1/12 pending high tickets）和行数全部保持。协同更新：tests/test_m2_api.py（category + order_status 断言值）、tests/test_m5_agent_response.py（GMV 硬编码值）、scripts/smoke_m2_api.py / smoke_m4_nl2sql.py（category 筛选值）、eval/cases_plan.md（评测用例类目名）。验证：pytest 27/27 passed；seed --reset 输出 counts + facts 全部匹配。备注：users.id 从 301、products.id 从 181 开始是因为 DELETE 不重置 MySQL 自增 ID，不影响业务但截图前可顺手增强 reset 逻辑。按用户确认将 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v2.md` 复制为 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`，只优化学习路线大方向，不生成具体执行 plan。v3 保留阶段三A，但收敛为可校验 Text2SQL 中间层改造：确定默认主链路 `question -> schema_retrieval -> schema_graph/join_path -> query_plan -> local_schema_prompt -> sql_generation -> sql_guard -> sql_execution -> trace`；将 QueryPlanStep 自检提升为 P0；先定 `trace_steps` 结构；Schema 检索文档扩展为 `field_doc / metric_doc / relation_doc`；Milvus 保持主路径并轻提 ChromaDB / 内存向量检索备选；RRF / Rerank 只做接口预留；阶段三A结束要求产出新旧链路对照报告；阶段三A不引入 LangGraph、MCP、Skill、多智能体、SQL 自修复或 EXPLAIN 风险检查。
+
 - 2026-07-21 Phase 2.5 M7 并入阶段三A：按用户确认执行排期收敛，`docs/phase2-plan.md` 中 M7 不再作为独立模块执行，阶段二 M0-M6 作为 v1 baseline 冻结；原 M7 的合理内容并入 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v2.md` 阶段三A，包括新 Text2SQL 链路的 `trace_steps`（schema_retrieval / schema_context / join_path / query_plan / sql_generation / sql_guard / sql_execution / chart_decision）和最小 Eval issue tags（missing_table / missing_column / safety_mismatch / unexpected_error）。完整 scorer 分层、历史结果库、HTML 报告和失败归因平台仍归阶段四独立 AgentEvalOps，不借 M7 名义提前实现。
+
 - 2026-07-21 AskData 技术亮点取舍沉淀：新增 `docs/askdata-tech-value-decision.md`，把 AskData 亮点按“真泛用且面试常问”“有价值但轻量做”“能讲但不做主线”分层；结论是 DataPilot 应优先借鉴字段级 Schema 检索、局部 Schema、轻量 Join 路径约束、结构化 QueryPlanStep、SQL Guard 和分步骤 Trace，MCP / Skill / 长短期记忆 / 多智能体继续作为后期扩展。同步小修 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v2.md`：保留阶段三A，但澄清 SchemaGraph 只是当前 Query 的轻量关系视图，四元组计划只作为 AskData 参考，DataPilot 落地为可校验的 QueryPlanStep；RRF / Rerank / SQL 自修复仍为 P1/P2，不阻塞主线。
+
 - 2026-07-21 面试适配报告修正与 roadmap v2：按用户反馈修正 `docs/interview-fit-vs-askdata.md`，将 DataPilot 单体评分与 “DataPilot + 独立 AgentEvalOps” 项目组合评分拆开，避免把完整版 AgentEvalOps 算作 DataPilot 内置能力；DataPilot 单体完成 Text2SQL 深化 + RAG/Hybrid + 包装后预期约 84-86/100，项目组合约 88-90/100。另在 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v2.md` 生成 roadmap v2，在 RAG/Hybrid 前新增阶段三A「Text2SQL 深化」，覆盖字段级 Schema Retriever、Milvus 向量召回、SchemaGraph/Join 路径、QueryPlanStep、局部 Schema SQL prompt、分步骤 Trace、加分项优先级与 AskData 参考位置；同步调整时间表、README 周计划、技术栈和兜底策略。备注：用户提醒后续准备使用 Milvus，本次仅在 roadmap v2 中按主路径体现，未改当前项目运行状态口径。
+
 - 2026-07-21 面试适配度与 AskData 对照分析：按用户担心“AI 从 0 到 1开发的 DataPilot 是否偏离市场面试项目”新增 `docs/interview-fit-vs-askdata.md`，对照当前 M0-M6 DataPilot v1、roadmap 阶段三到阶段五最终形态，以及 `references/askdata_agent` 的文档和可见代码。结论：DataPilot 当前 v1 是工程底座扎实的 NL2SQL v1，面试分约 72/100；完成 RAG/Hybrid、独立 AgentEvalOps、包装后可达强面试项目区间约 88/100。后续最值得借鉴 AskData 的是字段级 Schema Retriever、结构化 QueryPlanStep、SchemaGraph/Join 约束和分步骤 Trace；不建议盲目提前做多库 MCP、长短记忆或完整 Reflection。
+
 - 2026-07-21 M6 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 27 passed），报告 `accept-M6-20260721.md`。阶段二 v1 全部模块 M0-M6 验收完成，可进入阶段三 RAG/Hybrid 或可选 M7 Phase 2.5 硬化
+
 - 2026-07-21 M7 plan 补入 phase2-plan：用户确认采用“方案 B：小做 Phase 2.5”后，将 M7「Phase 2.5 Trace 与 Eval 最小硬化」加入 `docs/phase2-plan.md`。关键边界：M7 仅在 M6 accept 后执行，不属于 v1 验收标准；只做 trace 决策步骤和 Eval issue tag 最小化，不引入完整 EvalOps、数据库、LangGraph 或 RAG 存储选型变化。验证：人工回读；`git diff --check` 仅 Windows LF→CRLF 提示
+
 - 2026-07-21 Phase 2 优化机会分流：按用户阅读 `phase2-reference-review.md` 后的问题，新增 `docs/phase2-optimization-triage.md`，把 trace 增强、Eval issue tag、RAG 契约、模板匹配、SQL Guard reason、Streamlit 增强、LangGraph 迁移等优化点按优先级/难度/风险/roadmap 影响分流。结论：先 accept M6 锁定 baseline；可选做限时 Phase 2.5（trace 决策粒度 + Eval issue tag 最小化）；完整 EvalOps 和 LangGraph 迁移后置。验证：人工回读；`git diff --check` 仅 Windows LF→CRLF 提示
+
 - 2026-07-20 Phase 2 reference 对照复盘：按用户要求补查 phase2-plan 提到的 `askdata_agent`、`QueryMind`、`GustoBot`、`databao-agent`、`langchain_data_agent`、`CoreCoder`、`hello-agents/ch12` 相关文件，并新增 `docs/phase2-reference-review.md`。结论：M2-M6 当时未系统查 reference 在范围受控前提下可接受；当前实现无需返工，后续优先补 trace 粒度、EvalOps issue tags/scorer 分层、Phase 3 RAG 元数据契约。验证：人工回读报告；`git diff --check` 仅 Windows LF→CRLF 提示
+
 - 2026-07-20 M6 dev-log 加粗与 finish-module 规则补强：按用户反馈，为 M6「新概念」「设计要点」解释句补充必要加粗锚点；`finish-module` 阶段 4 新增加粗自检，要求「新概念」「设计要点」不能只加粗条目名，也要加粗关键作用、核心取舍、量化结果和边界风险。验证：人工回读修改段落
+
 - 2026-07-20 M6 dev-log 代码阅读路线二次优化：按用户反馈，将「读者需要重点理解哪个设计点」改进为“点名关键设计，并解释它解决什么问题、为什么这样放”；同步扩充 M6 阅读路线的 `smoke.yaml`、`_score_case()`、Streamlit 页面和阶段验收报告说明。验证：人工回读修改段落
+
 - 2026-07-20 M6 dev-log 阅读路线补强：按用户反馈，将 `docs/dev-log.md` M6「代码阅读路线」中 `eval/run_eval.py` 的说明从函数名罗列扩展为入口、YAML 加载、TestClient + SQLite dependency override、API 调用、评分、报告输出的逐步阅读导航。验证：人工回读修改段落
+
 - 2026-07-20 M5 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 27 passed），报告 `accept-M5-20260720.md`。备注：pytest 旧临时目录 `pytest-of-Stephen` 有权限问题需手动清理；`_elapsed_ms()` 在 query.py 和 sql_tool.py 各有一份相同实现，轻微重复
+
 - 2026-07-20 模块工作流小优化：AGENTS 工作约定新增模块开工极短 checklist、README 阶段末统一整理口径；finish-module 新增“用户确认过的关键取舍”记录要求；phase2-plan M6 新增需用户确认的决策点；AI_CONTEXT 新增当前技术选型快照。验证：人工回读修改段落
+
 - 2026-07-20 M4 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 24 passed），报告 `accept-M4-20260720.md`
+
 - 2026-07-20 M4 本地启动体验改为 Swagger 优先：按用户实际验证路径，将 `docs/dev-log.md` M4「本地启动体验」改为“启动 FastAPI → 打开 `/docs` Swagger UI → Try it out → 填 JSON → Execute → 看 Response body”，PowerShell 只作为复现和验收留证；同步微调 `finish-module` 模板，后续模块本地体验优先写 Swagger / 浏览器接口文档。验证：人工回读 M4 小节
+
 - 2026-07-20 M4 dev-log 验证体验补强：按用户反馈，`docs/dev-log.md` M4「验证与下一步」从单纯命令列表扩展为自动化验证预期、本地 FastAPI 启动体验、可复制 `/api/query` 输入和大致返回结果；同步更新 `finish-module` skill 模板，要求后续模块写“命令说明 + 预期结果 + 本地启动体验”。验证：人工回读 M4 小节和 skill 阶段 4
+
 - 2026-07-20 M3 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 19 passed），报告 `accept-M3-20260720.md`
+
 - 2026-07-19 dev-log 代码阅读路线版式调整：按用户确认，将 M0-M3 `### 代码阅读路线` 的顶部“按 X 顺序读”句式删除，改为编号项直接承载职责标题与文件路径（如 `**接口契约**：app/schemas/agent.py`），减少“先看/再看”冗余。验证：人工回读 M0-M3 阅读路线
 
 - 2026-07-19 dev-log 代码阅读路线补强：按用户确认的标准版，为 `docs/dev-log.md` M0-M3 的「关键文件」后新增 `### 代码阅读路线`，覆盖阅读顺序、主角文件/函数、调用关系和数据流向；`finish-module` skill 暂未修改，待用户选择模板版本。验证：人工回读 M0-M3 阅读路线
@@ -321,16 +367,30 @@
 - 2026-07-19 M2 代码注释补强：按 CLAUDE.md「代码风格」为 M2 的 7 个文件（core/logging、core/exceptions、core/cache、db/session、api/resources、schemas/resources、tests/test_m2_api）补充中文 docstring 和关键点注释（trace_id 透传与回传、三层异常兜底、Null Object 缓存骨架、分页稳定排序与 order_by(None) 计数、左闭右开时间范围、pytest 依赖覆盖），消除 accept-M2-recheck-20260719 检查 5 的 ⚠️；未改任何业务行为。验证：pytest 15 passed, 1 warning；git diff --check 仅 CRLF 提示
 
 - 2026-07-19 skill description 收敛：finish-module / accept-module 的 description 删流程摘要、只留定位与触发词，避免与正文形成第二份口径；finish-module 触发词补「写复盘」。验证：会话内 skill 列表已刷新为新 description
+
 - 2026-07-19 注释规则单一事实源收敛：CLAUDE.md「代码风格」定为注释规则唯一权威（补语言边界、分隔线规则及“目测即可、不进验收”说明）；finish-module / accept-module 改为引用不复述；accept-module 检查 5 更名「注释合规」、判定去 ORM 化并修 typo；deprecated-terms.txt 登记「注释合规抽查」。验证：rg 全库旧口径仅登记处命中
+
 - 2026-07-18 模块工作流口径优化：phase2-plan 取消模块总览状态列，进度只看 AI_CONTEXT；各模块补“模块验证命令”；finish-module 明确 AI_CONTEXT 新的在上、dev-log 追加到末尾。验证：rg / diff check
+
 - 2026-07-18 模块收工 workflow 固化：新增 `finish-module` skill（Claude canonical + Codex wrapper），把”补注释 + 跑验证 + 写 AI_CONTEXT + 写 dev-log”固定为模块完成后的收工整理；`accept-module` 增加注释合规轻量必检，并更新 AGENTS / CLAUDE / phase2-plan 的调用顺序。验证：rg / diff check
+
 - 2026-07-18 M1 代码注释补强：按 AGENTS.md「代码风格」为 M1 模型、seed、Alembic env、M1 测试补充新手友好的中文注释和关键步骤说明；未改业务行为。验证：pytest 9 passed, 1 warning；alembic check 无新增操作；git diff --check 仅 Windows 换行提示
+
 - 2026-07-18 完善 dev-log 学习复盘：按新版 AGENTS.md 要求，为 M0/M1 补充更清晰的故事体说明、关键文件速览和可复制验证命令。验证：rg / diff check
+
 - 2026-07-17 日志分家（方案 A）：dev-log 改为学习复盘、本文件改为技术档案，删除与 CLAUDE.md / phase2-plan / README 重复的段落；同步改写 CLAUDE.md「开发记录要求」、phase2-plan 相关引用和 accept-module skill。验证：rg 扫描「当前状态速览」无活跃引用
+
 - 2026-07-17 日志拆分 v1（已被上一条取代）：曾新增复制式 AI_CONTEXT.md，因重复定义问题重构
+
 - 2026-07-17 Phase 2 验收口径收敛：M4 简单 SQL 正确性、YAML case 字段、验收记录落位（`eval/reports/phase2-v1-acceptance.md`）登记进 phase2-plan「单一事实源」。仅文档，未跑测试
+
 - 2026-07-17 跨文档重复收敛：32 条用例构成唯一出处定为 phase2-plan M3；目录结构权威定为 CLAUDE.md；phase2-plan 规范复述改引用。仅文档，未跑测试
+
 - 2026-07-17 文档口径审查：README 删 SQLite 主路径旧口径；库名统一 `datapilot_dev`（config 默认值 / .env.example / test 字面值三处）。pytest 5 passed。遗留低优先级待办：dev 依赖补 httpx、空包目录补 `__init__.py`、`.gitkeep` 入库、`redact_database_url`
   改 `rsplit`、LEARNING_ROADMAP 两处旧口径
+  
 - 2026-07-17 多工具协作口径校准：临时目录统一 `.agent_work/temp/`、Trace 归`eval/traces/`、Phase 2 smoke 定为 6 条。仅文档与目录占位，未跑测试
+
 - 2026-07-17 架构底线与降级边界：phase2-plan 新增 P0（不可降级）/ P1（可简化）边界；简化版 AgentResponse 前置到 M3。仅文档，未跑测试
+
+    

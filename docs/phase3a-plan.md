@@ -51,7 +51,7 @@
 | SQL 生成只能使用 QueryPlanStep 与 SchemaGraph 中出现的表、字段、指标和关系 | prompt 快照测试 + plan validation 测试 |
 | SQL Guard 仍是最终安全门，planner 合法不能绕过 sqlglot / RBAC / 敏感字段策略 | 阶段三A 2 条 security case 2/2 blocked |
 | `trace_steps` 必须写入 JSONL trace，不要求立即公开为 API 必填字段 | `tests/test_phase3a_pipeline.py` 读取 trace JSONL 校验 steps |
-| 阶段三A不引入 LangGraph、MCP、Skill、多智能体、SQL 自动修复或 EXPLAIN 风险检查 | 代码审查和 `rg` 检查依赖 / 新目录 |
+| 阶段三A不引入 LangGraph、MCP、Skill、多智能体、SQL 自动修复、EXPLAIN 风险检查，也不把 DB-GPT / AWEL / Sandbox 作为运行时底座 | 代码审查和 `rg` 检查依赖 / 新目录；DB-GPT 只作为设计参考，不新增 `dbgpt-*` 依赖 |
 
 ### P1：可简化，接口保留
 
@@ -68,6 +68,7 @@
 - 阶段三A执行计划：以 `docs/phase3a-plan.md` 为准。
 - 数据库当前事实：以 `docs/database-current-state.md`、migration `20260722_0002` 和 polish migration `20260722_0003` 为准，覆盖 14 表清单、固定 seed 事实、指标口径、RBAC 和后续写 plan 注意事项。
 - 数据库升级设计背景：以 `docs/archive/database-upgrade-plan-v5.md` 为归档参考，只查设计理由、取舍背景和 challenge 分层，不作为当前精确 DDL 事实源。
+- DB-GPT 参考项目取舍：以 `docs/reference-dbgpt-analysis.md` 为准；阶段三A只借鉴 Schema Retriever、Action schema、DAG 化 trace 和评测抽象，不基于 DB-GPT 重开、不引入 AWEL / Skill / Sandbox 运行时。
 - 模块实时进度：以 `docs/AI_CONTEXT.md`「当前状态」为准。
 - 项目目录结构：以 `AGENTS.md` / `CLAUDE.md`「目录结构」为准。
 - 阶段三A总路线与技术取舍：以 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`「阶段三A」为准；本计划只把它拆成可施工模块。
@@ -308,6 +309,9 @@
 | `references/askdata_agent/schema_indexing/objects.py` | `ColumnSchema`、`IndexTextBundle`、字段样例、业务用途、语义角色 | 设计 `SchemaDocument`、`SchemaHit`、`SchemaGraph` |
 | `references/askdata_agent/schema_retrieval/hybrid_schema_retrieval_service.py` | keyword / vector / RRF / rerank 流程 | 只落 keyword + vector 主链路，RRF / rerank 保留字段 |
 | `references/askdata_agent/schema_retrieval/graph_builder.py` | 命中字段 -> 表集合 -> 关系 -> SchemaGraph | DataPilot 实现轻量 JoinPath，不引入复杂图系统 |
+| `references/DB-GPT/packages/dbgpt-ext/src/dbgpt_ext/rag/assembler/db_schema.py` | `DBSchemaAssembler` 从 connector 构造 schema chunks 并持久化到向量库 | 借鉴“构建文档 -> 写入索引 -> retriever 读取”的分层；DataPilot 仍从 `domain_pack` 构建 field / metric / relation docs，不直接抽 DDL |
+| `references/DB-GPT/packages/dbgpt-ext/src/dbgpt_ext/rag/retriever/db_schema.py` | `DBSchemaRetriever` 的表级召回 + 字段级补充、metadata filter 和大表字段拆分 | M9 可按 `doc_type/table/column/metric/relation` 做二次过滤；只借结构，不引入 DB-GPT vector store 依赖 |
+| `references/DB-GPT/examples/rag/simple_dbschema_retriever_example.py` | schema assembler / retriever 的最小可运行示例 | 用作阅读路线和测试用例设计参考，不照搬示例里的临时 SQLite / Chroma 配置 |
 | `engine/nl2sql/schema_loader.py` | 已能加载 schema_desc / metrics / examples | 复用 `DomainSchema`，不重复解析领域配置 |
 
 ### 任务清单
@@ -362,6 +366,8 @@
 |---|---|---|
 | `references/askdata_agent/cot_planning/cot_planner.py` | 先生成可解析中间计划，再交给 SQL 生成 | DataPilot 落地为 JSON `QueryPlanStep` |
 | `references/askdata_agent/sql_generation/prompt_builder.py` | SQL prompt 只允许使用局部 Schema | M11 的局部 Schema SQL prompt 复用 M10 plan |
+| `references/DB-GPT/packages/dbgpt-core/src/dbgpt/agent/core/action/base.py` | `Action.ai_out_schema` 由 Pydantic 模型反推 JSON 输出示例；`ActionOutput` 记录执行结果和 observation | `build_query_plan_prompt` 可由 `QueryPlanStep` 字段生成 schema 示例；validation 结果保留 issue tags / errors，不引入通用 Action 框架 |
+| `references/DB-GPT/packages/dbgpt-app/src/dbgpt_app/scene/chat_db/auto_execute/prompt.py` | Text2SQL prompt 要求返回 `sql/display_type/direct_response` JSON | 只借“结构化输出 + 展示意图”思路；M10/M11 不让模型绕过 SQL Tool 直接执行 |
 | `engine/sql_guard/policy.py` | 敏感字段与 RBAC 最终安全策略 | M10 只做计划预检，最终仍交给 SQL Guard |
 
 ### 任务清单
@@ -412,6 +418,9 @@
 |---|---|---|
 | `references/askdata_agent/askdata_pipeline/text2sql_pipeline.py` | 端到端 step log | DataPilot 用 `trace_steps` 记录，不引入 MCP 执行器 |
 | `references/askdata_agent/sql_generation/prompt_builder.py` | 局部 Schema + 当前计划生成 SQL | 扩展 `build_sql_prompt` 或新增 `build_local_schema_sql_prompt` |
+| `references/DB-GPT/packages/dbgpt-core/src/dbgpt/core/awel/dag/base.py` | AWEL `DAG` / `DAGContext` 的 node、上下游、task output、共享上下文设计 | 只借 trace 结构和未来 DAG 化表达；M11 仍是普通 Python pipeline，不引入 AWEL |
+| `references/DB-GPT/examples/awel/simple_nl_schema_sql_chart_example.py` | `schema_linking -> prompt_join -> sql_gen -> sql_exec -> chart` 的数据分析 DAG | 用来校验 DataPilot trace_steps 是否覆盖同等阶段；SQL 执行仍统一进入 `run_sql_tool()` |
+| `references/DB-GPT/packages/dbgpt-app/src/dbgpt_app/scene/base_chat.py` | 分段 trace、prompt composition、stream/non-stream 调用边界 | 只借分段 trace 命名和失败记录思路，不引入 DB-GPT scene 基类 |
 | `app/api/query.py` | 当前模板优先 + SQL Tool + Chart + Trace | 增量接入新 pipeline，旧路径保留 |
 | `engine/tools/sql_tool.py` | 最终 SQL Guard + DB 执行 | 新 pipeline SQL 仍必须进入 SQL Tool |
 
@@ -465,6 +474,9 @@
 |---|---|---|
 | `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md` | 新旧链路对照报告要求 | 报告展示局部表字段数量、trace steps、JoinPath、10 条 formal 通过率和 16 条 challenge 诊断摘要 |
 | `docs/phase3a-diagnostic-benchmark-proposal-v5.md` | 32 条 diagnostic benchmark 报告口径 | M12 输出 capability / improvement / blocking / skipped / manual 多维摘要 |
+| `docs/reference-dbgpt-analysis.md` | DB-GPT vs DataPilot 的取舍结论和 M9-M12 借鉴路线 | M12 README / dev-log 明确“借鉴成熟平台结构，但 DataPilot 未基于 DB-GPT 重开” |
+| `references/DB-GPT/packages/dbgpt-serve/src/dbgpt_serve/evaluate/api/schemas.py` | evaluate request 的 `scene_key / datasets / metrics / context` 抽象 | 阶段三A仍只做 Markdown；后续 AgentEvalOps 独立化时再服务化 |
+| `references/DB-GPT/examples/client/client_evaluation.py` | RAG recall / app answer 的评测调用示例 | 作为阶段四 AgentEvalOps adapter 参考，M12 不提前做 DB-GPT client |
 | `eval/run_eval.py` | Markdown 报告生成 | 扩展对照报告，不引入新平台 |
 | `docs/dev-log.md` | 学习复盘风格 | 写清 Schema Retrieval、QueryPlanStep、Trace Steps 的面试讲法 |
 
@@ -554,6 +566,7 @@ flowchart TD
 | 新 pipeline 破坏旧模板优先链路 | M11 | M4/M5/M6 既有测试失败 | `force_new_pipeline` 默认 False，旧路径保持原行为 | 新链路强制评测 |
 | eval 扩展超出阶段三A | M8/M8.5/M12 | 开始做历史库、HTML dashboard、复杂 scorer | 只保留 Markdown + issue tags / skipped / capability 摘要；完整能力交给阶段四 AgentEvalOps | 阶段三A报告 |
 | SchemaGraph 复杂化 | M9/M10 | 开始引入图数据库或复杂路径搜索 | 只做当前问题相关表关系视图；JoinPath 来自已知 relation | 多表 Join 约束 |
+| DB-GPT 借鉴变成平台迁移 | M9-M12 | 开始新增 `dbgpt-*` 依赖、AWEL DAG 运行时、Skill Manager、Sandbox 服务或多数据源平台代码 | 停止扩展，回到 `docs/reference-dbgpt-analysis.md` 的结论：只借鉴结构；阶段三A坚持 DataPilot 自研轻量 pipeline | Schema Retrieval、QueryPlan、trace_steps、对照报告 |
 | 安全边界前移导致误判 | M10/M11 | planner 预检和 SQL Guard 结果冲突 | 以 SQL Guard 为最终安全门，planner 只做提前诊断 | 最终安全用例 |
 | Windows 临时目录锁 | 全模块 | pytest basetemp PermissionError | 换新的 `.agent_work/temp/pytest-mx-tmp-*` 复跑 | 业务验证 |
 
