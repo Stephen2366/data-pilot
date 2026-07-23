@@ -5,10 +5,10 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：M10 QueryPlanStep 与自检（待开工）
-- 下一模块：M11 新 Text2SQL Pipeline 与 Trace Steps
+- 当前模块：Phase 3A M9.1 Milvus Adapter 实验（实验分支已完成，待用户决定是否合并）
+- 下一模块：M10 QueryPlanStep 与自检
 - 上一模块验收：Phase 3A M9 已验收（2026-07-23，accept-M9-20260723.md）
-- 阻塞项：无；M9 已验收通过，可进入 M10
+- 阻塞项：无；M9.1 在 `codex-m9.1-milvus-experiment` 分支验证 Milvus adapter 可用，但在 deterministic embedding 下召回数字与 in-memory 持平，暂不建议仅因本实验直接替换主线
 - 更新时间：2026-07-23
 
 ## 当前技术选型快照
@@ -32,6 +32,30 @@
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
 ## 模块技术档案（新的在上）
+
+### Phase 3A M9.1 Milvus Adapter 实验（2026-07-23）
+
+- 改动范围：未提供模块起始 commit，本次按当前实验分支工作树变更检查；`engine/schema_retrieval/vector_index.py`、`engine/schema_retrieval/retriever.py`、`tests/test_m9_1_milvus_schema_retrieval.py`、`scripts/smoke_m9_1_milvus.py`、`pyproject.toml`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9.1-notes.md`、`.agent_work/temp/m9_1-milvus-smoke.md`
+- 关键决策：
+  - 从已验收 M9 后的 `main` 切出实验分支 `codex-m9.1-milvus-experiment`，不在实验完成后自动合并；用户明确要求“如果要合并先询问”。
+  - 使用 `pymilvus 3.0.0` 的 `MilvusClient` 新 API，不使用会触发 deprecation warning 的 ORM API。`pyproject.toml` 登记 `pymilvus>=3.0.0`，避免实验分支依赖只存在于本机环境而没有项目声明。
+  - `retrieve_schema()` 默认仍使用 M9 的 in-memory vector index；只有显式注入 `MilvusVectorIndex` 时才走方案 B，避免普通 pytest 和主线开发被 Docker / Milvus 服务绑定。
+  - Milvus collection 使用显式 schema：`doc_id VARCHAR(max_length=512)` 作为主键，`vector FLOAT_VECTOR(dim=128)`，索引用 `AUTOINDEX + COSINE`；插入后 `flush + load_collection`，保证 smoke 立即可查。
+  - M9 的 deterministic sparse embedding 通过 SHA1 稳定 hash 映射到 dense vector。这里刻意不用 Python 内置 `hash()`，因为内置 hash 有进程级随机盐，会导致 Milvus 召回排序不可复现。
+- 参考资料：
+  - 查阅本机 `pymilvus.MilvusClient` 签名，并用临时 collection 探测 `create_collection / insert / flush / load / search / drop_collection` 行为。
+  - 未查阅外部文档；本次只基于本机 PyMilvus 3.0 API 和 M9 已有接口实现。
+- 验证快照：
+  - 分支：`git switch -c codex-m9.1-milvus-experiment` 初次因沙箱 `.git` 写权限失败，提权后创建成功；当前工作在实验分支。
+  - 环境探测：`pymilvus 3.0.0` 可 import；`http://127.0.0.1:19530` 可连接，初始 collections 为空。
+  - TDD 红灯：`pytest tests\test_m9_1_milvus_schema_retrieval.py ... --basetemp=.agent_work/temp/pytest-m9_1-red` 2 failed，失败于 `MilvusVectorIndex` 仍抛 `NotImplementedError`。
+  - 聚焦绿灯：`$env:OPENBLAS_NUM_THREADS='1'; pytest tests\test_m9_1_milvus_schema_retrieval.py tests\test_phase3a_schema_retrieval.py ... --basetemp=.agent_work/temp/pytest-m9_1-related` 8 passed，1 warning（Starlette TestClient / httpx deprecation，既有警告）。
+  - Smoke：`$env:OPENBLAS_NUM_THREADS='1'; python scripts\smoke_m9_1_milvus.py` 成功生成 `.agent_work/temp/m9_1-milvus-smoke.md`；运行中出现既有 TestClient/httpx warning。
+  - Smoke 对比：in-memory 与 Milvus 在当前 deterministic embedding 下数字完全一致：formal 15/15 tables、16/18 items、3/3 join；challenge 29/29 tables、29/33 items、6/6 join；diagnostic 54/54 tables、54/62 items、14/14 join。
+- 遗留：
+  - 当前 Milvus 只替换向量存储，不替换 embedding 模型；因此质量没有优于 in-memory。若要评估“Milvus 主路径是否值得合入”，建议下一步接真实中文 embedding（BGE / text2vec）后复测。
+  - 由于 M9.1 真实测试依赖 Docker Milvus，默认 M9 测试仍不应强制依赖外部服务；若未来合并，建议把 Milvus 测试保留为显式 smoke 或可 skip 集成测试。
+  - 未合并回 main；是否合并需用户确认。
 
 ### Phase 3A M9 Schema Retrieval 与 JoinPath（2026-07-23）
 

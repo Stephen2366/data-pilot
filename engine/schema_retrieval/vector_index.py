@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import re
+from hashlib import sha1
 from collections import Counter
 from dataclasses import dataclass
 from typing import Protocol
@@ -16,6 +17,8 @@ from typing import Protocol
 from engine.schema_retrieval.objects import SchemaDocument, SchemaHit
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
+DEFAULT_MILVUS_URI = "http://127.0.0.1:19530"
+DEFAULT_MILVUS_DIMENSION = 128
 
 
 class EmbeddingProvider(Protocol):
@@ -23,6 +26,13 @@ class EmbeddingProvider(Protocol):
 
     def embed(self, text: str) -> dict[str, float]:
         """把文本转成稀疏向量。"""
+
+
+class VectorIndex(Protocol):
+    """向量索引协议：in-memory 与 Milvus 都只需要实现 search。"""
+
+    def search(self, query: str, *, top_k: int) -> list[SchemaHit]:
+        """按相似度返回 SchemaHit。"""
 
 
 class DeterministicEmbeddingProvider:
@@ -90,15 +100,113 @@ class InMemoryVectorIndex:
 
 
 class MilvusVectorIndex:
-    """Milvus adapter 占位。
+    """Milvus adapter 实验实现。
 
-    M9 经用户确认不新增 `pymilvus` 或 Docker 依赖；真正接入时实现与 `InMemoryVectorIndex`
-    相同的 `search()` 契约即可。
+    ★ M9.1 只在显式实例化时使用 Milvus；默认 retriever 仍走 in-memory，避免普通 pytest 或
+    新同学本地启动被 Docker 服务绑住。
     """
 
-    def __init__(self, *_args: object, **_kwargs: object) -> None:
-        """明确提示当前 adapter 尚未启用，防止 README 或测试误报 Milvus 已可用。"""
+    def __init__(
+        self,
+        *,
+        documents: list[SchemaDocument],
+        embedding_provider: EmbeddingProvider,
+        collection_name: str,
+        uri: str = DEFAULT_MILVUS_URI,
+        dimension: int = DEFAULT_MILVUS_DIMENSION,
+        reset_collection: bool = False,
+        timeout: float = 10.0,
+    ) -> None:
+        """创建 Milvus collection 并写入 Schema 文档向量。"""
 
-        raise NotImplementedError(
-            "Milvus adapter is reserved for a later module; M9 uses InMemoryVectorIndex."
+        try:
+            from pymilvus import DataType, MilvusClient
+        except ImportError as exc:
+            raise RuntimeError("pymilvus is required for MilvusVectorIndex.") from exc
+
+        self.documents = documents
+        self.embedding_provider = embedding_provider
+        self.collection_name = collection_name
+        self.dimension = dimension
+        self._documents_by_id = {document.doc_id: document for document in documents}
+        self._client = MilvusClient(uri=uri, timeout=timeout)
+
+        if reset_collection and self._client.has_collection(collection_name):
+            self._client.drop_collection(collection_name)
+        if not self._client.has_collection(collection_name):
+            schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
+            schema.add_field("doc_id", DataType.VARCHAR, is_primary=True, max_length=512)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dimension)
+            index_params = MilvusClient.prepare_index_params()
+            index_params.add_index(field_name="vector", metric_type="COSINE", index_type="AUTOINDEX")
+            self._client.create_collection(
+                collection_name=collection_name,
+                schema=schema,
+                index_params=index_params,
+            )
+
+        # 步骤 1：写入向量并 flush，确保后续 search 能立即看到本轮实验文档。-------------
+        rows = [
+            {
+                "doc_id": document.doc_id,
+                "vector": self._to_dense_vector(self.embedding_provider.embed(document.vector_text)),
+            }
+            for document in documents
+        ]
+        if rows:
+            self._client.insert(collection_name=collection_name, data=rows)
+            self._client.flush(collection_name=collection_name)
+        self._client.load_collection(collection_name)
+
+    def _to_dense_vector(self, sparse_vector: dict[str, float]) -> list[float]:
+        """把 M9 稀疏 embedding 哈希到固定维度 dense vector，供 Milvus FLOAT_VECTOR 使用。"""
+
+        dense = [0.0] * self.dimension
+        for token, value in sparse_vector.items():
+            # ★ 不能用 Python 内置 hash()：它有进程级随机盐，会让 Milvus 实验召回排序不可复现。
+            stable_index = int(sha1(token.encode("utf-8")).hexdigest(), 16) % self.dimension
+            dense[stable_index] += value
+        norm = math.sqrt(sum(value * value for value in dense))
+        if norm == 0:
+            return dense
+        return [value / norm for value in dense]
+
+    def search(self, query: str, *, top_k: int) -> list[SchemaHit]:
+        """按 Milvus COSINE 相似度返回 SchemaHit。"""
+
+        query_vector = self._to_dense_vector(self.embedding_provider.embed(query))
+        results = self._client.search(
+            collection_name=self.collection_name,
+            data=[query_vector],
+            limit=top_k,
+            output_fields=["doc_id"],
+            anns_field="vector",
         )
+        hits: list[SchemaHit] = []
+        for rank, item in enumerate(results[0], start=1):
+            entity = item.get("entity") or {}
+            doc_id = str(entity.get("doc_id") or item.get("id") or "")
+            document = self._documents_by_id.get(doc_id)
+            if document is None:
+                continue
+            hits.append(
+                SchemaHit(
+                    document=document,
+                    score=float(item.get("distance", 0.0)),
+                    source="milvus",
+                    rank=rank,
+                    doc_type=document.doc_type,
+                )
+            )
+        return hits
+
+    def drop_collection(self) -> None:
+        """删除实验 collection，测试和 smoke 清理资源时使用。"""
+
+        if self._client.has_collection(self.collection_name):
+            self._client.drop_collection(self.collection_name)
+
+    def close(self) -> None:
+        """关闭 Milvus client 连接。"""
+
+        self._client.close()

@@ -1107,3 +1107,88 @@ git diff --check
 **本地启动体验：**
 
 本模块暂无新的 Swagger 或前端页面；它是后端 Text2SQL 中间层能力。学习时可以先跑上面的 M9 测试，再打开 `tests/test_phase3a_schema_retrieval.py` 看每个断言：它会告诉你哪些中文问题召回了哪些表、字段、指标和 JoinPath。后续 M10/M11 会把这块能力接到 QueryPlan 和新 pipeline 里。
+
+## ★ M9.1 Milvus Adapter 实验（2026-07-23）
+
+**简述**：这次在实验分支验证了 **Milvus 作为 Schema Retriever 向量存储** 是否值得提前合入主线。
+
+### 这次做了什么
+
+M9 验收通过后，我们从 `main` 切出 `codex-m9.1-milvus-experiment` 分支做方案 B。目标不是推翻 M9，而是只替换向量索引这一层：默认 M9 仍然走 in-memory，实验分支可以显式注入 `MilvusVectorIndex`，用同一批 Schema 文档、同一套测试和同一份 smoke 报告做对比。
+
+本机环境已经有 `pymilvus 3.0.0`，Docker Milvus 也能通过 `http://127.0.0.1:19530` 连接。实现时使用新的 **MilvusClient** API，而不是旧 ORM API；collection 使用 `doc_id` 字符串主键和 `FLOAT_VECTOR` 字段。一个小坑是：Milvus 的 `VARCHAR` 主键必须显式设置 `max_length`，否则建 collection 会失败。另一个小坑是：不能用 Python 内置 `hash()` 把稀疏向量映射成 dense vector，因为它每个进程都有随机盐，召回排序会不可复现；本次改成了 **SHA1 稳定 hash**。
+
+最终结论比较冷静：**adapter 能工作，但召回质量没有提升**。在当前 deterministic embedding 下，Milvus 和 in-memory 的召回数字完全一致：formal 表命中 **15/15**、字段/指标 **16/18**、JoinPath **3/3**；diagnostic schema/join 表命中 **54/54**、字段/指标 **54/62**、JoinPath **14/14**。这说明目前 Milvus 只是换了存储和检索服务，真正的质量提升要等接入真实中文 embedding 后再评估。
+
+### 新概念
+
+- **Milvus**：专门存储和检索向量的数据库。可以把它理解成“给 embedding 用的索引库”，适合后续 schema / 文档语义检索。
+- **Adapter 实验**：不是把主线直接改成新技术，而是在分支里实现同一个接口的另一个版本。这样能比较效果，也方便失败后回退。
+- **MilvusClient**：PyMilvus 3.0 推荐的新客户端 API。本次避免使用旧 ORM API，是为了少背一层即将废弃的接口风险。
+- **Dense Vector**：Milvus 的 `FLOAT_VECTOR` 需要固定长度数字数组；M9 原来的 deterministic embedding 是稀疏 dict，所以 M9.1 用稳定 hash 把它映射到固定维度。
+
+### 关键文件
+
+- `engine/schema_retrieval/vector_index.py`：新增 `VectorIndex` 协议和 `MilvusVectorIndex` 实验实现。
+- `engine/schema_retrieval/retriever.py`：支持显式注入 vector index，默认仍是 in-memory。
+- `tests/test_m9_1_milvus_schema_retrieval.py`：真实 Milvus 可用时验证 adapter 与 retriever 集成。
+- `scripts/smoke_m9_1_milvus.py`：生成 in-memory vs Milvus 召回对比报告。
+- `.agent_work/temp/m9_1-milvus-smoke.md`：本次实验的真实对比结果。
+- `pyproject.toml`：实验分支登记 `pymilvus>=3.0.0`。
+
+### 代码阅读路线
+
+1. **先看接口边界**：`engine/schema_retrieval/vector_index.py`
+   从 `VectorIndex` 协议看起。它只有一个 `search()` 方法，这就是 M9.1 的关键：后续 in-memory、Milvus、甚至别的向量库都可以实现同一个接口。
+
+2. **再看 Milvus 实现**：`engine/schema_retrieval/vector_index.py`
+   重点看 `MilvusVectorIndex.__init__()`。它负责建 collection、插入文档向量、flush、load；再看 `_to_dense_vector()`，理解为什么要用 **SHA1 稳定 hash**，而不是 Python 内置 `hash()`。
+
+3. **然后看 retriever 集成**：`engine/schema_retrieval/retriever.py`
+   `retrieve_schema()` 新增了 `vector_index` 可选参数。没传时仍走 M9 in-memory；传入 `MilvusVectorIndex` 时才走 Milvus。这种设计让实验分支不破坏默认开发体验。
+
+4. **最后看 smoke 对比**：`scripts/smoke_m9_1_milvus.py`
+   它把 formal、challenge、diagnostic 三组 schema/join case 同时跑 in-memory 和 Milvus。重点看报告里的数字是否真的提升，而不是只看 Milvus 能不能连上。
+
+M9.1 的实验流向：
+
+`SchemaDocument`
+→ `DeterministicEmbeddingProvider`
+→ `SHA1 dense vector`
+→ `Milvus collection`
+→ `MilvusVectorIndex.search()`
+→ `retrieve_schema(vector_index=milvus_index)`
+→ `SchemaGraph / JoinPath`
+→ smoke 对比报告
+
+### 设计要点
+
+- **默认链路不改**：M9.1 没有把普通 `retrieve_schema()` 默认改成 Milvus，避免主线开发依赖 Docker。
+- **先验证存储层，不夸大效果**：当前 embedding 仍是 deterministic fake embedding，所以 Milvus 没有带来语义质量提升。
+- **合并前要再确认**：本实验分支证明 adapter 可行，但还没证明“值得替换主线”。如果后续接真实 BGE / text2vec 后指标变好，再考虑合并更合理。
+
+### 面试怎么讲
+
+M9.1 可以讲成“我没有盲目把 Milvus 接进主线，而是用实验分支验证 adapter 价值”。我保持 Schema Retriever 的 VectorIndex 接口不变，新增 Milvus 实现，并用同一套 formal / challenge / diagnostic case 对比 in-memory 和 Milvus。结果显示，在没有真实 embedding 模型时，Milvus 只改变向量存储方式，召回指标没有提升。因此我的结论不是“为了技术栈好看就合入”，而是等接入真实中文 embedding 后再评估，这体现了工程取舍和可回退意识喵
+
+### 验证与下一步
+
+- 验证：M9.1 + M9 schema 测试 **8 passed**；Milvus smoke 成功生成报告；当前 smoke 指标与 in-memory 持平。
+- warning：Starlette TestClient / httpx deprecation 是既有 warning；运行 Milvus 相关脚本时建议设置 `OPENBLAS_NUM_THREADS=1`，避免 Windows 下 OpenBLAS 偶发线程/内存分配问题。
+- 下一步：不建议直接合并；如果要继续验证方案 B 的真实价值，应接入 BGE / text2vec 等中文 embedding 后复测。
+
+可复制验证命令：
+
+```powershell
+# 跑 M9.1 + M9 Schema Retrieval 测试。预期：8 passed。
+$env:OPENBLAS_NUM_THREADS='1'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m9_1_milvus_schema_retrieval.py tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9_1-related
+
+# 跑 Milvus 对比 smoke。预期：生成 .agent_work/temp/m9_1-milvus-smoke.md。
+$env:OPENBLAS_NUM_THREADS='1'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_1_milvus.py
+```
+
+**本地启动体验：**
+
+本模块暂无 Swagger 页面；体验方式是先启动 Docker Milvus，再运行上面的 smoke 脚本。打开 `.agent_work/temp/m9_1-milvus-smoke.md` 后，对比每组的 **in_memory** 和 **milvus** 数字。如果两边一样，说明只是 adapter 跑通；如果后续接真实 embedding 后 Milvus 明显提升，再考虑合入主线。
