@@ -7,7 +7,7 @@
 - 当前阶段计划文件：`docs/phase3a-plan.md`
 - 当前模块：Phase 3A M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线（已完成，待验收）
 - 下一模块：M9 Schema Retrieval 与 JoinPath
-- 上一模块验收：Phase 3A M8.5 未验收（待 accept-module）
+- 上一模块验收：Phase 3A M8.5 已验收（2026-07-23，报告 accept-M8.5-20260723.md）
 - 阻塞项：无；旧链路 diagnostic baseline 为 32 条 total、12 passed、10 failed、10 skipped_due_to_pipeline_mode、3 review_required，已作为真实诊断 baseline 冻结
 - 更新时间：2026-07-23
 
@@ -259,6 +259,8 @@
 
 ## 补充记录（小修补，新的在上）
 
+- 2026-07-23 M8.5 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 44 passed），报告 `accept-M8.5-20260723.md`。后续可进入 M9 Schema Retrieval 与 JoinPath。
+- 2026-07-23 Phase 3A plan 口径小修：按用户要求执行 M9 diagnostic 消费与安全统计澄清。`docs/phase3a-plan.md` 新增 M9-M11 分阶段消费 32 条 diagnostic capability 标签的要求；M9 任务清单和验收门明确要对带 `schema_retrieval` / `join_path` capability 的 diagnostic case 输出召回诊断摘要，但不提前要求 QueryPlan / local schema prompt / trace_steps 专属 check 通过；M12 安全验收拆成 formal 2/2 主硬门 + diagnostic security 4 条单独统计，避免 `db_sec_003/db_sec_004` 这类诊断安全失败被 2/2 口径掩盖。`D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md` 只补全程总览可能过时、以项目计划为准、不要混淆 Phase 3A diagnostic 32 与 AgentEvalOps 基础 32 的说明。
 - 2026-07-23 Phase 3A plan 增补 M8.5：按用户确认将 `docs/phase3a-diagnostic-benchmark-proposal-v5.md` 的落地任务写入 `docs/phase3a-plan.md`，新增 M8.5「Diagnostic Benchmark 骨架与旧链路诊断基线」。边界：只新建 16 条 extra diagnostic case、扩展 eval runner 的 `--extra-cases` / `--pipeline-mode` / `skipped_due_to_pipeline_mode` / `source_file` 报告字段，并生成旧链路 32 条 diagnostic baseline；不提前实现 M9 Schema Retrieval、M10 QueryPlanStep 或 M11 trace_steps。当前下一模块已改为 M8.5。
 - 2026-07-23 Phase 3A M8 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 38 passed），报告 `accept-M8-20260723.md`。当时后续可进入 M9 Schema Retrieval 与 JoinPath；现已按上方 M8.5 补充记录调整为先进入 M8.5。
 - 2026-07-23 Phase 3A 32 条诊断 benchmark proposal v5：按用户要求生成 `docs/phase3a-diagnostic-benchmark-proposal-v5.md`，在 v4 基础上吸收 review-v4 中有效意见。v5 保持 32 条结构，但改为 `database-upgrade-challenge.yaml` 作为 16 条 challenge 唯一源，`phase3a-diagnostic-benchmark.yaml` 只维护新增 16 条，并由 runner `--cases + --extra-cases` 合并；明确 `pipeline_mode` 推荐值 / runner 覆盖 / 实际模式记录，旧链路无法验证的新 check 标 `skipped_due_to_pipeline_mode`；重算 capability 覆盖总数和自动门分母；补 `metric_mapping_match`、local_schema_prompt block/warn 分层、pipeline robustness 单测边界、`quality_reasons` 和 golden path 调整。当前仍未落 benchmark YAML、未改 M8 baseline。

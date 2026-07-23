@@ -25,6 +25,7 @@
 - 能用 10 条 SQL / 聚合 / 多表 / 安全正式回归用例冻结阶段二 v1 baseline，观察点是 `eval/reports/phase3a-baseline.md` 记录旧链路通过率、SQL、trace_id 和失败原因。
 - 能同步运行 16 条 challenge superset，观察点是 `eval/reports/phase3a-challenge-baseline.md` 和后续 challenge 报告记录扩展通过率、manual review 标记、issue tags 和困难诊断素材。
 - 能在 M8.5 形成 32 条 diagnostic benchmark 骨架，观察点是 `eval/cases/phase3a-diagnostic-benchmark.yaml` 只维护新增 16 条，runner 通过 `--cases + --extra-cases` 与 challenge 16 条组合运行。
+- M9-M11 要逐步消费 32 条 diagnostic 的 capability 标签：M9 至少输出 `schema_retrieval` / `join_path` 相关诊断摘要，M10 聚焦 `query_plan`，M11 聚焦 `local_schema_prompt` / `trace_steps` / 新 pipeline 集成；M12 再做完整新旧对照，不把 M8.5 新增 case 放到最后才第一次看。
 - 能从 `domain_pack/schema_desc/`、`domain_pack/metrics.yaml` 和 SQL examples 构建字段、指标、关系三类 Schema 检索文档，观察点是 8 条允许类 SQL 的 expected_tables 命中率 100%，expected_columns / expected_metrics 召回命中率不低于 80%。
 - 能为一次问题生成轻量 SchemaGraph / JoinPath，只包含相关表、字段、指标和关系，观察点是多表 case trace 中可看到 join path，并且 Join 条件来自 `domain_pack/schema_desc/*` 的关联关系。
 - 能让 LLM 先输出 `QueryPlan(steps=[QueryPlanStep])`，再基于局部 Schema 生成 SQL，观察点是计划通过 Pydantic 校验、字段来源校验、Join 来源校验和敏感字段预检；Phase 3A 只允许一个可执行 `sql_query` step。
@@ -319,6 +320,7 @@
 - [ ] [顺序] 新建 `engine/schema_retrieval/graph.py::build_schema_graph` | 输入：merged_hits、domain_schema | 输出：相关表字段指标关系、JoinPath，自动补 Join key
 - [ ] [顺序] 新建 `tests/test_phase3a_schema_retrieval.py` | 输入：8 条允许类 case | 输出：expected_tables 100% 命中、expected_columns / expected_metrics >= 80%、多表 case 有合法 join path
 - [ ] [顺序] 同步记录 challenge 召回表现 | 输入：16 条 challenge | 输出：challenge expected_tables / expected_columns / expected_metrics 命中摘要，困难题可标记 manual review
+- [ ] [顺序] 同步记录 diagnostic 召回表现 | 输入：32 条 diagnostic 中带 `schema_retrieval` / `join_path` capability 的 case | 输出：按 capability 汇总 expected_tables / expected_columns / expected_metrics / JoinPath 命中摘要；不属于 M9 的 `query_plan` / `trace_steps` 检查只保留 skipped 或待后续模块处理
 - [ ] [可选] 新增 Milvus adapter smoke 脚本草案 | 输入：本机 `localhost:19530` | 输出：只在环境可用时运行，不阻塞 pytest
 - [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
 
@@ -328,6 +330,7 @@
 - [ ] 8 条允许类 SQL 的 expected_tables 命中率 100%
 - [ ] 8 条允许类 SQL 的 expected_columns / expected_metrics 召回命中率不低于 80%
 - [ ] 16 条 challenge 同步跑召回诊断并记录 issue tags；困难题不在 M9 早期作为硬阻塞
+- [ ] 32 条 diagnostic 中带 `schema_retrieval` / `join_path` capability 的 case 有 M9 召回诊断摘要；不要求 M9 提前通过 QueryPlan / local schema prompt / trace_steps 专属 check
 - [ ] `p3a_multi_001/p3a_multi_002/p3a_multi_003` 均能生成来自 schema_desc 关系的 JoinPath
 - [ ] 检索结果包含 `score/source/rank/doc_type`，为 RRF / rerank 留接口
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-tmp`
@@ -483,7 +486,7 @@
 - [ ] 新链路 10 条回归可批量运行
 - [ ] 新链路 16 条 challenge 可批量运行，并记录 manual review 和 issue tags
 - [ ] 新链路 32 条 diagnostic 可批量运行，并按 capability、improvement、blocking/non-blocking、manual/skipped 统计
-- [ ] 安全用例 2/2 blocked
+- [ ] formal 安全用例 2/2 blocked；diagnostic security 4 条在报告中单独统计，不能被 formal 2/2 的主硬门口径掩盖
 - [ ] 允许类 SQL 8 条中至少 7 条结果正确
 - [ ] Schema Retriever expected_tables 命中率 100%，expected_columns / expected_metrics 召回命中率不低于 80%
 - [ ] QueryPlanStep 对 10 条 formal case 均有 trace；16 条 challenge 有诊断摘要；失败 case 有 issue tag
