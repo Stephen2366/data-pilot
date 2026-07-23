@@ -5,10 +5,10 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：Phase 3A M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线（已完成，待验收）
-- 下一模块：M9 Schema Retrieval 与 JoinPath
-- 上一模块验收：Phase 3A M8.5 已验收（2026-07-23，报告 accept-M8.5-20260723.md）
-- 阻塞项：无；旧链路 diagnostic baseline 为 32 条 total、12 passed、10 failed、10 skipped_due_to_pipeline_mode、3 review_required，已作为真实诊断 baseline 冻结
+- 当前模块：Phase 3A M9 Schema Retrieval 与 JoinPath（已完成，待验收）
+- 下一模块：M10 QueryPlanStep 与自检
+- 上一模块验收：Phase 3A M9 未验收（待 accept-module）
+- 阻塞项：无；M9 已完成 field / metric / relation docs、keyword + in-memory vector 两路召回、SchemaGraph / JoinPath；Milvus adapter 仅保留边界，未接真实服务
 - 更新时间：2026-07-23
 
 ## 当前技术选型快照
@@ -32,6 +32,29 @@
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
 ## 模块技术档案（新的在上）
+
+### Phase 3A M9 Schema Retrieval 与 JoinPath（2026-07-23）
+
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`engine/schema_retrieval/*`、`tests/test_phase3a_schema_retrieval.py`、`domain_pack/schema_desc/relations.yaml`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9-notes.md`、`.agent_work/temp/m9-recall-summary.md`
+- 关键决策：
+  - 用户确认选择 M9 选项 A：按 ROADMAP 保留 Milvus 主路径边界，但本模块只实现 deterministic in-memory vector index 与 `EmbeddingProvider` / `InMemoryVectorIndex` 协议，不新增 `pymilvus`、Docker 启动脚本或网络下载依赖。主要风险是真实语义召回质量仍需后续 Milvus / BGE adapter smoke 验证；好处是 M9 不被环境集成阻塞，P0 的文档结构、召回契约和 JoinPath 可先稳定。
+  - Schema 文档只分 `field_doc`、`metric_doc`、`relation_doc` 三类；没有新增独立 alias 文件。字段文档复用 `schema_desc/*.md`，指标文档复用 `metrics.yaml` 并做轻量中文业务说法扩写，关系文档优先来自 `relations.yaml`。
+  - JoinPath 严格从 `domain_pack/schema_desc/relations.yaml` 构造，不从 Markdown 自然语言关系或 LLM 输出猜 Join。M9 暴露并补齐了 `relations.yaml` 原缺的 `refunds_order`、`refunds_product`、`refunds_user` 三条关系；这些关系已存在于 `refunds.md`，本次只是补齐结构化单一关系源。
+  - `SchemaGraph` 当前按命中表补齐该表字段，优先保证 M9 recall 硬门；更严格的局部 Schema prompt 精简留给 M11。派生列别名如 `coupon_order_count`、`conversion_rate`、`avg_price` 不在 M9 强行伪造成物理字段，后续由 M10/M11 的 QueryPlan / SQL alias 层处理。
+- 参考资料：
+  - 查阅 `docs/phase3a-plan.md` M9、`domain_pack/schema_desc/relations.yaml`、`domain_pack/metrics.yaml`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`engine/nl2sql/schema_loader.py` 和 `eval/run_eval.py`。
+  - 借鉴计划中 AskData / DB-GPT 的分层思想：文档构建、检索、图构建分开；没有引入 DB-GPT / AWEL / Milvus runtime 依赖，也没有提前实现 RRF / rerank 主链路。
+- 验证快照：
+  - TDD 红灯：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-red` 失败于 `ModuleNotFoundError: No module named 'engine.schema_retrieval'`，符合预期。
+  - 聚焦 pytest：`pytest tests\test_phase3a_schema_retrieval.py ... --basetemp=.agent_work/temp/pytest-m9-tmp` 6 passed，1 warning（Starlette TestClient / httpx deprecation，既有警告）。
+  - 相关回归：`pytest tests\test_phase3a_eval.py tests\test_phase3a_schema_retrieval.py ... --basetemp=.agent_work/temp/pytest-m9-related` 19 passed，1 warning（既有警告）。
+  - 全量 pytest：首次 120 秒超时停在 `tests/test_m3_query.py` 中途，未判定失败；改用 300 秒后 `pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-full-rerun` 50 passed，1 warning（既有警告）。
+  - `git diff --check`：无 whitespace error，仅 `domain_pack/schema_desc/relations.yaml` 的 Windows LF→CRLF 提示。
+  - 召回诊断：formal allow 8 条 expected_tables 15/15、expected_columns+expected_metrics 16/18、multi_table JoinPath 3/3；challenge schema/join 14 条 expected_tables 29/29、items 29/33、JoinPath 6/6；diagnostic schema/join 24 条 expected_tables 54/54、items 54/62、JoinPath 14/14。
+- 遗留：
+  - M9 未接真实 Milvus / embedding 模型，`MilvusVectorIndex` 只作为明确报错的 adapter 占位；后续阶段三 RAG 或 M12 README/smoke 需如实说明实际状态。
+  - 派生输出列别名未全部召回为字段：formal miss 为 `conversion_rate`、`coupon_order_count`；challenge / diagnostic 还包括 `root_category`、`avg_price`、`doc_title` 等。这些属于 QueryPlan/SQL alias 或不支持关系诊断范畴，留给 M10/M11/M12 处理。
+  - `SchemaGraph` 为保证 M9 recall 目前会补齐命中表全字段；M11 做 local schema prompt 时应再按 QueryPlanStep 做字段裁剪，避免 prompt 噪音。
 
 ### Phase 3A M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线（2026-07-23）
 

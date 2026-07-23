@@ -1038,3 +1038,99 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 **本地启动体验：**
 
 本模块暂无新的 Swagger 或前端页面；它的交互入口是评测报告。运行 diagnostic baseline 命令后，打开 `eval/reports/phase3a-diagnostic-baseline.md`，先看顶部 total / passed / failed / skipped，再看 **Capability Summary**，最后挑几条 Case Details 看实际 SQL 和 issue tag。这个报告就是后续 M12 新旧链路对照的旧链路诊断输入。
+
+## ★ M9 Schema Retrieval 与 JoinPath（2026-07-23）
+
+**简述**：这次给 Text2SQL 新链路加上 **Schema Retrieval**，让系统先查“数据字典和关系图”，再进入后续 QueryPlan / SQL 生成。
+
+### 这次做了什么
+
+M8/M8.5 已经冻结了旧链路 baseline，M9 开始真正搭 Text2SQL 中间层的第一块：把 `domain_pack/` 里的表字段、指标口径和表关系整理成可检索文档。现在系统能生成三类 Schema 文档：**field_doc** 说明字段，**metric_doc** 说明 GMV / 退款率 / 净收入等指标，**relation_doc** 说明表之间怎么 join。
+
+检索链路分两路：一条是 **keyword retrieval**，用中文业务词、英文表字段名和指标别名做关键词命中；另一条是 **deterministic in-memory vector index**，用不联网的确定性稀疏向量模拟向量召回接口。用户已确认 M9 先不接真实 Milvus，所以本模块只保留 Milvus adapter 边界，不新增 Docker 或 `pymilvus` 依赖。
+
+最后，M9 会把召回结果整理成 **SchemaGraph**：包含当前问题相关的表、字段、指标和 **JoinPath**。JoinPath 严格来自 `relations.yaml`，不让模型临时猜 join 条件。本次还补齐了退款相关的结构化关系：`refunds_order`、`refunds_product`、`refunds_user`，它们原本已经写在 `refunds.md`，只是没有进入集中关系 YAML。
+
+真实结果是：8 条 formal allow case 的 expected_tables **15/15 命中**，字段/指标 **16/18 命中**，3 个 formal 多表 case 的 JoinPath **3/3 生成**；32 条 diagnostic 中 schema/join 相关 24 条的 expected_tables **54/54 命中**，JoinPath **14/14 生成**。
+
+### 新概念
+
+- **Schema Retrieval**：可以理解为 Text2SQL 之前先查一遍“数据字典”。用户问“渠道 GMV”，系统先召回 `orders`、`channels`、`gmv`、`orders_channel` 这些上下文，后续 LLM 才不用面对全库所有表字段。
+- **field_doc / metric_doc / relation_doc**：三类文档分别回答“有什么字段”“指标怎么算”“表怎么连”。这比把所有 schema 塞进 prompt 更可控，也方便评测哪一类知识没召回。
+- **VectorIndex 协议**：M9 先用内存索引跑通接口，后续真实 Milvus 只要实现同样的 `search()` 契约即可。它类似 Java 里先定义 interface，再换不同实现。
+- **SchemaGraph**：当前问题的小型 Schema 视图。它不是全局图数据库，只是把本次问题需要的表、字段、指标和关系收在一起。
+- **JoinPath**：从一张表走到另一张表的连接路径。例如优惠券渠道题需要 `orders -> order_coupons -> coupons` 和 `orders -> channels`。M9 的原则是 **Join 条件只能来自 relations.yaml**。
+
+### 关键文件
+
+- `engine/schema_retrieval/objects.py`：定义 `SchemaDocument`、`SchemaHit`、`SchemaGraph`、`JoinPath` 等核心结构。
+- `engine/schema_retrieval/document_builder.py`：把 `DomainSchema`、`metrics.yaml`、`relations.yaml` 构造成三类检索文档。
+- `engine/schema_retrieval/vector_index.py`：提供 `EmbeddingProvider`、deterministic in-memory vector index 和 Milvus adapter 占位。
+- `engine/schema_retrieval/retriever.py`：实现 keyword + vector 两路召回和简单融合。
+- `engine/schema_retrieval/graph.py`：把命中文档转成局部 SchemaGraph，并从 relations 图里找 JoinPath。
+- `tests/test_phase3a_schema_retrieval.py`：M9 的验收测试，覆盖文档类型、召回结构、formal 命中率和 diagnostic JoinPath。
+- `domain_pack/schema_desc/relations.yaml`：集中关系源，本次补齐退款相关关系。
+
+### 代码阅读路线
+
+1. **先看结构定义**：`engine/schema_retrieval/objects.py`
+   重点看 `SchemaDocument` 和 `SchemaHit`。前者是“被检索的知识块”，后者是“某个问题命中了哪个知识块、分数多少、来自 keyword 还是 vector”。再看 `SchemaGraph` 和 `JoinPath`，理解 M9 给后续模块交付的不是 SQL，而是 **局部上下文**。
+
+2. **再看文档构建**：`engine/schema_retrieval/document_builder.py`
+   从 `build_schema_documents()` 读起。它先遍历表字段生成 field_doc，再遍历 `metrics.yaml` 生成 metric_doc，最后读取 `relations.yaml` 生成 relation_doc。阅读重点是 **领域知识仍来自 domain_pack**，代码只负责整理和轻量别名扩写。
+
+3. **然后看召回执行**：`engine/schema_retrieval/retriever.py` 和 `engine/schema_retrieval/vector_index.py`
+   `retrieve_schema()` 会先跑关键词召回，再跑内存向量召回，最后 `_merge_hits()` 做简单融合。这里不用深抠向量数学，重点理解当前 in-memory index 是 **测试替身和接口占位**，不是宣称生产级 Milvus 已完成。
+
+4. **最后看关系成图**：`engine/schema_retrieval/graph.py`
+   `build_schema_graph()` 会从命中结果收集表、指标和 relation，然后在 `relations.yaml` 构成的无向图里找最短路径。重点理解这里的安全边界：**没有登记过的关系不会被编出来**，缺关系就补 YAML，而不是放给 LLM 猜。
+
+5. **用测试反推验收门**：`tests/test_phase3a_schema_retrieval.py`
+   这份测试最适合确认 M9 做到什么程度。先看三类文档测试，再看 keyword/vector 返回结构，最后看 formal 8 条和 diagnostic 24 条的命中统计。它能帮你分清 M9 的职责是 **召回上下文**，不是生成 QueryPlan 或 SQL。
+
+M9 的数据流向：
+
+`schema_desc/*.md + metrics.yaml + relations.yaml`
+→ `SchemaDocument`
+→ `keyword_hits + vector_hits`
+→ `merged_hits`
+→ `SchemaGraph`
+→ `JoinPath`
+→ M10 `QueryPlanStep`
+
+### 设计要点
+
+- **Milvus 先保边界，不接真实服务**：这是用户确认后的方案 A。M9 不新增依赖、不启动 Docker，避免环境问题阻塞核心结构；后续接 Milvus 时复用 `EmbeddingProvider` / `InMemoryVectorIndex` 的接口。
+- **关系单一事实源收敛到 relations.yaml**：Markdown 可以解释关系，但 JoinPath 的结构化判断只读 `relations.yaml`。这让后续 plan validation 能稳定判断 join 是否合法。
+- **不伪造派生列**：`coupon_order_count`、`conversion_rate`、`avg_price` 这类是 SQL 输出别名，不是物理字段。M9 不把它们硬塞进 schema，后续 M10/M11 通过 QueryPlan 和 SQL alias 处理。
+- **M9 先保证 recall，M11 再精简 prompt**：当前 `SchemaGraph` 会补齐命中表的字段，目的是让 expected_columns 命中率先达标；局部 Schema prompt 的噪音控制留给 M11。
+
+### 面试怎么讲
+
+M9 可以讲成“我给 Text2SQL 增加了字段级 Schema Retrieval 和结构化 JoinPath”。用户问题进来后，系统不会直接把全库 schema 塞给 LLM，而是先从 domain pack 生成 field_doc、metric_doc、relation_doc，再用 keyword + vector 两路召回当前问题相关的表、字段、指标和关系。多表查询不让模型自由猜 join，而是从 relations.yaml 找 JoinPath；如果关系缺失，就补结构化关系源。自动化结果是 formal 允许类 SQL 的表召回 15/15，字段指标 16/18，多表 JoinPath 3/3，为后续 QueryPlanStep 和局部 Schema SQL prompt 打了一个可验证的基础喵
+
+### 验证与下一步
+
+- 验证：M9 聚焦测试 **6 passed**；相关 eval + schema 测试 **19 passed**；全量 pytest **50 passed**；`git diff --check` 无 whitespace error。
+- warning：Starlette TestClient / httpx deprecation 是既有 warning；`relations.yaml` 有 Windows LF→CRLF 提示，不影响本模块。
+- 下一步：用户人工检查后可调用 `accept-module` 验收 M9；通过后进入 M10 QueryPlanStep 与自检。
+
+可复制验证命令：
+
+```powershell
+# 跑 M9 聚焦测试。预期：6 passed，可能有既有 TestClient warning。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-tmp
+
+# 跑相关 eval 回归。预期：19 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-related
+
+# 跑全量测试。预期：50 passed，耗时约 3 分钟。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-full-rerun
+
+# 检查 whitespace。预期：无 whitespace error，可能出现 Windows LF->CRLF 提示。
+git diff --check
+```
+
+**本地启动体验：**
+
+本模块暂无新的 Swagger 或前端页面；它是后端 Text2SQL 中间层能力。学习时可以先跑上面的 M9 测试，再打开 `tests/test_phase3a_schema_retrieval.py` 看每个断言：它会告诉你哪些中文问题召回了哪些表、字段、指标和 JoinPath。后续 M10/M11 会把这块能力接到 QueryPlan 和新 pipeline 里。
