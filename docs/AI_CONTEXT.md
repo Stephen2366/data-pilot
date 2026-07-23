@@ -5,10 +5,10 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：Phase 3A M9.2 真实中文 Embedding + Milvus 效果测试（实验分支已完成，待用户决定是否合并）
-- 下一模块：M10 QueryPlanStep 与自检
+- 当前模块：M10 QueryPlanStep 与自检（待开工）
+- 下一模块：M11 新 Text2SQL Pipeline 与 Trace Steps
 - 上一模块验收：Phase 3A M9 已验收（2026-07-23，accept-M9-20260723.md）
-- 阻塞项：无；M9.2 在 `codex-m9.2-real-embedding-experiment` 分支验证 SiliconFlow BGE-M3 / Qwen3-0.6B + Milvus 可用；merged_top30 与 M9 持平，Qwen3 在 vector-only_top12 视角提升明显但不足以单独替代 keyword+relations
+- 阻塞项：无；M9.1/M9.2 optional Milvus + SiliconFlow embedding 能力已验证，默认 Schema Retrieval 仍不联网、不依赖 Milvus；主线可继续 M10
 - 更新时间：2026-07-24
 
 ## 当前技术选型快照
