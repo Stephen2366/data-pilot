@@ -12,7 +12,7 @@ from pathlib import Path
 from engine.nl2sql.schema_loader import DomainSchema
 from engine.schema_retrieval.document_builder import DEFAULT_RELATIONS_PATH, build_schema_documents
 from engine.schema_retrieval.objects import SchemaDocument, SchemaHit, SchemaRetrievalResult
-from engine.schema_retrieval.vector_index import DeterministicEmbeddingProvider, InMemoryVectorIndex
+from engine.schema_retrieval.vector_index import DeterministicEmbeddingProvider, InMemoryVectorIndex, VectorIndex
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]{2,}|[\u4e00-\u9fff]")
 
@@ -99,15 +99,17 @@ def retrieve_schema(
     top_k: int,
     domain_schema: DomainSchema,
     relations_path: Path = DEFAULT_RELATIONS_PATH,
+    vector_index: VectorIndex | None = None,
 ) -> SchemaRetrievalResult:
     """★ 对一个自然语言问题召回局部 Schema 文档。"""
 
     documents = build_schema_documents(domain_schema, relations_path=relations_path)
     keyword_hits = _keyword_search(question, documents, top_k=top_k)
-    vector_hits = InMemoryVectorIndex(
+    active_vector_index = vector_index or InMemoryVectorIndex(
         documents=documents,
         embedding_provider=DeterministicEmbeddingProvider(),
-    ).search(question, top_k=top_k)
+    )
+    vector_hits = active_vector_index.search(question, top_k=top_k)
     merged_hits = _merge_hits(keyword_hits, vector_hits, top_k=top_k)
     return SchemaRetrievalResult(
         question=question,

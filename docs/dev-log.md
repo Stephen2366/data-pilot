@@ -1107,3 +1107,181 @@ git diff --check
 **本地启动体验：**
 
 本模块暂无新的 Swagger 或前端页面；它是后端 Text2SQL 中间层能力。学习时可以先跑上面的 M9 测试，再打开 `tests/test_phase3a_schema_retrieval.py` 看每个断言：它会告诉你哪些中文问题召回了哪些表、字段、指标和 JoinPath。后续 M10/M11 会把这块能力接到 QueryPlan 和新 pipeline 里。
+
+## ★ M9.1 Milvus Adapter 实验（2026-07-23）
+
+**简述**：这次在实验分支验证了 **Milvus 作为 Schema Retriever 向量存储** 是否值得提前合入主线。
+
+### 这次做了什么
+
+M9 验收通过后，我们从 `main` 切出 `codex-m9.1-milvus-experiment` 分支做方案 B。目标不是推翻 M9，而是只替换向量索引这一层：默认 M9 仍然走 in-memory，实验分支可以显式注入 `MilvusVectorIndex`，用同一批 Schema 文档、同一套测试和同一份 smoke 报告做对比。
+
+本机环境已经有 `pymilvus 3.0.0`，Docker Milvus 也能通过 `http://127.0.0.1:19530` 连接。实现时使用新的 **MilvusClient** API，而不是旧 ORM API；collection 使用 `doc_id` 字符串主键和 `FLOAT_VECTOR` 字段。一个小坑是：Milvus 的 `VARCHAR` 主键必须显式设置 `max_length`，否则建 collection 会失败。另一个小坑是：不能用 Python 内置 `hash()` 把稀疏向量映射成 dense vector，因为它每个进程都有随机盐，召回排序会不可复现；本次改成了 **SHA1 稳定 hash**。
+
+最终结论比较冷静：**adapter 能工作，但召回质量没有提升**。在当前 deterministic embedding 下，Milvus 和 in-memory 的召回数字完全一致：formal 表命中 **15/15**、字段/指标 **16/18**、JoinPath **3/3**；diagnostic schema/join 表命中 **54/54**、字段/指标 **54/62**、JoinPath **14/14**。这说明目前 Milvus 只是换了存储和检索服务，真正的质量提升要等接入真实中文 embedding 后再评估。
+
+### 新概念
+
+- **Milvus**：专门存储和检索向量的数据库。可以把它理解成“给 embedding 用的索引库”，适合后续 schema / 文档语义检索。
+- **Adapter 实验**：不是把主线直接改成新技术，而是在分支里实现同一个接口的另一个版本。这样能比较效果，也方便失败后回退。
+- **MilvusClient**：PyMilvus 3.0 推荐的新客户端 API。本次避免使用旧 ORM API，是为了少背一层即将废弃的接口风险。
+- **Dense Vector**：Milvus 的 `FLOAT_VECTOR` 需要固定长度数字数组；M9 原来的 deterministic embedding 是稀疏 dict，所以 M9.1 用稳定 hash 把它映射到固定维度。
+
+### 关键文件
+
+- `engine/schema_retrieval/vector_index.py`：新增 `VectorIndex` 协议和 `MilvusVectorIndex` 实验实现。
+- `engine/schema_retrieval/retriever.py`：支持显式注入 vector index，默认仍是 in-memory。
+- `tests/test_m9_1_milvus_schema_retrieval.py`：真实 Milvus 可用时验证 adapter 与 retriever 集成。
+- `scripts/smoke_m9_1_milvus.py`：生成 in-memory vs Milvus 召回对比报告。
+- `.agent_work/temp/m9_1-milvus-smoke.md`：本次实验的真实对比结果。
+- `pyproject.toml`：实验分支登记 `pymilvus>=3.0.0`。
+
+### 代码阅读路线
+
+1. **先看接口边界**：`engine/schema_retrieval/vector_index.py`
+   从 `VectorIndex` 协议看起。它只有一个 `search()` 方法，这就是 M9.1 的关键：后续 in-memory、Milvus、甚至别的向量库都可以实现同一个接口。
+
+2. **再看 Milvus 实现**：`engine/schema_retrieval/vector_index.py`
+   重点看 `MilvusVectorIndex.__init__()`。它负责建 collection、插入文档向量、flush、load；再看 `_to_dense_vector()`，理解为什么要用 **SHA1 稳定 hash**，而不是 Python 内置 `hash()`。
+
+3. **然后看 retriever 集成**：`engine/schema_retrieval/retriever.py`
+   `retrieve_schema()` 新增了 `vector_index` 可选参数。没传时仍走 M9 in-memory；传入 `MilvusVectorIndex` 时才走 Milvus。这种设计让实验分支不破坏默认开发体验。
+
+4. **最后看 smoke 对比**：`scripts/smoke_m9_1_milvus.py`
+   它把 formal、challenge、diagnostic 三组 schema/join case 同时跑 in-memory 和 Milvus。重点看报告里的数字是否真的提升，而不是只看 Milvus 能不能连上。
+
+M9.1 的实验流向：
+
+`SchemaDocument`
+→ `DeterministicEmbeddingProvider`
+→ `SHA1 dense vector`
+→ `Milvus collection`
+→ `MilvusVectorIndex.search()`
+→ `retrieve_schema(vector_index=milvus_index)`
+→ `SchemaGraph / JoinPath`
+→ smoke 对比报告
+
+### 设计要点
+
+- **默认链路不改**：M9.1 没有把普通 `retrieve_schema()` 默认改成 Milvus，避免主线开发依赖 Docker。
+- **先验证存储层，不夸大效果**：当前 embedding 仍是 deterministic fake embedding，所以 Milvus 没有带来语义质量提升。
+- **合并前要再确认**：本实验分支证明 adapter 可行，但还没证明“值得替换主线”。如果后续接真实 BGE / text2vec 后指标变好，再考虑合并更合理。
+
+### 面试怎么讲
+
+M9.1 可以讲成“我没有盲目把 Milvus 接进主线，而是用实验分支验证 adapter 价值”。我保持 Schema Retriever 的 VectorIndex 接口不变，新增 Milvus 实现，并用同一套 formal / challenge / diagnostic case 对比 in-memory 和 Milvus。结果显示，在没有真实 embedding 模型时，Milvus 只改变向量存储方式，召回指标没有提升。因此我的结论不是“为了技术栈好看就合入”，而是等接入真实中文 embedding 后再评估，这体现了工程取舍和可回退意识喵
+
+### 验证与下一步
+
+- 验证：M9.1 + M9 schema 测试 **8 passed**；Milvus smoke 成功生成报告；当前 smoke 指标与 in-memory 持平。
+- warning：Starlette TestClient / httpx deprecation 是既有 warning；运行 Milvus 相关脚本时建议设置 `OPENBLAS_NUM_THREADS=1`，避免 Windows 下 OpenBLAS 偶发线程/内存分配问题。
+- 下一步：不建议直接合并；如果要继续验证方案 B 的真实价值，应接入 BGE / text2vec 等中文 embedding 后复测。
+
+可复制验证命令：
+
+```powershell
+# 跑 M9.1 + M9 Schema Retrieval 测试。预期：8 passed。
+$env:OPENBLAS_NUM_THREADS='1'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m9_1_milvus_schema_retrieval.py tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9_1-related
+
+# 跑 Milvus 对比 smoke。预期：生成 .agent_work/temp/m9_1-milvus-smoke.md。
+$env:OPENBLAS_NUM_THREADS='1'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_1_milvus.py
+```
+
+**本地启动体验：**
+
+本模块暂无 Swagger 页面；体验方式是先启动 Docker Milvus，再运行上面的 smoke 脚本。打开 `.agent_work/temp/m9_1-milvus-smoke.md` 后，对比每组的 **in_memory** 和 **milvus** 数字。如果两边一样，说明只是 adapter 跑通；如果后续接真实 embedding 后 Milvus 明显提升，再考虑合入主线。
+
+## ★ M9.2 真实中文 Embedding + Milvus 效果测试（2026-07-24）
+
+**简述**：这次把 M9.1 的 Milvus adapter 接上 **SiliconFlow 真实中文 embedding**，验证它是否真的比 fake embedding 更会“理解中文业务问题”。
+
+### 这次做了什么
+
+M9.1 已经证明 Milvus adapter 能工作，但当时用的还是 deterministic fake embedding，所以 Milvus 只是换了存储方式，召回数字没有提升。M9.2 补上真正关键的一步：新增 `SiliconFlowEmbeddingProvider`，调用 SiliconFlow 的 embeddings API，把 schema 文档和 query 都转成真实语义向量，再写入 Milvus 检索。
+
+这次测了两个模型：**BAAI/bge-m3** 和 **Qwen/Qwen3-Embedding-0.6B**。为了避免默认测试联网，单元测试只用 fake transport；真实 API 调用放在 `scripts/smoke_m9_2_real_embedding.py`。Smoke 同时输出两种视角：**merged_top30** 模拟 M9 当前“keyword + vector + relation”的主策略，**vector_only_top12** 单独观察 embedding 的排序能力。
+
+结果很清楚：在 **merged_top30** 下，BGE-M3 和 Qwen3 都与 M9 持平，formal 仍是 **15/15 tables、16/18 items、3/3 join**，diagnostic 仍是 **54/54 tables、54/62 items、14/14 join**。这说明当前主链路的硬门已经主要由 keyword 和 relations.yaml 补满，真实 embedding 没有进一步提高最终 recall。
+
+但在 **vector_only_top12** 下，Qwen3-0.6B 有明显收益：diagnostic item recall 从 fake 的 **47/62** 提到 **55/62**，JoinPath 从 **13/14** 到 **14/14**。所以结论不是“embedding 没用”，而是：**真实 embedding 的排序能力更好，但当前 M9 的最终瓶颈不在 embedding，而在派生列 alias 和后续 QueryPlan / SQL 生成。**
+
+### 新概念
+
+- **真实 embedding**：不再用规则或 hash 模拟相似度，而是让模型把文本转成语义向量。它能把“渠道 GMV”“成交额”“销售额排名”这类表达拉得更近。
+- **merged_top30**：M9 当前主策略，综合 keyword、vector 和 relation。这个视角代表“真实系统最终可用上下文”。
+- **vector_only_top12**：只看向量召回前 12 个结果。这个视角更适合观察 embedding 模型本身的质量。
+- **模型维度 dimensions**：Qwen3 embedding 支持指定输出维度。本次用 `1024` 维，既能控制成本和存储，也比 M9.1 的 128 维 fake dense vector更接近真实语义检索。
+- **缓存 embedding**：同一批文档和问题在一次 smoke 中可能重复出现，provider 用内存缓存避免重复调用 API，省钱也更稳。
+
+### 关键文件
+
+- `engine/schema_retrieval/embedding_provider.py`：新增 SiliconFlow embedding provider，支持 batch、cache、Qwen3 dimensions。
+- `engine/schema_retrieval/vector_index.py`：Milvus adapter 支持 dense vector，并能从真实 embedding 自动推断维度。
+- `scripts/smoke_m9_2_real_embedding.py`：真实 embedding + Milvus 对比 smoke。
+- `tests/test_m9_2_siliconflow_embedding.py`：用 fake transport 验证 provider 请求和响应解析，不消耗 API 额度。
+- `.agent_work/temp/m9_2-real-embedding-smoke-bge-m3.md`：BGE-M3 对比报告。
+- `.agent_work/temp/m9_2-real-embedding-smoke-qwen3-0.6b.md`：Qwen3-0.6B 对比报告。
+
+### 代码阅读路线
+
+1. **先看 provider**：`engine/schema_retrieval/embedding_provider.py`
+   从 `SiliconFlowEmbeddingProvider.embed_texts()` 读起。它组装 `/embeddings` 请求、按 index 还原向量顺序，并用 `_cache` 避免重复请求。重点理解这里是 **真实 API provider**，所以只在 smoke 中显式使用。
+
+2. **再看 Milvus 维度推断**：`engine/schema_retrieval/vector_index.py`
+   M9.1 默认把 fake embedding 哈希成 128 维；M9.2 接真实 embedding 后，维度可能是 1024 或模型默认值。因此 `MilvusVectorIndex` 要先生成文档向量、推断维度，再创建 collection。
+
+3. **然后看真实 smoke**：`scripts/smoke_m9_2_real_embedding.py`
+   它从 `.env` 读取 `SILICONFLOW_API_KEY`、`SILICONFLOW_BASE_URL`、`MILVUS_URI`，也允许用 `SILICONFLOW_EMBEDDING_MODEL` 和 `SILICONFLOW_EMBEDDING_DIMENSIONS` 临时切模型。重点看报告里的 merged 和 vector-only 两组数字。
+
+4. **最后看测试边界**：`tests/test_m9_2_siliconflow_embedding.py`
+   这份测试不联网，而是用 fake transport 验证 provider 会发送正确 payload、Authorization header 和 dimensions。这样主线 pytest 不会因为 API 余额、网络或 Docker 状态变红。
+
+M9.2 的实验流向：
+
+`SchemaDocument`
+→ `SiliconFlowEmbeddingProvider`
+→ `dense vectors`
+→ `Milvus collection`
+→ `retrieve_schema(vector_index=real_index)`
+→ `merged_top30 / vector_only_top12`
+→ recall 对比报告
+
+### 设计要点
+
+- **真实 embedding 不放默认链路**：M9.2 仍然是实验分支；默认 M9/M10 不联网，不依赖 SiliconFlow 或 Milvus。
+- **Qwen3 比 BGE-M3 更适合当前实验**：在 vector-only_top12 下，Qwen3-0.6B 的 diagnostic item recall 更高，JoinPath 也更完整。
+- **不把派生列问题归咎于 embedding**：`coupon_order_count`、`conversion_rate`、`avg_price` 是 SQL 输出别名或计划层概念，embedding 很难直接“召回”它们。后续应在 M10 QueryPlan 和 M11 SQL prompt 中解决。
+- **合并建议保守**：可以合入 optional provider / adapter / smoke，但不建议把默认 Schema Retrieval 改成 SiliconFlow + Milvus。
+
+### 面试怎么讲
+
+M9.2 可以讲成“我不是为了堆技术栈而接 Milvus，而是做了真实 embedding 对比实验”。我先用 fake embedding + Milvus 验证 adapter，再接 SiliconFlow 的 BGE-M3 和 Qwen3 Embedding，用同一套 formal / challenge / diagnostic case 对比 merged recall 和 vector-only recall。结论是：在当前 keyword+relations 已经很强的情况下，真实 embedding 没提高最终 merged 硬门；但 Qwen3 在向量单路严格召回上明显优于 fake embedding。这说明后续如果做 RAG 或更大规模 schema retrieval，Qwen3 + Milvus 有价值；但当前 Text2SQL 主线应该先推进 QueryPlan 和 SQL 生成喵
+
+### 验证与下一步
+
+- 验证：M9.2 provider + M9.1/M9 相关测试 **10 passed**；BGE-M3 和 Qwen3-0.6B 两次真实 smoke 均成功。
+- warning：Starlette TestClient / httpx deprecation 是既有 warning；首次真实 smoke 因沙箱网络权限失败，提权后成功；运行真实 smoke 建议设置 `OPENBLAS_NUM_THREADS=1`。
+- 下一步：如果要合并，只建议合入 optional provider / smoke，不建议默认切到联网 embedding；主线仍建议回到 M10 QueryPlanStep。
+
+可复制验证命令：
+
+```powershell
+# 跑 M9.2 单元和相关集成测试。预期：10 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m9_2_siliconflow_embedding.py tests\test_m9_1_milvus_schema_retrieval.py tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9_2-related
+
+# 跑 BGE-M3 真实 embedding smoke。预期：生成 m9_2-real-embedding-smoke.md，可复制为 bge-m3 报告。
+$env:OPENBLAS_NUM_THREADS='1'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_2_real_embedding.py
+
+# 跑 Qwen3-0.6B 真实 embedding smoke。预期：生成 Qwen3 对比报告。
+$env:OPENBLAS_NUM_THREADS='1'
+$env:SILICONFLOW_EMBEDDING_MODEL='Qwen/Qwen3-Embedding-0.6B'
+$env:SILICONFLOW_EMBEDDING_DIMENSIONS='1024'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_2_real_embedding.py
+```
+
+**本地启动体验：**
+
+本模块没有 Swagger 页面；它的体验方式是实验报告。先确认 Docker Milvus 已启动、`.env` 里有 `SILICONFLOW_API_KEY`，再运行 smoke。报告会写到 `.agent_work/temp/`，重点看 `milvus_siliconflow / merged_top30` 和 `milvus_siliconflow / vector_only_top12` 两组数字：前者判断当前系统是否受益，后者判断 embedding 模型本身是否更强。
