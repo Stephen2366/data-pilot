@@ -108,7 +108,7 @@
 - 每个模块都必须能独立学习、实现、验证和复盘；测试、smoke、README 小修跟随对应功能模块，不单独拆模块。
 - 每个模块开始时在 `.agent_work/temp/m<module>-notes.md` 写 5-8 条极短 checklist，开发中同步记录关键决策、踩坑和验证素材。
 - 每个模块完成后先跑本模块验收门，再用 `finish-module` 收工整理；用户人工检查后再跑 `accept-module` 验收。
-- 涉及降级、技术选型变更、模块边界变更、验收标准变更时，先在 `AI_CONTEXT.md`「补充记录」写清原因、迁移风险、回切条件，再问用户确认。
+- 涉及降级、技术选型变更、模块边界变更、验收标准变更时，先在 `AI_CONTEXT.md`「变更记录」写清原因、迁移风险、回切条件，再问用户确认。
 - 默认 TDD：先写失败测试，再实现最小功能，再跑聚焦测试和必要回归。
 
 ## 目录与文件规划
@@ -151,7 +151,7 @@
 | `tests/test_phase3a_pipeline.py` | 新建 | M11 | 强制新 pipeline、trace_steps、SQL Guard 集成测试 |
 | `scripts/smoke_phase3a_text2sql.py` | 新建 | M12 | 阶段三A 本地 smoke，一键跑 10 条 formal、16 条 challenge、32 条 diagnostic 和对照报告 |
 | `README.md` | 修改 | M12 | 阶段三A 入口、命令、能力边界和 Milvus 实际状态 |
-| `docs/AI_CONTEXT.md` | 修改 | 每模块 | 当前状态、技术档案、补充记录 |
+| `docs/AI_CONTEXT.md` | 修改 | 每模块 | 当前状态、变更记录 |
 | `docs/dev-log.md` | 修改 | 每模块 | 面向用户的学习复盘 |
 
 ## 模块划分说明
@@ -217,7 +217,7 @@
 - [ ] [顺序] 运行旧链路 baseline | 输入：当前 `/api/query` | 输出：`eval/reports/phase3a-baseline.md` 和 `.agent_work/temp/phase3a-baseline-traces.jsonl`
 - [ ] [顺序] 运行旧链路 challenge baseline | 输入：当前 `/api/query` | 输出：`eval/reports/phase3a-challenge-baseline.md` 和 `.agent_work/temp/phase3a-challenge-baseline-traces.jsonl`
 - [ ] [并行] 更新 `docs/AI_CONTEXT.md`「当前状态」 | 输入：M8 进度 | 输出：当前阶段计划文件指向 `docs/phase3a-plan.md`，当前模块更新为 M8
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 模块技术档案和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 变更记录和 `docs/dev-log.md`
 
 ### 验收门
 

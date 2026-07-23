@@ -1,14 +1,14 @@
 # DataPilot AI Context（技术档案）
 
-> 续接任务、查 bug 读这个。记录 git 和代码里查不到的信息：为什么这么做、验证过什么、有什么坑等。硬约束见 CLAUDE.md/AGENTS.md（自动加载），任务见当前阶段计划文件（现指向见下方「当前状态」），均不在此重复。用户学习复盘见 dev-log.md。「当前状态」「已知的坑」保持最新；「模块技术档案」「补充记录」只追加不改写。
+> 续接任务、查 bug 读这个。记录 git 和代码里查不到的信息：为什么这么做、验证过什么、有什么坑等。硬约束见 CLAUDE.md/AGENTS.md（自动加载），任务见当前阶段计划文件（现指向见下方「当前状态」），均不在此重复。用户学习复盘见 dev-log.md。「当前状态」「已知的坑」「变更记录」保持最新；「历史档案」「历史补充」是 2026-07-24 之前的旧记录，只查不改。
 
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：M11 新 Text2SQL Pipeline 与 Trace Steps（待开工，需先验收 M10）
+- 当前模块：M11 新 Text2SQL Pipeline 与 Trace Steps（待开工）
 - 下一模块：M12 对照报告与阶段收尾
-- 上一模块验收：Phase 3A M10 未验收（待 accept-module）
-- 阻塞项：无；M10 QueryPlanStep 与自检已完成收工整理，进入 M11 前按流程先跑 accept-module
+- 上一模块验收：Phase 3A M10 已验收（2026-07-24，报告 accept-M10-20260724.md）
+- 阻塞项：无
 - 更新时间：2026-07-24
 
 ## 当前技术选型快照
@@ -31,7 +31,12 @@
 - DB comment 在 PowerShell 离线 SQL 输出中乱码；在线迁移和建表正常，无害。如需导出 SQL文件，再统一处理输出编码或将 DB comment 改为 ASCII（M1）
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
-## 模块技术档案（新的在上）
+## 变更记录（新的在上）
+
+### M10 QueryPlanStep 与自检 验收通过（2026-07-24）
+accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 63 passed），报告 `accept-M10-20260724.md`。⚠️ 目录地图 `engine/schema_retrieval/` 漏登待补。后续可进入 M11。
+
+## 历史档案（2026-07-24 冻结）
 
 ### Phase 3A M10 QueryPlanStep 与自检（2026-07-24）
 
@@ -354,9 +359,9 @@
 - 验证快照：pytest 5 passed；`Settings()` 能读 `.env` 且 `DATABASE_URL` 指向 `datapilot_dev`；`pymysql` 可导入
 - 遗留：已由 M1 完成（ORM、Alembic、seed）
 
-## 补充记录（小修补，新的在上）
+## 历史补充（2026-07-24 冻结）
 
-- 2026-07-24 dev-log M9.1/M9.2 章节合并：按用户要求将两个实验复盘合并为一个“可选 Milvus + SiliconFlow Embedding”章节，补充合并后主线口径（默认 in-memory，不强制 Milvus/联网 API）、使用时机和注意事项；未改代码。
+- 2026-07-24 dev-log M9.1/M9.2 章节合并：按用户要求将两个实验复盘合并为一个”可选 Milvus + SiliconFlow Embedding”章节，补充合并后主线口径（默认 in-memory，不强制 Milvus/联网 API）、使用时机和注意事项；未改代码。
 - 2026-07-23 M9 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 50 passed），报告 `accept-M9-20260723.md`。后续可进入 M10 QueryPlanStep 与自检。
 
 - 2026-07-23 Phase 3A plan P2 增强取舍：按用户补充建议更新 `docs/phase3a-plan.md`，把聚合函数 × 列类型校验登记为 M10 P2 可选增强，`SchemaDocument.metadata` 可选保留 `data_type`；增加 `QueryPlan.to_human_explanation()` 作为 trace/report/dev-log 可读解释预留；暂不把 `display_type` 放入 QueryPlanStep 执行字段，最终展示仍归 M11 `chart_decision`。仅文档，未跑测试

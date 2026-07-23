@@ -95,5 +95,5 @@ tests/                  # pytest 测试
 - 「当前状态」含「上一模块验收」字段（finish-module 收工时置「未验收」，accept-module 通过后改「已验收」）。每次任务开始读「当前状态」时一并核对：若要开始下一模块开发而上一模块仍是「未验收」，先提醒用户运行 accept-module，经用户确认后再动工。
 - `dev-log.md`（学习复盘）：面向用户，模块故事 + 新概念 + 面试讲法。
 - 两者的详细模板和写作要求见 `finish-module` skill，模块完成后才调用该 skill 记录 `AI_CONTEXT.md` 和 `dev-log.md`。
-- 开发中遇到关键决策/踩坑/验证命令/临时取舍，随手记入 `AI_CONTEXT.md`「补充记录」或 `.agent_work/temp/<module>-notes.md`，不要求格式——目的是给 `finish-module` skill 留素材。
-- 配置修正、文档调整、增改注释等小修复，在回复"完成"前先更新 AI_CONTEXT「补充记录」。
+- 开发中遇到关键决策/踩坑/验证命令/临时取舍，随手记入 `AI_CONTEXT.md`「变更记录」或 `.agent_work/temp/<module>-notes.md`，不要求格式——目的是给 `finish-module` skill 留素材。
+- 配置修正、文档调整、增改注释等小修复，在回复"完成"前先更新 AI_CONTEXT「变更记录」。
