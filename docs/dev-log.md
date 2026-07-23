@@ -787,18 +787,20 @@ python -m streamlit run demo\streamlit_app.py
 
 ### 面试怎么讲
 
-Phase 2.7 可以讲成“我为了让 Text2SQL 项目从 demo 走向真实业务复杂度，专门升级了数据库底座”。原来只有 7 张表，Agent 很容易靠全量 schema prompt 硬猜；升级后有 **14 张物理表、1 万级订单、1.8 万级订单明细、多对多优惠券、递归类目、SCD 价格历史、行为漏斗和宽表快照**。我还把固定业务事实和数据质量彩蛋写进确定性 seed，并用 Alembic 管理可逆迁移。这样后续做 Schema Retriever、JoinPath 和 QueryPlanStep 时，不是凭感觉优化 prompt，而是在一套可复现的新库上验证选表、Join、指标口径和安全边界喵
+Phase 2.7 可以讲成”我为了让 Text2SQL 项目从 demo 走向真实业务复杂度，专门升级了数据库底座”。原来只有 7 张表，Agent 很容易靠全量 schema prompt 硬猜；升级后有 **14 张物理表、1 万级订单、1.8 万级订单明细、多对多优惠券、递归类目、SCD 价格历史、行为漏斗和宽表快照**。我还把固定业务事实和数据质量彩蛋写进确定性 seed，并用 Alembic 管理可逆迁移。这样后续做 Schema Retriever、JoinPath 和 QueryPlanStep 时，不是凭感觉优化 prompt，而是在一套可复现的新库上验证选表、Join、指标口径和安全边界喵
+
+**审查后 polish**：Phase 2.7 验收后，外部 AI 审查指出几处 plan v5 与实现之间的口径偏差——`orders_wide` 缺 `user_role/primary_product_price/item_count/refund_count/total_refund/has_refund/updated_at` 七个字段、`coupons` 缺 `ix_valid_range` 复合索引、`product_price_history` 缺 `change_reason`。通过独立的 `20260722_0003` migration 补齐，不改链路、不改旧字段名、不扩大范围。面试可以讲：**plan 和实现有偏差时不是默默跳过，而是用独立 migration 补齐——Alembic 历史清晰可追溯，后续接手的人看到 `0003` 就知道这是”审查后补齐的口径”，不会和 `0002` 的核心升级混在一起。**
 
 ### 验证与下一步
 
-- 验证：真实 MySQL 完整跑过 `alembic downgrade 20260717_0001` → `alembic upgrade head` → `python -m scripts.seed_data --reset`；最终 `alembic current` 为 `20260722_0002 (head)`，`alembic check` 无新增操作。
+- 验证：真实 MySQL 完整跑过 `alembic downgrade 20260717_0001` → `alembic upgrade head` → `python -m scripts.seed_data --reset`；最终 `alembic current` 为 `20260722_0003 (head)`，`alembic check` 无新增操作。
 - 自动化：全量 pytest **31 passed, 1 warning**；M6 smoke **6/6 passed**；`git diff --check` 无 whitespace error，仅 Windows CRLF 提示。
-- 下一步：Phase 2.7 已验收；随后执行了 Phase 2.7.1 数据库 polish 补强，再进入 Phase 3A M8 baseline。
+- 下一步：进入 Phase 3A M8 回归基线冻结。
 
 可复制验证命令：
 
 ```powershell
-# 查看当前数据库迁移版本。预期：20260722_0002 (head)。
+# 查看当前数据库迁移版本。预期：20260722_0003 (head)。
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 
 # 检查 ORM metadata 与真实 MySQL 是否一致。预期：No new upgrade operations detected.
@@ -826,35 +828,6 @@ python -m uvicorn app.main:app --reload
 ```
 
 打开 `http://127.0.0.1:8000/docs` 后，可以继续用 `POST /api/query` 测阶段二旧问题，例如”2026年6月本月GMV是多少？”。大致结果：`safety_status=passed`，`chart_spec` 是单指标柱图，GMV 会变成新库的 **11285752.0**。如果测”各渠道订单量是多少？”，仍会返回 Mobile App 等渠道结果，说明旧链路在新库上保持兼容。
-
-## ★ Phase 2.7.1 数据库 polish（2026-07-22）
-
-**简述**：Phase 2.7 验收后，根据外部 AI 代码审查意见做了一轮低扰动数据库口径补齐——不改链路、不重开 Phase 3A M8，只把 plan v5 与实现之间的偏差修干净。
-
-### 这次做了什么
-
-Phase 2.7 把 7 表升级到了 14 张物理表，但外部审查后发现几处 plan v5 写了但代码没完全落地的口径：`orders_wide` 缺少 `user_role` / `primary_product_price` / `item_count` / `refund_count` / `total_refund` / `has_refund` / `updated_at` 七个字段；`coupons` 缺少 `ix_valid_range` 复合索引；`product_price_history` 缺少 `change_reason` 字段。
-
-这次通过一条干净的 `20260722_0003` migration 补齐了这些口径。不改旧字段名、不改链路逻辑、不重跑全量 seed（只更新了 seed 中宽表字段的生成逻辑）。同步更新了 4 份 `schema_desc/*.md` 和 `database-current-state.md`，让文档与真实 DDL 对齐。
-
-### 新概念
-
-无新增概念。本轮是 polish，不是新模块。
-
-### 设计要点
-
-- **补字段不重命名**：`orders_wide` 保留 `product_name/category/user_status` 等阶段二兼容列，新字段只追加不替换，确保旧 API、M6 smoke 和 eval case 不受影响。
-- **`change_reason` vs `price_source` 不混用**：前者是业务调价原因（如”新春清仓”），后者是数据来源元数据（如”seed/import”），字段职责分开。
-- **polish 不扩大范围**：`resources.py` docstring 位置等 cosmetic issue 已知但不在此轮处理，控制在 3 个 ORM 模型 + 1 条 migration + seed + 文档。
-
-### 面试怎么讲
-
-这一轮虽然改动量小，但体现了一个后端工程习惯：**plan 和实现之间有偏差时，不是默默跳过，而是用一条独立的 migration 把口径补齐**。这样做的好处是 Alembic 历史清晰可追溯，后续接手的人（或 AI）看到 `0003` 就知道”这是审查后补齐的口径”，不会和 `0002` 的核心升级混在一起。
-
-### 验证与下一步
-
-- 验证：聚焦 pytest `tests/test_m1_models.py tests/test_database_upgrade.py` 7 passed；全量 pytest 31 passed, 1 warning；`alembic current` = `20260722_0003 (head)`，`alembic check` 无新增操作；seed reset 后 14 表行数和固定事实保持稳定。
-- 下一步：进入 Phase 3A M8 回归基线冻结。
 
 ## ★ Phase 3A M8 回归基线冻结（2026-07-22）
 

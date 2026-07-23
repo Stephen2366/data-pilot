@@ -5,10 +5,10 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：Phase 3A M9 Schema Retrieval 与 JoinPath（已完成，待验收）
-- 下一模块：M10 QueryPlanStep 与自检
-- 上一模块验收：Phase 3A M9 未验收（待 accept-module）
-- 阻塞项：无；M9 已完成 field / metric / relation docs、keyword + in-memory vector 两路召回、SchemaGraph / JoinPath；Milvus adapter 仅保留边界，未接真实服务
+- 当前模块：M10 QueryPlanStep 与自检（待开工）
+- 下一模块：M11 新 Text2SQL Pipeline 与 Trace Steps
+- 上一模块验收：Phase 3A M9 已验收（2026-07-23，accept-M9-20260723.md）
+- 阻塞项：无；M9 已验收通过，可进入 M10
 - 更新时间：2026-07-23
 
 ## 当前技术选型快照
@@ -281,6 +281,8 @@
 - 遗留：已由 M1 完成（ORM、Alembic、seed）
 
 ## 补充记录（小修补，新的在上）
+
+- 2026-07-23 M9 验收通过：accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 50 passed），报告 `accept-M9-20260723.md`。后续可进入 M10 QueryPlanStep 与自检。
 
 - 2026-07-23 Phase 3A plan P2 增强取舍：按用户补充建议更新 `docs/phase3a-plan.md`，把聚合函数 × 列类型校验登记为 M10 P2 可选增强，`SchemaDocument.metadata` 可选保留 `data_type`；增加 `QueryPlan.to_human_explanation()` 作为 trace/report/dev-log 可读解释预留；暂不把 `display_type` 放入 QueryPlanStep 执行字段，最终展示仍归 M11 `chart_decision`。仅文档，未跑测试
 
