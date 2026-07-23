@@ -8,12 +8,13 @@ from pathlib import Path
 
 import yaml
 
-from eval.run_eval import EvalCase, _score_case, load_cases, write_report
+from eval.run_eval import EvalCase, EvalResult, _score_case, load_cases, write_report
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PHASE3A_CASES = PROJECT_ROOT / "eval" / "cases" / "phase3a-regression.yaml"
 CHALLENGE_CASES = PROJECT_ROOT / "eval" / "cases" / "database-upgrade-challenge.yaml"
+DIAGNOSTIC_CASES = PROJECT_ROOT / "eval" / "cases" / "phase3a-diagnostic-benchmark.yaml"
 SMOKE_CASES = PROJECT_ROOT / "eval" / "cases" / "smoke.yaml"
 
 
@@ -68,6 +69,21 @@ def test_challenge_suite_is_superset_of_formal_regression() -> None:
     assert len(challenge_questions - formal_questions) == 6
     assert all("expected_metrics" in case for case in raw_challenge_cases)
     assert all(isinstance(case.expected_metrics, list) for case in challenge_cases)
+
+
+def test_challenge_cases_carry_diagnostic_capability_metadata() -> None:
+    """M8.5 的 32 条 capability summary 需要继承 challenge 16 条的能力标签。"""
+
+    cases = {case.case_id: case for case in load_cases(CHALLENGE_CASES)}
+
+    assert cases["db_core_001"].phase3a_capabilities == [
+        "schema_retrieval",
+        "query_plan",
+        "trace_steps",
+    ]
+    assert cases["db_hard_001"].phase3a_blocking is False
+    assert "manual_review" in cases["db_hard_001"].case_properties
+    assert cases["db_sec_001"].phase3a_capabilities == ["security_guard"]
 
 
 def test_score_case_returns_minimal_issue_tags() -> None:
@@ -178,8 +194,6 @@ def test_report_includes_issue_tags_and_sql(tmp_path: Path) -> None:
         },
         200,
     )
-    from eval.run_eval import EvalResult
-
     write_report(
         [
             EvalResult(
@@ -188,6 +202,7 @@ def test_report_includes_issue_tags_and_sql(tmp_path: Path) -> None:
                 reason=score.reason,
                 issue_tags=score.issue_tags,
                 review_required=score.review_required,
+                skipped_due_to_pipeline_mode=score.skipped_due_to_pipeline_mode,
                 status_code=200,
                 route="sql",
                 safety_status="passed",
@@ -195,6 +210,7 @@ def test_report_includes_issue_tags_and_sql(tmp_path: Path) -> None:
                 trace_id="trace-m8",
                 sql="SELECT product_name, category, status FROM products",
                 response_body={},
+                actual_pipeline_mode=case.pipeline_mode,
             )
         ],
         report_path,
@@ -205,3 +221,105 @@ def test_report_includes_issue_tags_and_sql(tmp_path: Path) -> None:
     assert "review_required" in report
     assert "trace-m8" in report
     assert "SELECT product_name, category, status FROM products" in report
+
+
+def test_diagnostic_extra_cases_keep_m8_5_shape() -> None:
+    """M8.5 只维护新增 16 条 extra case，不能复制 challenge 16 条。"""
+
+    payload = yaml.safe_load(DIAGNOSTIC_CASES.read_text(encoding="utf-8")) or {}
+    cases = list(payload.get("cases") or [])
+    ids = {case["id"] for case in cases}
+    challenge_ids = {case.case_id for case in load_cases(CHALLENGE_CASES)}
+
+    assert len(cases) == 16
+    assert ids.isdisjoint(challenge_ids)
+    assert {case["pipeline_mode"] for case in cases} == {"new_text2sql"}
+
+    for case in cases:
+        assert isinstance(case.get("phase3a_capabilities"), list)
+        assert case["phase3a_capabilities"]
+        assert isinstance(case.get("phase3a_blocking"), bool)
+        assert isinstance(case.get("check"), dict)
+        assert case["check"].get("type")
+
+
+def test_load_cases_merges_extra_files_and_keeps_source_file() -> None:
+    """runner 用 `--cases + --extra-cases` 拼成 32 条，并给每条保留来源文件。"""
+
+    cases = load_cases(CHALLENGE_CASES, extra_cases=[DIAGNOSTIC_CASES])
+
+    assert len(cases) == 32
+    assert len({case.case_id for case in cases}) == 32
+    assert cases[0].source_file == "eval/cases/database-upgrade-challenge.yaml"
+    assert cases[-1].source_file == "eval/cases/phase3a-diagnostic-benchmark.yaml"
+    assert any(case.case_id == "db_plan_001" for case in cases)
+
+
+def test_diagnostic_linked_and_multi_answer_cases_are_explicit() -> None:
+    """共享问题和多答案 case 要结构化标注，避免 M12 对照时口径漂移。"""
+
+    cases = {case.case_id: case for case in load_cases(CHALLENGE_CASES, extra_cases=[DIAGNOSTIC_CASES])}
+
+    linked = cases["db_plan_001"]
+    source = cases["db_multi_003"]
+    multi_answer = cases["db_schema_003"]
+
+    assert linked.linked_case_id == "db_multi_003"
+    assert linked.question == source.question
+    assert "SUM(order_amount)" in str(linked.expected_plan)
+    assert "SUM(o.order_amount)" in source.expected_sql
+
+    assert multi_answer.expected_tables_alternatives
+    assert multi_answer.check_type == "schema_context_match"
+    assert multi_answer.check.get("match_mode") == "any_alternative"
+
+
+def test_baseline_skips_new_pipeline_only_checks_without_counting_failure() -> None:
+    """旧链路 baseline 遇到 plan / trace / local schema 专属检查时要跳过，不伪装成失败。"""
+
+    case = {case.case_id: case for case in load_cases(DIAGNOSTIC_CASES)}["db_plan_001"]
+
+    score = _score_case(case, {}, 0, actual_pipeline_mode="baseline")
+
+    assert score.passed is False
+    assert score.skipped_due_to_pipeline_mode is True
+    assert score.issue_tags == ["skipped_due_to_pipeline_mode"]
+    assert score.reason == "skipped_due_to_pipeline_mode"
+
+
+def test_diagnostic_report_includes_source_mode_and_capability_summary(tmp_path: Path) -> None:
+    """M8.5 报告要能看出来源、实际 pipeline mode、skip 和 capability 覆盖。"""
+
+    case = {case.case_id: case for case in load_cases(DIAGNOSTIC_CASES)}["db_plan_001"]
+    report_path = tmp_path / "phase3a-diagnostic-baseline.md"
+    score = _score_case(case, {}, 0, actual_pipeline_mode="baseline")
+
+    write_report(
+        [
+            EvalResult(
+                case=case,
+                passed=score.passed,
+                reason=score.reason,
+                issue_tags=score.issue_tags,
+                review_required=score.review_required,
+                skipped_due_to_pipeline_mode=score.skipped_due_to_pipeline_mode,
+                status_code=0,
+                route=None,
+                safety_status=None,
+                error_type=None,
+                trace_id=None,
+                sql=None,
+                response_body={},
+                actual_pipeline_mode="baseline",
+            )
+        ],
+        report_path,
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "skipped_due_to_pipeline_mode: 1" in report
+    assert "## Capability Summary" in report
+    assert "source_file" in report
+    assert "configured_pipeline_mode" in report
+    assert "actual_pipeline_mode" in report
+    assert "phase3a-diagnostic-benchmark.yaml" in report

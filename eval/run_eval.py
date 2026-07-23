@@ -1,7 +1,8 @@
-"""M6 EvalOps-lite：读取 YAML 用例，调用 `/api/query`，输出 Markdown 评测报告。
+"""EvalOps-lite：读取 YAML 用例，调用 `/api/query`，输出 Markdown 评测报告。
 
-★ 这个模块不是完整评测平台，而是阶段二收尾用的最小闭环：case -> API -> AgentResponse
--> pass/fail/error_type。后续接独立 AgentEvalOps 时，可以复用 YAML 字段和报告口径。
+★ 这个模块不是完整评测平台，而是从阶段二 smoke 延伸到 Phase 3A diagnostic benchmark 的
+最小闭环：case -> API -> AgentResponse -> pass/fail/skipped/error_type。M8.5 只补多文件合并、
+pipeline_mode 覆盖和诊断报告字段，复杂 scorer / 历史库 / HTML 仪表盘仍留给独立 EvalOps。
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import json
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -40,8 +41,8 @@ DEFAULT_TRACE_PATH = PROJECT_ROOT / ".agent_work" / "temp" / "m6-eval-traces.jso
 class EvalCase:
     """一条 eval case 的稳定结构。
 
-    ★ M8 起同一个 loader 同时服务 M6 smoke 和 Phase 3A regression：旧 smoke 字段不能被新字段
-    反向绑架，新字段则先在数据结构里预留，方便 M9-M12 继续扩展。
+    ★ M8.5 起同一个 loader 同时服务 M6 smoke、Phase 3A regression 和 32 条 diagnostic：
+    旧 smoke 字段不能被新字段反向绑架，新字段则先在数据结构里预留，方便 M9-M12 继续扩展。
     """
 
     case_id: str
@@ -51,11 +52,24 @@ class EvalCase:
     expected_tables: list[str]
     expected_columns: list[str]
     expected_metrics: list[str]
-    expected_trace_steps: list[str]
+    expected_trace_steps: list[Any]
     pipeline_mode: str
     security_expectation: Literal["allow", "block"]
     check_type: str
     check_value: str
+    source_file: str = ""
+    phase3a_capabilities: list[str] = field(default_factory=list)
+    phase3a_blocking: bool = True
+    case_properties: list[str] = field(default_factory=list)
+    linked_case_id: str | None = None
+    expected_tables_alternatives: list[dict[str, Any]] = field(default_factory=list)
+    expected_plan: dict[str, Any] = field(default_factory=dict)
+    expected_plan_result: str = ""
+    expected_issue_tag: str = ""
+    expected_schema_context: dict[str, Any] = field(default_factory=dict)
+    security_subtype: str | None = None
+    expected_sql: str = ""
+    check: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -70,6 +84,7 @@ class EvalScore:
     reason: str
     issue_tags: list[str]
     review_required: bool = False
+    skipped_due_to_pipeline_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -81,6 +96,7 @@ class EvalResult:
     reason: str
     issue_tags: list[str]
     review_required: bool
+    skipped_due_to_pipeline_mode: bool
     status_code: int
     route: str | None
     safety_status: str | None
@@ -88,10 +104,33 @@ class EvalResult:
     trace_id: str | None
     sql: str | None
     response_body: dict[str, Any]
+    actual_pipeline_mode: str
 
 
-def load_cases(path: Path = DEFAULT_CASES_PATH) -> list[EvalCase]:
-    """从 YAML 加载 smoke cases。
+# 旧 baseline 无法真实验证的新链路检查类型。
+#
+# 这些 check 依赖 M9-M11 才会出现的 QueryPlan、局部 Schema 或 trace_steps。M8.5 如果硬判
+# 失败，会把“能力尚未实现”和“旧链路答错了”混在一起；硬判通过又会虚报能力，所以单独记 skipped。
+NEW_PIPELINE_ONLY_CHECKS = {
+    "plan_structure_match",
+    "plan_validation_blocked",
+    "schema_context_match",
+    "schema_context_size",
+    "trace_steps_complete",
+}
+
+
+def _source_file_label(path: Path) -> str:
+    """把 case 来源路径转成报告里稳定、跨机器可读的相对路径。"""
+
+    try:
+        return path.resolve().relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _load_cases_from_path(path: Path) -> list[EvalCase]:
+    """从单个 YAML 加载 cases，并把 M8.5 诊断字段保留下来。
 
     ★ 这里做轻量结构化转换，不重新定义字段口径；如果 YAML 缺字段，直接抛错提醒用例不完整。
     """
@@ -114,8 +153,40 @@ def load_cases(path: Path = DEFAULT_CASES_PATH) -> list[EvalCase]:
                 security_expectation=item.get("security_expectation", "allow"),
                 check_type=str(check.get("type", "contains")),
                 check_value=str(check.get("value", "")),
+                source_file=_source_file_label(path),
+                phase3a_capabilities=list(item.get("phase3a_capabilities") or []),
+                phase3a_blocking=bool(item.get("phase3a_blocking", True)),
+                case_properties=list(item.get("case_properties") or []),
+                linked_case_id=item.get("linked_case_id"),
+                expected_tables_alternatives=list(item.get("expected_tables_alternatives") or []),
+                expected_plan=dict(item.get("expected_plan") or {}),
+                expected_plan_result=str(item.get("expected_plan_result", "")),
+                expected_issue_tag=str(item.get("expected_issue_tag", "")),
+                expected_schema_context=dict(item.get("expected_schema_context") or {}),
+                security_subtype=item.get("security_subtype"),
+                expected_sql=str(item.get("expected_sql", "")),
+                check=dict(check),
             )
         )
+    return cases
+
+
+def load_cases(path: Path = DEFAULT_CASES_PATH, extra_cases: list[Path] | None = None) -> list[EvalCase]:
+    """加载主 case 文件，并可按顺序合并额外 case 文件。
+
+    ★ M8.5 不做 includes 语法，保持显式 `--cases + --extra-cases`：调用者一眼能看出
+    32 条 diagnostic benchmark 是由哪两个文件拼出来的。
+    """
+
+    paths = [path, *(extra_cases or [])]
+    cases: list[EvalCase] = []
+    seen_ids: set[str] = set()
+    for case_path in paths:
+        for case in _load_cases_from_path(case_path):
+            if case.case_id in seen_ids:
+                raise ValueError(f"duplicate eval case id: {case.case_id}")
+            seen_ids.add(case.case_id)
+            cases.append(case)
     return cases
 
 
@@ -168,12 +239,41 @@ def _body_text(body: dict[str, Any]) -> str:
     return json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def _score_case(case: EvalCase, body: dict[str, Any], status_code: int) -> EvalScore:
+def _should_skip_due_to_pipeline_mode(case: EvalCase, actual_pipeline_mode: str) -> bool:
+    """判断旧链路是否无法验证这条 case 的核心检查。
+
+    M8.5 的核心边界是“先把诊断骨架落地”，不是让旧 pipeline 硬装成新 pipeline。plan、
+    trace_steps、local schema 这些字段只有 M9-M11 后才有真实证据，所以 baseline 下只能记
+    skipped，不能算失败或成功。
+    """
+
+    if actual_pipeline_mode != "baseline":
+        return False
+    if case.check_type in NEW_PIPELINE_ONLY_CHECKS:
+        return True
+    return bool(case.expected_plan or case.expected_schema_context or case.expected_trace_steps)
+
+
+def _score_case(
+    case: EvalCase,
+    body: dict[str, Any],
+    status_code: int,
+    actual_pipeline_mode: str | None = None,
+) -> EvalScore:
     """按 EvalOps-lite 最小评分规则判断单条 case。
 
     评分只覆盖接口成功、route、表/列命中、安全期望和简单内容检查；它故意不做复杂 SQL
     语义判等，避免 M8 baseline 扩大成完整评测平台。
     """
+
+    actual_mode = actual_pipeline_mode or case.pipeline_mode
+    if _should_skip_due_to_pipeline_mode(case, actual_mode):
+        return EvalScore(
+            False,
+            "skipped_due_to_pipeline_mode",
+            ["skipped_due_to_pipeline_mode"],
+            skipped_due_to_pipeline_mode=True,
+        )
 
     if status_code != 200:
         return EvalScore(False, f"http_status={status_code}", ["unexpected_error"])
@@ -228,20 +328,47 @@ def _score_case(case: EvalCase, body: dict[str, Any], status_code: int) -> EvalS
     return EvalScore(True, "ok", [])
 
 
-def run_cases(cases: list[EvalCase], client: TestClient) -> list[EvalResult]:
+def run_cases(
+    cases: list[EvalCase],
+    client: TestClient,
+    pipeline_mode: str | None = None,
+) -> list[EvalResult]:
     """逐条调用 `/api/query` 并收集 pass / fail / error_type。"""
 
     results: list[EvalResult] = []
     for case in cases:
+        actual_pipeline_mode = pipeline_mode or case.pipeline_mode
+        if _should_skip_due_to_pipeline_mode(case, actual_pipeline_mode):
+            score = _score_case(case, {}, 0, actual_pipeline_mode=actual_pipeline_mode)
+            results.append(
+                EvalResult(
+                    case=case,
+                    passed=score.passed,
+                    reason=score.reason,
+                    issue_tags=score.issue_tags,
+                    review_required=score.review_required,
+                    skipped_due_to_pipeline_mode=score.skipped_due_to_pipeline_mode,
+                    status_code=0,
+                    route=None,
+                    safety_status=None,
+                    error_type=None,
+                    trace_id=None,
+                    sql=None,
+                    response_body={},
+                    actual_pipeline_mode=actual_pipeline_mode,
+                )
+            )
+            continue
+
         request_body: dict[str, Any] = {"question": case.question, "user_role": case.user_role}
-        if case.pipeline_mode != "baseline":
+        if actual_pipeline_mode != "baseline":
             request_body["force_new_pipeline"] = True
         response = client.post(
             "/api/query",
             json=request_body,
         )
         body = response.json()
-        score = _score_case(case, body, response.status_code)
+        score = _score_case(case, body, response.status_code, actual_pipeline_mode=actual_pipeline_mode)
         results.append(
             EvalResult(
                 case=case,
@@ -249,6 +376,7 @@ def run_cases(cases: list[EvalCase], client: TestClient) -> list[EvalResult]:
                 reason=score.reason,
                 issue_tags=score.issue_tags,
                 review_required=score.review_required,
+                skipped_due_to_pipeline_mode=score.skipped_due_to_pipeline_mode,
                 status_code=response.status_code,
                 route=body.get("route"),
                 safety_status=body.get("safety_status"),
@@ -256,6 +384,7 @@ def run_cases(cases: list[EvalCase], client: TestClient) -> list[EvalResult]:
                 trace_id=body.get("trace_id"),
                 sql=body.get("sql"),
                 response_body=body,
+                actual_pipeline_mode=actual_pipeline_mode,
             )
         )
     return results
@@ -264,8 +393,10 @@ def run_cases(cases: list[EvalCase], client: TestClient) -> list[EvalResult]:
 def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) -> None:
     """把评测结果写成 Markdown，方便 README / dev-log / 验收报告引用。"""
 
-    passed_count = sum(result.passed for result in results)
-    failed_count = len(results) - passed_count
+    passed_count = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in results)
+    skipped_count = sum(result.skipped_due_to_pipeline_mode for result in results)
+    failed_count = len(results) - passed_count - skipped_count
+    review_count = sum(result.review_required for result in results)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines = [
         "# DataPilot EvalOps-lite Latest Report",
@@ -274,22 +405,76 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
         f"- total: {len(results)}",
         f"- passed: {passed_count}",
         f"- failed: {failed_count}",
+        f"- skipped_due_to_pipeline_mode: {skipped_count}",
+        f"- review_required: {review_count}",
         "",
-        "| id | type | pass | reason | issue_tags | review_required | safety | error_type | trace_id |",
-        "|---|---|---:|---|---|---|---|---|---|",
+        "## Blocking Summary",
+        "",
+        "| group | total | passed | failed | skipped | review_required |",
+        "|---|---:|---:|---:|---:|---:|",
     ]
+    for label, expected_blocking in [("blocking", True), ("non_blocking", False)]:
+        group = [result for result in results if result.case.phase3a_blocking is expected_blocking]
+        group_passed = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in group)
+        group_skipped = sum(result.skipped_due_to_pipeline_mode for result in group)
+        group_failed = len(group) - group_passed - group_skipped
+        group_review = sum(result.review_required for result in group)
+        lines.append(f"| {label} | {len(group)} | {group_passed} | {group_failed} | {group_skipped} | {group_review} |")
+
+    capability_names = sorted(
+        {
+            capability
+            for result in results
+            for capability in result.case.phase3a_capabilities
+        }
+    )
+    if capability_names:
+        lines.extend(
+            [
+                "",
+                "## Capability Summary",
+                "",
+                "| capability | coverage | passed | failed | skipped | review_required |",
+                "|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for capability in capability_names:
+            group = [result for result in results if capability in result.case.phase3a_capabilities]
+            group_passed = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in group)
+            group_skipped = sum(result.skipped_due_to_pipeline_mode for result in group)
+            group_failed = len(group) - group_passed - group_skipped
+            group_review = sum(result.review_required for result in group)
+            lines.append(
+                f"| {capability} | {len(group)} | {group_passed} | {group_failed} | {group_skipped} | {group_review} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Case Summary",
+            "",
+            "| id | type | pass | skipped | reason | issue_tags | review_required | safety | error_type | trace_id | source_file | configured_pipeline_mode | actual_pipeline_mode | phase3a_blocking | capabilities |",
+            "|---|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for result in results:
         lines.append(
-            "| {id} | {type} | {passed} | {reason} | {issue_tags} | {review_required} | {safety} | {error_type} | {trace_id} |".format(
+            "| {id} | {type} | {passed} | {skipped} | {reason} | {issue_tags} | {review_required} | {safety} | {error_type} | {trace_id} | {source_file} | {configured_pipeline_mode} | {actual_pipeline_mode} | {blocking} | {capabilities} |".format(
                 id=result.case.case_id,
                 type=result.case.task_type,
                 passed="yes" if result.passed else "no",
+                skipped="yes" if result.skipped_due_to_pipeline_mode else "no",
                 reason=result.reason,
                 issue_tags=",".join(result.issue_tags) or "-",
                 review_required="yes" if result.review_required else "no",
                 safety=result.safety_status,
                 error_type=result.error_type,
                 trace_id=result.trace_id,
+                source_file=result.case.source_file,
+                configured_pipeline_mode=result.case.pipeline_mode,
+                actual_pipeline_mode=result.actual_pipeline_mode,
+                blocking="yes" if result.case.phase3a_blocking else "no",
+                capabilities=",".join(result.case.phase3a_capabilities) or "-",
             )
         )
     lines.extend(["", "## Case Details", ""])
@@ -300,7 +485,13 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
                 f"### {result.case.case_id} {result.case.question}",
                 "",
                 f"- user_role: {result.case.user_role}",
-                f"- pipeline_mode: {result.case.pipeline_mode}",
+                f"- source_file: {result.case.source_file}",
+                f"- configured_pipeline_mode: {result.case.pipeline_mode}",
+                f"- actual_pipeline_mode: {result.actual_pipeline_mode}",
+                f"- phase3a_capabilities: {', '.join(result.case.phase3a_capabilities) or '-'}",
+                f"- phase3a_blocking: {'yes' if result.case.phase3a_blocking else 'no'}",
+                f"- case_properties: {', '.join(result.case.case_properties) or '-'}",
+                f"- security_subtype: {result.case.security_subtype or '-'}",
                 f"- expected_metrics: {', '.join(result.case.expected_metrics) or '-'}",
                 f"- status_code: {result.status_code}",
                 f"- route: {result.route}",
@@ -308,6 +499,7 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
                 f"- error_type: {result.error_type}",
                 f"- issue_tags: {', '.join(result.issue_tags) or '-'}",
                 f"- review_required: {'yes' if result.review_required else 'no'}",
+                f"- skipped_due_to_pipeline_mode: {'yes' if result.skipped_due_to_pipeline_mode else 'no'}",
                 f"- trace_id: {result.trace_id}",
                 "",
                 "```sql",
@@ -325,23 +517,29 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Run DataPilot M6 EvalOps-lite smoke cases.")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
+    parser.add_argument("--extra-cases", type=Path, action="append", default=[])
+    parser.add_argument("--pipeline-mode", choices=["baseline", "new_text2sql"], default=None)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--trace", type=Path, default=DEFAULT_TRACE_PATH)
     args = parser.parse_args(argv)
 
-    cases = load_cases(args.cases)
+    cases = load_cases(args.cases, extra_cases=args.extra_cases)
     with seeded_api_client(args.trace) as client:
-        results = run_cases(cases, client)
+        results = run_cases(cases, client, pipeline_mode=args.pipeline_mode)
     write_report(results, args.report)
 
-    passed_count = sum(result.passed for result in results)
+    passed_count = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in results)
+    skipped_count = sum(result.skipped_due_to_pipeline_mode for result in results)
     print(f"report={args.report}")
     print(f"trace_path={args.trace}")
     print(f"passed={passed_count}/{len(results)}")
+    print(f"skipped_due_to_pipeline_mode={skipped_count}/{len(results)}")
     for result in results:
         print(
             f"{result.case.case_id}: passed={result.passed} reason={result.reason} "
             f"issue_tags={','.join(result.issue_tags) or '-'} review_required={result.review_required} "
+            f"skipped_due_to_pipeline_mode={result.skipped_due_to_pipeline_mode} "
+            f"actual_pipeline_mode={result.actual_pipeline_mode} "
             f"safety={result.safety_status} "
             f"error_type={result.error_type} trace_id={result.trace_id}"
         )

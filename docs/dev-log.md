@@ -954,3 +954,87 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cas
 **本地启动体验：**
 
 本模块暂无新的交互页面；它的交互方式是评测报告。运行上面的 baseline 命令后，打开 `eval/reports/phase3a-baseline.md` 和 `eval/reports/phase3a-challenge-baseline.md`，可以看到每条 case 的 pass/fail、review_required、issue tag、trace_id 和实际 SQL。这两个报告就是后续 M12 新旧链路对照的旧链路输入。
+
+## ★ M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线（2026-07-23）
+
+**简述**：这次把 Phase 3A 的诊断评测从 16 条 challenge 扩成 **32 条 diagnostic benchmark**，像给后续 Text2SQL 改造装了一块更细的仪表盘。
+
+### 这次做了什么
+
+M8 已经回答了“旧链路在 10 条 formal 和 16 条 challenge 上表现如何”，但它还不够说明“后续新链路到底在哪些能力上进步”。M8.5 做的就是补这层诊断骨架：保留 `database-upgrade-challenge.yaml` 作为 **16 条 challenge 唯一源**，新建 `phase3a-diagnostic-benchmark.yaml` 只写新增 **16 条 capability-focused case**，然后让 runner 通过 `--cases + --extra-cases` 拼成 32 条。
+
+runner 也做了最小扩展：每条结果记录 `source_file`、`configured_pipeline_mode`、`actual_pipeline_mode`，报告里增加 **capability summary**、blocking/non-blocking 统计、skipped 和 review_required。旧链路无法验证的 plan / trace / local schema 检查不会被硬判失败，而是标成 **skipped_due_to_pipeline_mode**，这样报告既诚实，又不会把“能力还没实现”和“旧链路答错了”混成一团。
+
+真实旧链路 diagnostic baseline 是：**32 条 total，12 passed，10 failed，10 skipped，3 review_required**。这不是为了追求好看的分数，而是给 M9-M12 留一份可对照的失败地图。
+
+### 新概念
+
+- **Diagnostic Benchmark**：不是普通“多问几道题”，而是按能力维度设计的评测集。它关心的是 **schema_retrieval、join_path、query_plan、local_schema_prompt、trace_steps、security_guard** 分别有没有证据。
+- **source_file**：记录一条 case 来自哪个 YAML。因为 32 条不是复制到一个大文件，而是由 **challenge 16 + extra 16** 组合出来的，来源字段可以防止以后找错维护位置。
+- **configured_pipeline_mode / actual_pipeline_mode**：case 自己推荐用什么链路是一回事，runner 实际用什么链路是另一回事。M8.5 用旧链路跑 baseline，所以很多 extra case 的 configured 是 `new_text2sql`，actual 是 `baseline`。
+- **skipped_due_to_pipeline_mode**：旧链路没有 QueryPlan、局部 Schema 和 trace_steps，不能假装这些检查通过，也不应该把它们当失败。skip 是一种更诚实的诊断状态。
+
+### 关键文件
+
+- `eval/cases/phase3a-diagnostic-benchmark.yaml`：新增 16 条 extra case，只维护 proposal v5 的 capability-focused 题。
+- `eval/cases/database-upgrade-challenge.yaml`：16 条 challenge 唯一源，本次只补 capability / blocking 等诊断元数据。
+- `eval/run_eval.py`：支持 `--extra-cases`、pipeline mode 覆盖、skip 评分和 diagnostic Markdown 摘要。
+- `tests/test_phase3a_eval.py`：守住 32 条合并、case id 唯一、linked case、多答案 case、skip 规则和报告字段。
+- `eval/reports/phase3a-diagnostic-baseline.md`：旧链路跑 32 条 diagnostic 的真实 baseline。
+
+### 代码阅读路线
+
+1. **先看题本分层**：`eval/cases/database-upgrade-challenge.yaml` 和 `eval/cases/phase3a-diagnostic-benchmark.yaml`
+   重点看两个文件的职责差异：challenge 文件继续维护前 16 条；diagnostic 文件只维护新增 16 条。新增 case 里可以重点读 `db_plan_001`、`db_schema_003`、`db_prompt_001` 和 `db_trace_001`，它们分别代表 **linked case、多答案、局部 Schema 分层和 trace step 完整性**。
+
+2. **再看加载入口**：`eval/run_eval.py`
+   从 `load_cases()` 读起。它把主文件和 extra 文件按顺序合并，并用 case id 去重。这里的关键设计是 **显式组合，而不是隐式 includes**：运行命令里能直接看见 32 条由哪两个文件拼出来，后续维护不容易迷路。
+
+3. **然后看评分边界**：`eval/run_eval.py`
+   看 `_should_skip_due_to_pipeline_mode()` 和 `_score_case()`。前者专门判断旧 baseline 无法验证的新链路检查；后者仍保留 M8 的轻量结果层评分。重点理解这里不是完整 scorer，而是给 M12 对照报告准备稳定状态。
+
+4. **最后看报告输出**：`eval/run_eval.py` 和 `eval/reports/phase3a-diagnostic-baseline.md`
+   `write_report()` 会先写总览，再写 blocking summary、capability summary 和 case summary。读报告时先看 capability summary，再看 `db_sec_003 / db_sec_004` 这类失败明细，它们说明旧链路在哪些安全意图上还不能稳定触发 SQL Guard。
+
+32 条 diagnostic baseline 的数据流向：
+
+`database-upgrade-challenge.yaml + phase3a-diagnostic-benchmark.yaml`
+→ `EvalCase(source_file, capabilities, pipeline_mode)`
+→ baseline `/api/query` 或 skip
+→ `EvalScore`
+→ `EvalResult(actual_pipeline_mode)`
+→ `phase3a-diagnostic-baseline.md`
+
+### 设计要点
+
+- **不复制 challenge 16 条**：复制会制造第二份真相，后续改一个问题可能漏另一个文件。M8.5 选择多文件组合，让维护边界更干净。
+- **skip 不是失败也不是通过**：QueryPlan、local schema、trace_steps 还没实现时，旧链路只能告诉我们“这类检查当前不可验证”。这比把新能力虚报成失败/通过都更稳。
+- **challenge 补元数据，不改旧题**：为了让 32 条 capability summary 完整，本次给 challenge case 补了能力标签和 blocking 属性，但没有改问题、expected_sql、check，也没有重写 M8 baseline 报告。
+- **报告继续是 Markdown**：M8.5 没有做 HTML、历史库或复杂 scorer。它先把最小结构跑通，完整 EvalOps 平台仍留给后续独立项目。
+
+### 面试怎么讲
+
+M8.5 可以讲成“我没有等新 pipeline 写完才想怎么评估，而是先把诊断基准设计落地”。我把原来的 16 条 challenge 和新增 16 条 capability case 组合成 32 条 benchmark，并在 runner 里区分 configured pipeline 和 actual pipeline。旧链路不能验证 QueryPlan、local schema、trace_steps 时，我没有把它们算失败，而是标记 skipped；同时报告按 capability 汇总，能清楚看到旧链路在 schema_retrieval、join_path、query_plan、安全边界上的真实状态。这能体现我做 Agent / Text2SQL 项目时，不只是写 prompt，而是会先设计可复现、可诊断、可对照的评测闭环喵
+
+### 验证与下一步
+
+- 验证：`tests/test_phase3a_eval.py` **13 passed**；旧 smoke 兼容 **6/6 passed**；全量 pytest **44 passed**；diagnostic baseline **12/32 passed、10 failed、10 skipped、3 review_required**。
+- warning：Starlette TestClient / httpx deprecation 是既有 warning；`git diff --check` 只有 Windows LF→CRLF 提示。
+- 下一步：用户人工检查后可调用 `accept-module` 验收 M8.5；通过后进入 M9 Schema Retrieval 与 JoinPath。
+
+可复制验证命令：
+
+```powershell
+# 跑 M8.5 eval 契约测试。预期：13 passed，可能有既有 TestClient warning。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8_5-tmp
+
+# 生成 32 条 diagnostic 旧链路 baseline。预期：total=32，passed=12，failed=10，skipped=10。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pipeline-mode baseline --cases eval/cases/database-upgrade-challenge.yaml --extra-cases eval/cases/phase3a-diagnostic-benchmark.yaml --report eval/reports/phase3a-diagnostic-baseline.md --trace .agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl
+
+# 跑全量回归。预期：44 passed，可能有既有 TestClient warning。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8_5-full
+```
+
+**本地启动体验：**
+
+本模块暂无新的 Swagger 或前端页面；它的交互入口是评测报告。运行 diagnostic baseline 命令后，打开 `eval/reports/phase3a-diagnostic-baseline.md`，先看顶部 total / passed / failed / skipped，再看 **Capability Summary**，最后挑几条 Case Details 看实际 SQL 和 issue tag。这个报告就是后续 M12 新旧链路对照的旧链路诊断输入。

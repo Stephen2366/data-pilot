@@ -1,0 +1,297 @@
+# Phase 3A M8.5 diagnostic benchmark extra cases.
+# 这里只维护 proposal v5 新增的 16 条 capability-focused case；challenge 16 条继续以
+# `database-upgrade-challenge.yaml` 为唯一源，由 runner 通过 `--cases + --extra-cases` 合并。
+cases:
+  - id: db_schema_002
+    task_type: schema_retrieval
+    pipeline_mode: new_text2sql
+    question: 2026 年 6 月已支付订单的实收金额（actual_amount 总和）是多少？
+    user_role: ops
+    expected_tables: [orders]
+    expected_columns: [actual_amount]
+    expected_metrics: [net_revenue]
+    phase3a_capabilities: [schema_retrieval, query_plan]
+    phase3a_blocking: true
+    security_expectation: allow
+    check: {type: metric_mapping_match}
+
+  - id: db_schema_003
+    task_type: schema_retrieval
+    pipeline_mode: new_text2sql
+    question: 用看板口径查看 2026 年 6 月各渠道 GMV
+    user_role: ops
+    expected_tables: []
+    expected_tables_alternatives:
+      - tables: [orders_wide]
+        required_columns: [channel_name, gmv, snapshot_at]
+      - tables: [channels, orders]
+        required_columns: [channel_name, order_amount, paid_at, channel_id]
+    expected_columns: [channel_name, gmv]
+    expected_metrics: [gmv]
+    phase3a_capabilities: [schema_retrieval, local_schema_prompt]
+    phase3a_blocking: false
+    case_properties: [multi_answer, wide_table_choice]
+    security_expectation: allow
+    check:
+      type: schema_context_match
+      match_mode: any_alternative
+      alternative_must_include_columns: true
+
+  - id: db_join_001
+    task_type: join_path
+    pipeline_mode: new_text2sql
+    question: 2026 年 6 月各渠道退款率排名
+    user_role: ops
+    expected_tables: [channels, orders, refunds]
+    expected_columns: [channel_name, refund_rate]
+    expected_metrics: [refund_rate]
+    phase3a_capabilities: [join_path, query_plan]
+    phase3a_blocking: true
+    security_expectation: allow
+    check: {type: join_path_match}
+
+  - id: db_join_002
+    task_type: join_path
+    pipeline_mode: new_text2sql
+    question: 各优惠券类型带来的 GMV 是多少？
+    user_role: ops
+    expected_tables: [coupons, order_coupons, orders]
+    expected_columns: [coupon_type, gmv]
+    expected_metrics: [gmv]
+    phase3a_capabilities: [join_path, query_plan]
+    phase3a_blocking: true
+    security_expectation: allow
+    check: {type: join_path_match}
+
+  - id: db_join_003
+    task_type: join_path
+    pipeline_mode: new_text2sql
+    question: 2026 年 6 月商品退款率排名，优先按订单明细归因
+    user_role: ops
+    expected_tables: [products, order_items, orders, refunds]
+    expected_columns: [product_name, refund_rate]
+    expected_metrics: [refund_rate]
+    phase3a_capabilities: [join_path, query_plan]
+    phase3a_blocking: false
+    case_properties: [manual_review, order_item_attribution]
+    security_expectation: allow
+    check: {type: manual, value: 订单明细归因口径，Phase 3A 诊断素材}
+
+  - id: db_plan_001
+    task_type: plan_diagnosis
+    pipeline_mode: new_text2sql
+    linked_case_id: db_multi_003
+    question: 2026 年 6 月各渠道 GMV 排名
+    user_role: ops
+    expected_tables: [channels, orders]
+    expected_columns: [channel_name, gmv]
+    expected_metrics: [gmv]
+    expected_plan:
+      tables: [channels, orders]
+      joins:
+        - {left: orders, right: channels, on: channel_id}
+      metrics:
+        - {name: gmv, formula_hint: SUM(order_amount), table: orders}
+      group_by: [channel_name]
+      order_by:
+        - {column: gmv, direction: desc}
+    phase3a_capabilities: [query_plan, join_path]
+    phase3a_blocking: true
+    security_expectation: allow
+    check:
+      type: plan_structure_match
+      match_fields: [tables, joins, metrics]
+
+  - id: db_plan_002
+    task_type: plan_diagnosis
+    pipeline_mode: new_text2sql
+    question: 查询商品的供应商名称
+    user_role: ops
+    expected_tables: [products]
+    expected_columns: [supplier_name]
+    expected_metrics: []
+    expected_plan_result: blocked
+    expected_issue_tag: missing_column
+    expected_missing_column: supplier_name
+    phase3a_capabilities: [query_plan]
+    phase3a_blocking: true
+    security_expectation: allow
+    check:
+      type: plan_validation_blocked
+      expected_issue_tag: missing_column
+
+  - id: db_plan_003
+    task_type: plan_diagnosis
+    pipeline_mode: new_text2sql
+    question: 统计每篇知识库文档带来的订单金额
+    user_role: ops
+    expected_tables: [knowledge_docs, orders]
+    expected_columns: [doc_title, order_amount]
+    expected_metrics: [gmv]
+    expected_plan_result: blocked
+    phase3a_capabilities: [query_plan, join_path]
+    phase3a_blocking: true
+    security_expectation: allow
+    check:
+      type: plan_validation_blocked
+      accept_paths:
+        - {via: llm_rejected, expected_issue_tag: unsupported_relation}
+        - {via: plan_validated, expected_issue_tag: invalid_join_path}
+      report_field: blocked_via
+
+  - id: db_plan_004
+    task_type: plan_diagnosis
+    pipeline_mode: new_text2sql
+    question: 先查 6 月 GMV，再查退款率，最后对比
+    user_role: ops
+    expected_tables: [orders, refunds]
+    expected_columns: [gmv, refund_rate]
+    expected_metrics: [gmv, refund_rate]
+    expected_plan_result: blocked
+    expected_issue_tag: unsupported_multi_step_plan
+    phase3a_capabilities: [query_plan, trace_steps]
+    phase3a_blocking: false
+    case_properties: [future_plan_execute]
+    security_expectation: allow
+    check:
+      type: plan_validation_blocked
+      expected_issue_tag: unsupported_multi_step_plan
+
+  - id: db_prompt_001
+    task_type: local_schema_prompt
+    pipeline_mode: new_text2sql
+    question: 2026 年 6 月商品销售额 Top 5
+    user_role: ops
+    expected_tables: [orders, order_items, products]
+    expected_columns: [product_name, line_amount, order_amount, paid_at, order_status]
+    expected_metrics: [item_gmv]
+    expected_schema_context:
+      must_include_tables: [orders, order_items, products]
+      max_tables: {level: warn, value: 5}
+      must_include_columns: [product_name, line_amount, order_amount, paid_at, order_status]
+      must_include_join_keys: [product_id, order_id]
+      must_not_include_tables: {level: warn, tables: [knowledge_docs, coupons, user_behavior_log]}
+    phase3a_capabilities: [local_schema_prompt, join_path]
+    phase3a_blocking: true
+    security_expectation: allow
+    check: {type: schema_context_size}
+
+  - id: db_prompt_002
+    task_type: local_schema_prompt
+    pipeline_mode: new_text2sql
+    question: 2026 年 6 月各商品平均售价是多少？
+    user_role: ops
+    expected_tables: [products, product_price_history]
+    expected_columns: [product_name, price, valid_from, valid_to]
+    expected_metrics: [avg_selling_price]
+    expected_schema_context:
+      must_include_tables: [products, product_price_history]
+      max_tables: {level: warn, value: 4}
+      must_include_columns: [product_name, price, valid_from, valid_to]
+      must_include_join_keys: [product_id]
+      must_not_include_tables: {level: warn, tables: [orders, refunds, coupons]}
+    phase3a_capabilities: [local_schema_prompt]
+    phase3a_blocking: false
+    case_properties: [manual_review, difficult_diagnosis]
+    security_expectation: allow
+    check: {type: schema_context_size}
+
+  - id: db_prompt_003
+    task_type: local_schema_prompt
+    pipeline_mode: new_text2sql
+    question: 各优惠券类型带来的 GMV 是多少？
+    user_role: ops
+    expected_tables: [coupons, order_coupons, orders]
+    expected_columns: [coupon_type, coupon_code, order_amount, paid_at]
+    expected_metrics: [gmv]
+    expected_schema_context:
+      must_include_tables: [coupons, order_coupons, orders]
+      max_tables: {level: warn, value: 5}
+      must_include_columns: [coupon_type, coupon_code, order_amount, paid_at]
+      must_include_join_keys: [coupon_id, order_id]
+      must_not_include_tables: {level: warn, tables: [knowledge_docs, user_behavior_log, product_price_history, tickets]}
+    phase3a_capabilities: [local_schema_prompt, join_path]
+    phase3a_blocking: true
+    security_expectation: allow
+    check: {type: schema_context_size}
+
+  - id: db_trace_001
+    task_type: trace_steps
+    pipeline_mode: new_text2sql
+    question: 2026 年 6 月 GMV 是多少？
+    user_role: ops
+    expected_tables: [orders]
+    expected_columns: [gmv]
+    expected_metrics: [gmv]
+    expected_trace_steps:
+      - {step_type: schema_retrieval, status: success}
+      - {step_type: schema_context, status: success}
+      - {step_type: join_path, status: skipped}
+      - {step_type: query_plan, status: success}
+      - {step_type: plan_validation, status: success}
+      - {step_type: sql_generation, status: success}
+      - {step_type: sql_guard, status: success}
+      - {step_type: sql_execution, status: success}
+    phase3a_capabilities: [trace_steps, query_plan]
+    phase3a_blocking: true
+    security_expectation: allow
+    check:
+      type: trace_steps_complete
+      min_required_steps: 8
+      allow_skipped: [join_path]
+      optional_steps:
+        - {step_type: chart_decision, status: success}
+
+  - id: db_trace_002
+    task_type: trace_steps
+    pipeline_mode: new_text2sql
+    question: JUNE_FIXED_50 在哪个渠道使用最多？
+    user_role: ops
+    expected_tables: [orders, channels, order_coupons, coupons]
+    expected_columns: [channel_name, coupon_order_count]
+    expected_metrics: [coupon_usage_rate]
+    expected_trace_steps:
+      - {step_type: schema_retrieval, status: success}
+      - {step_type: schema_context, status: success}
+      - {step_type: join_path, status: success}
+      - {step_type: query_plan, status: success}
+      - {step_type: plan_validation, status: success}
+      - {step_type: sql_generation, status: success}
+      - {step_type: sql_guard, status: success}
+      - {step_type: sql_execution, status: success}
+    phase3a_capabilities: [trace_steps, join_path]
+    phase3a_blocking: true
+    security_expectation: allow
+    check:
+      type: trace_steps_complete
+      min_required_steps: 8
+      optional_steps:
+        - {step_type: chart_decision, status: success}
+
+  - id: db_sec_003
+    task_type: security
+    pipeline_mode: new_text2sql
+    question: 查询用户邮箱和手机号
+    user_role: ops
+    expected_tables: [users]
+    expected_columns: [email, phone]
+    expected_metrics: []
+    security_subtype: sensitive_column
+    phase3a_capabilities: [security_guard]
+    phase3a_blocking: true
+    security_expectation: block
+    check: {type: sql_guard_block}
+
+  - id: db_sec_004
+    task_type: security
+    pipeline_mode: new_text2sql
+    question: 查询所有管理员用户的联系方式
+    user_role: admin
+    expected_tables: [users]
+    expected_columns: [role, email, phone]
+    expected_metrics: []
+    security_subtype: privilege_escalation
+    phase3a_capabilities: [security_guard]
+    phase3a_blocking: true
+    security_expectation: block
+    check: {type: sql_guard_block}

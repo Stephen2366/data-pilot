@@ -5,10 +5,10 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：Phase 3A M8 回归基线冻结（已验收）
-- 下一模块：M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线
-- 上一模块验收：Phase 3A M8 已验收（2026-07-23，accept-M8-20260723.md）
-- 阻塞项：无；旧链路 formal baseline 允许类 SQL 为 6/8，challenge baseline 为 11/16，已按用户确认作为真实 baseline 冻结
+- 当前模块：Phase 3A M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线（已完成，待验收）
+- 下一模块：M9 Schema Retrieval 与 JoinPath
+- 上一模块验收：Phase 3A M8.5 未验收（待 accept-module）
+- 阻塞项：无；旧链路 diagnostic baseline 为 32 条 total、12 passed、10 failed、10 skipped_due_to_pipeline_mode、3 review_required，已作为真实诊断 baseline 冻结
 - 更新时间：2026-07-23
 
 ## 当前技术选型快照
@@ -32,6 +32,34 @@
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
 ## 模块技术档案（新的在上）
+
+### Phase 3A M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线（2026-07-23）
+
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`eval/cases/phase3a-diagnostic-benchmark.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/run_eval.py`、`tests/test_phase3a_eval.py`、`eval/reports/phase3a-diagnostic-baseline.md`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m8.5-notes.md`、`.agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl`、`.agent_work/temp/m8_5-smoke-compat.md`、`.agent_work/temp/m8_5-smoke-compat-traces.jsonl`
+- 关键决策：
+  - M8.5 按 proposal v5 采用显式 `--cases + --extra-cases` 多文件组合：`database-upgrade-challenge.yaml` 仍是 16 条 challenge 唯一源，`phase3a-diagnostic-benchmark.yaml` 只维护新增 16 条 extra case；没有复制 challenge，也没有实现完整 `includes`。
+  - `eval/run_eval.py` 只扩展多文件合并、case id 全局唯一校验、`source_file`、`configured_pipeline_mode` / `actual_pipeline_mode` 和 Markdown 摘要，不引入历史结果库、HTML dashboard 或复杂 scorer。
+  - 旧链路 baseline 下，`metric_mapping_match` / `join_path_match` / `manual` 仍跑旧链路结果层；`plan_structure_match`、`plan_validation_blocked`、`schema_context_*`、`trace_steps_complete` 这类新 pipeline 专属 check 标记 `skipped_due_to_pipeline_mode`，不算 pass，也不算 fail。
+  - 16 条 challenge 只补 `phase3a_capabilities`、`phase3a_blocking`、`case_properties`、`security_subtype` 诊断元数据，不改问题、expected_sql、check 或 M8 已冻结 baseline 报告；这样 32 条 diagnostic report 的 capability summary 才能覆盖完整 32 条。
+  - local schema prompt extra case 使用 block / warn 分层数据结构：缺关键表字段仍是 block；`max_tables` 超标和无关表噪音先作为 warn 素材，避免 M8.5 把 prompt 精简度膨胀成硬门。
+  - 用户确认：本模块没有新增需用户二次确认的方案选择；按 `docs/phase3a-plan.md` M8.5 与 `docs/phase3a-diagnostic-benchmark-proposal-v5.md` 已定方案执行。
+- 参考资料：
+  - 查阅 `docs/phase3a-plan.md` M8.5、`docs/phase3a-diagnostic-benchmark-proposal-v5.md`、`eval/cases/database-upgrade-challenge.yaml`、`eval/run_eval.py`、`tests/test_phase3a_eval.py`。
+  - 借鉴 proposal v5 的 32 条结构、capability 标签、check 类型、pipeline mode 和 skipped 口径。
+  - 没有照搬外部项目；未查阅外部参考。
+- 验证快照：
+  - TDD 红灯：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8_5-red` 为 6 failed / 6 passed，失败点集中在 diagnostic YAML 缺失、`extra_cases` 参数缺失、`skipped_due_to_pipeline_mode` 字段缺失。
+  - capability 元数据红灯：`pytest tests\test_phase3a_eval.py::test_challenge_cases_carry_diagnostic_capability_metadata ... pytest-m8_5-red-cap` 失败于 challenge case 缺 `phase3a_capabilities`，随后只补元数据。
+  - 聚焦 pytest：`pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8_5-final` 13 passed，1 warning（Starlette TestClient / httpx deprecation，既有警告）。
+  - Diagnostic baseline：`python -m eval.run_eval --pipeline-mode baseline --cases eval/cases/database-upgrade-challenge.yaml --extra-cases eval/cases/phase3a-diagnostic-benchmark.yaml --report eval/reports/phase3a-diagnostic-baseline.md --trace .agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl` 输出 total=32、passed=12、failed=10、skipped_due_to_pipeline_mode=10、review_required=3；trace JSONL 22 行，skipped case 不写 trace。
+  - Capability summary：schema_retrieval 14 覆盖、join_path 13、query_plan 15、local_schema_prompt 7、trace_steps 6、security_guard 4；旧链路下 local schema / plan / trace 专属 case 按预期 skipped。
+  - 旧 smoke 兼容：`python -m eval.run_eval --cases eval/cases/smoke.yaml --report .agent_work/temp/m8_5-smoke-compat.md --trace .agent_work/temp/m8_5-smoke-compat-traces.jsonl` 6/6 passed，skipped=0。
+  - 全量 pytest：`pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8_5-full-final` 44 passed，1 warning（既有 Starlette/httpx）。
+  - `git diff --check`：无 whitespace error，仅 Windows LF→CRLF 提示。
+- 遗留：
+  - `db_sec_003` / `db_sec_004` 在旧链路 diagnostic baseline 下是 `safety_mismatch`，说明当前旧 pipeline 未稳定把“查用户邮箱手机号 / 管理员联系方式”转成 SQL Guard 可拦截的敏感字段 SQL；先作为 baseline 事实保留，不在 M8.5 修安全策略。
+  - 10 条 skipped case 等 M9-M11 提供 Schema Retrieval、QueryPlan、local schema prompt 和 trace_steps 后再真正评分；M8.5 不伪装这些能力已实现。
+  - M9 应优先消费 `eval/reports/phase3a-diagnostic-baseline.md` 的 capability summary 和失败明细，证明 schema / join / plan 改造具体改善哪些能力。
 
 ### Phase 3A M8 回归基线冻结（2026-07-22）
 

@@ -7,6 +7,8 @@ cases:
     expected_tables: [products]
     expected_columns: [product_name, category, status]
     expected_metrics: []
+    phase3a_capabilities: [schema_retrieval]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: active}
     expected_sql: |
@@ -22,6 +24,8 @@ cases:
     expected_tables: [orders]
     expected_columns: [order_no, order_amount, paid_at]
     expected_metrics: []
+    phase3a_capabilities: [schema_retrieval]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: 2026-06}
     expected_sql: |
@@ -37,6 +41,8 @@ cases:
     expected_tables: [coupons]
     expected_columns: [coupon_code, coupon_name, coupon_type]
     expected_metrics: []
+    phase3a_capabilities: [schema_retrieval]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: JUNE_FIXED_50}
     expected_sql: |
@@ -51,6 +57,8 @@ cases:
     expected_tables: [orders]
     expected_columns: [gmv]
     expected_metrics: [gmv]
+    phase3a_capabilities: [schema_retrieval, query_plan, trace_steps]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: gmv}
     expected_sql: |
@@ -66,6 +74,8 @@ cases:
     expected_tables: [products, orders, refunds]
     expected_columns: [product_name, refund_rate]
     expected_metrics: [refund_rate]
+    phase3a_capabilities: [schema_retrieval, query_plan]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: Aurora Noise Cancelling Headphones}
     expected_sql: |
@@ -85,6 +95,8 @@ cases:
     expected_tables: [orders]
     expected_columns: [net_revenue]
     expected_metrics: [net_revenue]
+    phase3a_capabilities: [schema_retrieval, query_plan]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: net_revenue}
     expected_sql: |
@@ -100,6 +112,8 @@ cases:
     expected_tables: [channels, orders]
     expected_columns: [channel_name, order_count]
     expected_metrics: [order_count]
+    phase3a_capabilities: [schema_retrieval, join_path]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: Mobile App}
     expected_sql: |
@@ -116,6 +130,8 @@ cases:
     expected_tables: [orders, channels, order_coupons, coupons]
     expected_columns: [channel_name, coupon_order_count]
     expected_metrics: [coupon_usage_rate]
+    phase3a_capabilities: [schema_retrieval, join_path, query_plan]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: Mobile App}
     expected_sql: |
@@ -135,6 +151,8 @@ cases:
     expected_tables: [products, order_items, orders]
     expected_columns: [category, item_gmv]
     expected_metrics: [item_gmv]
+    phase3a_capabilities: [schema_retrieval, join_path, local_schema_prompt]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: 数码电子}
     expected_sql: |
@@ -154,6 +172,8 @@ cases:
     expected_tables: [channels, orders]
     expected_columns: [channel_name, gmv]
     expected_metrics: [gmv]
+    phase3a_capabilities: [join_path, query_plan, trace_steps]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: Mobile App}
     expected_sql: |
@@ -172,6 +192,8 @@ cases:
     expected_tables: [orders, order_items, products]
     expected_columns: [product_name, item_gmv]
     expected_metrics: [item_gmv]
+    phase3a_capabilities: [schema_retrieval, local_schema_prompt]
+    phase3a_blocking: true
     security_expectation: allow
     check: {type: contains, value: item_gmv}
     expected_sql: |
@@ -193,6 +215,9 @@ cases:
     expected_tables: [product_categories, products, order_items, orders]
     expected_columns: [root_category, gmv]
     expected_metrics: [item_gmv]
+    phase3a_capabilities: [join_path]
+    phase3a_blocking: false
+    case_properties: [manual_review, difficult_diagnosis]
     security_expectation: allow
     check: {type: manual, value: 递归 CTE，Phase 3A 诊断素材}
     expected_sql: |
@@ -221,6 +246,9 @@ cases:
     expected_tables: [user_behavior_log]
     expected_columns: [device_type, conversion_rate]
     expected_metrics: [add_to_pay_conversion_rate]
+    phase3a_capabilities: [schema_retrieval, query_plan, trace_steps]
+    phase3a_blocking: true
+    case_properties: [difficult_diagnosis, stable_hard]
     security_expectation: allow
     check: {type: contains, value: mobile_app}
     expected_sql: |
@@ -238,6 +266,9 @@ cases:
     expected_tables: [products, product_price_history]
     expected_columns: [product_name, avg_price]
     expected_metrics: [avg_selling_price]
+    phase3a_capabilities: [schema_retrieval, local_schema_prompt]
+    phase3a_blocking: false
+    case_properties: [manual_review, difficult_diagnosis]
     security_expectation: allow
     check: {type: manual, value: SCD 时间窗口 JOIN，Phase 3A 诊断素材}
     expected_sql: |
@@ -256,6 +287,9 @@ cases:
     expected_tables: [orders]
     expected_columns: []
     expected_metrics: []
+    security_subtype: ddl_block
+    phase3a_capabilities: [security_guard]
+    phase3a_blocking: true
     security_expectation: block
     check: {type: sql_guard_block, value: SQL Guard}
   - id: db_sec_002
@@ -265,5 +299,8 @@ cases:
     expected_tables: [refunds]
     expected_columns: []
     expected_metrics: []
+    security_subtype: dml_block
+    phase3a_capabilities: [security_guard]
+    phase3a_blocking: true
     security_expectation: block
     check: {type: sql_guard_block, value: SQL Guard}
