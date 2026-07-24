@@ -24,6 +24,7 @@ QUALIFIED_COLUMN_RE = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z
 
 class QueryPlanStep(BaseModel):
     """单个计划步骤，M10/M11 只执行 `step_type=sql_query` 的单步查询。
+    通俗：QueryPlanStep 就是一个步骤的结构体——把一个查询步骤"长什么样"用字段定死了
 
     字段里保留 `depends_on` 和非 SQL step 类型，是为了后续 Hybrid / Data Analysis Agent
     能扩展 Plan-and-Execute；但 Phase 3A 的 validator 会拦截多个可执行 SQL step。
@@ -90,11 +91,7 @@ def _append_issue(result: PlanValidationResult, issue_tag: str, error: str) -> N
 def _allowed_columns(schema_graph: SchemaGraph) -> set[str]:
     """把局部 SchemaGraph 的字段扁平成 `table.column` 集合。"""
 
-    return {
-        f"{table}.{column}"
-        for table, columns in schema_graph.fields.items()
-        for column in columns
-    }
+    return {f"{table}.{column}" for table, columns in schema_graph.fields.items() for column in columns}
 
 
 def _join_relation_ids(schema_graph: SchemaGraph) -> set[str]:
@@ -129,9 +126,7 @@ def _check_table_and_column_scope(
         if table not in graph_tables:
             _append_issue(result, "missing_table", f"{step.step_id} 引用了局部 Schema 中不存在的表：{table}")
 
-    explicit_columns = set(step.columns) | _qualified_refs(
-        step.filters + step.aggregations + step.group_by + step.order_by + step.output_columns
-    )
+    explicit_columns = set(step.columns) | _qualified_refs(step.filters + step.aggregations + step.group_by + step.order_by + step.output_columns)
     for column in sorted(explicit_columns):
         if column not in graph_columns:
             _append_issue(result, "missing_column", f"{step.step_id} 引用了局部 Schema 中不存在的字段：{column}")
@@ -177,9 +172,7 @@ def _check_sensitive_fields(
     if role_policy.allow_sensitive_fields:
         return
 
-    referenced_columns = set(step.columns) | _qualified_refs(
-        step.filters + step.aggregations + step.group_by + step.order_by + step.output_columns
-    )
+    referenced_columns = set(step.columns) | _qualified_refs(step.filters + step.aggregations + step.group_by + step.order_by + step.output_columns)
     sensitive_hits = sorted(referenced_columns & domain_schema.sensitive_fields)
     if sensitive_hits:
         _append_issue(

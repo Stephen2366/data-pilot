@@ -83,6 +83,7 @@ class JoinPath:
 @dataclass(frozen=True)
 class SchemaGraph:
     """当前问题的局部 Schema 视图。
+    通俗：SchemaGraph 做的事就是从全量 Schema 中剪裁出当前问题相关的部分
 
     `tables` 是后续 prompt 可见表集合；`fields` 只按表收纳字段名，M10/M11 再决定怎样展示。
     """

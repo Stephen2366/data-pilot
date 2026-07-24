@@ -1018,11 +1018,11 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 ### 这次做了什么
 
-M8/M8.5 已经冻结了旧链路 baseline，M9 开始真正搭 Text2SQL 中间层的第一块：把 `domain_pack/` 里的表字段、指标口径和表关系整理成可检索文档。现在系统能生成三类 Schema 文档：**field_doc** 说明字段，**metric_doc** 说明 GMV / 退款率 / 净收入等指标，**relation_doc** 说明表之间怎么 join。
+M8/M8.5 已经冻结了旧链路 baseline，M9 开始真正搭 Text2SQL 中间层的第一块：把 `domain_pack/` 里的表字段、指标口径和表关系整理成可检索文档。现在系统能生成三类 Schema 文档：**字段文档 field_doc** 说明字段（用户问的'渠道名'对应哪个表的哪个列？），**指标文档 metric_doc** 说明 GMV / 退款率 / 净收入等指标（用户说'销售额'指的是 `gmv` 还是 `item_gmv`？公式是什么？），**关系文档 relation_doc** 说明表之间怎么 join（要查订单和渠道，两张表该怎么 JOIN？有没有桥表）。
 
 检索链路分两路：一条是 **keyword retrieval**，用中文业务词、英文表字段名和指标别名做关键词命中；另一条是 **deterministic in-memory vector index**，用不联网的确定性稀疏向量模拟向量召回接口。用户已确认 M9 先不接真实 Milvus，所以本模块只保留 Milvus adapter 边界，不新增 Docker 或 `pymilvus` 依赖。
 
-最后，M9 会把召回结果整理成 **SchemaGraph**：包含当前问题相关的表、字段、指标和 **JoinPath**。JoinPath 严格来自 `relations.yaml`，不让模型临时猜 join 条件。本次还补齐了退款相关的结构化关系：`refunds_order`、`refunds_product`、`refunds_user`，它们原本已经写在 `refunds.md`，只是没有进入集中关系 YAML。
+最后，M9 会把召回结果整理成 **SchemaGraph**：包含当前问题相关的表、字段、指标和 **JoinPath**（**通俗：**从全量 Schema 中剪裁出当前问题相关的部分）。JoinPath 严格来自 `relations.yaml`，不让模型临时猜 join 条件。本次还补齐了退款相关的结构化关系：`refunds_order`、`refunds_product`、`refunds_user`，它们原本已经写在 `refunds.md`，只是没有进入集中关系 YAML。
 
 真实结果是：8 条 formal allow case 的 expected_tables **15/15 命中**，字段/指标 **16/18 命中**，3 个 formal 多表 case 的 JoinPath **3/3 生成**；32 条 diagnostic 中 schema/join 相关 24 条的 expected_tables **54/54 命中**，JoinPath **14/14 生成**。
 
@@ -1048,6 +1048,8 @@ M8/M8.5 已经冻结了旧链路 baseline，M9 开始真正搭 Text2SQL 中间�
 
 1. **先看结构定义**：`engine/schema_retrieval/objects.py`
    重点看 `SchemaDocument` 和 `SchemaHit`。前者是“被检索的知识块”，后者是“某个问题命中了哪个知识块、分数多少、来自 keyword 还是 vector”。再看 `SchemaGraph` 和 `JoinPath`，理解 M9 给后续模块交付的不是 SQL，而是 **局部上下文**。
+
+   **通俗：**流程就是：`build_schema_documents()` 造一堆书 → 写入 Milvus → 用户提问 → Milvus 返回一摞带了分数的 `SchemaHit` → `build_schema_graph()` 把这些 hit 拼成 `SchemaGraph`。
 
 2. **再看文档构建**：`engine/schema_retrieval/document_builder.py`
    从 `build_schema_documents()` 读起。它先遍历表字段生成 field_doc，再遍历 `metrics.yaml` 生成 metric_doc，最后读取 `relations.yaml` 生成 relation_doc。阅读重点是 **领域知识仍来自 domain_pack**，代码只负责整理和轻量别名扩写。
@@ -1251,7 +1253,7 @@ M10 做的就是在这个位置加一道 **QueryPlan 自检门**。模型后续�
 ### 代码阅读路线
 
 1. **计划结构**：`engine/nl2sql/planner.py`
-   先看 `QueryPlanStep` 的字段。重点理解它不是 SQL AST，而是 **业务层可读的查询意图结构**：表、字段、指标、过滤、Join、聚合和输出列都拆成列表，方便校验和 trace。`QueryPlan.steps` 是列表，但 validator 会限制 Phase 3A 只能有一个可执行 SQL step。
+   先看 `QueryPlanStep` 的字段。重点理解它不是 SQL AST，而是 **业务层可读的查询意图结构**：表、字段、指标、过滤、Join、聚合和输出列都拆成列表，方便校验和 trace。`QueryPlan.steps` 是列表，但 validator 会限制 Phase 3A 只能有一个可执行 SQL step。**通俗：**`QueryPlanStep` 就是一个**步骤的结构体**——把一个查询步骤"长什么样"用字段定死了：
 
 2. **自检入口**：`engine/nl2sql/planner.py`
    然后看 `validate_query_plan()`。它先检查多 SQL step，再调用 `_check_table_and_column_scope()`、`_check_metric_scope()`、`_check_join_scope()` 和 `_check_sensitive_fields()`。阅读重点是：**planner 只做 SQL 前诊断，不替代 SQL Guard**。
@@ -1309,15 +1311,17 @@ git diff --check
 
 ## ★ M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
 
-**简述**：M11 把 M9 的 **Schema Retrieval / JoinPath**、M10 的 **QueryPlanStep 自检** 和 M5 的 **SQL Tool / Trace** 串成了一条真正能从 `/api/query` 触发的新 Text2SQL 链路。旧接口默认仍走模板优先，保证 M5/M6 演示不被破坏；评测或调试时传 `force_new_pipeline=true`，就会强制绕过模板，走 `schema_retrieval -> query_plan -> local_schema_sql -> sql_guard -> sql_execution`，并把每一步写进 JSONL 的 `trace_steps`。这一步的价值是让系统第一次具备“能证明自己走了新链路”的证据，而不只是报告里写了新链路。
+**简述**：M11 把 M9 的 **Schema Retrieval / JoinPath**、M10 的 **QueryPlanStep 自检** 和 M5 的 **SQL Tool / Trace** 串成了一条真正能从 `/api/query` 触发的新 Text2SQL 链路。
+
+旧接口默认仍走模板优先，保证 M5/M6 演示不被破坏；评测或调试时传 `force_new_pipeline=true`，就会强制绕过模板，走 `schema_retrieval -> query_plan -> local_schema_sql -> sql_guard -> sql_execution`，并把每一步写进 JSONL 的 `trace_steps`。这一步的价值是让系统第一次具备“能证明自己走了新链路”的证据，而不只是报告里写了新链路。
 
 ### 这次做了什么
 
 M10 做完后，DataPilot 已经能把“准备查什么”变成 QueryPlan，但还没有接到真实请求里。M11 做的就是把这条中间层真正串起来：API 收到请求后，如果 `force_new_pipeline=false`，旧模板链路照常工作；如果 `force_new_pipeline=true`，就进入 `run_text2sql_pipeline()`。
 
-新 pipeline 会先召回局部 Schema，再构建 `SchemaGraph / JoinPath`，然后让 LLM 生成 `QueryPlan`，通过本地 validator 后再用局部 Schema prompt 生成 SQL。生成出来的 SQL 不会直接执行，而是统一交给 `run_sql_tool()`，继续经过 SQL Guard、RBAC 和敏感字段策略。执行成功后，结果会尝试生成图表；无图表也不影响 SQL 答案。
+新 pipeline 会先召回**局部 Schema**，再构建 `SchemaGraph / JoinPath`，然后让 LLM 生成 **`QueryPlan`**，通过本地 validator 后再用局部 Schema prompt 生成 SQL。生成出来的 SQL 不会直接执行，而是统一交给 `run_sql_tool()`，继续经过 SQL Guard、RBAC 和敏感字段策略。执行成功后，结果会尝试生成图表；无图表也不影响 SQL 答案。
 
-最重要的是：这条链路会把每一步写成 `TraceStep`，包括步骤名、顺序、类型、状态、耗时、错误类型和 metadata。后续 M12 做对照报告时，就能从 trace 里看见“到底走了哪些步骤、在哪一步失败、局部 Schema 有多少表字段、SQL 执行返回了几行”。
+最重要的是：这条链路会把每一步写成 **`TraceStep`**，包括步骤名、顺序、类型、状态、耗时、错误类型和 metadata。后续 M12 做对照报告时，就能从 trace 里看见“到底走了哪些步骤、在哪一步失败、局部 Schema 有多少表字段、SQL 执行返回了几行”。
 
 ### 新概念
 

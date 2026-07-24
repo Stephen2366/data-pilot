@@ -33,10 +33,22 @@ from engine.trace.recorder import TraceStep
 
 @dataclass(frozen=True)
 class Text2SQLPipelineResult:
-    """新 pipeline 给 `/api/query` 的返回包。
+    """Text2SQL pipeline 的出站返回包，只向上交付给 `/api/query` API 层。
 
-    API 层继续负责 AgentResponse 拼装；pipeline 只交付 SQL/工具结果/trace_steps/错误标签，
-    避免 M11 复制一套响应契约。
+    设计意图 —— 把「业务响应格式」和「引擎执行结果」拆开：
+    ------------------------------------------------------------------
+    1. pipeline 是引擎层，关心的是 SQL 生成、执行、安全拦截、trace 记录；
+    2. API 层关心的是用户看到的 AgentResponse（type / message / data / tool_call 等），
+        包括统一话术包装、可视化图表注入、错误码映射；
+    3. 如果 pipeline 自己拼 AgentResponse，M11 的每个分支都要复制一套响应契约，
+        后续改话术或改字段会同时污染引擎层和 API 层。
+
+    所以 Text2SQLPipelineResult 只携带「事实」：生成的 SQL、执行结果、trace 步骤、
+    问题标签、拦截原因、错误类型、图表规格。API 层拿到后统一翻译成 AgentResponse。
+
+    ★ 安全状态汇总：safety_status 属性会把 tool_result.safety_status 透传出来；
+        没有 tool_result 时，只要存在 blocked_reason 就视为 blocked，否则 passed。
+        API 层用这一个字段即可决定是返回正常数据、友好拒绝还是错误提示。
     """
 
     sql: str | None
@@ -152,11 +164,7 @@ def _schema_graph_metadata(schema_graph: SchemaGraph) -> dict[str, Any]:
 def _join_path_metadata(schema_graph: SchemaGraph) -> dict[str, Any]:
     """提取 JoinPath 的 relation id，便于 M12 对照报告复用。"""
 
-    relation_ids = [
-        edge.relation_id
-        for join_path in schema_graph.join_paths
-        for edge in join_path.edges
-    ]
+    relation_ids = [edge.relation_id for join_path in schema_graph.join_paths for edge in join_path.edges]
     return {
         "join_path_count": len(schema_graph.join_paths),
         "relation_ids": relation_ids,
@@ -194,7 +202,7 @@ def run_text2sql_pipeline(
 ) -> Text2SQLPipelineResult:
     """执行 M11 single-step Text2SQL pipeline。
 
-    处理顺序与 trace step 顺序保持一致；任何一步失败都返回结构化 blocked 结果，不降级到
+    ★ 处理顺序与 trace step 顺序保持一致；任何一步失败都返回结构化 blocked 结果，不降级到
     全量 schema prompt、模板 SQL 或 SQL 自动修复。
     """
 
