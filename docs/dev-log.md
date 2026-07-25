@@ -1424,3 +1424,103 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:ap
 ```
 
 点 Execute 后，响应体仍是原来的 `AgentResponse` 形状；分步骤证据写在 JSONL trace 里。真实 LLM 的 SQL 质量留到 M12 用批量报告评估，不建议只凭一次 Swagger 结果判断新链路效果。
+
+## ★ M12 对照报告与阶段收尾（2026-07-25）
+
+**简述**：M12 是阶段三A（Text2SQL 深化）的收尾模块，把 M8 冻结的**旧链路 baseline** 和 M11 实现的**新 Text2SQL pipeline** 并排对比，用数据证明新链路在 Schema 精简度、Trace 可观测性和 Issue Tag 归因方面的改进——同时如实记录 LLM 列名不稳定的真实瓶颈。不写新能力，**只做测量和收口**。
+
+### 这次做了什么
+
+阶段三A 的理想目标是：新 pipeline 换了 Schema Retrieval + QueryPlan + 局部 Schema Prompt 后，SQL 质量应该**不低于**旧链路的全量 schema prompt。M12 的职责就是**用同一批 10+16+32=58 条评测用例跑新旧两套链路**，把差异量化成 Markdown 对照报告。
+
+实际执行时，发现三个需要在 M12 修复的 bug：
+
+1. **DeepSeek 模型名过期**：DeepSeek API 把 `deepseek-chat` 改成了 `deepseek-v4-pro`，不修的话新 pipeline 所有 LLM 调用都 400 报错。这是环境依赖变化，不是 M11 代码错误。
+2. **新 pipeline 安全预检缺失**：旧链路在模板未命中时会检查用户输入是否包含 `DROP`/`DELETE` 关键词并提前拦截；新链路的 `force_new_pipeline` 分支绕过了这个检查，导致"DROP TABLE orders"被 LLM 转写成"SELECT * FROM orders"后放行。补了一个预检，新旧行为一致。
+3. **plan validation 误判聚合表达式**：`COUNT(DISTINCT orders.id)` 被当成了普通列名去数据库 schema 里查，当然找不到。修了校验逻辑：先拆出纯列名再查。
+
+修完后跑完三套新 pipeline 报告 + 三套对照报告：
+
+- **formal 10 条**：6/10 passed（安全 2/2 blocked，允许类 SQL 5/8）
+- **challenge 16 条**：8/16 passed（安全 2/2 blocked）
+- **diagnostic 32 条**：15/32 passed
+
+对照报告展示了新链路的**核心价值**：每次请求都有 9 步 trace（schema_retrieval → chart_decision），局部 Schema 从 14 表几百字段**精简到 4-7 表几十字段**，Join 条件来自 `relations.yaml` 而非 LLM 自由发挥。同时也如实记录了**当前瓶颈**：LLM 输出的**列名不稳定**（category vs category_name、coupon_order_count 等**别名漂移**），导致约一半 case 挂在**列名匹配**上。
+
+### 新概念
+
+- **对照报告（comparison report）**：不是重跑评测，而是读两份 trace JSONL（baseline + new pipeline），按 question 文本匹配同一条 case，把两边的 SQL、tables_used、trace_steps、issue_tags 并排展示。类似数据库里的 **LEFT JOIN on question**——两边都有才算"可比"，只有一边的单独列出来。
+- **trace JSONL 匹配**：trace 文件里没有 `case_id` 字段，只有 `question`（用户原始问题文本）。因为 formal/challenge/diagnostic 三套 YAML 里的 question 文本是唯一且稳定的，直接用 question 做 join key 是可靠且低成本的做法。
+- **Schema 精简度（schema compaction）**：新 pipeline 的 `schema_context` trace step 记录了给 LLM 看的局部表/字段/指标数量；旧链路没有这个 trace step，只能用 `tables_used` + `columns` 做保守估算。这个对比是 Phase 3A 最核心的价值证明——新链路**不给 LLM 塞无关表字段**。
+- **别名漂移（alias drift）**：LLM 生成的列名和 eval case 期望的列名不一致，例如 case 期望 `category` 但 LLM 输出 `category_name`；case 期望 `coupon_order_count` 但 LLM 输出 `order_count`。这不是 SQL 错误，而是命名偏好不同。类比：同一个 SQL 查询结果，Java 里叫 `getCategory()`，Python 里叫 `category_name`——业务含义对，但字段名对不上自动评分。
+
+### 关键文件
+
+- `eval/compare_phase3a.py`：对照报告生成器。读取两份 trace JSONL → 按 question 匹配 → 输出并排对比 Markdown
+- `scripts/smoke_phase3a_text2sql.py`：一键跑完 6 个报告 + 3 个对照的编排脚本
+- `eval/reports/phase3a-comparison.md`：formal 新旧对照报告（最核心的交付物）
+- `engine/nl2sql/planner.py`：plan validation 聚合表达式误判修复
+- `app/api/query.py`：新 pipeline 安全预检补丁
+
+### 代码阅读路线
+
+1. **入门口**：`scripts/smoke_phase3a_text2sql.py`
+   看 `main()` 怎么用 `subprocess.run` 串起 5 步：3 个新 pipeline eval + 3 个对照报告 + 写摘要。重点理解这个脚本只是**编排器**——它不自己调用 LLM、不操作数据库，只是把 M8-M11 已经做好的 `eval.run_eval` 和 `eval.compare_phase3a` 按顺序调用。先看这步能快速建立"M12 做了什么"的整体印象，不需要深究每个子命令的参数。
+
+2. **对照逻辑**：`eval/compare_phase3a.py`
+   这是 M12 最核心的新代码。按阅读顺序：`main()` → `_load_traces()`（读 JSONL）→ `_index_by_question()`（建立 question→trace 索引）→ `generate_comparison()`（核心逻辑）。重点理解 **question 文本匹配**的策略和局限性——trace 里没有 case_id，但好处是不需要 YAML 文件参与，纯靠两份 trace 就能对齐。`_extract_schema_context_size()` 和 `_extract_join_path_info()` 展示了如何从新 pipeline 的 `trace_steps` 里提取诊断数据；旧链路没有这些字段，所以 Schema 精简度对比中旧链路只能保守估算。
+
+3. **修复点到原文件**：`app/api/query.py` 和 `engine/nl2sql/planner.py`
+   - `query.py` 的 M12 补丁：在 `force_new_pipeline` 分支开头加了 `_looks_like_dangerous_sql()` 检查。需要理解它为什么不能放在 `run_text2sql_pipeline()` 内部——因为 SQL Guard 拦截需要用到 `validate_readonly_sql()` 返回的 `blocked_reason`，而这个理由要写进 AgentResponse；pipeline 层只返回 `Text2SQLPipelineResult`，不应该知道响应格式。
+   - `planner.py` 的 M12 修复：`_check_table_and_column_scope()` 里把 `step.columns` 拆成 `plain_columns`（纯 table.column）和 `expr_columns`（从聚合表达式里提取的 table.column）。理解 `_qualified_refs()` 的 regex 怎么从 `COUNT(DISTINCT orders.id)` 里提取出 `orders.id`。这个修复不影响 M10 原始设计——校验范围没变，只是校验方式更聪明了。
+
+4. **报告产物**：`eval/reports/phase3a-comparison.md`
+   这是 M12 的核心交付物。打开看 6 个小节的组织逻辑：通过率 → Schema 精简度 → JoinPath → Trace Steps → Issue Tags → 分 case 明细。理解为什么"Schema 精简度"放在第二而不是第一——新链路的**局部 schema prompt** 是它和旧链路最本质的架构差异，也是面试里最容易讲清楚的价值。
+
+5. **README 收口**：项目根 `README.md` 的 Phase 3A 小节
+   看"当前边界"表格怎么把已完成/测试兜底/可选/未实现分四档表述。这是一个工程上很重要的习惯：不虚报能力。面试官如果看到 README 说"Milvus 已完成"但实际是 in-memory，信任感会瞬间崩塌。
+
+`smoke_script` → `compare_phase3a` → `query.py fix` → `planner.py fix` → `comparison.md` → `README`
+
+### 设计要点
+
+- **对照报告用 trace 不用 Markdown**：解析 Markdown 报告太脆弱（格式一改就坏），trace JSONL 是 Pydantic `model_dump_json()` 输出的稳定结构化数据。代价是需要两份 trace 文件都存在且 question 文本一致；好处是报告生成器完全不用依赖 YAML case 文件，纯数据驱动。
+- **M12 不做 LLM 质量优化**：约 50% 通过率低于计划的 7/8 门槛，但 M12 定位是"测量和收口"而非"修 LLM"。对照报告如实呈现失败原因（alias drift、missing column 等），后续 P0 schema/plan/prompt 优化时可以直接消费这些 issue tags。在错误的时间修错误的问题会让模块边界混乱。
+- **安全预检不能放在 pipeline 内部**：`run_text2sql_pipeline()` 返回的是引擎层 `Text2SQLPipelineResult`，不应该知道 `validate_readonly_sql()` 的 `blocked_reason` 怎么写进 `AgentResponse`。放在 API 层是正确的分层——安全策略属于 API 边界的职责。
+- **DeepSeek 模型名是环境依赖问题**：`deepseek-chat` → `deepseek-v4-pro` 是 API 侧的变化，不应该在 M11 实现时就预见。M12 作为第一个"批量跑新 pipeline"的模块，自然成为第一个踩到这个问题的地方。修在 `generator.py` 的默认值，环境变量 `LLM_MODEL` 可以覆盖。
+
+### 面试怎么讲
+
+**"你是怎么证明你的 Text2SQL 改造有价值的？"**
+
+这是面试官很可能问的问题。回答方向：不是口头说"新链路更好"，而是**量化对比**。
+
+"我在 Phase 3A 最后做了一个对照报告模块（M12）。基本思路是：用同一批 58 条评测用例，分别跑旧链路和新链路，把两边的 SQL、用到的表、trace 步骤、失败原因并排对比。对照报告不是手动写的——我有一个 `compare_phase3a.py` 脚本，读两份 trace JSONL，按问题文本自动匹配，生成 6 个小节的 Markdown 报告。"
+
+"核心结论是：新链路的局部 Schema 把 LLM 看到的内容从全量 14 表几百字段精简到 4-7 表几十字段，Join 条件来自 `relations.yaml` 而不是 LLM 自由发挥，每次请求有完整 9 步 trace 可以定位到底是 schema retrieval 召回不足还是 plan validation 拦截还是 SQL Guard 报错。当前瓶颈是 LLM 输出列名不稳定，约一半 case 挂在别名匹配上——但这个对照报告本身已经给出了明确的改进方向。"
+
+**"如果你来改进通过率，你会怎么做？"**
+
+"列名问题是多方面的：一是 eval case 的 `expected_columns` 可以更灵活——比如接受 `category` 或 `category_name` 都算对；二是 local schema prompt 里可以更明确地告诉 LLM 用哪些列名；三是 plan validation 可以增加列名映射规则。但核心原则是：**不要让评测标准掩盖真实质量问题**——如果 LLM 确实选错了列，就应该报出来，而不是放宽标准假装通过。"
+
+### 验证与下一步
+
+- 验证：pytest 65 passed, 2 skipped；新 pipeline 三套报告 + 三套对照报告均生成；git diff --check clean
+- 下一步：Phase 3A 全部 M8-M12 代码完成，等 finish-module 收工后人工检查，再 accept-module 验收。后续进入阶段三 RAG / Hybrid
+
+可复制验证命令：
+
+```powershell
+# 新 pipeline formal 10 条。预期：generate report + trace JSONL，pass 约 6/10。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pipeline-mode new_text2sql --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-new-pipeline.md --trace .agent_work/temp/phase3a-new-traces.jsonl
+
+# 生成 formal 对照报告。预期：对比新旧链路通过率、Schema 规模、JoinPath、Trace Steps。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.compare_phase3a --baseline-trace .agent_work/temp/phase3a-baseline-traces.jsonl --new-trace .agent_work/temp/phase3a-new-traces.jsonl --report eval/reports/phase3a-comparison.md
+
+# 全量验证。预期：65 passed, 2 skipped。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m12-full
+```
+
+**本地启动体验：**
+
+M12 本身没有新的 API 端点——它的体验入口是**批量评测报告**而非 Swagger。建议先看 `eval/reports/phase3a-comparison.md` 了解新旧链路差异的全貌，再用 `scripts/smoke_phase3a_text2sql.py` 一键复现（需要 DeepSeek API key）。

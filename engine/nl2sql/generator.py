@@ -53,7 +53,7 @@ class DeepSeekChatClient:
     def __init__(self, *, api_key: str, base_url: str, model: str) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/") or "https://api.deepseek.com"
-        self.model = model or "deepseek-chat"
+        self.model = model or "deepseek-v4-pro"
 
     def complete(self, *, prompt: str) -> str:
         """调用 DeepSeek chat completions 接口。"""
@@ -113,7 +113,7 @@ def get_default_llm_client() -> LLMClient:
         raise LLMGenerationError(f"M4 仅支持 DeepSeek 主路径，当前 LLM_PROVIDER={settings.llm_provider}。")
 
     api_key = settings.deepseek_api_key or settings.llm_api_key
-    model = settings.llm_model if settings.llm_model != "mock-sql-generator" else "deepseek-chat"
+    model = settings.llm_model if settings.llm_model != "mock-sql-generator" else "deepseek-v4-pro"
     return DeepSeekChatClient(
         api_key=api_key,
         base_url=settings.deepseek_base_url or "https://api.deepseek.com",

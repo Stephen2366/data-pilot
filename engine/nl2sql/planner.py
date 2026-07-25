@@ -126,7 +126,12 @@ def _check_table_and_column_scope(
         if table not in graph_tables:
             _append_issue(result, "missing_table", f"{step.step_id} 引用了局部 Schema 中不存在的表：{table}")
 
-    explicit_columns = set(step.columns) | _qualified_refs(step.filters + step.aggregations + step.group_by + step.order_by + step.output_columns)
+    # ★ M12 修复：step.columns 里可能混入聚合表达式（如 COUNT(DISTINCT orders.id)），
+    # 直接按 table.column 比对会误判为缺失字段。这里拆成两步：先把纯 table.column 挑出来，
+    # 再从表达式里提取 table.column，两个集合合并后再校验。
+    plain_columns = {col for col in step.columns if QUALIFIED_COLUMN_RE.fullmatch(col)}
+    expr_columns = _qualified_refs(step.columns + step.filters + step.aggregations + step.group_by + step.order_by + step.output_columns)
+    explicit_columns = plain_columns | expr_columns
     for column in sorted(explicit_columns):
         if column not in graph_columns:
             _append_issue(result, "missing_column", f"{step.step_id} 引用了局部 Schema 中不存在的字段：{column}")

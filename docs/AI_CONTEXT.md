@@ -5,11 +5,11 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：M11 新 Text2SQL Pipeline 与 Trace Steps（已收工，待验收）
-- 下一模块：M12 对照报告与阶段收尾
+- 当前模块：M12 对照报告与阶段收尾（已收工，待验收）
+- 下一模块：阶段三 RAG / Hybrid（待定）
 - 上一模块验收：M11 已验收（2026-07-24，报告 `accept-M11-20260724.md`）
 - 阻塞项：无
-- 更新时间：2026-07-24
+- 更新时间：2026-07-25
 
 ## 当前技术选型快照
 
@@ -32,6 +32,29 @@
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
 ## 变更记录（新的在上）
+
+### Phase 3A M12 对照报告与阶段收尾（2026-07-25）
+
+- 改动范围：新增 `eval/compare_phase3a.py`、`scripts/smoke_phase3a_text2sql.py`；修改 `engine/nl2sql/generator.py`、`engine/nl2sql/planner.py`、`app/api/query.py`、`README.md`、`docs/AI_CONTEXT.md`
+- 关键决策：
+  - M12 负责跑新 pipeline 10 条 formal / 16 条 challenge / 32 条 diagnostic 报告，生成新旧链路对照报告，提供一键 smoke 脚本，更新 README 能力边界。
+  - **DeepSeek 模型名修复**：API 已废弃 `deepseek-chat`，修改 `generator.py` 两处默认值为 `deepseek-v4-pro`；同步更新 README LLM_MODEL 示例。
+  - **新 pipeline 安全预检补丁**：新链路 `force_new_pipeline=true` 绕过了旧链路的 `_looks_like_dangerous_sql` 预检，导致 DROP/DELETE 等危险问题被 LLM 转写成 SELECT 从而绕过安全用例。修复：在 `app/api/query.py` 的 `force_new_pipeline` 分支前增加相同预检。
+  - **plan validation 聚合表达式误判修复**：`_check_table_and_column_scope()` 把 `COUNT(DISTINCT orders.id)` 当作普通列名检查导致误判。修复：拆分 `step.columns` 为纯 `table.column` 和表达式引用，表达式通过 `_qualified_refs()` 提取内部引用。
+  - **对照报告生成策略**：选择读取 trace JSONL（结构化）而非解析 Markdown 报告。`compare_phase3a.py` 按 question 文本匹配 case，生成并排对比表（通过率、Schema 精简度、JoinPath、Trace Steps、Issue Tags）。
+  - **LLM 通过率现状**：新 pipeline 允许类 SQL 约 50-60% 通过率，低于计划目标 7/8。主要瓶颈是 LLM 输出列名不稳定（别名漂移），与 baseline 遇到的同源。对照报告如实呈现，issue tags 记录具体失败原因。后续 P0 schema/plan/prompt 优化可提升。
+  - 用户确认：本模块按 `docs/phase3a-plan.md` M12 默认方案执行，未出现需要偏离计划的新方案选择。
+- 参考资料：未查阅外部参考；本次按 `docs/phase3a-plan.md` M12、M8-M11 已有 baseline 和新 pipeline 代码实现。
+- 验证快照：
+  - 新 pipeline formal 10：6/10 passed（安全 2/2 blocked）
+  - 新 pipeline challenge 16：8/16 passed（安全 2/2 blocked）
+  - 新 pipeline diagnostic 32：15/32 passed
+  - 对照报告 formal/challenge/diagnostic 三份均生成
+  - pytest：65 passed, 2 skipped, 1 warning（既有 Starlette/httpx）
+  - `git diff --check`：无 whitespace error，仅 Windows CRLF 提示
+- 遗留：
+  - M12 未解决 LLM 列名别名漂移问题（category/category_name、coupon_order_count 等），属于 P0 schema/plan/prompt 优化范畴，留给后续阶段。
+  - 阶段三A 全部 5 个模块（M8-M12）代码已就绪；M12 收工整理后等待人工检查和 accept-module。
 
 ### M11 accept-module 验收通过（2026-07-24）
 accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 65 passed + 2 skipped），报告 `accept-M11-20260724.md`。⚠️ 测试文件 4 个 test 函数缺单行"守住什么"注释，建议 M12 补。后续可进入 M12 对照报告与阶段收尾。

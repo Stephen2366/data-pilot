@@ -243,6 +243,22 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
 
     # 步骤 0：M11 评测开关显式绕过模板优先，只走新 Text2SQL pipeline。-----------------------
     if request_body.force_new_pipeline:
+        # ★ M12 补丁：新 pipeline 也必须做危险 SQL 关键词预检。旧链路在 matched is None 分支
+        # 里由 _looks_like_dangerous_sql 拦截；新链路此前绕过该分支，导致 DROP/DELETE 等
+        # 危险问题进入 LLM 后被转写成 SELECT，从而绕过安全用例。这里把预检提到 force 分支前，
+        # 确保新旧链路统一拦截恶意问题。
+        if _looks_like_dangerous_sql(request_body.question):
+            guard_result = validate_readonly_sql(request_body.question)
+            if not guard_result.is_allowed:
+                return _blocked_response(
+                    request=request,
+                    request_body=request_body,
+                    trace_id=trace_id,
+                    sql=request_body.question,
+                    blocked_reason=guard_result.blocked_reason or "SQL Guard 已拦截。",
+                    started_at=started_at,
+                )
+
         pipeline_result = run_text2sql_pipeline(
             question=request_body.question,
             user_role=request_body.user_role,

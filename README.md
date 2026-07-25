@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统——自然语言 → SQL/RAG → 可视化 + 分析报告。
 
-✅ 阶段二 v1 已收尾：M6 EvalOps-lite 与 Streamlit 演示页已完成，下一步进入阶段三 RAG / Hybrid。
+✅ 阶段二 v1 已收尾。阶段三A（M8-M12）Text2SQL 深化已完成：Schema Retrieval、QueryPlanStep、新 Text2SQL Pipeline、Trace Steps 和对照报告。下一步进入阶段三 RAG / Hybrid。
 
 ## 快速开始
 
@@ -215,7 +215,7 @@ LLM 配置示例：
 
 ```powershell
 $env:LLM_PROVIDER='deepseek'
-$env:LLM_MODEL='deepseek-chat'
+$env:LLM_MODEL='deepseek-v4-pro'
 $env:DEEPSEEK_API_KEY='<your_key>'
 $env:DEEPSEEK_BASE_URL='https://api.deepseek.com'
 ```
@@ -264,18 +264,67 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m streamlit run demo\
 演示页通过 HTTP 调用本地 `/api/query`，展示 `answer`、`SQL`、表格、Vega-Lite 图表、
 `safety_status`、`trace_id` 和 tool trace。
 
+### Phase 3A Text2SQL 深化
+
+M8-M12 把阶段二 v1 的 SQL 主链路升级为可检索、可计划、可校验、可追踪的 Text2SQL 中间层。
+
+**核心能力**：
+
+| 能力 | 模块 | 说明 |
+|---|---|---|
+| Schema Retrieval（字段/指标/关系三级检索） | M9 | keyword + vector 双路召回，结果含 `score/source/rank/doc_type` |
+| SchemaGraph + JoinPath | M9 | 从 `relations.yaml` 构建局部表关系图，Join 条件不靠 LLM 猜 |
+| QueryPlanStep 结构化计划与自检 | M10 | LLM 先输出 JSON plan，再校验表/字段/Join/敏感字段 |
+| 新 Text2SQL Pipeline | M11 | `schema_retrieval → plan → local prompt → SQL → Guard → execute` |
+| 分步骤 Trace（trace_steps） | M11 | 每次请求记录 9 步：schema_retrieval 到 chart_decision |
+| 强制新链路评测开关 | M11 | `QueryRequest.force_new_pipeline=true` + `pipeline_mode=new_text2sql` |
+| 新旧链路对照报告 | M12 | 10 条 formal + 16 条 challenge + 32 条 diagnostic 对比 |
+
+**运行 Phase 3A 评测**：
+
+```powershell
+# 新 pipeline 10 条 formal 回归
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pipeline-mode new_text2sql --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-new-pipeline.md --trace .agent_work/temp/phase3a-new-traces.jsonl
+
+# 生成新旧对照报告
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.compare_phase3a --baseline-trace .agent_work/temp/phase3a-baseline-traces.jsonl --new-trace .agent_work/temp/phase3a-new-traces.jsonl --report eval/reports/phase3a-comparison.md
+
+# 一键 smoke（运行全部报告 + 对照）
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3a_text2sql.py
+```
+
+**当前边界（如实说明，不虚报）**：
+
+| 项目 | 状态 |
+|---|---|
+| Schema Retrieval keyword + vector 双路召回 | 已完成（in-memory vector index） |
+| Milvus 向量数据库 | 测试兜底（adapter 已实现，pytest 用 in-memory，smoke 可选接 Docker Milvus） |
+| 真实中文 Embedding（BGE-M3 / Qwen3） | 可选（SiliconFlow adapter 已实现，默认不联网） |
+| RRF 融合 / Rerank | 未实现（接口字段已预留） |
+| Schema Linking LLM 二次筛选 | 未实现（hook 位置已预留） |
+| SQL 自动修复 / EXPLAIN 风险检查 | 未实现 |
+| LangGraph / MCP / Skill 编排 | 未实现（Phase 3A 坚持普通 Python pipeline） |
+| 多 SQL Agent / Plan-and-Execute | 未实现（QueryPlan.steps 和 TraceStep.parent_step_id 已预留） |
+
 阶段二已完成能力：
 
 | 能力 | 状态 |
 |---|---|
-| MySQL + Alembic + 确定性 seed 数据 | 已完成 |
+| MySQL + Alembic + 确定性 seed 数据（14 表） | 已完成 |
 | 4 类基础列表 API、分页、筛选、统一异常 | 已完成 |
 | 模板 SQL + SQL Guard v0 | 已完成 |
 | DeepSeek NL2SQL + schema / KPI / few-shot prompt | 已完成 |
 | 表级 RBAC + 敏感字段拦截 | 已完成 |
 | AgentResponse + SQL Tool + JSONL Trace + 基础图表 | 已完成 |
-| EvalOps-lite 6 条 SQL smoke + Markdown 报告 | 已完成 |
+| EvalOps-lite SQL smoke + Markdown 报告（10 formal + 16 challenge + 32 diagnostic） | 已完成 |
 | Streamlit 最小演示控制台 | 已完成 |
+| Schema Retrieval（field/metric/relation 三级，keyword+vector 双路召回） | 已完成 |
+| SchemaGraph + JoinPath（relations.yaml 驱动） | 已完成 |
+| QueryPlanStep 结构化计划 + 自检 | 已完成 |
+| 新 Text2SQL Pipeline + force_new_pipeline 开关 | 已完成 |
+| 分步骤 trace_steps（9 步，JSONL） | 已完成 |
+| 新旧链路对照报告 | 已完成 |
+| Milvus 向量数据库 | 测试兜底（adapter 已实现，pytest 用 in-memory） |
 | RAG / Hybrid 正式检索链路 | 阶段三 |
 | LangGraph 编排、MCP、Skill 化 | 后续计划 |
 
@@ -299,7 +348,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic upgrade hea
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
 ```
 
-M1 seed 固定写入以下数据量：用户 50、商品 30、渠道 6、订单 500、退款 80、工单 120、知识文档 8。
+M1 seed 固定写入以下数据量：用户 200、商品 50、类目 15、渠道 6、订单 10000、订单明细 18000、退款 1000、工单 300、知识文档 10、优惠券 10、订单优惠券 3000、行为日志 10000、价格历史 150、宽表快照 10000。
 
 固定业务事实锚点：
 
@@ -407,7 +456,8 @@ app/                    # FastAPI 应用层
   models/               # ORM 模型
   schemas/              # Pydantic 请求/响应模型
 engine/                 # 通用 Agent 引擎
-  nl2sql/               # 模板 SQL / NL2SQL
+  nl2sql/               # 模板 SQL / NL2SQL / Planner / Pipeline
+  schema_retrieval/     # Schema 检索（field/metric/relation doc + vector index + SchemaGraph）
   sql_guard/            # SQL 安全检查
   tools/                # Agent tools
   trace/                # Trace 与成本延迟记录
@@ -415,13 +465,17 @@ domain_pack/            # 电商/SaaS 业务配置
   chart_templates/      # 图表模板
   kb_docs/              # 知识库文档
   metrics.yaml          # KPI 口径
-  schema_desc/          # 表结构与字段语义
+  schema_desc/          # 表结构与字段语义（含 relations.yaml）
   sql_examples/         # few-shot 与模板 SQL
 eval/                   # EvalOps-lite
   cases/                # YAML 测试用例
     smoke.yaml          # M6 6 条 SQL smoke case
-  cases_plan.md         # 32 条评测问题清单和 YAML 字段草案
+    phase3a-regression.yaml  # Phase 3A 10 条 formal regression
+    database-upgrade-challenge.yaml  # 16 条 challenge
+    phase3a-diagnostic-benchmark.yaml  # 16 条 diagnostic extra
+  compare_phase3a.py    # M12 新旧链路对照报告生成器
   reports/              # 评测报告
+  run_eval.py           # 评测入口
 demo/                   # Streamlit 演示页
   streamlit_app.py      # M6 最小演示控制台
 scripts/                # 数据生成和维护脚本
