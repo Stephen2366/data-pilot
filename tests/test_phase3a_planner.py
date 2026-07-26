@@ -144,7 +144,7 @@ def test_plan_validation_rejects_objects_outside_schema_graph(step: QueryPlanSte
 
 
 def test_sensitive_field_plan_is_blocked_before_sql_generation() -> None:
-    """普通运营角色计划查询敏感字段时，要在 SQL 生成前被预检拦截。"""
+    """敏感字段优先于角色权限，admin 也不能在 Text2SQL 中直接规划邮箱字段。"""
 
     graph = _sample_schema_graph()
     graph = SchemaGraph(
@@ -154,15 +154,16 @@ def test_sensitive_field_plan_is_blocked_before_sql_generation() -> None:
         relations=graph.relations,
         join_paths=graph.join_paths,
     )
-    result = validate_query_plan(
-        QueryPlan(steps=[_valid_step(tables=["users"], columns=["users.email"], joins=[], metrics=[])]),
-        schema_graph=graph,
-        domain_schema=load_domain_schema(),
-        user_role="ops",
-    )
+    for role in ["ops", "admin"]:
+        result = validate_query_plan(
+            QueryPlan(steps=[_valid_step(tables=["users"], columns=["users.email"], joins=[], metrics=[])]),
+            schema_graph=graph,
+            domain_schema=load_domain_schema(),
+            user_role=role,
+        )
 
-    assert not result.is_valid
-    assert "sensitive_field_access" in result.issue_tags
+        assert not result.is_valid
+        assert "sensitive_field_access" in result.issue_tags
 
 
 def test_extract_query_plan_supports_fenced_json_and_maps_failures() -> None:

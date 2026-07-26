@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     siliconflow_api_key: str = Field(default="", alias="SILICONFLOW_API_KEY")
     siliconflow_base_url: str = Field(default="", alias="SILICONFLOW_BASE_URL")
 
+    # Schema Retrieval 配置 ===================================================================
+    # 默认仍走纯本地 deterministic in-memory；Milvus / SiliconFlow 必须显式开启。
+    schema_vector_backend: str = Field(default="inmemory", alias="SCHEMA_VECTOR_BACKEND")
+    schema_embedding_provider: str = Field(default="deterministic", alias="SCHEMA_EMBEDDING_PROVIDER")
+    milvus_collection: str = Field(default="datapilot_schema_docs", alias="MILVUS_COLLECTION")
+    milvus_uri: str = Field(default="http://127.0.0.1:19530", alias="MILVUS_URI")
+    milvus_reset_collection: bool = Field(default=False, alias="MILVUS_RESET_COLLECTION")
+    siliconflow_embedding_model: str = Field(default="BAAI/bge-m3", alias="SILICONFLOW_EMBEDDING_MODEL")
+    siliconflow_embedding_dimensions: int | None = Field(default=None, alias="SILICONFLOW_EMBEDDING_DIMENSIONS")
+
     # 可观测性配置 =============================================================================
     # LangSmith 用来记录/观察 LLM 调用链路，后续调试 Agent 时会很有用。
     langsmith_tracing: str = Field(default="false", alias="LANGSMITH_TRACING")

@@ -5,11 +5,11 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：M13 Phase 3A 新 pipeline 质量修复（已收工，待验收）
+- 当前模块：M14-lite Phase 3A 收口（开发中）
 - 下一模块：阶段三 RAG / Hybrid（待定）
-- 上一模块验收：M13 未验收（待 accept-module）
+- 上一模块验收：M13 已验收（2026-07-26，报告 accept-M13-20260726.md）
 - 阻塞项：无
-- 更新时间：2026-07-26
+- 更新时间：2026-07-27
 
 ## 当前技术选型快照
 
@@ -33,6 +33,47 @@
 
 ## 变更记录（新的在上）
 
+### dev-log 早期模块面试口径同步（2026-07-27）
+
+- 改动范围：`docs/dev-log.md`。
+- 关键决策：按用户要求重写 M3、M4、M5、Phase 2.7、M9、M9.1/M9.2、M10 的「面试怎么讲」，统一为完整叙述 + 面试官可能追问；对早期实现和当前主线不一致处，用 `> 现在口径：...` 标明，例如 SQL Guard 已扩展到 RBAC/敏感字段、admin 也不直出敏感字段、Schema Retrieval 已有显式 Milvus/SiliconFlow 配置开关、M5 trace 已演进到 M11 trace_steps / M14-lite LLM 失败 metadata。按用户要求重写 Phase 3A M8 / M8.5 的「面试怎么讲」，统一为完整叙述 + 面试官可能追问；新增 `> 现在口径：...`，说明 M8 baseline 属于早期旧尺子产物，M13 后需按 expected_value/result_match 思路重新理解评测可信度；M8.5 diagnostic 是诊断素材，不是追满分硬门。
+- 验证：`git diff --check -- docs\dev-log.md` 通过，仅 Windows CRLF 提示。
+
+### M14-lite 文档口径同步（2026-07-27）
+
+- 改动范围：`docs/multi-chain-architecture.md`、`docs/dev-log.md`。
+- 关键决策：同步 M14-lite 后的真实口径：Schema Retrieval 支持环境变量显式切换 Milvus/SiliconFlow，默认仍为 `inmemory + deterministic`；SQL 安全策略改为敏感字段优先于 admin；M11「面试怎么讲」按 finish-module 模板改成完整叙述 + 常见问答。
+- 验证：`git diff --check -- docs\multi-chain-architecture.md docs\dev-log.md` 通过，仅 Windows CRLF 提示。
+
+### M14-lite Phase 3A 收口开发中（2026-07-27）
+
+- 改动范围：`eval/run_eval.py`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`、`engine/sql_guard/rbac.py`、`engine/schema_retrieval/retriever.py`、`app/core/config.py`、`.env.example`、相关 Phase 3A 测试。
+- 关键决策：
+  - M14-lite 执行用户确认的 5 项：最小 `result_match`、LLM 失败 trace 增强、安全/diagnostic 口径清理、Schema Retrieval 后端配置开关；不做递归类目、知识库归因、完整 EvalOps、JSON mode 大实验。
+  - `result_match` 只做最小结果集对比：执行 `expected_sql`，按行顺序和列值比较 API 返回 rows；不做 SQL AST 等价、历史库或平台化。当前仅给 5 条核心 challenge SQL case 启用，目的是加严结果校验，不追 diagnostic 满分。
+  - 安全口径采用用户确认的方案 A：敏感字段优先于 admin 角色；`users.email/users.phone` 在 Text2SQL 路径中默认不直出，后续如需 admin 查看应走脱敏/审计/专门接口。
+  - diagnostic 清理只做边界与语义等价 alias：`db_plan_003` 知识库订单金额归因标为 `manual_review + hybrid_attribution + non_blocking`，留给后续 Hybrid；未通过 prompt 硬连知识库与订单。
+  - Schema Retrieval 配置开关默认仍是 `inmemory + deterministic`；`milvus` / `siliconflow` 必须通过环境变量显式开启，pytest 不依赖外部 Milvus 或联网 embedding。
+  - Milvus/SiliconFlow 不切默认的关键依据：2026-07-26 临时 A/B eval 显示，Milvus + SiliconFlow 对当前 M13 end-to-end pipeline 没有收益，formal `10/10` 持平，challenge `14/16` 持平，diagnostic `23/32 -> 20/32`。因此 M14-lite 只把它登记为显式工程开关和后续 RAG 复用能力，不把它当成 Text2SQL 提分主线。
+  - 注意区分两类结论：M9.1/M9.2 的 schema recall smoke 证明 Milvus adapter / SiliconFlow embedding provider 可用；M14-lite 参考的是 M13 后的真实端到端 eval，结论是“能用，但当前不该默认启用”。
+- 验证快照：
+  - `pytest tests\test_phase3a_eval.py::test_result_match_case_fails_when_generated_rows_do_not_match_expected_sql`：先红后绿。
+  - `pytest tests\test_phase3a_pipeline.py::test_sql_generation_failure_trace_keeps_raw_preview_and_parse_context`：先红后绿。
+  - `pytest tests\test_m4_nl2sql.py::test_enhanced_guard_blocks_sensitive_fields_and_role_table_access tests\test_phase3a_planner.py::test_sensitive_field_plan_is_blocked_before_sql_generation`：先红后绿。
+  - `pytest tests\test_phase3a_schema_retrieval.py::test_retrieve_schema_default_backend_stays_inmemory_deterministic tests\test_phase3a_schema_retrieval.py::test_retrieve_schema_can_explicitly_select_milvus_backend_without_changing_default`：默认路径通过，显式 Milvus 分支先红后绿。
+  - Milvus/SiliconFlow A/B 结论来自 M13 后续接文档与 `.agent_work/temp/milvus-eval/` 临时实验记录：formal `10/10` 持平，challenge `14/16` 持平，diagnostic `23/32 -> 20/32`，所以没有切默认，也没有把 diagnostic 下降伪装成配置收益。
+- 临时记录：`.agent_work/temp/m14-lite-notes.md`。
+
+### Phase 3A M13 后续接文档新增（2026-07-26）
+
+- 改动范围：新增 `docs/phase3a-m13-current-state-and-next-fixes.md`。
+- 关键决策：按用户要求新增新会话速览文档，集中说明 M13 已验收后的当前状态、formal/challenge/diagnostic 最新结果、剩余问题分类、潜伏问题、是否建议开 M14-lite 以及进入阶段三 RAG / Hybrid 前的修改建议。
+- 验证：人工回读文档结构；仅文档新增，未跑 pytest。
+
+### M13 accept-module 验收通过（2026-07-26）
+
+accept-module 7 项检查全部通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 78 passed + 1 既有 warning），报告 `accept-M13-20260726.md`。检查 4 发现 AI_CONTEXT M13 两批条目缺「参考资料」小节，已当场修复。后续可进入阶段三 RAG / Hybrid。
+
 ### M13 dev-log 面试复盘扩写（2026-07-26）
 
 - 改动范围：`docs/dev-log.md`。
@@ -49,6 +90,7 @@
   - QueryPlan prompt 增加商品/类目销售额约束：必须用 `item_gmv`、聚合 `order_items.line_amount`，商品/类目维度通过 `order_items.product_id = products.id` 关联，不用 `gmv` / `orders.order_amount` / `orders.product_id` 替代。
   - SQL prompt 增加转化率浮点除法约束：`add_to_pay_conversion_rate` 必须使用 `* 1.0` 或 `CAST(... AS REAL)`，避免 SQLite 整数除法把小数截成 0。
   - `一级类目销售额排名` 的固定检查值从 `数码电子` 改为 `SaaS 软件`。原因：用当前 MySQL seed 直接执行参考 SQL，Top1 实际为 `SaaS 软件`；`数码电子及其子类目` 是另一条困难诊断题，未改。
+  - 参考资料：未查阅外部参考；本次按 trace 分层诊断和已有 metrics.yaml / schema_desc 口径执行修复，未引入新的参考项目。
 - 验证快照：
   - TDD RED/GREEN 细节见 `.agent_work/temp/m13-notes.md`。
   - 相关回归最终：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py tests\test_phase3a_planner.py tests\test_phase3a_pipeline.py --basetemp=.agent_work\temp\pytest-m13-single-metric-related` -> 37 passed，1 既有 Starlette/httpx warning。
@@ -73,6 +115,7 @@
   - 新增 `expected_value` eval check，优先拦住 `gmv=NULL` 但 `contains: gmv` 误判通过的问题。正式 regression/challenge 中 GMV 使用固定事实 `11285752.00`，净收入按确定性 seed 查询得到 `11293058.25`。
   - `_format_plan_metrics()` 现在会把 `filter` 和 `default_time_field` 注入新 pipeline 的 QueryPlan / 局部 SQL prompt，恢复旧 M4 `_format_metrics()` 已有的结构化指标口径。
   - `DeepSeekChatClient.complete()` 支持可选 `system_prompt`；`generate_query_plan()` 和 `generate_sql_from_plan_step()` 传入各自任务角色。为保护已有 fake LLM 测试，新增兼容调用：旧 `complete(prompt=...)` fake client 仍可工作。
+  - 参考资料：未查阅外部参考；本次按 v5 计划执行 M13 第一批修复，修改范围限定在 eval scorer、metrics prompt 管道和 generator system_prompt 兼容；未引入新的参考项目。
 - 验证快照：
   - TDD RED/GREEN 记录见 `.agent_work/temp/m13-notes.md`。
   - `tests/test_phase3a_eval.py`：15 passed，1 既有 Starlette/httpx warning。

@@ -178,6 +178,21 @@ def _join_path_metadata(schema_graph: SchemaGraph) -> dict[str, Any]:
     }
 
 
+def _llm_error_metadata(exc: LLMGenerationError) -> dict[str, Any]:
+    """把 LLM 失败上下文压成 trace metadata，避免报告里只剩一句错误文案。"""
+
+    metadata: dict[str, Any] = {}
+    if exc.stage:
+        metadata["stage"] = exc.stage
+    if exc.raw_response_preview:
+        metadata["raw_response_preview"] = exc.raw_response_preview
+    if exc.parse_error:
+        metadata["parse_error"] = exc.parse_error
+    if exc.prompt_length is not None:
+        metadata["prompt_length"] = exc.prompt_length
+    return metadata
+
+
 def _first_sql_step(plan: QueryPlan):
     """取出 Phase 3A 允许执行的唯一 sql_query step。"""
 
@@ -291,6 +306,7 @@ def run_text2sql_pipeline(
                 started_at=started_at,
                 error_type=exc.issue_tag,
                 output_summary=str(exc),
+                metadata=_llm_error_metadata(exc),
             )
         )
         return _blocked_result(
@@ -310,6 +326,7 @@ def run_text2sql_pipeline(
                 started_at=started_at,
                 error_type="llm_generation_error",
                 output_summary=str(exc),
+                metadata=_llm_error_metadata(exc),
             )
         )
         return _blocked_result(
@@ -396,6 +413,7 @@ def run_text2sql_pipeline(
                 started_at=started_at,
                 error_type="llm_generation_error",
                 output_summary=str(exc),
+                metadata=_llm_error_metadata(exc),
                 parent_step_id=plan_step.step_id,
             )
         )

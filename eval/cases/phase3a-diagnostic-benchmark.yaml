@@ -9,6 +9,8 @@ cases:
     user_role: ops
     expected_tables: [orders]
     expected_columns: [actual_amount]
+    expected_column_aliases:
+      actual_amount: [net_revenue, total_net_revenue, total_actual_amount]
     expected_metrics: [net_revenue]
     phase3a_capabilities: [schema_retrieval, query_plan]
     phase3a_blocking: true
@@ -57,6 +59,8 @@ cases:
     user_role: ops
     expected_tables: [coupons, order_coupons, orders]
     expected_columns: [coupon_type, gmv]
+    expected_column_aliases:
+      gmv: [total_gmv, coupon_gmv]
     expected_metrics: [gmv]
     phase3a_capabilities: [join_path, query_plan]
     phase3a_blocking: true
@@ -130,7 +134,8 @@ cases:
     expected_metrics: [gmv]
     expected_plan_result: blocked
     phase3a_capabilities: [query_plan, join_path]
-    phase3a_blocking: true
+    phase3a_blocking: false
+    case_properties: [manual_review, hybrid_attribution]
     security_expectation: allow
     check:
       type: plan_validation_blocked

@@ -9,10 +9,18 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from app.core.config import Settings, get_settings
 from engine.nl2sql.schema_loader import DomainSchema
 from engine.schema_retrieval.document_builder import DEFAULT_RELATIONS_PATH, build_schema_documents
+from engine.schema_retrieval.embedding_provider import SiliconFlowEmbeddingProvider
 from engine.schema_retrieval.objects import SchemaDocument, SchemaHit, SchemaRetrievalResult
-from engine.schema_retrieval.vector_index import DeterministicEmbeddingProvider, InMemoryVectorIndex, VectorIndex
+from engine.schema_retrieval.vector_index import (
+    DEFAULT_MILVUS_DIMENSION,
+    DeterministicEmbeddingProvider,
+    InMemoryVectorIndex,
+    MilvusVectorIndex,
+    VectorIndex,
+)
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]{2,}|[\u4e00-\u9fff]")
 
@@ -92,6 +100,46 @@ def _merge_hits(keyword_hits: list[SchemaHit], vector_hits: list[SchemaHit], *, 
     ]
 
 
+def _build_embedding_provider(settings: Settings):
+    """按配置创建 embedding provider；默认不联网。"""
+
+    provider = settings.schema_embedding_provider.lower()
+    if provider == "deterministic":
+        return DeterministicEmbeddingProvider()
+    if provider == "siliconflow":
+        return SiliconFlowEmbeddingProvider(
+            api_key=settings.siliconflow_api_key,
+            base_url=settings.siliconflow_base_url or "https://api.siliconflow.cn/v1",
+            model=settings.siliconflow_embedding_model,
+            dimensions=settings.siliconflow_embedding_dimensions,
+        )
+    raise ValueError(f"Unsupported SCHEMA_EMBEDDING_PROVIDER={settings.schema_embedding_provider}.")
+
+
+def _build_configured_vector_index(documents: list[SchemaDocument]) -> VectorIndex:
+    """根据显式配置创建向量索引；默认保持 M9 的本地 deterministic 路径。"""
+
+    settings = get_settings()
+    backend = settings.schema_vector_backend.lower()
+    provider_name = settings.schema_embedding_provider.lower()
+    embedding_provider = _build_embedding_provider(settings)
+
+    if backend == "inmemory":
+        if provider_name != "deterministic":
+            raise ValueError("SCHEMA_VECTOR_BACKEND=inmemory 只支持 SCHEMA_EMBEDDING_PROVIDER=deterministic。")
+        return InMemoryVectorIndex(documents=documents, embedding_provider=embedding_provider)
+    if backend == "milvus":
+        return MilvusVectorIndex(
+            documents=documents,
+            embedding_provider=embedding_provider,
+            collection_name=settings.milvus_collection,
+            uri=settings.milvus_uri,
+            dimension=settings.siliconflow_embedding_dimensions or DEFAULT_MILVUS_DIMENSION,
+            reset_collection=settings.milvus_reset_collection,
+        )
+    raise ValueError(f"Unsupported SCHEMA_VECTOR_BACKEND={settings.schema_vector_backend}.")
+
+
 def retrieve_schema(
     *,
     question: str,
@@ -105,10 +153,7 @@ def retrieve_schema(
 
     documents = build_schema_documents(domain_schema, relations_path=relations_path)
     keyword_hits = _keyword_search(question, documents, top_k=top_k)
-    active_vector_index = vector_index or InMemoryVectorIndex(
-        documents=documents,
-        embedding_provider=DeterministicEmbeddingProvider(),
-    )
+    active_vector_index = vector_index or _build_configured_vector_index(documents)
     vector_hits = active_vector_index.search(question, top_k=top_k)
     merged_hits = _merge_hits(keyword_hits, vector_hits, top_k=top_k)
     return SchemaRetrievalResult(

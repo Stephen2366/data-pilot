@@ -299,9 +299,29 @@ M1 准备了数据，M2 准备了 API 出入口。M3 做的是 DataPilot v0 的�
 
 ### 面试怎么讲
 
-M3 可以讲成“先做一个**可控的 Text-to-SQL v0**”。我没有一上来接 LLM，而是用**模板 SQL 建立稳定基线**：自然语言问题命中模板，SQL 进入 Guard，只允许只读查询，然后通过统一数据库 Session 执行，最后返回结构化 AgentResponse。这样做的好处是**可测试、可验收**，也为后续 LLM 接入留好工程接口。
+“M3 我先做的是一个**可控的 Text-to-SQL v0**。我没有一上来就让 LLM 自由生成 SQL，而是先用 5 条高价值模板 SQL 打通自然语言问题、SQL Guard、数据库执行和 `AgentResponse` 返回的完整闭环。这样做的价值是：系统先有一条稳定、可测、可演示的主链路；后续 M4 接 LLM、M5 扩展 trace 和图表时，只需要替换 SQL 来源，不需要重做 API、安全和响应契约。”
 
-安全上，我没有只靠 **prompt** 或**字符串过滤**，而是用 **sqlglot 解析 SQL AST**，拦截 **DDL / DML**。虽然 M3 还没做敏感字段和角色权限，但 **SQL Guard 的入口已经固定**，M4 可以在同一个层继续加 RBAC 和字段策略。
+“安全上，M3 已经把 SQL 执行入口固定到 **SQL Guard** 后面。即使模板 SQL 是我们自己写的，也不绕过 Guard；危险输入会被 sqlglot AST 解析拦截为非 SELECT。这是后续安全能力的地基：M3 只做只读检查，M4 再在同一个入口叠加 RBAC 和敏感字段策略。”
+
+> 现在口径：M3 的模板路径仍然是 `/api/query` 默认 baseline 的一部分；M11 之后可以通过 `force_new_pipeline=true` 强制走新 Text2SQL pipeline。SQL Guard 也已从 M3 的只读检查演进为 **只读检查 + 表级 RBAC + 敏感字段拦截**，M14-lite 后 admin 也不能通过 Text2SQL 直出 `users.email/users.phone`。
+
+1. **面试官问“为什么不一开始就接 LLM？”**
+
+   可以答：“因为一开始就接 LLM，会把生成质量、SQL 安全、接口契约、数据库执行混在一起排查。M3 先用模板 SQL 建立稳定 baseline，等 API、Guard、AgentResponse 都可测后，再把 LLM 作为 SQL 来源接进来。这样问题分层更清楚。”
+
+   这段突出的是 **先稳工程闭环，再引入不确定性**。
+
+2. **面试官问“模板 SQL 会不会太简单？”**
+
+   可以答：“模板 SQL 不是最终智能能力，而是 v0 基线。它覆盖 GMV、退款率、渠道订单量等高价值问题，帮助项目先有可演示结果；同时模板和 LLM 共用 SQL Guard 和响应结构，所以后续升级不会推倒重来。”
+
+   这段突出的是 **演进式架构**，不是把模板包装成智能。
+
+3. **面试官问“M3 的安全设计有什么亮点？”**
+
+   可以答：“M3 没有靠字符串判断 `drop`，而是用 sqlglot 把 SQL 解析成 AST，只允许单条 SELECT。虽然当时还没有 RBAC 和敏感字段，但 Guard 的入口已经固定，后续所有模板 SQL、LLM SQL、新 pipeline SQL 都复用同一个安全门。”
+
+   这段突出的是 **安全边界前置** 和 **可扩展门禁**。
 
 ### 验证与下一步
 
@@ -396,7 +416,29 @@ M3 已经跑通了 **模板 SQL 闭环**：自然语言问题命中白名单模�
 
 ### 面试怎么讲
 
-M4 可以讲成“把 **Text-to-SQL** 从规则模板升级到 **LLM 生成**，但没有把安全交给模型”。我先让模板 SQL 保持优先，保证 v0 稳定基线不被模型波动影响；未命中模板时，用 schema、指标口径和 few-shot 构造 prompt 调 DeepSeek。模型输出后，系统用 **sqlglot AST** 提取表和字段，再按 **RBAC allowlist** 和 **敏感字段策略**决定是否放行。这个设计能体现一个关键工程意识：LLM 可以负责生成候选答案，但数据库执行权必须由后端安全策略掌握喵
+“M4 我把 Text-to-SQL 从规则模板升级到 **LLM 生成 SQL**，但没有把安全交给模型。默认仍然模板优先，只有模板未命中才把 schema、指标口径和 few-shot 示例放进 prompt 调 DeepSeek。模型返回 SQL 后，系统不会直接执行，而是用 sqlglot AST 提取访问的表和字段，再按 RBAC allowlist 和敏感字段策略判断是否放行。”
+
+“这个模块最重要的工程意识是：**LLM 只负责生成候选 SQL，数据库执行权必须掌握在后端确定性策略里**。prompt 可以提醒模型不要查敏感字段，但真正的门禁在 SQL Guard / policy 层。这样即使模型输出了危险 SQL、越权表或 `users.email`，后端也能结构化拦截，而不是把安全寄托在模型‘听话’上。”
+
+> 现在口径：M4 当时接的是最小 DeepSeek 主路径；后续默认模型名已修到 `deepseek-v4-pro`。M14-lite 后安全策略进一步收紧为 **敏感字段优先于 admin 角色**，所以 admin 也不能在 Text2SQL 路径直接查邮箱/手机号；如果要给管理员看敏感信息，应走脱敏、审计或专门接口。
+
+1. **面试官问“LLM 生成 SQL 怎么保证不乱查？”**
+
+   可以答：“M4 的做法是 prompt 约束 + 后端校验双层。prompt 里给 schema、指标和 few-shot，让模型尽量生成正确 SQL；但最终放行由 SQL Guard 决定，它会解析 AST、检查是否只读、访问了哪些表字段，再套 RBAC 和敏感字段策略。”
+
+   这段突出的是 **LLM 不掌握执行权**。
+
+2. **面试官问“为什么模板优先？”**
+
+   可以答：“M3 的 5 条模板已经是稳定 baseline，如果 M4 一接 LLM 就让所有问题都走模型，老能力会被模型波动影响。模板优先能保证核心 demo 稳定，模板未命中时再用 LLM 扩展覆盖面。”
+
+   这段突出的是 **稳定基线 + 渐进扩展**。
+
+3. **面试官问“敏感字段怎么处理？”**
+
+   可以答：“敏感字段来自 domain pack 的 schema 描述，不靠自然语言临时判断。SQL Guard 会从 SQL AST 里提取 `table.column`，命中 `users.email/users.phone` 就拦截。现在主线里这条规则对 admin 也生效，避免 Text2SQL 成为敏感信息直出通道。”
+
+   这段突出的是 **schema metadata 驱动安全策略**。
 
 ### 验证与下一步
 
@@ -549,7 +591,29 @@ M4 已经解决了 SQL 从哪里来、怎么安全执行的问题：模板优先
 
 ### 面试怎么讲
 
-M5 可以讲成“我把 Text-to-SQL 的结果做成了**可观测的 Agent 输出协议**”。很多项目只返回 answer 和 SQL，但我额外记录了 **tool_calls、cost、tables_used、chart_spec、error_type 和 JSONL trace**。这样做的价值是：前端能直接展示图表，评测系统能按 trace_id 回放每次查询，安全拦截也能被归类统计。工程上，我把 SQL 执行从 API 层拆成 SQL Tool，保证安全检查、执行和耗时记录在同一个边界里，后续换成 LangGraph 或 EvalOps 时不用重写核心查询逻辑喵
+“M5 我把 Text-to-SQL 的结果从‘返回 answer + SQL’升级成一个**可观测的 Agent 输出协议**。响应里不只包含自然语言答案和表格，还包含 `tool_calls`、`cost`、`tables_used`、`chart_spec`、`error_type` 和 `trace_id`。这样前端可以直接展示图表，评测系统可以按 trace_id 复盘一次查询，安全拦截也能被归类统计。”
+
+“工程上，我把 SQL 执行从 API 层拆成 **SQL Tool**。这样安全检查、数据库执行、耗时记录、错误类型都收口在同一个边界里。后续不管是 Streamlit 演示、EvalOps-lite，还是 M11 新 pipeline，本质上都可以复用这个 Tool，而不是每条链路各自执行 SQL、各自处理安全。”
+
+> 现在口径：M5 的 `tool_calls` / JSONL trace 是可观测性底座；M11 后新增了更细的 `trace_steps`，能看到 schema retrieval、query plan、sql generation、sql guard 等阶段；M14-lite 又给 LLM 失败 trace 增加 raw response preview、parse error 和 prompt length。也就是说，M5 是 trace 起点，不是最终形态。
+
+1. **面试官问“AgentResponse 为什么要这么多字段？”**
+
+   可以答：“因为 Agent 系统不只是给用户看一句 answer。前端需要表格和图表，评测需要 SQL、表、列和 trace_id，排查需要 tool_calls、error_type 和耗时。M5 把这些信息结构化，后续模块就不用解析一段自由文本。”
+
+   这段突出的是 **响应契约设计**。
+
+2. **面试官问“为什么要把 SQL 执行封装成 Tool？”**
+
+   可以答：“Tool 是 Agent 调用外部能力的边界。SQL Tool 统一负责 Guard、执行、耗时和错误记录，避免 API、评测、新 pipeline 各自直接 `db.execute()`。这样后续迁移到 LangGraph 或多步骤 Agent 时，安全边界仍然在 Tool 里。”
+
+   这段突出的是 **工具边界和安全复用**。
+
+3. **面试官问“图表是怎么来的？”**
+
+   可以答：“M5 先做轻量规则，不让图表决策拖大范围。根据 columns 和 rows 判断 bar、line、horizontal_bar 或单指标柱图，无法判断就返回 `chart_spec=null`。图表是附加展示能力，不影响 SQL 答案本身。”
+
+   这段突出的是 **功能可用但边界克制**。
 
 ### 验证与下一步
 
@@ -787,9 +851,29 @@ python -m streamlit run demo\streamlit_app.py
 
 ### 面试怎么讲
 
-Phase 2.7 可以讲成”我为了让 Text2SQL 项目从 demo 走向真实业务复杂度，专门升级了数据库底座”。原来只有 7 张表，Agent 很容易靠全量 schema prompt 硬猜；升级后有 **14 张物理表、1 万级订单、1.8 万级订单明细、多对多优惠券、递归类目、SCD 价格历史、行为漏斗和宽表快照**。我还把固定业务事实和数据质量彩蛋写进确定性 seed，并用 Alembic 管理可逆迁移。这样后续做 Schema Retriever、JoinPath 和 QueryPlanStep 时，不是凭感觉优化 prompt，而是在一套可复现的新库上验证选表、Join、指标口径和安全边界喵
+“Phase 2.7 我把项目的数据底座从 demo 级 7 表升级到更接近真实分析场景的 **14 张物理表**。新增了订单明细、类目树、优惠券桥接表、行为日志、价格历史和订单宽表；数据规模也扩到 1 万级订单和 1.8 万级订单明细。这样后续 Text2SQL 不再是在小库上自嗨，而是要面对多表 Join、指标口径、宽表选择、递归类目、SCD 价格历史和数据质量问题。”
 
-**审查后 polish**：Phase 2.7 验收后，外部 AI 审查指出几处 plan v5 与实现之间的口径偏差——`orders_wide` 缺 `user_role/primary_product_price/item_count/refund_count/total_refund/has_refund/updated_at` 七个字段、`coupons` 缺 `ix_valid_range` 复合索引、`product_price_history` 缺 `change_reason`。通过独立的 `20260722_0003` migration 补齐，不改链路、不改旧字段名、不扩大范围。面试可以讲：**plan 和实现有偏差时不是默默跳过，而是用独立 migration 补齐——Alembic 历史清晰可追溯，后续接手的人看到 `0003` 就知道这是”审查后补齐的口径”，不会和 `0002` 的核心升级混在一起。**
+“这个模块的价值不只是表变多，而是把**可复现的业务事实**写进 deterministic seed。比如 2026 年 6 月 GMV、净收入、优惠券、渠道和商品销售额等，后续评测可以拿这些固定事实判断 Agent 的 SQL 结果到底对不对。数据库迁移用 Alembic 管理，审查后发现字段和索引口径偏差时，也通过独立 `0003` migration 补齐，没有把历史改乱。”
+
+> 现在口径：Phase 2.7 提供的 14 表和固定事实，已经在 Phase 3A 被继续消费。M13 用 `expected_value` 校准 GMV / 净收入，M14-lite 又用 `result_match` 对 5 条核心 SQL case 执行参考 SQL 结果对比。递归类目和知识库归因仍然不作为当前 Text2SQL 硬门，后续应放到 SQL Guard 递归 CTE 设计或 RAG / Hybrid 阶段处理。
+
+1. **面试官问“为什么要专门做数据库升级？”**
+
+   可以答：“原来的 7 表足够跑 demo，但不够检验 Text2SQL 的真实问题。企业数据分析常见难点是多表 Join、指标口径、明细表和宽表选择、历史价格窗口、优惠券多对多和数据质量异常。Phase 2.7 把这些复杂度提前放进可控 seed，后续优化才有可信评测环境。”
+
+   这段突出的是 **用真实复杂度驱动 Agent 能力设计**。
+
+2. **面试官问“seed 数据为什么要确定性？”**
+
+   可以答：“评测需要稳定标准答案。如果每次 seed 都随机，GMV、Top 商品、渠道排名每天变，Agent 对不对就没法自动判断。Phase 2.7 用规则化生成保证数据规模真实，同时固定关键业务事实，后续 M13/M14 才能做 expected_value 和 result_match。”
+
+   这段突出的是 **评测可复现性**。
+
+3. **面试官问“审查后发现表设计偏差怎么处理？”**
+
+   可以答：“我没有直接改旧 migration，也没有口头说‘差不多’。发现 `orders_wide` 字段、优惠券有效期索引、价格历史变更原因等口径偏差后，用独立 `20260722_0003` migration 补齐。这样 Alembic 历史清楚，接手的人能看出哪些是核心升级，哪些是审查后 polish。”
+
+   这段突出的是 **迁移历史可追溯** 和 **工程补偿方式**。
 
 ### 验证与下一步
 
@@ -900,7 +984,29 @@ Phase 3A 的目标不是立刻让 Text2SQL 变聪明，而是先回答一个很�
 
 ### 面试怎么讲
 
-M8 可以讲成“我在 Text2SQL 深化前先做了一个真实 baseline 冻结”。我没有一上来就改 prompt，而是先把 10 条 formal regression 和 16 条 challenge 跑在旧链路上，报告里记录 SQL、trace_id、安全状态、issue tag 和 manual review 标记。结果显示旧链路 formal 8/10，challenge 11/16，安全 2/2 能拦截，但 formal 允许类 SQL 只有 6/8，失败集中在多表输出列契约。这说明后续 Schema Retrieval 和 QueryPlanStep 的目标不是抽象地“更智能”，而是要针对可观测失败点提升选表、指标口径和输出结构稳定性。
+“M8 我在 Text2SQL 深化前先做了**真实 baseline 冻结**。我没有一上来就调 prompt 或重写链路，而是把 10 条 formal regression 和 16 条 challenge 跑在旧链路上，报告里记录 SQL、trace_id、安全状态、issue tag 和 manual review 标记。这样后续 M9-M12 做 Schema Retrieval、QueryPlan、新 pipeline 和对照报告时，不是凭感觉说‘更好’，而是能和同一批问题的旧链路表现对比。”
+
+“这个模块最重要的不是分数好不好看，而是**先把测量对象固定住**。M8 发现旧链路安全题能拦截，但允许类 SQL 失败集中在多表输出列契约、别名和表选择上。这些失败点直接影响了后续设计：M9 做字段级 Schema Retrieval 和 JoinPath，M10 做 QueryPlanStep，M11 做 trace_steps，M12/M13 再用报告和 trace 继续定位质量问题。”
+
+> 现在口径：M8 的 baseline 报告是 Phase 3A 早期“旧尺子”阶段产物。M13 后发现部分旧 eval 会把 `GMV=NULL` 这类错误结果误判通过，所以面试中引用 M8 分数要谨慎；更推荐说“先冻结旧链路 baseline，再在 M13 用 expected_value/result_match 思路修正评测可信度”。当前可包装的真实改进口径是 M13 后 formal **约 4/10 → 10/10**、challenge **约 6/16 → 14/16**、diagnostic **约 12/32 → 23/32**，这里的“约”来自旧报告曾存在误判。
+
+1. **面试官问“为什么要先做 baseline？”**
+
+   可以答：“如果没有 baseline，后续改 Schema Retrieval 或 prompt，很容易只凭个别样例说有效。M8 先固定同一批 formal/challenge 问题、同一套报告字段和 issue tag，后续新链路才能和旧链路同题对照。”
+
+   这段突出的是 **先测量，再优化**。
+
+2. **面试官问“baseline 分数不高会不会不好看？”**
+
+   可以答：“baseline 的价值不是好看，而是真实。旧链路低分说明问题确实存在，后续优化才有目标。更重要的是，我没有为了好看删 case 或放宽期望，而是保留失败 SQL、issue tag 和 trace_id，方便后续定位。”
+
+   这段突出的是 **不美化指标**。
+
+3. **面试官问“M8 对后续模块有什么作用？”**
+
+   可以答：“M8 把失败形态结构化了：是缺表、缺列、安全 mismatch，还是需要人工复核。后续 M9/M10/M11 每个模块都可以针对这些失败类型补能力，M12 再生成新旧链路对照报告。”
+
+   这段突出的是 **评测驱动架构演进**。
 
 ### 验证与下一步
 
@@ -987,7 +1093,29 @@ runner 也做了最小扩展：每条结果记录 `source_file`、`configured_pi
 
 ### 面试怎么讲
 
-M8.5 可以讲成“我没有等新 pipeline 写完才想怎么评估，而是先把诊断基准设计落地”。我把原来的 16 条 challenge 和新增 16 条 capability case 组合成 32 条 benchmark，并在 runner 里区分 configured pipeline 和 actual pipeline。旧链路不能验证 QueryPlan、local schema、trace_steps 时，我没有把它们算失败，而是标记 skipped；同时报告按 capability 汇总，能清楚看到旧链路在 schema_retrieval、join_path、query_plan、安全边界上的真实状态。这能体现我做 Agent / Text2SQL 项目时，不只是写 prompt，而是会先设计可复现、可诊断、可对照的评测闭环喵
+“M8.5 我把 Phase 3A 的评测从普通 pass/fail 扩展成了**按能力维度诊断的 benchmark**。原来的 16 条 challenge 继续作为唯一源，新文件只新增 16 条 capability-focused case，最终通过 `--cases + --extra-cases` 拼成 32 条。每条 case 都标注它关注 schema_retrieval、join_path、query_plan、local_schema_prompt、trace_steps 还是 security_guard，报告也按 capability 汇总。”
+
+“这里的关键设计是：旧链路不能验证的新 pipeline 能力，不硬算失败，也不假装通过，而是标成 `skipped_due_to_pipeline_mode`。比如旧链路没有 QueryPlan、local schema 和 trace_steps，那这些检查在 baseline 下只能 skip。这样报告能区分‘能力尚不可验证’和‘SQL 真的答错’，后续 M11/M12 跑新 pipeline 时，才有公平对照。”
+
+> 现在口径：M8.5 的 32 条 diagnostic 是诊断素材，不是正式硬门。M13 后 diagnostic 到 **23/32**，M14-lite 又清理了边界：递归类目、知识库归因、完整 EvalOps、JSON mode 大实验都不在当前 Text2SQL 收口范围内；`db_plan_003` 这类 Hybrid 归因题已标为 non_blocking/manual_review。面试时不要说“我要把 diagnostic 修满”，而要说“diagnostic 用来暴露未来能力缺口”。
+
+1. **面试官问“diagnostic benchmark 和 regression 有什么区别？”**
+
+   可以答：“regression 是正式回归硬尺子，关注核心问题是否稳定；diagnostic 是能力仪表盘，按 schema retrieval、join path、query plan、trace、安全等维度设计，用来发现链路哪一层弱。它不应该被当成所有 case 必须立刻满分的目标。”
+
+   这段突出的是 **评测分层**。
+
+2. **面试官问“为什么旧链路不支持的检查要 skipped？”**
+
+   可以答：“因为旧链路没有 QueryPlan 和 trace_steps，把这些检查判失败是不公平，也会混淆原因。skip 表示当前 pipeline mode 无法验证这类能力。等新 pipeline 接入后，同一批 case 再变成可验证项。”
+
+   这段突出的是 **评分口径诚实**。
+
+3. **面试官问“为什么不把 32 条都作为硬门？”**
+
+   可以答：“因为其中有些是未来能力探针，比如递归类目、知识库归因、复杂 Hybrid 语义。如果当前阶段为了分数硬补 prompt，很容易把未来语义层和 SQL Guard 设计塞进 Text2SQL。M8.5 的价值是发现这些边界，而不是逼当前模块全做完。”
+
+   这段突出的是 **知道哪些失败该修，哪些该留给后续架构**。
 
 ### 验证与下一步
 
@@ -1082,7 +1210,29 @@ M9 的数据流向：
 
 ### 面试怎么讲
 
-M9 可以讲成“我给 Text2SQL 增加了字段级 Schema Retrieval 和结构化 JoinPath”。用户问题进来后，系统不会直接把全库 schema 塞给 LLM，而是先从 domain pack 生成 field_doc、metric_doc、relation_doc，再用 keyword + vector 两路召回当前问题相关的表、字段、指标和关系。多表查询不让模型自由猜 join，而是从 relations.yaml 找 JoinPath；如果关系缺失，就补结构化关系源。自动化结果是 formal 允许类 SQL 的表召回 15/15，字段指标 16/18，多表 JoinPath 3/3，为后续 QueryPlanStep 和局部 Schema SQL prompt 打了一个可验证的基础喵
+“M9 我给 Text2SQL 加了一层**字段级 Schema Retrieval 和结构化 JoinPath**。用户问题进来后，系统不再把全库 schema 一股脑塞给 LLM，而是先从 domain pack 生成 field_doc、metric_doc、relation_doc，再用 keyword + vector 两路召回当前问题相关的表、字段、指标和关系。多表查询不让模型自由猜 Join，而是从 `relations.yaml` 里找结构化 JoinPath。”
+
+“这一步的价值是把 Text2SQL 的第一层不确定性拆出来：到底有没有召回正确表字段、有没有找到合法 Join、指标文档有没有命中，都可以在 M9 单独测试。自动化结果证明 formal 允许类 SQL 的表召回、字段指标召回和多表 JoinPath 达到阶段目标，为后续 M10 QueryPlan 和 M11 局部 Schema SQL prompt 打了可验证基础。”
+
+> 现在口径：M9 当时默认只接 `InMemory + Deterministic`，Milvus 先保留边界；M9.1/M9.2 后已合入可选 Milvus 和 SiliconFlow；M14-lite 后新增正式环境变量开关。默认仍是 `SCHEMA_VECTOR_BACKEND=inmemory` + `SCHEMA_EMBEDDING_PROVIDER=deterministic`，显式设置才走 Milvus/SiliconFlow。
+
+1. **面试官问“为什么不直接把全库 schema 给 LLM？”**
+
+   可以答：“全库 schema 会让 prompt 很长，而且模型容易在不相关表字段里漂移。M9 先做 schema retrieval，只给当前问题相关的字段、指标和关系，既减少噪音，也让失败可以归因到召回层。”
+
+   这段突出的是 **局部上下文** 和 **可诊断性**。
+
+2. **面试官问“JoinPath 怎么避免模型乱连表？”**
+
+   可以答：“Join 关系不靠模型自由发挥，而是来自 `relations.yaml`。SchemaGraph 根据召回到的表和结构化关系找 JoinPath，后续 QueryPlan 只允许引用这些 relation id。这样 Join 从自然语言猜测变成了可校验的关系事实。”
+
+   这段突出的是 **关系单一事实源**。
+
+3. **面试官问“向量检索是不是必须依赖 Milvus？”**
+
+   可以答：“不是。默认路径用 deterministic in-memory，保证 pytest、CI 和本地开发离线稳定；Milvus/SiliconFlow 是可选后端，适合后续 RAG 或更大 schema 规模时显式开启。这个取舍避免项目被外部服务环境绑住。”
+
+   这段突出的是 **工程稳定性优先，外部能力显式启用**。
 
 ### 验证与下一步
 
@@ -1192,7 +1342,29 @@ M9.2 的结论更有价值：**真实 embedding 的向量排序能力更好，�
 
 ### 面试怎么讲
 
-M9.1/M9.2 可以合起来讲成“我把 Schema Retrieval 做成了可插拔向量检索架构”。默认路径用 in-memory 保证测试稳定，真实路径支持 Milvus + SiliconFlow embedding，并用 formal / challenge / diagnostic case 做效果对比。实验发现 Qwen3 embedding 在向量单路召回上明显优于 fake embedding，但当前最终 merged recall 已经被 keyword + relations.yaml 补满，所以我没有盲目把默认链路切到联网服务，而是把它作为 optional capability 合入主线，等 RAG 或更大规模 schema 检索时启用喵
+“M9.1/M9.2 我把 Schema Retrieval 的向量层做成了**可插拔后端**。默认路径仍然是本地 in-memory，保证自动化测试和普通开发不依赖外部服务；真实路径支持 Milvus 向量库和 SiliconFlow embedding，并用 formal / challenge / diagnostic case 做 A/B 对比。实验里真实 embedding 的 vector-only 召回确实更强，但当时 merged recall 已经被 keyword + relations.yaml 补得比较满，所以我没有把默认链路切到联网服务。”
+
+“这个取舍很适合面试讲：我不是为了简历技术栈强行上 Milvus，而是先把 adapter、provider、smoke 和对比报告做好，让它成为可选能力。等后续进入 RAG 或 schema 规模变大，再通过配置显式开启；平时 pytest 和本地启动仍然稳定、可重复。”
+
+> 现在口径：M14-lite 后已经把这套可选能力接入 Settings：`SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=siliconflow` 等环境变量可以显式启用。默认仍不变；M14-lite 的临时 A/B 记录显示 Milvus + SiliconFlow 没提升 M13 eval 分数，所以不应把它当成刷分主线。
+
+1. **面试官问“你为什么接 Milvus 但不设为默认？”**
+
+   可以答：“因为默认链路要服务 pytest、CI、本地开发和新同学启动，不能依赖 Docker Milvus 或联网 embedding。Milvus 是生产候选能力，应该显式开启；默认路径保持 deterministic in-memory，保证工程稳定。”
+
+   这段突出的是 **默认稳定，能力可选**。
+
+2. **面试官问“真实 embedding 实验有什么结论？”**
+
+   可以答：“Qwen3 embedding 在 vector-only 召回上优于 fake embedding，说明真实中文 embedding 有价值。但最终 merged 结果还受 keyword 和 relations.yaml 影响，当前 eval 没明显收益，所以我没有盲目切默认，而是保留为后续 RAG / 大规模 schema 的配置能力。”
+
+   这段突出的是 **实验结论不等于立刻改默认**。
+
+3. **面试官问“可插拔设计体现在哪里？”**
+
+   可以答：“上层 retriever 只依赖 `VectorIndex.search()` 和 `EmbeddingProvider.embed()` 这两个协议。InMemory、Milvus、Deterministic、SiliconFlow 都实现这些边界，后续换 Qdrant 或其他 embedding provider，不需要改 Schema Retrieval 主流程。”
+
+   这段突出的是 **接口隔离**。
 
 ### 验证与下一步
 
@@ -1281,7 +1453,35 @@ M10 做的就是在这个位置加一道 **QueryPlan 自检门**。模型后续�
 
 ### 面试怎么讲
 
-M10 可以讲成“我在 Text2SQL 里加了一层可校验的中间表示”。普通 NL2SQL 是直接从问题到 SQL，失败时很难知道是 schema 召回错了、Join 错了，还是 SQL 生成错了；我把中间层拆成 `QueryPlanStep`，让模型先声明表、字段、指标和 Join，再用本地 validator 检查。这样后续 eval 可以打出 `missing_column / invalid_join_path / sensitive_field_access` 这类 issue tag，问题定位会比只看 SQL 错误清楚很多喵
+“M10 我在 Text2SQL 里加了一层**可校验的中间表示 QueryPlanStep**。普通 NL2SQL 是直接从问题到 SQL，失败时只能看最终 SQL；M10 让模型先声明准备查哪些表、哪些字段、哪些指标、用哪些 Join relation id，再由本地 validator 检查这些对象是否来自 M9 的局部 SchemaGraph。这样错误可以在 SQL 生成前暴露出来。”
+
+“这层中间表示的价值是把模型输出从自由文本变成结构化契约。评测和 trace 可以稳定打出 `missing_column`、`invalid_join_path`、`unsupported_multi_step_plan`、`sensitive_field_access` 这类 issue tag，后续排查就能知道问题发生在计划层，而不是等 SQL 执行报错后再猜。”
+
+> 现在口径：M10 当时的文档写的是“非 admin 角色访问敏感字段会拦截”；M14-lite 后安全口径已收紧为 **敏感字段优先于 admin 角色**。所以 `sensitive_field_access` 现在对 admin 也生效，最终仍由 SQL Guard 在执行前再兜底。
+
+1. **面试官问“QueryPlanStep 和直接生成 SQL 比有什么优势？”**
+
+   可以答：“直接 SQL 太难诊断，错了只能看一长串 SQL。QueryPlanStep 把模型意图拆成表、字段、指标、Join、过滤、聚合和输出列，本地 validator 可以逐项检查。这样错误更早暴露，也更容易告诉模型或开发者到底错在哪里。”
+
+   这段突出的是 **结构化意图表达**。
+
+2. **面试官问“为什么用 relation id 表示 Join？”**
+
+   可以答：“Join 条件应该来自 `relations.yaml`，而不是模型现场编。M10 让 QueryPlan 引用 relation id，validator 再检查 id 是否存在于局部 SchemaGraph。这样 JoinPath 就是结构化事实，不是 prompt 里的建议。”
+
+   这段突出的是 **Join 可校验**。
+
+3. **面试官问“为什么预留多 step 但当前只允许单 SQL？”**
+
+   可以答：“Pydantic 结构上预留 `steps`，是为了后续 Plan-and-Execute 或 Hybrid；但 Phase 3A 当前执行器只支持单 SQL。如果此时放开多个 sql_query step，会把事务、安全、结果合并和 trace 都提前复杂化。所以 M10 先把多 SQL plan 拦成 `unsupported_multi_step_plan`。”
+
+   这段突出的是 **结构可扩展，执行边界收紧**。
+
+4. **面试官问“安全为什么还要 SQL Guard 兜底？”**
+
+   可以答：“Plan Validation 是生成 SQL 前的预检，它能提前发现计划层访问敏感字段或编造字段；但模型最后生成的 SQL 仍可能偏离计划，所以执行前必须再走 SQL Guard。两层分别在计划阶段和运行阶段拦截，形成纵深防御。”
+
+   这段突出的是 **预检不替代最终门禁**。
 
 ### 验证与下一步
 
@@ -1380,7 +1580,33 @@ M10 做完后，DataPilot 已经能把“准备查什么”变成 QueryPlan，�
 
 ### 面试怎么讲
 
-M11 可以讲成“我把 Text2SQL 从一条黑盒调用升级成可观测 pipeline”。以前用户问一句话，系统直接给 SQL，失败时很难知道错在 schema、计划、SQL 生成还是安全拦截；现在我把请求拆成 schema retrieval、schema context、join path、query plan、plan validation、sql generation、sql guard、sql execution 等步骤，并把每一步写进 trace。这样评测报告能基于证据定位问题，而不是只看最终 SQL 对不对。更重要的是，我没有为了新 pipeline 破坏旧接口，而是用 `force_new_pipeline` 做显式灰度开关，安全仍由 SQL Guard 兜底喵
+“M11 我把 Text2SQL 从一条黑盒 LLM 调用，升级成一条**可观测、可校验、可灰度的新 pipeline**。以前用户问一句话，系统直接给 SQL，失败时很难判断错在 schema 召回、查询计划、SQL 生成还是安全拦截。M11 后，请求会先走 Schema Retrieval 和 SchemaGraph，只把相关表字段交给模型；再让模型生成结构化 QueryPlan，本地校验表、字段、指标、Join 是否来自可信上下文；最后才基于局部 Schema 生成 SQL，并统一经过 SQL Guard 执行。每一步都会写成 `TraceStep`，所以后续 M12 能用报告证明新链路到底走了哪些步骤、在哪一层失败。”
+
+“这个模块的另一个重点是**不破坏旧链路**。普通 `/api/query` 默认仍走模板优先，M5/M6 的演示体验不变；只有显式传 `force_new_pipeline=true`，或者 eval 里设置 `pipeline_mode=new_text2sql`，才会强制进入新 pipeline。这样既能安全灰度，也能让评测脚本精准测新链路，不会出现报告说跑了新 pipeline、实际被模板兜底的情况。”
+
+1. **面试官问“你为什么要在 Text2SQL 前加 QueryPlan？”**
+
+   可以答：“直接让 LLM 生成 SQL 太黑盒，失败时只能看到最终 SQL。QueryPlan 相当于先让模型说清楚‘准备查哪些表、用哪些字段、按什么指标和 Join 查’，再由本地 validator 校验它有没有编造表字段或越权访问。这样可以把错误提前挡在 SQL 生成前，也能把失败归因拆清楚。”
+
+   这段突出的是 **结构化中间层** 和 **本地校验**，比单纯说“优化 prompt”更有工程含量。
+
+2. **面试官问“新 pipeline 会不会影响已有线上功能？”**
+
+   可以答：“不会。M11 用 `force_new_pipeline` 做显式灰度开关，默认请求仍走旧的模板优先链路。评测脚本通过 `pipeline_mode=new_text2sql` 自动带上这个开关，所以测试新链路时不会被模板误兜底。这个设计类似后端服务里的 feature flag：新能力可测、可灰度，但不直接冲击旧路径。”
+
+   这段突出的是 **兼容性意识** 和 **灰度发布思维**。
+
+3. **面试官问“你怎么保证 LLM 生成的 SQL 安全？”**
+
+   可以答：“M11 不把安全押在 prompt 上。QueryPlan 阶段会预检表、字段、Join 和敏感字段，但最终 SQL 仍统一交给 `run_sql_tool()`，走 SQL Guard 的 AST 只读检查、表级 RBAC 和敏感字段策略。测试里 fake LLM 故意返回 `DELETE FROM orders`，仍会被 SQL Guard 拦住。这说明安全边界在工具层，而不是靠模型自觉。”
+
+   这段突出的是 **纵深防御**：prompt / plan 可以减少错误，但最终门禁必须在确定性代码里。
+
+4. **面试官问“TraceStep 有什么价值？”**
+
+   可以答：“TraceStep 让一次 Text2SQL 请求从黑盒变成分步骤证据。它记录 schema retrieval、schema context、join path、query plan、plan validation、sql generation、sql guard、sql execution 等步骤，每步都有状态、耗时、错误类型和 metadata。后续做 eval 报告时，不只是知道 case 失败了，还能判断是 schema 没召回、plan 没通过，还是 SQL 执行被 guard 拦截。”
+
+   这段突出的是 **Agent 可观测性** 和 **失败归因能力**。
 
 ### 验证与下一步
 
@@ -1497,7 +1723,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:ap
 
 "我在 Phase 3A 最后做了一个对照报告模块（M12）。基本思路是：用同一批 58 条评测用例，分别跑旧链路和新链路，把两边的 SQL、用到的表、trace 步骤、失败原因并排对比。对照报告不是手动写的——我有一个 `compare_phase3a.py` 脚本，读两份 trace JSONL，按问题文本自动匹配，生成 6 个小节的 Markdown 报告。"
 
-"核心结论是：新链路的局部 Schema 把 LLM 看到的内容从全量 14 表几百字段精简到 4-7 表几十字段，Join 条件来自 `relations.yaml` 而不是 LLM 自由发挥，每次请求有完整 9 步 trace 可以定位到底是 schema retrieval 召回不足还是 plan validation 拦截还是 SQL Guard 报错。当前瓶颈是 LLM 输出列名不稳定，约一半 case 挂在别名匹配上——但这个对照报告本身已经给出了明确的改进方向。"
+"核心结论是：新链路的局部 Schema 把 LLM 看到的内容从**全量 14 表几百字段**精简到 **4-7 表几十字段**，Join 条件来自 `relations.yaml` 而不是 LLM 自由发挥，每次请求有完整 9 步 **trace** 可以定位到底是 schema retrieval 召回不足还是 plan validation 拦截还是 SQL Guard 报错。当前瓶颈是 LLM 输出列名不稳定，约一半 case 挂在别名匹配上——但这个对照报告本身已经给出了明确的改进方向。"
 
 **"如果你来改进通过率，你会怎么做？"**
 
@@ -1649,3 +1875,61 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pip
 **本地启动体验：**
 
 M13 没有新增 API 端点，体验入口仍是批量评测报告。想看效果，优先打开 `eval/reports/phase3a-new-pipeline.md`、`eval/reports/phase3a-challenge-new-pipeline.md`、`eval/reports/phase3a-diagnostic-new-pipeline.md`，再对照 `eval/reports/phase3a-*-comparison.md` 看 M12 → M13 后失败形态怎么变化。
+
+## ★ M14-lite Phase 3A 收口（2026-07-27）
+
+**简述**：M14-lite 是进入 RAG / Hybrid 前的一次小收口，不追 diagnostic 满分，而是把 **评测更可信、失败更好查、安全边界更清楚、Schema Retrieval 可显式切换后端** 这几件基础卫生补齐。
+
+### 这次做了什么
+
+这次先补了最小 **result_match**：部分核心 SQL case 不再只看列名或包含文本，而是执行 `expected_sql`，把标准 SQL 的结果和模型生成 SQL 的结果做轻量对比。它不是完整 EvalOps 平台，只覆盖 5 条核心 challenge case，用来防止“SQL 能跑但结果错”继续混过去。
+
+然后增强了 **LLM 失败 trace**。以前 `llm_generation_error` 只能看到一句“解析失败”，现在 trace 会记录 `raw_response_preview`、`parse_error`、`prompt_length` 和失败阶段，方便判断是 QueryPlan 解析坏了，还是 SQL generation 没按 JSON 返回。
+
+安全口径采用用户确认的 **方案 A**：敏感字段优先于 admin 角色。也就是说，`users.email / users.phone` 在 Text2SQL 路径里默认不直出；即使是 admin 查询，也会被 QueryPlan 预检和 SQL Guard 拦住。后续如果真的要给 admin 看联系方式，应该走脱敏、审计或专门接口，而不是让自然语言 SQL 直接吐敏感字段。
+
+最后补了 **Schema Retrieval 后端配置开关**：默认仍是 `inmemory + deterministic`，pytest 和本地开发不依赖 Milvus 或联网 embedding；只有显式设置 `SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=siliconflow` 等配置时，才会走外部后端。
+
+### 新概念
+
+- **result_match**：把“生成 SQL 的执行结果”拿去和“参考 SQL 的执行结果”比较。它比 `contains` 更严格，但 M14-lite 只做最小版本，不做 SQL 语法等价、历史记录库或完整评测平台。
+- **安全口径**：先定清“什么情况一定不能放行”。这次定的是 **敏感字段优先**，避免 admin 角色在 Text2SQL 里变成“万能通行证”。
+- **显式后端开关**：工程上支持 Milvus / SiliconFlow，但默认不启用。这样 README 和面试里可以诚实讲“能力已接入，可显式开启；默认路径仍稳定可测”。
+
+### 关键文件
+
+- `eval/run_eval.py`：新增最小 result_match scorer。
+- `engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`：LLM 解析失败时补 trace metadata。
+- `engine/sql_guard/rbac.py`：admin 不再直通敏感字段。
+- `engine/schema_retrieval/retriever.py`、`app/core/config.py`：新增 Schema Retrieval 后端配置入口。
+- `eval/cases/*.yaml`：只做核心 case 的 result_match 和 diagnostic 边界标注清理。
+
+### 设计要点
+
+- **不刷 diagnostic**：递归类目、知识库归因、完整 EvalOps、JSON mode 大实验都没有做；`db_plan_003` 被标成 non_blocking/manual_review，是因为它属于后续 Hybrid 语义层，不适合硬塞进 Text2SQL。
+- **默认路径不变**：Milvus / SiliconFlow 只是显式开关，默认仍不依赖外部服务，避免测试和本地开发被环境拖住。
+- **安全优先于便利**：admin 能看所有表，但不能通过 Text2SQL 直接查邮箱手机号；这更接近真实企业系统里的“敏感字段要有专门通道”。
+
+### 面试怎么讲
+
+“M14-lite 我没有继续追 diagnostic 满分，而是做进入下一阶段前的工程收口：给核心 SQL case 加最小 result_match，让评测不只看列名；给 LLM 失败 trace 加 raw preview 和 parse error，方便排查 JSON/生成稳定性；同时定稿敏感字段策略，admin 也不能在 Text2SQL 中直接查 email/phone。最后把 Schema Retrieval 的 Milvus / SiliconFlow 做成显式配置开关，默认仍走本地 deterministic 检索。这个模块体现的是我知道什么时候该补工程边界，什么时候不该为了分数把未来 Hybrid 能力硬塞进 Text2SQL。”
+
+### 验证与下一步
+
+- 验证：相关回归 **54 passed**；全量 pytest **84 passed**。
+- warning：仍是既有 Starlette/httpx warning，不影响本模块。
+- 下一步：用户人工检查后可调用 `accept-module` 做 M14-lite 验收；之后进入阶段三 RAG / Hybrid。
+
+可复制验证命令：
+
+```powershell
+# 相关回归，预期 54 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py tests\test_phase3a_pipeline.py tests\test_phase3a_planner.py tests\test_phase3a_schema_retrieval.py tests\test_m4_nl2sql.py -q --basetemp=.agent_work\temp\pytest-m14-related
+
+# 全量验证，预期 84 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.agent_work\temp\pytest-m14-full-2
+```
+
+**本地启动体验：**
+
+M14-lite 没有新增 API 端点，体验入口仍是批量评测和 trace。想看变化，优先看 eval 报告里的 `result_match` case 是否更严格，再看新 pipeline trace 中 LLM 失败时的 metadata 是否包含 raw preview / parse error。

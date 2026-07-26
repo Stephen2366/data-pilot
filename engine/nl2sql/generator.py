@@ -24,6 +24,21 @@ from engine.schema_retrieval.objects import SchemaGraph
 class LLMGenerationError(RuntimeError):
     """LLM SQL 生成失败，调用方应转成结构化拦截响应。"""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_response_preview: str | None = None,
+        parse_error: str | None = None,
+        prompt_length: int | None = None,
+        stage: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.raw_response_preview = raw_response_preview
+        self.parse_error = parse_error
+        self.prompt_length = prompt_length
+        self.stage = stage
+
 
 class QueryPlanExtractionError(LLMGenerationError):
     """QueryPlan 解析失败，固定映射到 M10 的 `invalid_query_plan`。"""
@@ -158,7 +173,12 @@ def extract_generated_sql(raw_text: str) -> GeneratedSQL:
     if stripped.lower().startswith("select"):
         return GeneratedSQL(sql=stripped, confidence=0.5, reasoning_summary="从纯 SQL 文本提取。")
 
-    raise LLMGenerationError("无法从 LLM 输出中提取 SQL。")
+    message = "无法从 LLM 输出中提取 SQL。"
+    raise LLMGenerationError(
+        message,
+        raw_response_preview=stripped[:500],
+        parse_error=message,
+    )
 
 
 def _extract_json_object(raw_text: str) -> str:
@@ -190,7 +210,30 @@ def extract_query_plan(raw_text: str) -> QueryPlan:
     try:
         return QueryPlan.model_validate_json(_extract_json_object(raw_text))
     except (ValueError, TypeError) as exc:
-        raise QueryPlanExtractionError("无法从 LLM 输出中提取 QueryPlan。") from exc
+        message = "无法从 LLM 输出中提取 QueryPlan。"
+        raise QueryPlanExtractionError(
+            message,
+            raw_response_preview=raw_text.strip()[:500],
+            parse_error=f"{message} {exc}",
+        ) from exc
+
+
+def _add_error_context(
+    exc: LLMGenerationError,
+    *,
+    stage: str,
+    prompt: str,
+    raw_text: str | None = None,
+) -> LLMGenerationError:
+    """给 LLM 异常补充 trace 需要的上下文，同时保留原异常类型。"""
+
+    exc.stage = exc.stage or stage
+    exc.prompt_length = exc.prompt_length or len(prompt)
+    if raw_text is not None and not exc.raw_response_preview:
+        exc.raw_response_preview = raw_text.strip()[:500]
+    if not exc.parse_error:
+        exc.parse_error = str(exc)
+    return exc
 
 
 def generate_sql(
@@ -209,7 +252,10 @@ def generate_sql(
         prompt=prompt,
         system_prompt="你是 DataPilot 的 NL2SQL 生成器。请把中文业务问题转换为安全的单条 SELECT SQL，并按要求返回结构化结果。",
     )
-    return extract_generated_sql(raw_text)
+    try:
+        return extract_generated_sql(raw_text)
+    except LLMGenerationError as exc:
+        raise _add_error_context(exc, stage="sql_generation", prompt=prompt, raw_text=raw_text) from exc
 
 
 def generate_query_plan(
@@ -233,7 +279,10 @@ def generate_query_plan(
         prompt=prompt,
         system_prompt="你是 DataPilot 的查询规划器。根据用户问题和局部 Schema 信息输出结构化 JSON 查询计划，不直接生成 SQL。",
     )
-    return extract_query_plan(raw_text)
+    try:
+        return extract_query_plan(raw_text)
+    except QueryPlanExtractionError as exc:
+        raise _add_error_context(exc, stage="query_plan", prompt=prompt, raw_text=raw_text) from exc
 
 
 def generate_sql_from_plan_step(
@@ -261,4 +310,7 @@ def generate_sql_from_plan_step(
         prompt=prompt,
         system_prompt="你是 DataPilot 的 SQL 生成器。根据已验证的 QueryPlanStep 和局部 Schema 生成安全的只读 SELECT SQL。",
     )
-    return extract_generated_sql(raw_text)
+    try:
+        return extract_generated_sql(raw_text)
+    except LLMGenerationError as exc:
+        raise _add_error_context(exc, stage="sql_generation", prompt=prompt, raw_text=raw_text) from exc

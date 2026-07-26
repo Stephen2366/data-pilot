@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 import yaml
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -288,6 +288,79 @@ def _score_expected_value(case: EvalCase, body: dict[str, Any]) -> EvalScore:
     return EvalScore(True, "expected_value_ok", [])
 
 
+def _normalize_result_value(value: Any) -> Any:
+    """把 SQL 结果值压成稳定可比形式，供最小 result_match 使用。"""
+
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+
+
+def _rows_match(
+    *,
+    actual_rows: list[dict[str, Any]],
+    expected_rows: list[dict[str, Any]],
+    tolerance: Decimal,
+) -> tuple[bool, str]:
+    """比较两组结果行；M14-lite 只做行顺序一致的轻量结果对比。"""
+
+    if len(actual_rows) != len(expected_rows):
+        return False, f"row_count expected={len(expected_rows)} actual={len(actual_rows)}"
+    for row_index, (actual_row, expected_row) in enumerate(zip(actual_rows, expected_rows, strict=True)):
+        if len(actual_row) != len(expected_row):
+            return (
+                False,
+                f"row[{row_index}] column_count expected={len(expected_row)} actual={len(actual_row)}",
+            )
+        for column_index, (actual_value, expected_value) in enumerate(
+            zip(actual_row.values(), expected_row.values(), strict=True)
+        ):
+            normalized_actual = _normalize_result_value(actual_value)
+            normalized_expected = _normalize_result_value(expected_value)
+            if isinstance(normalized_actual, Decimal) and isinstance(normalized_expected, Decimal):
+                if abs(normalized_actual - normalized_expected) <= tolerance:
+                    continue
+            elif normalized_actual == normalized_expected:
+                continue
+            return (
+                False,
+                f"row[{row_index}] col[{column_index}] expected={normalized_expected} actual={normalized_actual}",
+            )
+    return True, "result_match_ok"
+
+
+def _score_result_match(case: EvalCase, body: dict[str, Any]) -> EvalScore:
+    """执行 expected_sql 并与 generated SQL 的返回结果做最小对照。"""
+
+    if not case.expected_sql.strip():
+        return EvalScore(False, "result_match_expected_sql_empty", ["unexpected_error"])
+    actual_rows = body.get("rows") or []
+    if not isinstance(actual_rows, list) or any(not isinstance(row, dict) for row in actual_rows):
+        return EvalScore(False, "result_match_actual_rows_invalid", ["unexpected_error"])
+    try:
+        tolerance = Decimal(str(case.check.get("tolerance", "0.000001")))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        return EvalScore(False, f"result_match_invalid_tolerance: {exc}", ["unexpected_error"])
+
+    engine = _prepare_sqlite_seed()
+    try:
+        with Session(engine) as session:
+            expected_result = session.execute(text(case.expected_sql))
+            expected_rows = [dict(row) for row in expected_result.mappings().all()]
+    except Exception as exc:  # noqa: BLE001 - eval 报告需要保留 SQL 对照失败原因。
+        return EvalScore(False, f"result_match_expected_sql_error: {exc}", ["unexpected_error"])
+    finally:
+        Base.metadata.drop_all(engine)
+
+    matched, reason = _rows_match(actual_rows=actual_rows, expected_rows=expected_rows, tolerance=tolerance)
+    if not matched:
+        return EvalScore(False, f"result_mismatch {reason}", ["result_mismatch"])
+    return EvalScore(True, reason, [])
+
+
 def _should_skip_due_to_pipeline_mode(case: EvalCase, actual_pipeline_mode: str) -> bool:
     """判断旧链路是否无法验证这条 case 的核心检查。
 
@@ -382,6 +455,8 @@ def _score_case(
     text = _body_text(body)
     if case.check_type == "expected_value":
         return _score_expected_value(case, body)
+    if case.check_type == "result_match":
+        return _score_result_match(case, body)
     if case.check_type == "contains" and case.check_value not in text:
         return EvalScore(False, f"missing_text={case.check_value}", ["unexpected_error"])
     if case.check_type == "equals" and case.check_value not in text:

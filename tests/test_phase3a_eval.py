@@ -278,6 +278,39 @@ def test_expected_value_check_accepts_single_metric_column_alias() -> None:
     assert score.reason == "expected_value_ok"
 
 
+def test_result_match_case_fails_when_generated_rows_do_not_match_expected_sql() -> None:
+    """result_match 要执行 expected_sql 对照，不能只因表列命中就放过错误结果。"""
+
+    case = EvalCase(
+        case_id="p3a_result_match_wrong_value",
+        task_type="core_metric",
+        question="2026 年 6 月 GMV 是多少？",
+        user_role="ops",
+        expected_tables=["orders"],
+        expected_columns=["gmv"],
+        expected_metrics=["gmv"],
+        expected_trace_steps=[],
+        pipeline_mode="new_text2sql",
+        security_expectation="allow",
+        check_type="result_match",
+        check_value="",
+        expected_sql="SELECT 11285752.00 AS gmv",
+        check={"type": "result_match", "tolerance": 0.01},
+    )
+    body = {
+        "route": "sql",
+        "safety_status": "passed",
+        "tables_used": ["orders"],
+        "columns": ["gmv"],
+        "rows": [{"gmv": "1.00"}],
+    }
+
+    score = _score_case(case, body, 200, actual_pipeline_mode="new_text2sql")
+
+    assert score.passed is False
+    assert score.issue_tags == ["result_mismatch"]
+
+
 def test_manual_challenge_case_requires_review_without_hiding_success() -> None:
     """困难诊断题可先跑通结构，但报告必须提示人工复核。"""
 
@@ -434,6 +467,31 @@ def test_diagnostic_linked_and_multi_answer_cases_are_explicit() -> None:
     assert multi_answer.expected_tables_alternatives
     assert multi_answer.check_type == "schema_context_match"
     assert multi_answer.check.get("match_mode") == "any_alternative"
+
+
+def test_challenge_enables_minimal_result_match_for_core_sql_cases() -> None:
+    """M14-lite 至少让 5 条核心 SQL case 走 expected_sql 结果对照。"""
+
+    cases = load_cases(CHALLENGE_CASES)
+    result_match_cases = [
+        case
+        for case in cases
+        if case.check_type == "result_match" and "manual_review" not in case.case_properties
+    ]
+
+    assert len(result_match_cases) >= 5
+    assert all(case.expected_sql.strip() for case in result_match_cases)
+
+
+def test_diagnostic_out_of_scope_hybrid_attribution_is_non_blocking_manual_review() -> None:
+    """知识库归因属于后续 Hybrid 语义层，不能作为 Phase 3A Text2SQL 硬门。"""
+
+    cases = {case.case_id: case for case in load_cases(DIAGNOSTIC_CASES)}
+    case = cases["db_plan_003"]
+
+    assert case.phase3a_blocking is False
+    assert "manual_review" in case.case_properties
+    assert "hybrid_attribution" in case.case_properties
 
 
 def test_baseline_skips_new_pipeline_only_checks_without_counting_failure() -> None:

@@ -62,7 +62,7 @@ cases:
     phase3a_capabilities: [schema_retrieval, query_plan, trace_steps]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: expected_value, field: gmv, value: 11285752.00, tolerance: 0.01}
+    check: {type: result_match, tolerance: 0.01}
     expected_sql: |
       SELECT ROUND(SUM(order_amount), 2) AS gmv
       FROM orders
@@ -102,7 +102,7 @@ cases:
     phase3a_capabilities: [schema_retrieval, query_plan]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: expected_value, field: net_revenue, value: 11293058.25, tolerance: 0.01}
+    check: {type: result_match, tolerance: 0.01}
     expected_sql: |
       SELECT ROUND(SUM(actual_amount), 2) AS net_revenue
       FROM orders
@@ -119,7 +119,7 @@ cases:
     phase3a_capabilities: [schema_retrieval, join_path]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: Mobile App}
+    check: {type: result_match, tolerance: 0.01}
     expected_sql: |
       SELECT c.channel_name, COUNT(o.id) AS order_count
       FROM channels c
@@ -139,7 +139,7 @@ cases:
     phase3a_capabilities: [schema_retrieval, join_path, query_plan]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: Mobile App}
+    check: {type: result_match, tolerance: 0.01}
     expected_sql: |
       SELECT c.channel_name, COUNT(DISTINCT o.id) AS coupon_order_count
       FROM orders o
@@ -206,7 +206,7 @@ cases:
     phase3a_capabilities: [schema_retrieval, local_schema_prompt]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: item_gmv}
+    check: {type: result_match, tolerance: 0.01}
     expected_sql: |
       SELECT p.product_name, ROUND(SUM(oi.line_amount), 2) AS item_gmv
       FROM order_items oi

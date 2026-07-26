@@ -35,7 +35,7 @@ ALL_TABLES = {
 }
 
 ROLE_POLICIES: dict[str, RolePolicy] = {
-    "admin": RolePolicy(allowed_tables=set(ALL_TABLES), allow_sensitive_fields=True),
+    "admin": RolePolicy(allowed_tables=set(ALL_TABLES), allow_sensitive_fields=False),
     "ops": RolePolicy(allowed_tables=set(ALL_TABLES), allow_sensitive_fields=False),
     "customer_service": RolePolicy(
         allowed_tables={"tickets", "knowledge_docs"},

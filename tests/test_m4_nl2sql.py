@@ -131,6 +131,11 @@ def test_enhanced_guard_blocks_sensitive_fields_and_role_table_access() -> None:
         user_role="ops",
         domain_schema=domain_schema,
     )
+    admin_sensitive = validate_sql_policy(
+        "SELECT email, phone FROM users LIMIT 10",
+        user_role="admin",
+        domain_schema=domain_schema,
+    )
     forbidden_table = validate_sql_policy(
         "SELECT order_no FROM orders LIMIT 10",
         user_role="customer_service",
@@ -149,6 +154,8 @@ def test_enhanced_guard_blocks_sensitive_fields_and_role_table_access() -> None:
 
     assert sensitive.is_allowed is False
     assert "敏感字段" in (sensitive.blocked_reason or "")
+    assert admin_sensitive.is_allowed is False
+    assert "敏感字段" in (admin_sensitive.blocked_reason or "")
     assert forbidden_table.is_allowed is False
     assert "角色 customer_service" in (forbidden_table.blocked_reason or "")
     assert allowed_ticket.is_allowed is True

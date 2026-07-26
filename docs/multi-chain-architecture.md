@@ -60,7 +60,11 @@
 
 **默认**：InMemory。两者实现同一个 `VectorIndex` Protocol（`search(query, top_k) → list[SchemaHit]`）。
 
-**切换**：`retrieve_schema(vector_index=None)` → InMemory；传入 `MilvusVectorIndex` 实例 → Milvus。
+**切换**：
+
+- 默认：`SCHEMA_VECTOR_BACKEND=inmemory`，走 InMemory。
+- 显式 Milvus：`SCHEMA_VECTOR_BACKEND=milvus`，通过 `MILVUS_URI`、`MILVUS_COLLECTION`、`MILVUS_RESET_COLLECTION` 配置连接。
+- 测试 / 实验仍可通过 `retrieve_schema(vector_index=...)` 显式注入自定义 `VectorIndex`，优先级高于环境变量。
 
 ---
 
@@ -70,7 +74,7 @@
 |---|---|---|
 | **向量类型** | 稀疏 (token 计数 + 中文 bigram) | 稠密 (BAAI/bge-m3) |
 | **联网** | 否，纯本地，结果可重复 | 是，调 SiliconFlow OpenAI-like API |
-| **用途** | pytest / 本地诊断 | M9.2 实验验证真实中文 embedding 效果 |
+| **用途** | pytest / 本地诊断 / 默认路径 | M9.2 实验验证真实中文 embedding 效果；M14-lite 后可显式配置到 Schema Retrieval |
 | **代码** | [engine/schema_retrieval/vector_index.py:39](engine/schema_retrieval/vector_index.py#L39) | [engine/schema_retrieval/embedding_provider.py:29](engine/schema_retrieval/embedding_provider.py#L29) |
 
 两者实现同一个 `EmbeddingProvider` Protocol（`embed(text) → EmbeddingVector`）。
@@ -84,9 +88,23 @@ VectorIndex × EmbeddingProvider = 4 种理论组合：
 | 组合 | 验证状态 | 用途 |
 |------|----------|------|
 | **InMemory + Deterministic** | ✅ 默认 | pytest、本地诊断、CI |
-| InMemory + SiliconFlow | ❌ 未验证 | 理论可行但无使用场景 |
-| Milvus + Deterministic | ✅ M9.1 smoke | 验证 Milvus adapter 正确性 |
-| **Milvus + SiliconFlow** | ✅ M9.2 smoke | 生产候选方案 |
+| InMemory + SiliconFlow | ❌ 不支持 | InMemory 当前只接受 deterministic 稀疏向量，避免 dense vector 误接 |
+| Milvus + Deterministic | ✅ M9.1 smoke / 可显式配置 | 验证 Milvus adapter 正确性 |
+| **Milvus + SiliconFlow** | ✅ M9.2 smoke / 可显式配置 | 生产候选方案 |
+
+**配置开关**（M14-lite 后进入正式 Settings）：
+
+```env
+SCHEMA_VECTOR_BACKEND=inmemory|milvus
+SCHEMA_EMBEDDING_PROVIDER=deterministic|siliconflow
+MILVUS_URI=http://localhost:19530
+MILVUS_COLLECTION=datapilot_schema_docs
+MILVUS_RESET_COLLECTION=false
+SILICONFLOW_EMBEDDING_MODEL=BAAI/bge-m3
+SILICONFLOW_EMBEDDING_DIMENSIONS=
+```
+
+默认仍是 `inmemory + deterministic`，所以 pytest、本地启动和 CI 不依赖 Milvus 服务或联网 embedding。
 
 ---
 
@@ -127,10 +145,12 @@ merged_hits    # 融合结果（下游消费）
 
 | 角色 | 可访问表 | 敏感字段 |
 |------|----------|----------|
-| `admin` | 全部 14 张表 | ✅ 允许 |
+| `admin` | 全部 14 张表 | ❌ 禁止直出 |
 | `ops` | 全部 14 张表 | ❌ 禁止 |
 | `customer_service` | tickets, knowledge_docs | ❌ 禁止 |
 | `demo_user` | products, channels, knowledge_docs, product_categories, orders_wide | ❌ 禁止 |
+
+M14-lite 后安全口径定为：**敏感字段优先于角色权限**。`admin` 可以访问全部业务表，但 `users.email / users.phone` 这类敏感字段不通过 Text2SQL 直出；后续如需管理员查看，应走脱敏、审计或专门接口。
 
 **默认**：两层始终串行启用，所有 SQL 来源（模板/LLM 全量/LLM 局部）统一经过 `run_sql_tool()` 内的 `validate_sql_policy()`。
 
@@ -153,7 +173,7 @@ Plan Validation 的 5 项子检查：
 | 字段是否在局部 SchemaGraph 内 | `missing_column` |
 | 指标是否被召回 | `invalid_query_plan` |
 | Join relation_id 是否合法 | `invalid_join_path` |
-| 非 admin 角色是否访问了敏感字段 | `sensitive_field_access` |
+| 是否访问敏感字段（admin 也不直出） | `sensitive_field_access` |
 
 **默认**：新链路两层都走；旧链路只走 SQL Guard。两者不是切换关系，是互补的纵深防御。
 
@@ -180,8 +200,8 @@ Plan Validation 的 5 项子检查：
 |---|------|--------------|--------|--------|------|----------|
 | 1 | API 请求处理 | baseline | new_text2sql | — | **互斥** | `force_new_pipeline` flag |
 | 2 | SQL 生成 | 模板匹配 | LLM 全量 schema | LLM 局部 schema | **优先级 fallback** | 模板命中→A，未命中→B；force→C |
-| 3 | 向量索引 | InMemory | Milvus | — | **互斥** | `vector_index` 参数 |
-| 4 | Embedding | Deterministic | SiliconFlow | — | **互斥** | `embedding_provider` 参数 |
+| 3 | 向量索引 | InMemory | Milvus | — | **互斥** | `SCHEMA_VECTOR_BACKEND` env / `vector_index` 参数 |
+| 4 | Embedding | Deterministic | SiliconFlow | — | **互斥** | `SCHEMA_EMBEDDING_PROVIDER` env |
 | 5 | 搜索方法 | 关键词 + 向量 → 融合 | — | — | **始终并行** | 不可切换 |
 | 6 | SQL 安全层 | 只读检查 → 策略校验 | — | — | **始终串行** | 不可切换 |
 | 7 | 安全检查 | Plan Validation | SQL Guard | — | **互补纵深** | 新链路两者都走，旧链路只走 Guard |

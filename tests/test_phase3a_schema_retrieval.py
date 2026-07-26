@@ -76,6 +76,70 @@ def test_retrieve_schema_returns_keyword_vector_and_merged_hits() -> None:
     assert all(hit.doc_type in {"field_doc", "metric_doc", "relation_doc"} for hit in result.merged_hits)
 
 
+def test_retrieve_schema_default_backend_stays_inmemory_deterministic(monkeypatch) -> None:
+    """未显式配置时仍走 in-memory + deterministic，pytest 不依赖 Milvus 或联网 embedding。"""
+
+    from app.core.config import get_settings
+
+    monkeypatch.delenv("SCHEMA_VECTOR_BACKEND", raising=False)
+    monkeypatch.delenv("SCHEMA_EMBEDDING_PROVIDER", raising=False)
+    get_settings.cache_clear()
+    try:
+        result = retrieve_schema(
+            question="2026 年 6 月 GMV 是多少？",
+            user_role="ops",
+            top_k=8,
+            domain_schema=load_domain_schema(),
+            relations_path=RELATIONS_PATH,
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert result.vector_hits
+    assert {hit.source for hit in result.vector_hits} == {"vector"}
+
+
+def test_retrieve_schema_can_explicitly_select_milvus_backend_without_changing_default(monkeypatch) -> None:
+    """Milvus 后端必须显式开启；测试用 fake adapter 证明配置被消费，不连接真实服务。"""
+
+    from app.core.config import get_settings
+    from engine.schema_retrieval import retriever
+
+    calls: dict[str, object] = {}
+
+    class FakeMilvusVectorIndex:
+        """记录构造参数并返回空向量召回，避免单元测试依赖 Milvus。"""
+
+        def __init__(self, **kwargs: object) -> None:
+            calls.update(kwargs)
+
+        def search(self, query: str, *, top_k: int) -> list[object]:
+            calls["query"] = query
+            calls["top_k"] = top_k
+            return []
+
+    monkeypatch.setenv("SCHEMA_VECTOR_BACKEND", "milvus")
+    monkeypatch.setenv("SCHEMA_EMBEDDING_PROVIDER", "deterministic")
+    monkeypatch.setenv("MILVUS_COLLECTION", "schema_docs_test")
+    monkeypatch.setattr(retriever, "MilvusVectorIndex", FakeMilvusVectorIndex, raising=False)
+    get_settings.cache_clear()
+    try:
+        result = retrieve_schema(
+            question="2026 年 6 月 GMV 是多少？",
+            user_role="ops",
+            top_k=8,
+            domain_schema=load_domain_schema(),
+            relations_path=RELATIONS_PATH,
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert result.keyword_hits
+    assert calls["collection_name"] == "schema_docs_test"
+    assert calls["reset_collection"] is False
+    assert calls["query"] == "2026 年 6 月 GMV 是多少？"
+
+
 def test_allow_formal_cases_recall_expected_tables_columns_and_metrics() -> None:
     """8 条允许类 formal case：表 100% 命中，字段/指标总体召回不低于 80%。"""
 

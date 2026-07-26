@@ -119,6 +119,15 @@ class _FakeDangerousSQLClient(_FakeM11LLMClient):
         )
 
 
+class _FakeBrokenSQLClient(_FakeM11LLMClient):
+    """QueryPlan 正常，但 SQL 生成阶段返回不可解析文本，用来验证失败 trace。"""
+
+    def complete(self, *, prompt: str) -> str:
+        if "QueryPlan JSON Schema" in prompt:
+            return super().complete(prompt=prompt)
+        return "我无法稳定返回 JSON，也没有 SELECT。"
+
+
 def _patch_m11_llm(monkeypatch) -> None:
     """让 M11 pipeline 复用同一个 fake client 完成 plan 与 SQL 两次调用。"""
 
@@ -252,3 +261,31 @@ def test_eval_new_text2sql_mode_sends_force_flag_and_records_actual_mode(tmp_pat
     assert results[0].actual_pipeline_mode == "new_text2sql"
     assert results[0].passed
     assert any(step["name"] == "query_plan" for step in trace["trace_steps"])
+
+
+def test_sql_generation_failure_trace_keeps_raw_preview_and_parse_context(tmp_path: Path, monkeypatch) -> None:
+    """LLM 解析失败要把 raw preview / parse error / prompt length 写进 trace metadata。"""
+
+    from engine.nl2sql import pipeline as text2sql_pipeline
+
+    monkeypatch.setattr(text2sql_pipeline, "get_default_llm_client", lambda: _FakeBrokenSQLClient())
+    trace_path = tmp_path / "broken-sql-generation-traces.jsonl"
+
+    with _seeded_test_client(trace_path) as client:
+        response = client.post(
+            "/api/query",
+            json={"question": "各渠道订单量是多少？", "user_role": "ops", "force_new_pipeline": True},
+        )
+
+    body = response.json()
+    trace = json.loads(trace_path.read_text(encoding="utf-8").strip())
+    sql_generation_step = next(step for step in trace["trace_steps"] if step["name"] == "sql_generation")
+
+    assert response.status_code == 200
+    assert body["safety_status"] == "blocked"
+    assert body["error_type"] == "llm_generation_error"
+    assert sql_generation_step["status"] == "error"
+    assert sql_generation_step["metadata"]["stage"] == "sql_generation"
+    assert sql_generation_step["metadata"]["raw_response_preview"] == "我无法稳定返回 JSON，也没有 SELECT。"
+    assert "无法从 LLM 输出中提取 SQL" in sql_generation_step["metadata"]["parse_error"]
+    assert sql_generation_step["metadata"]["prompt_length"] > 100
