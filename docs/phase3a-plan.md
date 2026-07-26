@@ -5,7 +5,7 @@
 
 ## 开工前置说明：Phase 2.7 数据库升级已完成
 
-阶段三A正式开工前，已经完成 Phase 2.7 数据库底座升级，并通过 accept-module（2026-07-22，报告 `accept-Phase2.7-20260722.md`）。随后 Phase 2.7.1 又补齐了数据库 polish 迁移。数据库当前事实以 `docs/database-current-state.md`、migration `20260722_0002` 和 polish migration `20260722_0003` 为准；归档设计背景以 `docs/archive/database-upgrade-plan-v5.md` 为参考。升级结果是把阶段二 v1 的 7 表数据底座扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
+阶段三A正式开工前，已经完成 Phase 2.7 数据库底座升级，并通过 accept-module（2026-07-22，报告 `accept-Phase2.7-20260722.md`）。随后 Phase 2.7.1 又补齐了数据库 polish 迁移。数据库当前事实以 `docs/database-current-state.md`、migration `20260722_0002` 和 polish migration `20260722_0003` 为准；归档设计背景以 `docs/archive-versions/database-upgrade-plan-v5.md` 为参考。升级结果是把阶段二 v1 的 7 表数据底座扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
 
 这意味着本文档仍保留 Phase 3A 的主线设计，但 **M8-M12 的具体输入默认基于升级后的新库**。调整如下：
 
@@ -75,7 +75,7 @@
 
 - 阶段三A执行计划：以 `docs/phase3a-plan.md` 为准。
 - 数据库当前事实：以 `docs/database-current-state.md`、migration `20260722_0002` 和 polish migration `20260722_0003` 为准，覆盖 14 表清单、固定 seed 事实、指标口径、RBAC 和后续写 plan 注意事项。
-- 数据库升级设计背景：以 `docs/archive/database-upgrade-plan-v5.md` 为归档参考，只查设计理由、取舍背景和 challenge 分层，不作为当前精确 DDL 事实源。
+- 数据库升级设计背景：以 `docs/archive-versions/database-upgrade-plan-v5.md` 为归档参考，只查设计理由、取舍背景和 challenge 分层，不作为当前精确 DDL 事实源。
 - DB-GPT 参考项目取舍：以 `docs/reference-dbgpt-analysis.md` 为准；阶段三A只借鉴 Schema Retriever、Action schema、DAG 化 trace 和评测抽象，不基于 DB-GPT 重开、不引入 AWEL / Skill / Sandbox 运行时。
 - 模块实时进度：以 `docs/AI_CONTEXT.md`「当前状态」为准。
 - 项目目录结构：以 `AGENTS.md` / `CLAUDE.md`「目录结构」为准。

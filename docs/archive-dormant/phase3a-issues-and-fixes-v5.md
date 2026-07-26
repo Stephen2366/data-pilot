@@ -1,12 +1,5 @@
 # Phase 3A 现存问题与修改方案 v5
 
-> 基于 M12 新 pipeline 58 条真实 LLM 运行数据 + Phase 2.7 数据质量彩蛋（已查库验证）+ DeepSeek v4-pro 行为分析 + AskData 参考项目对比。
-> 写于 2026-07-25，v5 于 2026-07-26 基于源码复核和执行顺序复盘修订，供后续 AI 会话快速了解现状。
->
-> **v3 → v4 变化**：① 展开第 6 步 trace 增强为分层具体方案（①~⑥）；② 新增问题十（AskData 两段式 + 不强制 JSON 参考）及部分对齐建议；③ 问题三实验方案精化为三组对照；④ 彩蛋表已查库验证。
->
-> **v4 → v5 变化**：① 明确 `response_format: json_object` 只是待验证假设，不作为已确认根因；② 修正 `p3a_multi_002` 的 `products` 归因——当前复核显示局部 SchemaGraph 可包含 `products`，失败更可能发生在 SQL 生成阶段没用该表；③ 第一批执行顺序改为先落 `expected_value` 最小 eval，再修 prompt/system prompt 并重跑；④ `orders.md` 状态枚举修复从只补 `canceled` 扩展为同时补 `pending_payment`；⑤ Schema Retrieval 优化降级为“按 trace 证据决定是否做”。
-
 ## 致 AI（新会话速览）
 
 **项目**：DataPilot，企业数据分析 Agent 系统（FastAPI + DeepSeek + MySQL）。
@@ -31,8 +24,6 @@
 - `p3a_multi_002` 的 `products` 问题需要通过 trace 区分：当前复核显示局部 SchemaGraph 可包含 `products`，M12 formal 报告里的 `missing_tables=['products']` 更像 SQL 生成阶段选择了 `order_items.product_name_snapshot`，不应直接定性为 Schema Retrieval 没召回
 
 **相关会话历史**：用户问了"AskData 和 DB-GPT 怎么做指标定义"→ 结论是 DataPilot 的 `metrics.yaml` 更结构化。用户问了"会不会和 LLM 有关"→ 发现 system prompt 错配和 JSON 模式可能压制 v4-pro 的 thinking。用户要求查库验证彩蛋→ 发现 source_order_no 命名空间完全不同、pending_payment 状态未在文档列出等问题。用户要求对比 AskData 的模型策略→ 两段式 + 不强制 JSON，验证了部分对齐的方向。
-
-**旧版本文档**：v1（纯别名视角，已过时）、v2（补了 Phase 2.7 彩蛋分析，已过时）、v3（补 LLM 行为分析 + 源码复核，已过时）、v4（trace/AskData/eval 优先级修订，已被 v5 取代）在同目录下，**v5 是最新且唯一的权威版本**。
 
 ---
 

@@ -53,7 +53,8 @@ eval/                   # EvalOps-lite（评测前置），完整评测平台在
   traces/               # Agent 运行 Trace，默认不提交 JSONL
 
 docs/                   # 项目文档
-  archive/              # 旧版文档归档
+  archive-versions/     # 同文档的 v1→v2→v3 迭代链存档
+  archive-dormant/      # 阶段结束暂时不用、以后可能复盘
   AI_CONTEXT.md         # 技术档案（AI 续接 / 查 bug 入口）
   dev-log.md            # 学习复盘（用户阅读）
   phase2-plan.md        # 阶段二模块计划（后续阶段计划也放这里）

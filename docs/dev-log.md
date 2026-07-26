@@ -1527,17 +1527,25 @@ M12 本身没有新的 API 端点——它的体验入口是**批量评测报告
 
 ## ★ M13 Phase 3A 新 pipeline 质量修复（2026-07-26）
 
-**简述**：M13 是 M12 收工后的质量修复模块。M12 已经把新旧 pipeline 的差异量出来了，但新 pipeline 通过率偏低；M13 做的不是“盲目调 prompt”，而是先修**评测尺子**，再沿着 trace 一层层定位：到底是评测误杀、指标口径没进 prompt、QueryPlan 选错口径，还是 SQL 生成时关系边用错。最终 formal 新 pipeline 从低通过率提升到 **10/10**，challenge 到 **14/16**，diagnostic 到 **23/32**。
+**简述**：M13 是 M12 收工后的质量修复模块。M12 已经把新旧 pipeline 的差异量出来了，但新 pipeline 通过率偏低；M13 做的不是“盲目调 prompt”，而是先修**评测尺子**，再沿着 trace 一层层定位：到底是评测误杀、指标口径没进 prompt、QueryPlan 选错口径，还是 SQL 生成时关系边用错。按“真实通过”口径重新校准后，最终 formal 新 pipeline 从 **4/10** 提升到 **10/10**，challenge 从 **6/16** 到 **14/16**，diagnostic 从 **12/32** 到 **23/32**。(40%→100%，37.5%→87.5%，37.5%→71.9%)
+
+> ★ Ctrl + 左键 → 查看 M12 发现通过率低后制定的修复计划：[phase3a-issues-and-fixes-v5.md](archive-dormant/phase3a-issues-and-fixes-v5.md)
 
 ### 这次做了什么
 
-第一步先修 eval。原来的 GMV case 只检查响应里有没有 `gmv` 这个词，所以就算 SQL 算出 `NULL` 也可能通过。M13 新增了 **`expected_value` 固定事实检查**：像 2026 年 6 月 GMV、净收入这种 seed 已知答案的题，必须把结果数值和固定答案比上，不能靠列名混过去。
+这次不是从“看到通过率低”直接跳到“调 prompt”。真正的起点是先回看 M12 报告和 trace：formal 10 条表面是 **6/10**，但里面有两条 GMV / 净收入虽然被 eval 判过，SQL 却用了 `orders.created_at`，结果实际是 `NULL` 或错误口径；也就是说，系统不是单纯“模型答错”，而是 **评测尺子和 pipeline 都有问题**。如果先修 prompt，通过率可能涨，也可能只是被旧 scorer 误判，根因仍然看不清。
 
-第二步修 prompt 管道。`metrics.yaml` 里其实早就写了 GMV / 净收入的过滤条件和默认时间字段，但新 pipeline 的 `_format_plan_metrics()` 没把 `filter/default_time_field` 带进 QueryPlan 和局部 SQL prompt。修完后，模型才明确知道 GMV 要按 `orders.paid_at`，排除取消和未支付订单。
+发现显式问题后，又继续查隐藏问题。显式问题是报告里的 `missing_column` / `missing_table` / `GMV=NULL`；隐藏问题是 **旧 eval 把错结果放过去**、**`metrics.yaml` 的结构化口径没有进入新 prompt**、以及 **同一业务词在不同层被解释成不同 SQL 口径**。例如“销售额”在订单总额场景应该是 `gmv`，但商品/类目销售额应该是 `item_gmv`，要从 `order_items.line_amount` 算；模型如果用了 `orders.order_amount`，SQL 能跑，但业务答案不对。
 
-第三步按 trace 修多表残留。trace 证明商品/类目销售额不是单纯“没召回 products”，而是计划层和 SQL 层容易把“销售额”理解成订单头 GMV。M13 给 QueryPlan prompt 补了 **item_gmv 口径约束**：商品/类目销售额必须聚合 `order_items.line_amount`，商品维度通过 `order_items.product_id = products.id` 关联。还给转化率补了 **浮点除法约束**，避免 SQLite 把 `7/10` 算成 0。
+制定 fix 计划时，M13 把问题按证据强弱分层。第一层是确定性 bug：**eval 不看数值、`_format_plan_metrics()` 漏传 `filter/default_time_field`**，这两项必须先修。第二层是低风险工程修复：**QueryPlan / SQL generation 用不同 system prompt，trace 补 `metric_doc_hits` 和 plan step metadata**。第三层是待验证假设：JSON mode 是否压制推理、Schema Retrieval 是否真的漏表。这些没有证据前不动，避免把修复做成“大杂烩”。
 
-最后校准评测中的别名和数据预期。列名 `total_gmv`、`category_gmv`、`usage_count` 这类属于语义等价别名，应该被接受；但缺表、错表不能靠 alias 掩盖。另一个关键发现是当前 seed 下“一级类目销售额排名”第一名实际是 **SaaS 软件**，不是旧 case 写的“数码电子”，所以按实查结果修正了 case。
+**第一步** 先修 eval。原来的 GMV case 只检查响应里有没有 `gmv` 这个词，所以就算 SQL 算出 `NULL` 也可能通过。M13 新增了 **`expected_value` 固定事实检查**：像 2026 年 6 月 GMV、净收入这种 seed 已知答案的题，必须把结果数值和固定答案比上，不能靠列名混过去。
+
+**第二步** 修 prompt 管道。`metrics.yaml` 里其实早就写了 GMV / 净收入的过滤条件和默认时间字段，但新 pipeline 的 `_format_plan_metrics()` 没把 `filter/default_time_field` 带进 QueryPlan 和局部 SQL prompt。修完后，模型才明确知道 GMV 要按 `orders.paid_at`，排除取消和未支付订单。
+
+**第三步** 按 trace 修多表残留。trace 证明商品/类目销售额不是单纯“没召回 products”，而是计划层和 SQL 层容易把“销售额”理解成订单头 GMV。M13 给 QueryPlan prompt 补了 **item_gmv 口径约束**：商品/类目销售额必须聚合 `order_items.line_amount`，商品维度通过 `order_items.product_id = products.id` 关联。还给转化率补了 **浮点除法约束**，避免 SQLite 把 `7/10` 算成 0。
+
+最后校准评测中的别名和数据预期。列名 `total_gmv`、`category_gmv`、`usage_count` 这类属于语义等价别名，应该被接受；但缺表、错表不能靠 alias 掩盖。另一个关键发现是当前 seed 下“一级类目销售额排名”第一名实际是 **SaaS 软件**，不是旧 case 写的“数码电子”，所以按实查结果修正了 case。整轮执行保持“小步改、小步测”：先 TDD 证明旧行为错，再改代码，再跑局部 pytest，最后才跑真实 LLM eval。
 
 ### 新概念
 
@@ -1579,11 +1587,45 @@ M12 本身没有新的 API 端点——它的体验入口是**批量评测报告
 
 ### 面试怎么讲
 
-可以这样讲：
+“我做过一次 Text2SQL 新 pipeline 的质量修复。先发现通过率不可信：GMV=NULL 也会被旧 eval 判过，所以先加固定事实数值校验；再定位到新 pipeline 重写时漏传 `metrics.yaml` 的 filter 和默认时间字段，导致模型用 `created_at` 代替 `paid_at`；然后通过 trace 区分召回、计划和 SQL 生成问题，补了 item_gmv、商品表 join、转化率浮点除法等通用约束。按“真实通过”口径重新校准后，最终 formal 新 pipeline 从 **4/10** 提升到 **10/10**，challenge 从 **6/16** 到 **14/16**，diagnostic 从 **12/32** 到 **23/32**。（40%→100%，37.5%→87.5%，37.5%→71.9%）整个过程重点不是调 prompt，而是 eval 校准、语义口径注入、trace 分层诊断和小步验证。”
 
-“我做过一次 Text2SQL pipeline 的系统化修复。最开始不是直接调 prompt，而是发现 eval 本身有问题：GMV 查询只看列名，不看结果值，导致 NULL 也可能通过。我先加了固定事实数值检查，然后根据 trace 分层定位问题：有的是指标 filter/time field 没传进新 pipeline，有的是 QueryPlan 把商品销售额误选成订单 GMV，有的是 SQL 生成用了整数除法。最后通过率从 M12 的偏低状态提升到 formal 10/10、challenge 14/16、diagnostic 23/32。”
+不要只说“我优化了 prompt”。这次最值钱的点是：你能把一个低通过率的 Agent pipeline，当成工程系统来排查。
 
-这段话的重点是 **系统化排查能力**：你不是“调了几个 prompt”，而是先修测量，再定位根因，再小步验证。
+1. **面试官问“你怎么排查 Agent 效果差？”**
+
+   “我不会先调 prompt，而是先确认评测是否可信。M12 的 Text2SQL 新 pipeline 表面 formal 是 6/10，但我复查 SQL 和执行结果后发现，有些 case 虽然通过，实际算出来是 NULL 或用了错误时间字段。于是我先修 eval，加 `expected_value` 固定事实校验，再沿 trace 看失败发生在 Schema Retrieval、QueryPlan 还是 SQL Generation。这样后面每个修复都能解释通过率为什么变化。”
+
+   这段突出的是 **先校准测量，再修模型**。很多面试回答会停在“prompt 不好”，但企业里更关心你能不能判断指标本身是否可靠。
+
+2. **面试官问“你修复的核心 bug 是什么？”**
+
+   “核心 bug 是 metrics 到 prompt 的管道断了。`metrics.yaml` 里已经定义了 GMV 的 filter 和默认时间字段：排除取消订单、`paid_at IS NOT NULL`、默认用 `orders.paid_at`。但新 pipeline 重写 `_format_plan_metrics()` 时只输出了 name/formula/description，没有把 `filter/default_time_field` 传给 LLM。模型看到 `created_at` 和 `paid_at` 两个字段只能猜，所以经常用错时间口径。修复后，QueryPlan 和局部 SQL prompt 都能看到结构化指标口径。”
+
+   这段突出的是 **不是靠自然语言补丁救火，而是把已有 semantic metadata 接回链路**。
+
+3. **面试官问“你怎么避免为了通过率写死答案？”**
+
+   “我没有把某个问题映射成固定 SQL，也没有把标准答案塞给模型。`expected_value` 只用于 eval scorer，目的是判断模型 SQL 的执行结果是否等于 seed 数据里的固定事实；生产 pipeline 不读取这些答案。prompt 侧加的也是通用规则，比如商品/类目销售额使用 `item_gmv`，通过 `order_items.product_id = products.id` 连商品表；转化率必须用浮点除法。这些规则来自业务口径和 schema 关系，不是针对单个 case 的捷径。”
+
+   这段可以主动化解“是不是刷榜”的质疑。重点是 **eval 断言和生产推理路径隔离**。
+
+4. **面试官问“Text2SQL 里你怎么处理业务口径？”**
+
+   “我把业务指标看成 semantic layer 的雏形，而不是让模型自己猜。GMV、净收入、商品销售额、转化率这些指标都有明确公式、过滤条件和默认时间字段。M13 里我修了一个典型口径漂移：订单总 GMV 可以从 `orders.order_amount` 算，但商品/类目销售额要从 `order_items.line_amount` 聚合，否则会把订单头金额错误分摊到商品维度。这个问题 SQL 语法完全正确，但业务结果错，所以必须靠指标定义和 prompt 约束共同解决。”
+
+   这段突出的是 **SQL 正确不等于业务正确**，很适合讲给做数据产品或 Agent 应用的面试官。
+
+5. **面试官问“你怎么设计可观测性？”**
+
+   “我给 pipeline trace 补了能定位责任层的信息。Schema Retrieval 记录 `metric_doc_hits`，看指标文档有没有召回；SQL Generation 记录 `plan_step_tables/columns/filters/metrics/joins/output_columns`，看 QueryPlan 想做什么、SQL 最后有没有照做。这样一个失败 case 可以拆成三种：没召回、计划没写、SQL 没遵守计划。M13 后续判断 `products` 问题时，就是靠这个分层避免误判成单纯召回问题。”
+
+   这段突出的是 **Agent 系统的黑盒变白盒**。
+
+6. **面试官问“结果怎么样，还有什么没做？”**
+
+   “结果上，formal 新 pipeline 到 10/10，challenge 到 14/16，diagnostic 到 23/32；pytest 全量 78 passed。剩下没追满分，因为 diagnostic 里有些是递归类目、权限语义、知识库文档归因、诊断评分严格性，继续靠 prompt 小修会变成刷榜。我把 JSON mode 实验和完整 result_match 留到后续模块，因为 M13 的目标是修确定性根因，而不是把所有开放问题一次塞完。”
+
+   这段突出的是 **知道什么时候收手**。企业项目里，“不做什么”有时候和“做了什么”一样重要。
 
 ### 验证与下一步
 

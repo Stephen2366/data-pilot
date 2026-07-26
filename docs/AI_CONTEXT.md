@@ -33,6 +33,12 @@
 
 ## 变更记录（新的在上）
 
+### M13 dev-log 面试复盘扩写（2026-07-26）
+
+- 改动范围：`docs/dev-log.md`。
+- 关键决策：按用户反馈扩写 M13「这次做了什么」和「面试怎么讲」两节；前者补齐“如何发现显式/隐藏问题、如何按证据强弱制定 fix 计划、如何小步验证”的过程，后者拆成多个面试场景，覆盖排查 Agent 效果差、核心 bug、避免刷榜、业务口径、trace 可观测性、结果与边界。
+- 验证：人工回读文档段落；仅文档改动，未跑 pytest。
+
 ### M13 第二批：alias scorer + item_gmv/转化率 prompt 修复（2026-07-26）
 
 - 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`tests/test_phase3a_pipeline.py`、`eval/reports/phase3a-*.md`、`docs/phase3a-issues-and-fixes-v5.md`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m13-notes.md`。
@@ -61,7 +67,7 @@
 
 ### M13 第一批：eval 固定事实校准 + metrics prompt 管道修复（2026-07-26）
 
-- 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`docs/phase3a-issues-and-fixes-v5.md`、`.agent_work/temp/m13-notes.md`。
+- 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`docs/archive-dormant/phase3a-issues-and-fixes-v5.md`、`.agent_work/temp/m13-notes.md`。
 - 关键决策：
   - 按 v5 执行 M13 分步修复，不一步到位。第一批先解决"测不准"和"metrics prompt 管道断裂"，暂不改 JSON mode，不直接优化 Schema Retrieval。
   - 新增 `expected_value` eval check，优先拦住 `gmv=NULL` 但 `contains: gmv` 误判通过的问题。正式 regression/challenge 中 GMV 使用固定事实 `11285752.00`，净收入按确定性 seed 查询得到 `11293058.25`。
@@ -85,7 +91,7 @@
 
 ### Phase 3A 问题分析 v5 修订（2026-07-26）
 
-- 改动范围：新增 `docs/phase3a-issues-and-fixes-v5.md`（由 v4 复制后修订），未改源码。
+- 改动范围：新增 `docs/archive-dormant/phase3a-issues-and-fixes-v5.md`（由 v4 复制后修订），未改源码。
 - 关键决策：
   - v4 主线判断保持：M12 新 pipeline 低通过率的确定性根因优先看 `_format_plan_metrics()` 漏传 `metrics.yaml` 的 `filter/default_time_field`，以及 eval 只做列名 / contains 检查导致 GMV=NULL 也 pass。
   - v5 收紧优先级：第一批执行顺序改为先做 `expected_value` 最小 eval，让固定事实数值错误能被测出来；再修 metrics prompt 管道和 system prompt；之后重跑 formal / challenge / diagnostic。

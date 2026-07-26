@@ -1,6 +1,6 @@
 # DataPilot 数据库当前状态速查（Phase 2.7 / 2.7.1 后）
 
-> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/AI_CONTEXT.md`「历史档案」Phase 2.7 / 2.7.1 条目。
+> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/AI_CONTEXT.md`「历史档案」Phase 2.7 / 2.7.1 条目。
 
 ## 一句话结论
 
@@ -176,6 +176,6 @@ git diff --check
 - 先读 `docs/AI_CONTEXT.md` 当前状态，确认是否仍是 Phase 2.7 已验收。
 - 如果要做 Phase 3A，读 `docs/phase3a-plan.md` 顶部数据库升级前置说明。
 - 如果要写 SQL / Text2SQL plan，读本文件、`domain_pack/metrics.yaml`、`domain_pack/schema_desc/relations.yaml`。
-- 如果要改数据库，先读本文档和当前 Alembic head；如需理解历史设计取舍，再读 `docs/archive/database-upgrade-plan-v5.md`。
+- 如果要改数据库，先读本文档和当前 Alembic head；如需理解历史设计取舍，再读 `docs/archive-versions/database-upgrade-plan-v5.md`。
 - 如果看到测试中自增 ID 不从 1 开始，不要修成依赖 ID；改用稳定业务键。
 - 如果遇到 challenge 用例失败，先判断是数据库固定事实坏了，还是旧 Text2SQL 链路能力不足；不要误判为 Phase 3A 已失败。
