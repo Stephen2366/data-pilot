@@ -33,7 +33,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 | `channels` | 6 | 渠道 | 渠道 GMV、订单量、行为来源 | 固定事实常用 `Mobile App` |
 | `orders` | 10000 | 订单头 | 订单级 GMV、净收入、订单状态 | 订单级指标优先用这张表 |
 | `order_items` | 18000 | 订单明细行 | 商品维度 GMV、销量、明细退款归因 | Join 后统计订单量必须 `COUNT(DISTINCT orders.id)` |
-| `refunds` | 1000 | 退款单 | 退款量、退款原因、退款率 | `order_item_id` 可空，商品退款优先明细归因，整单退款需回退订单 |
+| `refunds` | 1000 | 退款单 | 退款量、退款原因、退款率 | `order_item_id` 有 100 条为空（10%），属于整单退款，只能通过 `order_id` 关联；商品维度退款率必须用 LEFT JOIN，INNER JOIN 会丢 10% |
 | `tickets` | 300 | 客服工单 | 高优先级待处理、客服问题分析 | `order_id` 可空，咨询类工单不一定绑定订单 |
 | `knowledge_docs` | 10 | 知识库文档 | RAG / 客服规则语料 | 后续 RAG 会继续使用 |
 | `coupons` | 10 | 优惠券 | 券信息、券类型、有效期 | 固定券码 `JUNE_FIXED_50` |
@@ -48,8 +48,8 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - 商品维度 GMV / 销量默认不要用 `orders.product_id`，应走 `orders -> order_items -> products`。
 - `products.category` 仍保留，表示旧版冗余类目字符串；规范类目层级走 `products.category_id -> product_categories.id`。
 - `orders.paid_at` 现在允许为空；GMV、净收入等成交口径默认排除 `paid_at IS NULL`。
-- `order_status` 兼容 `cancelled` 和 `canceled` 两种拼写；成交口径要同时排除两者。
-- `orders.source_order_no` / `orders.external_order_no` 和 `refunds.source_order_no` 用来模拟外部源系统弱一致，不等同于主表唯一业务键。
+- `order_status` 完整取值：`delivered`（3371）、`paid`（3091）、`shipped`（3089）、`cancelled`（421，双 l）、`pending_payment`（20，即 `paid_at IS NULL` 的 20 条）、`canceled`（8，单 l）。成交口径需同时排除 `cancelled` 和 `canceled`；`pending_payment` 不需要显式排除（`paid_at IS NOT NULL` 已将其过滤），但写 prompt / schema_desc 时不应漏掉此状态。
+- `orders.source_order_no` / `orders.external_order_no` 格式为 `SRC-2026-XXXXX`，`orders.order_no` 格式为 `ORD-2026-XXXXX`——两者是**不同的编号体系，不能 join**。`refunds.source_order_no` 同为 SRC 格式，模拟外部源系统追溯；退款关联订单的唯一正确路径是 `refunds.order_id -> orders.id`。
 - `orders_wide` 保留 `refund_count` / `total_refund` / `has_refund` / `item_count` 等快照字段，用于看板选表挑战；强一致诊断仍回到星型模型。
 - `product_price_history.price_source` 是数据来源，`change_reason` 是业务调价原因；后续写 prompt / plan 时不要混成一个字段。
 
@@ -103,12 +103,13 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 
 Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问题：
 
-- 未支付订单：`paid_at IS NULL`，成交指标必须排除。
-- 取消状态拼写差异：`cancelled` / `canceled` 都可能出现。
-- 外部源系统单号重复：通过 `source_order_no` / `external_order_no` 模拟，不破坏主键和唯一约束。
-- 弱关联退款：`refunds.source_order_no` 可用于模拟源系统追溯，主分析仍优先用外键。
-- 负数退款冲销：退款金额分析要注意业务含义。
-- 金额不一致样例：固定 5 条，用于后续困难诊断和 Agent 自检素材。
+- 未支付订单：20 条 `order_status = 'pending_payment'` 且 `paid_at IS NULL`。成交指标必须用 `paid_at IS NOT NULL` 排除；不要猜 `order_status = 'unpaid'`——该状态不存在。
+- 取消状态拼写差异：`cancelled`（421 条，双 l）/ `canceled`（8 条，单 l）都可能出现，成交口径要同时排除。
+- 外部源系统单号重复：各 20 条重复（10000 条中 9980 distinct），不破坏主键和唯一约束。
+- 外部源系统单号命名空间不兼容：`source_order_no` 格式为 `SRC-2026-XXXXX`，`order_no` 为 `ORD-2026-XXXXX`，**不能 join**。退款关联订单的唯一正确路径是 `refunds.order_id -> orders.id`。
+- 整单退款：`refunds.order_item_id` 有 100 条为空（10%），只通过 `order_id` 关联。商品维度退款率必须 LEFT JOIN `order_items`；INNER JOIN 会丢失这 100 条。
+- 负数退款冲销：3 条 `refund_amount = -20.00`，状态分别为 completed / requested / rejected。
+- 金额不一致样例：固定 5 条 `orders.order_amount ≠ SUM(order_items.line_amount)`。
 
 写 plan 时不要把这些当成 bug 清掉，除非用户明确要求“清洗数据”。它们是后续 Text2SQL 诊断能力的训练素材。
 

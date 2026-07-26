@@ -34,7 +34,7 @@ class QueryPlanExtractionError(LLMGenerationError):
 class LLMClient(Protocol):
     """最小 LLM client 协议，方便测试替换真实 DeepSeek 调用。"""
 
-    def complete(self, *, prompt: str) -> str:
+    def complete(self, *, prompt: str, system_prompt: str | None = None) -> str:
         """输入完整 prompt，返回模型原始文本。"""
 
 
@@ -55,17 +55,18 @@ class DeepSeekChatClient:
         self.base_url = base_url.rstrip("/") or "https://api.deepseek.com"
         self.model = model or "deepseek-v4-pro"
 
-    def complete(self, *, prompt: str) -> str:
+    def complete(self, *, prompt: str, system_prompt: str | None = None) -> str:
         """调用 DeepSeek chat completions 接口。"""
 
         if not self.api_key:
             raise LLMGenerationError("DeepSeek API key 缺失，请配置 DEEPSEEK_API_KEY 或 LLM_API_KEY。")
 
         # 步骤 1：按 OpenAI-compatible chat 格式组装请求 -------------------------------
+        resolved_system_prompt = system_prompt or "你只负责把中文业务问题转换为安全的单条 SELECT SQL。"
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": "你只负责把中文业务问题转换为安全的单条 SELECT SQL。"},
+                {"role": "system", "content": resolved_system_prompt},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0,
@@ -119,6 +120,17 @@ def get_default_llm_client() -> LLMClient:
         base_url=settings.deepseek_base_url or "https://api.deepseek.com",
         model=model,
     )
+
+
+def _complete_with_system_prompt(client: LLMClient, *, prompt: str, system_prompt: str) -> str:
+    """兼容新旧 fake client：真实客户端用 system prompt，旧测试替身仍可只接收 prompt。"""
+
+    try:
+        return client.complete(prompt=prompt, system_prompt=system_prompt)
+    except TypeError as exc:
+        if "system_prompt" not in str(exc):
+            raise
+        return client.complete(prompt=prompt)
 
 
 def extract_generated_sql(raw_text: str) -> GeneratedSQL:
@@ -192,7 +204,11 @@ def generate_sql(
 
     client = llm_client or get_default_llm_client()
     prompt = build_sql_prompt(question=question, user_role=user_role, domain_schema=domain_schema)
-    raw_text = client.complete(prompt=prompt)
+    raw_text = _complete_with_system_prompt(
+        client,
+        prompt=prompt,
+        system_prompt="你是 DataPilot 的 NL2SQL 生成器。请把中文业务问题转换为安全的单条 SELECT SQL，并按要求返回结构化结果。",
+    )
     return extract_generated_sql(raw_text)
 
 
@@ -212,7 +228,11 @@ def generate_query_plan(
         metrics=domain_schema.metrics,
         join_paths=schema_graph.join_paths,
     )
-    raw_text = client.complete(prompt=prompt)
+    raw_text = _complete_with_system_prompt(
+        client,
+        prompt=prompt,
+        system_prompt="你是 DataPilot 的查询规划器。根据用户问题和局部 Schema 信息输出结构化 JSON 查询计划，不直接生成 SQL。",
+    )
     return extract_query_plan(raw_text)
 
 
@@ -236,5 +256,9 @@ def generate_sql_from_plan_step(
         metrics=domain_schema.metrics,
         join_paths=schema_graph.join_paths,
     )
-    raw_text = client.complete(prompt=prompt)
+    raw_text = _complete_with_system_prompt(
+        client,
+        prompt=prompt,
+        system_prompt="你是 DataPilot 的 SQL 生成器。根据已验证的 QueryPlanStep 和局部 Schema 生成安全的只读 SELECT SQL。",
+    )
     return extract_generated_sql(raw_text)

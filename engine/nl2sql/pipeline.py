@@ -140,12 +140,18 @@ def _blocked_result(
 def _retrieval_metadata(retrieval_result: SchemaRetrievalResult) -> dict[str, Any]:
     """把检索详情压成 JSONL 友好的诊断摘要。"""
 
+    metric_doc_hits = [
+        hit.document.doc_id
+        for hit in retrieval_result.merged_hits
+        if hit.doc_type == "metric_doc"
+    ]
     return {
         "keyword_hit_count": len(retrieval_result.keyword_hits),
         "vector_hit_count": len(retrieval_result.vector_hits),
         "merged_hit_count": len(retrieval_result.merged_hits),
         "top_doc_ids": [hit.document.doc_id for hit in retrieval_result.merged_hits[:10]],
         "top_doc_types": [hit.doc_type for hit in retrieval_result.merged_hits[:10]],
+        "metric_doc_hits": metric_doc_hits,
     }
 
 
@@ -412,6 +418,12 @@ def run_text2sql_pipeline(
                 "tables_used": generated_sql.tables_used,
                 "confidence": generated_sql.confidence,
                 "sql_preview": generated_sql.sql[:300],
+                "plan_step_tables": plan_step.tables,
+                "plan_step_columns": plan_step.columns,
+                "plan_step_filters": plan_step.filters,
+                "plan_step_metrics": plan_step.metrics,
+                "plan_step_joins": plan_step.joins,
+                "plan_step_output_columns": plan_step.output_columns,
             },
             parent_step_id=plan_step.step_id,
         )

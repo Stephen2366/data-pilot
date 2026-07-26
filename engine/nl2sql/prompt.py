@@ -94,7 +94,11 @@ def _format_plan_metrics(domain_schema_metrics: dict[str, object], schema_graph:
         name = getattr(metric, "name", metric_key)
         formula = getattr(metric, "formula", "")
         description = getattr(metric, "description", "")
-        lines.append(f"- {metric_key}（{name}）：{formula}。{description}")
+        filter_rule = getattr(metric, "filter", "")
+        time_field = getattr(metric, "default_time_field", "")
+        filter_text = f"；附加过滤条件：{filter_rule}" if filter_rule else ""
+        time_text = f"；默认时间字段：{time_field}" if time_field else ""
+        lines.append(f"- {metric_key}（{name}）：{formula}{filter_text}{time_text}。{description}")
     return "\n".join(lines) or "无"
 
 
@@ -110,6 +114,59 @@ def _format_join_paths(join_paths: list[JoinPath]) -> str:
                 f"{edge.right_table}.{edge.right_column}（{edge.join_type}{through}）"
             )
     return "\n".join(lines) or "无"
+
+
+def _format_query_plan_notes(question: str, schema_graph: SchemaGraph) -> str:
+    """按问题意图给计划阶段补少量业务约束，优先约束高频易混的指标口径。"""
+
+    notes: list[str] = []
+    asks_sales_by_item = "商品销售额" in question
+    asks_sales_by_category = "类目销售额" in question or "类目" in question and "销售额" in question
+    # ★ M13 复盘出的高频漂移：模型看到“销售额”容易选全订单 GMV。
+    # 这里只在局部 Schema 已召回 item_gmv 时提醒计划层，避免把业务规则写成全局硬编码。
+    if "item_gmv" in schema_graph.metrics and (asks_sales_by_item or asks_sales_by_category):
+        notes.append(
+            "商品销售额/类目销售额必须使用 `item_gmv`，聚合 `order_items.line_amount`；"
+            "不要用 `gmv` 或 `orders.order_amount` 代替。"
+        )
+    if asks_sales_by_item and {"order_items", "products"}.issubset(set(schema_graph.tables)):
+        notes.append(
+            "商品销售额 TopN 需要计划 `order_items` + `products`，通过 "
+            "`order_items.product_id = products.id` 关联，输出商品名和 `item_gmv`。"
+        )
+    if asks_sales_by_category and {"order_items", "products", "product_categories"}.issubset(set(schema_graph.tables)):
+        notes.append(
+            "类目销售额排名需要计划 `order_items` + `products` + `product_categories`，通过 "
+            "`order_items.product_id = products.id` 后再连类目，按一级类目输出和排序。"
+        )
+    if (
+        "active" in question.lower()
+        and "商品列表" in question
+        and "products" in schema_graph.tables
+        and {"product_name", "category", "status"}.issubset(set(schema_graph.fields.get("products", [])))
+    ):
+        notes.append("active 商品列表需要输出 `products.product_name`、`products.category`、`products.status`。")
+    return "\n".join(f"- {note}" for note in notes) or "无"
+
+
+def _format_sql_generation_notes(plan_step: QueryPlanStep, schema_graph: SchemaGraph) -> str:
+    """根据计划和局部 Schema 给 SQL 生成阶段补少量硬约束，避免指标口径漂移。"""
+
+    notes: list[str] = []
+    if "item_gmv" in plan_step.metrics:
+        notes.append("使用 `item_gmv` 时必须按局部指标公式聚合 `order_items.line_amount`，不要改用 `orders.order_amount`。")
+    if (
+        "item_gmv" in plan_step.metrics
+        and "products" in schema_graph.tables
+        and "order_items" in schema_graph.tables
+        and "product_name_snapshot" in schema_graph.fields.get("order_items", [])
+    ):
+        notes.append("商品名输出优先 JOIN `products`；不要用 order_items.product_name_snapshot 替代 products。")
+    if "item_gmv" in plan_step.metrics and "products" in schema_graph.tables and "order_items" in schema_graph.tables:
+        notes.append("商品维度关联必须使用 `order_items.product_id = products.id`；不要用 orders.product_id 关联商品。")
+    if "add_to_pay_conversion_rate" in plan_step.metrics:
+        notes.append("转化率必须使用浮点除法，例如分子乘 `* 1.0` 或 `CAST(... AS REAL)`，不要让整数除法返回 0。")
+    return "\n".join(f"- {note}" for note in notes) or "无"
 
 
 def build_query_plan_prompt(
@@ -144,6 +201,9 @@ QueryPlan JSON Schema：
 
 允许的 JoinPath relation id：
 {_format_join_paths(available_join_paths)}
+
+计划补充约束：
+{_format_query_plan_notes(question, schema_graph)}
 
 用户问题：{question}
 """
@@ -187,4 +247,7 @@ QueryPlanStep：
 
 允许的 JoinPath relation id：
 {_format_join_paths(available_join_paths)}
+
+SQL 生成补充约束：
+{_format_sql_generation_notes(plan_step, schema_graph)}
 """

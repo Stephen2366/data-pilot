@@ -143,6 +143,8 @@ def test_force_new_pipeline_bypasses_template_and_writes_required_trace_steps(tm
     body = response.json()
     trace = json.loads(trace_path.read_text(encoding="utf-8").strip())
     step_names = [step["name"] for step in trace["trace_steps"]]
+    retrieval_step = next(step for step in trace["trace_steps"] if step["name"] == "schema_retrieval")
+    sql_generation_step = next(step for step in trace["trace_steps"] if step["name"] == "sql_generation")
 
     assert response.status_code == 200
     assert body["safety_status"] == "passed"
@@ -162,6 +164,17 @@ def test_force_new_pipeline_bypasses_template_and_writes_required_trace_steps(tm
     assert trace["trace_steps"][7]["step_type"] == "sql_query"
     assert trace["trace_steps"][7]["metadata"]["row_count"] == len(body["rows"])
     assert trace["trace_steps"][7]["metadata"]["column_count"] == len(body["columns"])
+    assert "metric_doc_hits" in retrieval_step["metadata"]
+    assert sql_generation_step["metadata"]["plan_step_tables"] == ["channels", "orders"]
+    assert sql_generation_step["metadata"]["plan_step_columns"] == [
+        "channels.channel_name",
+        "orders.id",
+        "orders.channel_id",
+    ]
+    assert sql_generation_step["metadata"]["plan_step_filters"] == []
+    assert sql_generation_step["metadata"]["plan_step_metrics"] == ["order_count"]
+    assert sql_generation_step["metadata"]["plan_step_joins"] == ["orders_channel"]
+    assert sql_generation_step["metadata"]["plan_step_output_columns"] == ["channels.channel_name", "order_count"]
     assert trace["trace_steps"][-1]["name"] == "chart_decision"
 
 

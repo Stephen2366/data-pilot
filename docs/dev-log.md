@@ -1524,3 +1524,86 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 **本地启动体验：**
 
 M12 本身没有新的 API 端点——它的体验入口是**批量评测报告**而非 Swagger。建议先看 `eval/reports/phase3a-comparison.md` 了解新旧链路差异的全貌，再用 `scripts/smoke_phase3a_text2sql.py` 一键复现（需要 DeepSeek API key）。
+
+## ★ M13 Phase 3A 新 pipeline 质量修复（2026-07-26）
+
+**简述**：M13 是 M12 收工后的质量修复模块。M12 已经把新旧 pipeline 的差异量出来了，但新 pipeline 通过率偏低；M13 做的不是“盲目调 prompt”，而是先修**评测尺子**，再沿着 trace 一层层定位：到底是评测误杀、指标口径没进 prompt、QueryPlan 选错口径，还是 SQL 生成时关系边用错。最终 formal 新 pipeline 从低通过率提升到 **10/10**，challenge 到 **14/16**，diagnostic 到 **23/32**。
+
+### 这次做了什么
+
+第一步先修 eval。原来的 GMV case 只检查响应里有没有 `gmv` 这个词，所以就算 SQL 算出 `NULL` 也可能通过。M13 新增了 **`expected_value` 固定事实检查**：像 2026 年 6 月 GMV、净收入这种 seed 已知答案的题，必须把结果数值和固定答案比上，不能靠列名混过去。
+
+第二步修 prompt 管道。`metrics.yaml` 里其实早就写了 GMV / 净收入的过滤条件和默认时间字段，但新 pipeline 的 `_format_plan_metrics()` 没把 `filter/default_time_field` 带进 QueryPlan 和局部 SQL prompt。修完后，模型才明确知道 GMV 要按 `orders.paid_at`，排除取消和未支付订单。
+
+第三步按 trace 修多表残留。trace 证明商品/类目销售额不是单纯“没召回 products”，而是计划层和 SQL 层容易把“销售额”理解成订单头 GMV。M13 给 QueryPlan prompt 补了 **item_gmv 口径约束**：商品/类目销售额必须聚合 `order_items.line_amount`，商品维度通过 `order_items.product_id = products.id` 关联。还给转化率补了 **浮点除法约束**，避免 SQLite 把 `7/10` 算成 0。
+
+最后校准评测中的别名和数据预期。列名 `total_gmv`、`category_gmv`、`usage_count` 这类属于语义等价别名，应该被接受；但缺表、错表不能靠 alias 掩盖。另一个关键发现是当前 seed 下“一级类目销售额排名”第一名实际是 **SaaS 软件**，不是旧 case 写的“数码电子”，所以按实查结果修正了 case。
+
+### 新概念
+
+- **评测尺子先于修模型**：如果测试本身会把 `GMV=NULL` 判成通过，后续所有通过率都不可信。类比 SpringBoot 项目里先修单元测试断言，再修 Service 逻辑；否则你是在用坏温度计判断病人退烧。
+- **固定事实检查（expected_value）**：对 seed 数据里确定的业务事实直接做数值比较，例如 GMV 必须等于 `11285752.00`。这比 `contains: gmv` 更像数据库里的精确断言：不是看列名长得像，而是看结果值对不对。
+- **单指标别名兜底**：单指标题只有一列结果时，LLM 可能把列名写成 `"2026年6月GMV"`。M13 的 scorer 会先尝试期望列名和显式 alias；如果仍没命中且只有一列，就用数值判断。这不是放水，因为多列结果仍然严格要求列名。
+- **口径漂移**：模型看到“销售额”可能从 `orders.order_amount` 算，也可能从 `order_items.line_amount` 算。业务上商品/类目销售额必须从订单明细算，这就是口径；口径漂了，SQL 能跑也不代表答案对。
+
+### 关键文件
+
+- `eval/run_eval.py`：新增 `expected_value`、列别名评分、单指标数值兜底。
+- `engine/nl2sql/prompt.py`：补 metrics filter/time field、item_gmv 商品/类目约束、转化率浮点除法约束。
+- `engine/nl2sql/generator.py`：让 QueryPlan 和 SQL 生成使用不同 system prompt，并保持旧 fake client 兼容。
+- `engine/nl2sql/pipeline.py`：trace metadata 增加 `metric_doc_hits` 和 plan_step 关键字段，方便定位失败层。
+- `eval/cases/*.yaml`：补固定事实、语义等价 alias、当前 seed 下的类目 Top1 预期。
+
+### 代码阅读路线
+
+1. **先看评分尺子**：`eval/run_eval.py`
+   从 `_score_case()` 开始读，看它如何先检查安全、表、列，再进入 `_score_expected_value()`。重点理解 **单指标固定事实题** 为什么能绕过中文别名：只有一列时值最重要；多列时仍不能乱猜。
+
+2. **再看 prompt 口径**：`engine/nl2sql/prompt.py`
+   先看 `_format_plan_metrics()`，它负责把 `metrics.yaml` 的业务口径带进新 pipeline。再看 `_format_query_plan_notes()` 和 `_format_sql_generation_notes()`，理解 M13 为什么把商品/类目销售额绑定到 `item_gmv`，并要求 `order_items.product_id = products.id`。
+
+3. **看 LLM 调用边界**：`engine/nl2sql/generator.py`
+   阅读 `_complete_with_system_prompt()` 和三个生成函数：普通 SQL、QueryPlan、局部 SQL 现在有不同 system prompt。重点理解兼容层为什么重要：真实 DeepSeek 需要更准确角色，旧测试替身不能因此全坏。
+
+4. **看 trace 证据**：`engine/nl2sql/pipeline.py`
+   找 `schema_retrieval` 和 `sql_generation` step 的 metadata。`metric_doc_hits` 告诉你指标文档有没有召回；`plan_step_tables/metrics/joins/output_columns` 告诉你计划层想做什么。这就是后续排查的“黑匣子记录仪”。
+
+`YAML case` → `eval.run_eval` → `/api/query force_new_pipeline` → `schema_retrieval / query_plan / sql_generation trace` → `report / comparison`
+
+### 设计要点
+
+- **先校准 eval，再改 prompt**：否则通过率涨跌无法解释。M13 每一批都先写 RED 测试，再做最小修复。
+- **alias 只接受语义等价**：`usage_count` 可作为 `coupon_order_count`，`category_gmv` 可作为 `item_gmv`；但如果 SQL 少连 `products`，不能靠 alias 让它过。
+- **JSON mode 暂不动**：v5 里把 JSON mode 降级为待验证假设。M13 已经用更小改动把 formal 拉到 10/10，所以没有必要在这一轮引入大行为变更。
+- **diagnostic 不等于正式硬门**：diagnostic 32 条是诊断素材，最新 23/32 暴露了更细问题，比如安全诊断漏拦、prompt 输出列严格性、递归类目 SQL Guard 等；这些适合后续拆小模块处理。
+
+### 面试怎么讲
+
+可以这样讲：
+
+“我做过一次 Text2SQL pipeline 的系统化修复。最开始不是直接调 prompt，而是发现 eval 本身有问题：GMV 查询只看列名，不看结果值，导致 NULL 也可能通过。我先加了固定事实数值检查，然后根据 trace 分层定位问题：有的是指标 filter/time field 没传进新 pipeline，有的是 QueryPlan 把商品销售额误选成订单 GMV，有的是 SQL 生成用了整数除法。最后通过率从 M12 的偏低状态提升到 formal 10/10、challenge 14/16、diagnostic 23/32。”
+
+这段话的重点是 **系统化排查能力**：你不是“调了几个 prompt”，而是先修测量，再定位根因，再小步验证。
+
+### 验证与下一步
+
+- 验证：full pytest **78 passed**；finish-module 后相关回归 **37 passed**；formal **10/10**；challenge **14/16**；diagnostic **23/32**。
+- warning：仍有既有 Starlette/httpx deprecation warning，不影响本模块。
+- 下一步：用户人工检查后可调用 `accept-module` 做 M13 验收；后续若继续修，可以优先拆 `db_sec_004` 安全诊断和 diagnostic 输出列严格性。
+
+可复制验证命令：
+
+```powershell
+# 相关回归，预期 37 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py tests\test_phase3a_planner.py tests\test_phase3a_pipeline.py --basetemp=.agent_work\temp\pytest-m13-finish-related
+
+# 正式 10 条，预期 10/10。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pipeline-mode new_text2sql --cases eval\cases\phase3a-regression.yaml --report eval\reports\phase3a-new-pipeline.md --trace .agent_work\temp\phase3a-new-traces.jsonl
+
+# 32 条 diagnostic，预期本轮为 23/32。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pipeline-mode new_text2sql --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --report eval\reports\phase3a-diagnostic-new-pipeline.md --trace .agent_work\temp\phase3a-diagnostic-new-traces.jsonl
+```
+
+**本地启动体验：**
+
+M13 没有新增 API 端点，体验入口仍是批量评测报告。想看效果，优先打开 `eval/reports/phase3a-new-pipeline.md`、`eval/reports/phase3a-challenge-new-pipeline.md`、`eval/reports/phase3a-diagnostic-new-pipeline.md`，再对照 `eval/reports/phase3a-*-comparison.md` 看 M12 → M13 后失败形态怎么变化。

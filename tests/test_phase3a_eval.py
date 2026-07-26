@@ -116,6 +116,168 @@ def test_score_case_returns_minimal_issue_tags() -> None:
     assert score.issue_tags == ["missing_column"]
 
 
+def test_expected_value_check_fails_when_metric_value_is_null() -> None:
+    """固定事实数值检查必须拦住 GMV=NULL，避免列名命中伪装成通过。"""
+
+    case = EvalCase(
+        case_id="p3a_gmv_null",
+        task_type="aggregation",
+        question="2026 年 6 月 GMV 是多少？",
+        user_role="ops",
+        expected_tables=["orders"],
+        expected_columns=["gmv"],
+        expected_metrics=["gmv"],
+        expected_trace_steps=[],
+        pipeline_mode="new_text2sql",
+        security_expectation="allow",
+        check_type="expected_value",
+        check_value="",
+        check={"type": "expected_value", "field": "gmv", "value": 11285752.00, "tolerance": 0.01},
+    )
+    body = {
+        "route": "sql",
+        "safety_status": "passed",
+        "tables_used": ["orders"],
+        "columns": ["gmv"],
+        "rows": [{"gmv": None}],
+    }
+
+    score = _score_case(case, body, 200, actual_pipeline_mode="new_text2sql")
+
+    assert score.passed is False
+    assert score.issue_tags == ["unexpected_error"]
+    assert "expected_value" in score.reason
+
+
+def test_expected_value_check_passes_when_metric_matches_within_tolerance() -> None:
+    """固定事实数值在容差内时应通过，避免 scorer 只会报错不能确认修复效果。"""
+
+    case = EvalCase(
+        case_id="p3a_gmv_value",
+        task_type="aggregation",
+        question="2026 年 6 月 GMV 是多少？",
+        user_role="ops",
+        expected_tables=["orders"],
+        expected_columns=["gmv"],
+        expected_metrics=["gmv"],
+        expected_trace_steps=[],
+        pipeline_mode="new_text2sql",
+        security_expectation="allow",
+        check_type="expected_value",
+        check_value="",
+        check={"type": "expected_value", "field": "gmv", "value": 11285752.00, "tolerance": 0.01},
+    )
+    body = {
+        "route": "sql",
+        "safety_status": "passed",
+        "tables_used": ["orders"],
+        "columns": ["gmv"],
+        "rows": [{"gmv": "11285752.00"}],
+    }
+
+    score = _score_case(case, body, 200, actual_pipeline_mode="new_text2sql")
+
+    assert score.passed is True
+    assert score.reason == "expected_value_ok"
+
+
+def test_expected_columns_accept_configured_aliases() -> None:
+    """列名评分允许 case 显式配置别名，避免把 usage_count 误判成 SQL 失败。"""
+
+    case = EvalCase(
+        case_id="p3a_coupon_alias",
+        task_type="multi_table",
+        question="JUNE_FIXED_50 在哪个渠道使用最多？",
+        user_role="ops",
+        expected_tables=["orders", "channels"],
+        expected_columns=["channel_name", "coupon_order_count"],
+        expected_metrics=["coupon_usage_rate"],
+        expected_trace_steps=[],
+        pipeline_mode="new_text2sql",
+        security_expectation="allow",
+        check_type="contains",
+        check_value="Mobile App",
+        expected_column_aliases={"coupon_order_count": ["usage_count"]},
+    )
+    body = {
+        "route": "sql",
+        "safety_status": "passed",
+        "tables_used": ["orders", "channels"],
+        "columns": ["channel_name", "usage_count"],
+        "rows": [{"channel_name": "Mobile App", "usage_count": 650}],
+    }
+
+    score = _score_case(case, body, 200, actual_pipeline_mode="new_text2sql")
+
+    assert score.passed is True
+    assert score.reason == "ok"
+
+
+def test_expected_value_check_reads_configured_field_alias() -> None:
+    """数值检查也要复用列别名，否则 total_net_revenue 这类正确值会先被挡住。"""
+
+    case = EvalCase(
+        case_id="p3a_net_revenue_alias",
+        task_type="aggregation",
+        question="2026 年 6 月净收入是多少？",
+        user_role="ops",
+        expected_tables=["orders"],
+        expected_columns=["net_revenue"],
+        expected_metrics=["net_revenue"],
+        expected_trace_steps=[],
+        pipeline_mode="new_text2sql",
+        security_expectation="allow",
+        check_type="expected_value",
+        check_value="",
+        check={"type": "expected_value", "field": "net_revenue", "value": 11293058.25, "tolerance": 0.01},
+        expected_column_aliases={"net_revenue": ["total_net_revenue"]},
+    )
+    body = {
+        "route": "sql",
+        "safety_status": "passed",
+        "tables_used": ["orders"],
+        "columns": ["total_net_revenue"],
+        "rows": [{"total_net_revenue": "11293058.25"}],
+    }
+
+    score = _score_case(case, body, 200, actual_pipeline_mode="new_text2sql")
+
+    assert score.passed is True
+    assert score.reason == "expected_value_ok"
+
+
+def test_expected_value_check_accepts_single_metric_column_alias() -> None:
+    """单指标固定事实题只有一列结果时，应以数值为准，避免中文别名被误判成缺列。"""
+
+    case = EvalCase(
+        case_id="p3a_gmv_localized_alias",
+        task_type="aggregation",
+        question="2026 年 6 月 GMV 是多少？",
+        user_role="ops",
+        expected_tables=["orders"],
+        expected_columns=["gmv"],
+        expected_metrics=["gmv"],
+        expected_trace_steps=[],
+        pipeline_mode="new_text2sql",
+        security_expectation="allow",
+        check_type="expected_value",
+        check_value="",
+        check={"type": "expected_value", "field": "gmv", "value": 11285752.00, "tolerance": 0.01},
+    )
+    body = {
+        "route": "sql",
+        "safety_status": "passed",
+        "tables_used": ["orders"],
+        "columns": ["2026年6月GMV"],
+        "rows": [{"2026年6月GMV": "11285752.00"}],
+    }
+
+    score = _score_case(case, body, 200, actual_pipeline_mode="new_text2sql")
+
+    assert score.passed is True
+    assert score.reason == "expected_value_ok"
+
+
 def test_manual_challenge_case_requires_review_without_hiding_success() -> None:
     """困难诊断题可先跑通结构，但报告必须提示人工复核。"""
 

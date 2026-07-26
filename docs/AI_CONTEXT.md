@@ -5,11 +5,11 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3a-plan.md`
-- 当前模块：M12 对照报告与阶段收尾（已收工，待验收）
+- 当前模块：M13 Phase 3A 新 pipeline 质量修复（已收工，待验收）
 - 下一模块：阶段三 RAG / Hybrid（待定）
-- 上一模块验收：M11 已验收（2026-07-24，报告 `accept-M11-20260724.md`）
+- 上一模块验收：M13 未验收（待 accept-module）
 - 阻塞项：无
-- 更新时间：2026-07-25
+- 更新时间：2026-07-26
 
 ## 当前技术选型快照
 
@@ -32,6 +32,93 @@
 - 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
 
 ## 变更记录（新的在上）
+
+### M13 第二批：alias scorer + item_gmv/转化率 prompt 修复（2026-07-26）
+
+- 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`tests/test_phase3a_pipeline.py`、`eval/reports/phase3a-*.md`、`docs/phase3a-issues-and-fixes-v5.md`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m13-notes.md`。
+- 关键决策：
+  - 继续按分步修复，不做 JSON mode 大改；先用 trace 证明失败位于 eval 评分、QueryPlan prompt、SQL prompt 还是数据预期。
+  - `expected_value` 单指标题新增单列兜底：如果结果只有一列，即使列名是 `"2026年6月GMV"` 这类中文别名，也交给数值校验判定；多列结果仍按列名/显式 alias 检查。
+  - 给 formal/challenge 补显式 alias：`usage_count`、`add_to_pay_conversion_rate`、`total_gmv`、`category_gmv`、`product_name_snapshot`、中文 `"商品名称"` / `"平均售价"` 等。原则是只放语义等价别名，不用 alias 掩盖缺表或错表。
+  - QueryPlan prompt 增加商品/类目销售额约束：必须用 `item_gmv`、聚合 `order_items.line_amount`，商品/类目维度通过 `order_items.product_id = products.id` 关联，不用 `gmv` / `orders.order_amount` / `orders.product_id` 替代。
+  - SQL prompt 增加转化率浮点除法约束：`add_to_pay_conversion_rate` 必须使用 `* 1.0` 或 `CAST(... AS REAL)`，避免 SQLite 整数除法把小数截成 0。
+  - `一级类目销售额排名` 的固定检查值从 `数码电子` 改为 `SaaS 软件`。原因：用当前 MySQL seed 直接执行参考 SQL，Top1 实际为 `SaaS 软件`；`数码电子及其子类目` 是另一条困难诊断题，未改。
+- 验证快照：
+  - TDD RED/GREEN 细节见 `.agent_work/temp/m13-notes.md`。
+  - 相关回归最终：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py tests\test_phase3a_planner.py tests\test_phase3a_pipeline.py --basetemp=.agent_work\temp\pytest-m13-single-metric-related` -> 37 passed，1 既有 Starlette/httpx warning。
+  - finish-module 注释补强后相关回归：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py tests\test_phase3a_planner.py tests\test_phase3a_pipeline.py --basetemp=.agent_work\temp\pytest-m13-finish-related` -> 37 passed，1 既有 Starlette/httpx warning。
+  - 全量 pytest：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest --basetemp=.agent_work\temp\pytest-m13-final-full-2` -> 78 passed，1 既有 Starlette/httpx warning。
+  - `git diff --check`：无 whitespace error，仅 Windows CRLF 提示。
+  - 真实 LLM formal：10/10（最新报告 `eval/reports/phase3a-new-pipeline.md`）。
+  - 真实 LLM challenge：14/16（最新报告 `eval/reports/phase3a-challenge-new-pipeline.md`）。
+  - 真实 LLM diagnostic：23/32，review_required=3（最新报告 `eval/reports/phase3a-diagnostic-new-pipeline.md`）。
+  - formal/challenge/diagnostic 对照报告已按最新 trace 重生成：`eval/reports/phase3a-comparison.md`、`eval/reports/phase3a-challenge-comparison.md`、`eval/reports/phase3a-diagnostic-comparison.md`。
+  - finish-module 注释扫描：M13 新增/修改函数与测试均有 docstring 或开头说明；补充 `eval/run_eval.py` 单指标数值兜底、`engine/nl2sql/prompt.py` item_gmv 计划约束两处内部注释。
+- 遗留：
+  - challenge 仍有 2 条未过：`db_multi_002` 本轮为 LLM generation error；`db_hard_001` 是非阻塞 manual-review 递归类目题，被 SQL Guard 拦截。
+  - diagnostic 仍有 9 条未过：5 条偏输出列/诊断评分严格性，2 条 plan validation/guard blocked，1 条非阻塞递归类目 SQL Guard block，1 条安全诊断 `db_sec_004` safety_mismatch。
+  - Windows 下默认 `.agent_work/temp/pytest-tmp` 仍可能被锁，已改用本次专属 `--basetemp` 规避。
+
+### M13 第一批：eval 固定事实校准 + metrics prompt 管道修复（2026-07-26）
+
+- 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`docs/phase3a-issues-and-fixes-v5.md`、`.agent_work/temp/m13-notes.md`。
+- 关键决策：
+  - 按 v5 执行 M13 分步修复，不一步到位。第一批先解决"测不准"和"metrics prompt 管道断裂"，暂不改 JSON mode，不直接优化 Schema Retrieval。
+  - 新增 `expected_value` eval check，优先拦住 `gmv=NULL` 但 `contains: gmv` 误判通过的问题。正式 regression/challenge 中 GMV 使用固定事实 `11285752.00`，净收入按确定性 seed 查询得到 `11293058.25`。
+  - `_format_plan_metrics()` 现在会把 `filter` 和 `default_time_field` 注入新 pipeline 的 QueryPlan / 局部 SQL prompt，恢复旧 M4 `_format_metrics()` 已有的结构化指标口径。
+  - `DeepSeekChatClient.complete()` 支持可选 `system_prompt`；`generate_query_plan()` 和 `generate_sql_from_plan_step()` 传入各自任务角色。为保护已有 fake LLM 测试，新增兼容调用：旧 `complete(prompt=...)` fake client 仍可工作。
+- 验证快照：
+  - TDD RED/GREEN 记录见 `.agent_work/temp/m13-notes.md`。
+  - `tests/test_phase3a_eval.py`：15 passed，1 既有 Starlette/httpx warning。
+  - `tests/test_phase3a_planner.py`：11 passed。
+  - `tests/test_phase3a_pipeline.py`：4 passed，1 既有 warning。
+  - `tests/test_m4_nl2sql.py`：5 passed，1 既有 warning。
+  - 相关回归：38 passed，1 既有 warning。
+  - 第一批修复后全量 pytest：69 passed，2 skipped，1 既有 warning。
+  - 真实 LLM formal 重跑：第一轮 6/10，补 trace 后重跑 5/10；GMV / 净收入均为 `expected_value_ok`，说明原 NULL 伪通过问题已消失。
+  - 真实 LLM challenge 重跑：10/16（M12 为 8/16），GMV / 净收入均为 `expected_value_ok`。
+  - 真实 LLM diagnostic 重跑：20/32（M12 为 15/32）。
+  - 对照报告已重新生成：`eval/reports/phase3a-comparison.md`、`phase3a-challenge-comparison.md`、`phase3a-diagnostic-comparison.md`。
+  - trace 增强后全量 pytest：71 passed，1 既有 warning。
+- 遗留：
+  - M13 已确认原始 `paid_at` / `unpaid` / NULL 类问题基本修复。剩余失败主要是 alias / expected table 严格匹配、SQL 生成阶段没有采用已召回表、以及少数真实 SQL 语义问题（如转化率别名/整数除法、一级类目销售额漂到 `orders_wide`/`gmv`）。下一轮不要再优先改 metrics prompt，应基于新增 trace metadata 判断是 plan prompt、SQL prompt 还是 eval 评分口径需要调整。
+
+### Phase 3A 问题分析 v5 修订（2026-07-26）
+
+- 改动范围：新增 `docs/phase3a-issues-and-fixes-v5.md`（由 v4 复制后修订），未改源码。
+- 关键决策：
+  - v4 主线判断保持：M12 新 pipeline 低通过率的确定性根因优先看 `_format_plan_metrics()` 漏传 `metrics.yaml` 的 `filter/default_time_field`，以及 eval 只做列名 / contains 检查导致 GMV=NULL 也 pass。
+  - v5 收紧优先级：第一批执行顺序改为先做 `expected_value` 最小 eval，让固定事实数值错误能被测出来；再修 metrics prompt 管道和 system prompt；之后重跑 formal / challenge / diagnostic。
+  - JSON mode 影响从"可能根因"降级为"待验证假设"，仅保留三组对照实验（当前 / SQL 层放开 / 全部放开），不在第一批直接改。
+  - `p3a_multi_002` 的 `products` 问题不再直接归因为 Schema Retrieval 没召回；当前复核显示同题 SchemaGraph 可包含 `products`，M12 formal 报告里的 `missing_tables=['products']` 更可能是 SQL 生成阶段选择 `order_items.product_name_snapshot`。后续需通过 trace 区分召回、QueryPlan、SQL 生成三层。
+  - `orders.md` 的 `order_status` 字段说明后续应同时补 `canceled` 和 `pending_payment`，避免模型继续幻想不存在的 `unpaid` 状态。
+- 验证快照：
+  - 已确认正确 `paid_at` 口径 2026 年 6 月 GMV = `11285752.00`；M12 报告中 `created_at` + `unpaid/cancelled` 口径会得到 NULL，但旧 eval 仍可因 `contains: gmv` 判 pass。
+  - 当前源码现跑"2026 年 6 月商品销售额 Top 5"时，SchemaGraph 包含 `products`，支持 v5 的归因修正。
+
+### AI_CONTEXT M9.1/M9.2 合并状态修正（2026-07-25）
+
+- 改动范围：`docs/AI_CONTEXT.md`（仅文档）
+- 关键决策：M9.1/M9.2 的遗留说明"未合并回 main"已过时——`9fa9368` 已将 Milvus 和 SiliconFlow embedding 可选支持合入 main。默认检索路径仍为 `InMemoryVectorIndex`，不影响 M12 结果（和 Milvus 没启动无关）。修正 M9.1 遗留第 3 条、M9.2 遗留第 2 条。
+
+### 数据库状态文档补充 + Phase 3A 问题分析 v3 修订（2026-07-25）
+
+- 改动范围：`docs/database-current-state.md`、`docs/phase3a-issues-and-fixes-v3.md`（仅文档，无代码改动）
+- 关键决策：
+  - **实地查库验证 Phase 2.7 数据质量彩蛋**：连接 MySQL `datapilot_dev` 逐项核实 7 个彩蛋的实际数据。确认全部存在，但文档描述有 3 处不够精确：`order_status` 漏了 `pending_payment` 状态（20 条）、`refunds.source_order_no` 格式与 `orders.order_no` 完全不同（SRC-xxx vs ORD-xxx，不能 join）、整单退款（100 条 `order_item_id IS NULL`，10%）未被列为独立彩蛋。
+  - **`database-current-state.md` 4 处修正**：① `order_status` 行补完整 6 种状态及行数；② `source_order_no` 行补格式差异和"不能 join"警告；③ refunds 表行量化整单退款比例（10%，必须 LEFT JOIN）；④ "数据质量设计"节全部 7 条量化到具体数字，原"弱关联退款"改为"命名空间不兼容"，新增整单退款条目。
+  - **`phase3a-issues-and-fixes-v3.md` 多轮修订**：① 精度修正——明确 bug 是 rewrite regression（旧 `_format_metrics()` 正确，新 `_format_plan_metrics()` 漏字段）；② system prompt 优先级从 ★★ 下调为 ★（user prompt 已部分补偿）；③ 实验设计补旧链路对照组；④ 优先级表合并 Step 4+5；⑤ 新增"问题八"（`numerator`/`denominator` 静默丢弃）和"问题九"（`orders.md` 缺 `canceled` 拼写）；⑥ 彩蛋表重写为 4 列（实际数据 + LLM 易犯错误），补数据库速查行；⑦ 文档末尾新增修订记录节。
+  - **v3 方案评估结论**：修复方案和优先级靠谱。最高优先仍是修 `_format_plan_metrics()`（~8 行），数据库验证加强了这一判断——LLM 失败模式可精确描述为"用 `created_at` 代替 `paid_at` + 自编不存在的 `order_status = 'unpaid'` + 不知双拼写"，而 `metrics.yaml` 的 `filter` 和 `default_time_field` 恰好提供这三个缺失信息。
+- 参考资料：直接查询 MySQL 数据库；对比 `database-current-state.md`、`domain_pack/schema_desc/orders.md`、`domain_pack/metrics.yaml` 和实际数据。
+- 验证快照：
+  - orders 总量 10000，`paid_at IS NULL` 20 条，状态均为 `pending_payment`
+  - `cancelled` 421 条 + `canceled` 8 条 = 429 条取消
+  - `refunds.source_order_no` 格式 `SRC-2026-XXXXX`，与 `order_no`（`ORD-2026-XXXXX`）**0 匹配**
+  - 1000 条退款中 `order_item_id IS NULL` 100 条（10%）
+  - 金额不一致 5 条、负数退款 3 条 `-20.00`、`source_order_no` 重复 20 条——均与文档一致
+  - 14 表行数全部与文档一致
+  - 2026 年 6 月 GMV（`paid_at` 口径+filter）= `11285752.00`，与固定事实一致
+- 遗留：`orders.md` schema_desc 的 `order_status` 字段行仍未补 `pending_payment` 和 `canceled`，属于问题九的范围，等主线修复完成后处理。
 
 ### Phase 3A M12 对照报告与阶段收尾（2026-07-25）
 
@@ -138,7 +225,7 @@ accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进�
 - 遗留：
   - 当前 M9 的 keyword + relation merge 已经覆盖硬门，真实 embedding 对最终 merged_top30 没有提升；派生 SQL alias（如 `coupon_order_count`、`conversion_rate`、`avg_price`）仍不是 embedding 能直接解决的问题，留给 M10/M11。
   - Qwen3-0.6B 在 vector-only_top12 比 fake / BGE-M3 更好，说明后续如果做真正语义检索，优先试 Qwen3；但主线不宜默认联网 embedding。
-  - 若合并实验分支，建议只合入 optional provider / adapter / smoke，不把默认 retriever 改成 SiliconFlow + Milvus。
+  - 已合并回 main（`9fa9368`），合并后默认 retriever 保持 `InMemoryVectorIndex`，Milvus/SiliconFlow 作为可选注入。
 
 ### Phase 3A M9.1 Milvus Adapter 实验（2026-07-23）
 
@@ -162,7 +249,7 @@ accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进�
 - 遗留：
   - 当前 Milvus 只替换向量存储，不替换 embedding 模型；因此质量没有优于 in-memory。若要评估“Milvus 主路径是否值得合入”，建议下一步接真实中文 embedding（BGE / text2vec）后复测。
   - 由于 M9.1 真实测试依赖 Docker Milvus，默认 M9 测试仍不应强制依赖外部服务；若未来合并，建议把 Milvus 测试保留为显式 smoke 或可 skip 集成测试。
-  - 未合并回 main；是否合并需用户确认。
+  - 已合并回 main（`9fa9368 Merge optional Milvus and SiliconFlow embedding support`）。合并后默认检索路径仍为 `InMemoryVectorIndex`，`MilvusVectorIndex` 为可选注入。
 
 ### Phase 3A M9 Schema Retrieval 与 JoinPath（2026-07-23）
 

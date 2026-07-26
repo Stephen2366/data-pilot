@@ -56,11 +56,13 @@ cases:
     user_role: ops
     expected_tables: [orders]
     expected_columns: [gmv]
+    expected_column_aliases:
+      gmv: [total_gmv]
     expected_metrics: [gmv]
     phase3a_capabilities: [schema_retrieval, query_plan, trace_steps]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: gmv}
+    check: {type: expected_value, field: gmv, value: 11285752.00, tolerance: 0.01}
     expected_sql: |
       SELECT ROUND(SUM(order_amount), 2) AS gmv
       FROM orders
@@ -94,11 +96,13 @@ cases:
     user_role: ops
     expected_tables: [orders]
     expected_columns: [net_revenue]
+    expected_column_aliases:
+      net_revenue: [total_net_revenue]
     expected_metrics: [net_revenue]
     phase3a_capabilities: [schema_retrieval, query_plan]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: net_revenue}
+    check: {type: expected_value, field: net_revenue, value: 11293058.25, tolerance: 0.01}
     expected_sql: |
       SELECT ROUND(SUM(actual_amount), 2) AS net_revenue
       FROM orders
@@ -129,6 +133,8 @@ cases:
     user_role: ops
     expected_tables: [orders, channels, order_coupons, coupons]
     expected_columns: [channel_name, coupon_order_count]
+    expected_column_aliases:
+      coupon_order_count: [usage_count]
     expected_metrics: [coupon_usage_rate]
     phase3a_capabilities: [schema_retrieval, join_path, query_plan]
     phase3a_blocking: true
@@ -150,11 +156,14 @@ cases:
     user_role: ops
     expected_tables: [products, order_items, orders]
     expected_columns: [category, item_gmv]
+    expected_column_aliases:
+      category: [category_name]
+      item_gmv: [category_gmv, sales]
     expected_metrics: [item_gmv]
     phase3a_capabilities: [schema_retrieval, join_path, local_schema_prompt]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: 数码电子}
+    check: {type: contains, value: SaaS 软件}
     expected_sql: |
       SELECT p.category, ROUND(SUM(oi.line_amount), 2) AS item_gmv
       FROM order_items oi
@@ -191,6 +200,8 @@ cases:
     user_role: ops
     expected_tables: [orders, order_items, products]
     expected_columns: [product_name, item_gmv]
+    expected_column_aliases:
+      product_name: [product_name_snapshot]
     expected_metrics: [item_gmv]
     phase3a_capabilities: [schema_retrieval, local_schema_prompt]
     phase3a_blocking: true
@@ -245,6 +256,8 @@ cases:
     user_role: ops
     expected_tables: [user_behavior_log]
     expected_columns: [device_type, conversion_rate]
+    expected_column_aliases:
+      conversion_rate: [add_to_pay_conversion_rate]
     expected_metrics: [add_to_pay_conversion_rate]
     phase3a_capabilities: [schema_retrieval, query_plan, trace_steps]
     phase3a_blocking: true
@@ -265,6 +278,9 @@ cases:
     user_role: ops
     expected_tables: [products, product_price_history]
     expected_columns: [product_name, avg_price]
+    expected_column_aliases:
+      product_name: ["商品名称"]
+      avg_price: [avg_selling_price, "平均售价"]
     expected_metrics: [avg_selling_price]
     phase3a_capabilities: [schema_retrieval, local_schema_prompt]
     phase3a_blocking: false

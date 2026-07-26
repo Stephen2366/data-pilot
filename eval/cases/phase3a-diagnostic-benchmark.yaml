@@ -249,6 +249,8 @@ cases:
     user_role: ops
     expected_tables: [orders, channels, order_coupons, coupons]
     expected_columns: [channel_name, coupon_order_count]
+    expected_column_aliases:
+      coupon_order_count: [usage_count]
     expected_metrics: [coupon_usage_rate]
     expected_trace_steps:
       - {step_type: schema_retrieval, status: success}

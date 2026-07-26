@@ -14,6 +14,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
@@ -67,6 +68,7 @@ class EvalCase:
     expected_plan_result: str = ""
     expected_issue_tag: str = ""
     expected_schema_context: dict[str, Any] = field(default_factory=dict)
+    expected_column_aliases: dict[str, list[str]] = field(default_factory=dict)
     security_subtype: str | None = None
     expected_sql: str = ""
     check: dict[str, Any] = field(default_factory=dict)
@@ -163,6 +165,10 @@ def _load_cases_from_path(path: Path) -> list[EvalCase]:
                 expected_plan_result=str(item.get("expected_plan_result", "")),
                 expected_issue_tag=str(item.get("expected_issue_tag", "")),
                 expected_schema_context=dict(item.get("expected_schema_context") or {}),
+                expected_column_aliases={
+                    str(column): [str(alias) for alias in aliases]
+                    for column, aliases in dict(item.get("expected_column_aliases") or {}).items()
+                },
                 security_subtype=item.get("security_subtype"),
                 expected_sql=str(item.get("expected_sql", "")),
                 check=dict(check),
@@ -239,6 +245,49 @@ def _body_text(body: dict[str, Any]) -> str:
     return json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
 
 
+def _score_expected_value(case: EvalCase, body: dict[str, Any]) -> EvalScore:
+    """按固定事实数值检查首行结果，先解决 GMV=NULL 被误判通过的问题。"""
+
+    field_name = str(case.check.get("field") or "").strip()
+    if not field_name:
+        return EvalScore(False, "expected_value_field_empty", ["unexpected_error"])
+
+    rows = body.get("rows") or []
+    if not rows or not isinstance(rows[0], dict):
+        return EvalScore(False, f"expected_value_missing_row field={field_name}", ["unexpected_error"])
+
+    row = rows[0]
+    actual_field_name = field_name
+    actual_value = row.get(field_name)
+    if actual_value is None:
+        for alias in case.expected_column_aliases.get(field_name, []):
+            if alias in row:
+                actual_field_name = alias
+                actual_value = row.get(alias)
+                break
+    # ★ 单指标固定事实题只返回一列时，列名常被 LLM 写成中文业务标题；
+    # 此时继续卡列名会误杀正确数值，所以让 Decimal 数值校验承担最终判断。
+    if actual_value is None and len(row) == 1:
+        actual_field_name, actual_value = next(iter(row.items()))
+    if actual_value is None:
+        return EvalScore(False, f"expected_value field={field_name} actual=NULL", ["unexpected_error"])
+
+    try:
+        expected = Decimal(str(case.check.get("value")))
+        actual = Decimal(str(actual_value))
+        tolerance = Decimal(str(case.check.get("tolerance", "0")))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        return EvalScore(False, f"expected_value_invalid_number field={field_name}: {exc}", ["unexpected_error"])
+
+    if abs(actual - expected) > tolerance:
+        return EvalScore(
+            False,
+            f"expected_value field={actual_field_name} expected={expected} actual={actual} tolerance={tolerance}",
+            ["unexpected_error"],
+        )
+    return EvalScore(True, "expected_value_ok", [])
+
+
 def _should_skip_due_to_pipeline_mode(case: EvalCase, actual_pipeline_mode: str) -> bool:
     """判断旧链路是否无法验证这条 case 的核心检查。
 
@@ -308,7 +357,20 @@ def _score_case(
         )
 
     actual_columns = set(body.get("columns") or [])
-    missing_columns = [column for column in case.expected_columns if column not in actual_columns]
+    missing_columns = [
+        column
+        for column in case.expected_columns
+        if column not in actual_columns
+        and not any(alias in actual_columns for alias in case.expected_column_aliases.get(column, []))
+    ]
+    if (
+        missing_columns
+        and case.check_type == "expected_value"
+        and len(case.expected_columns) == 1
+        and len(actual_columns) == 1
+    ):
+        # ★ 和 `_score_expected_value()` 的单列兜底保持一致：先别因别名失败短路。
+        missing_columns = []
     if missing_columns:
         return EvalScore(
             False,
@@ -318,6 +380,8 @@ def _score_case(
         )
 
     text = _body_text(body)
+    if case.check_type == "expected_value":
+        return _score_expected_value(case, body)
     if case.check_type == "contains" and case.check_value not in text:
         return EvalScore(False, f"missing_text={case.check_value}", ["unexpected_error"])
     if case.check_type == "equals" and case.check_value not in text:
