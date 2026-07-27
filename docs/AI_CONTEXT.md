@@ -24,31 +24,50 @@
 - 图表：后端输出 Vega-Lite 兼容 `chart_spec`，当前仅覆盖基础 bar / line / horizontal_bar 和单指标柱图
 - 演示：M6 已提供 `demo/streamlit_app.py` 最小演示控制台，通过 HTTP 调用 `/api/query` 展示 answer / SQL / table / chart / trace
 
+## 最新事实快照
+
+### 技术默认值
+
+- Schema Retrieval 默认：`inmemory + deterministic`；`milvus` / `siliconflow` 只通过环境变量显式开启，不作为当前 Text2SQL 主线默认值。
+- SQL 安全默认：敏感字段优先于角色权限；`admin` 也不能通过 Text2SQL 直出 `users.email/users.phone`，后续如需查看应走脱敏 / 审计 / 专门接口。
+- Trace 默认：Agent Trace 写入 `eval/traces/traces.jsonl`；测试、smoke 和临时实验可改写到 `.agent_work/temp/`。
+- Eval 默认：formal / challenge 用于主线验收和回归对照；diagnostic 用于定位边界和下一步问题，不追满分。
+
+### 最新评测基线
+
+- M13 后真实 LLM formal：`10/10`（`eval/reports/phase3a-new-pipeline.md`）。
+- M13 后真实 LLM challenge：`14/16`（`eval/reports/phase3a-challenge-new-pipeline.md`）。
+- M13 后真实 LLM diagnostic：`23/32`，`review_required=3`（`eval/reports/phase3a-diagnostic-new-pipeline.md`）。
+- M14-lite：未重跑真实 LLM eval；本轮重点是最小 `result_match`、LLM 失败 trace、安全 / diagnostic 口径和 Schema Retrieval 配置开关收口。
+
+### 重要实验结论
+
+- Milvus/SiliconFlow：2026-07-26 临时 A/B 显示 formal `10/10` 持平、challenge `14/16` 持平、diagnostic `23/32 -> 20/32`，所以不切默认。
+- M9.1/M9.2 结论：Milvus adapter / SiliconFlow embedding provider 可用，但当前 Text2SQL 主线默认仍保留轻量 deterministic / in-memory。
+
 ## 已知的坑（活跃列表，过期即删）
 
-- `app.db.base` 目前同时定义 `Base` 又导入所有模型来注册 Alembic metadata；如果业务代码先从 `app.models` 聚合包导入模型，可能触发循环导入。当前规避方式：API / 工具层优先沿用 `app.db.base` 暴露的模型导入路径；后续若重构，可拆 `app/db/base_class.py`（只放 Base）和 `app/db/base.py`（只汇总 metadata）
-- Windows 下 `.agent_work/temp/pytest-tmp` 偶发被旧 pytest 临时目录锁住，表现为 `PermissionError` 删除 basetemp 失败；遇到时不要改业务代码，改用新的 `--basetemp=.agent_work/temp/<name>` 复跑即可。本次 M6 已用 `pytest-m6-tmp-final` 验证通过
-- DB comment 在 PowerShell 离线 SQL 输出中乱码；在线迁移和建表正常，无害。如需导出 SQL文件，再统一处理输出编码或将 DB comment 改为 ASCII（M1）
-- 工作树可能有用户或其他工具留下的未提交改动；动文件前先 `git status --short`，不要回滚非本次任务的改动
+| 坑 | 影响 | 当前处理 |
+|---|---|---|
+| `app.db.base` 同时定义 `Base` 又导入所有模型注册 Alembic metadata | 业务代码若先从 `app.models` 聚合包导入模型，可能触发循环导入 | API / 工具层优先沿用 `app.db.base` 暴露的模型导入路径；后续若重构，可拆 `app/db/base_class.py` 和 `app/db/base.py` |
+| Windows 下 `.agent_work/temp/pytest-tmp` 偶发被旧 pytest 临时目录锁住 | 测试可能因 `PermissionError` 删除 basetemp 失败而假失败 | 不改业务代码，换新的 `--basetemp=.agent_work/temp/<name>` 复跑 |
+| DB comment 在 PowerShell 离线 SQL 输出中乱码 | 影响离线 SQL 文件可读性；在线迁移和建表正常 | 暂不改业务；如需导出 SQL 文件，再统一处理输出编码或将 DB comment 改为 ASCII |
+| 工作树可能有用户或其他工具留下的未提交改动 | 容易误回滚非本次任务修改 | 动文件前看 `git status --short`，不回滚非本次任务改动 |
 
 ## 变更记录（新的在上）
 
-### dev-log 早期模块面试口径同步（2026-07-27）
+> M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先级：
+> - `[模块任务]`：功能、架构、默认行为、安全口径、评测口径等实质性任务。
+> - `[实验]`：A/B、真实 LLM eval、smoke 或会影响路线判断的实验结论。
+> - `[验收]`：accept-module、阶段验收、明确的模块完成状态。
+> - `[小修]`：文档措辞、口径同步、注释补充、轻量整理；只需简写，不要求完整模板。
+>
+> 未来新增记录优先使用这些标签；小修可以只写一段话，模块任务建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
 
-- 改动范围：`docs/dev-log.md`。
-- 关键决策：按用户要求重写 M3、M4、M5、Phase 2.7、M9、M9.1/M9.2、M10 的「面试怎么讲」，统一为完整叙述 + 面试官可能追问；对早期实现和当前主线不一致处，用 `> 现在口径：...` 标明，例如 SQL Guard 已扩展到 RBAC/敏感字段、admin 也不直出敏感字段、Schema Retrieval 已有显式 Milvus/SiliconFlow 配置开关、M5 trace 已演进到 M11 trace_steps / M14-lite LLM 失败 metadata。按用户要求重写 Phase 3A M8 / M8.5 的「面试怎么讲」，统一为完整叙述 + 面试官可能追问；新增 `> 现在口径：...`，说明 M8 baseline 属于早期旧尺子产物，M13 后需按 expected_value/result_match 思路重新理解评测可信度；M8.5 diagnostic 是诊断素材，不是追满分硬门。
-- 验证：`git diff --check -- docs\dev-log.md` 通过，仅 Windows CRLF 提示。
-
-### M14-lite 文档口径同步（2026-07-27）
-
-- 改动范围：`docs/multi-chain-architecture.md`、`docs/dev-log.md`。
-- 关键决策：同步 M14-lite 后的真实口径：Schema Retrieval 支持环境变量显式切换 Milvus/SiliconFlow，默认仍为 `inmemory + deterministic`；SQL 安全策略改为敏感字段优先于 admin；M11「面试怎么讲」按 finish-module 模板改成完整叙述 + 常见问答。
-- 验证：`git diff --check -- docs\multi-chain-architecture.md docs\dev-log.md` 通过，仅 Windows CRLF 提示。
-
-### M14-lite Phase 3A 收口开发中（2026-07-27）
+### [模块任务] M14-lite Phase 3A 收口开发中（2026-07-27）
 
 - 改动范围：`eval/run_eval.py`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`、`engine/sql_guard/rbac.py`、`engine/schema_retrieval/retriever.py`、`app/core/config.py`、`.env.example`、相关 Phase 3A 测试。
-- 关键决策：
+- 关键记录：
   - M14-lite 执行用户确认的 5 项：最小 `result_match`、LLM 失败 trace 增强、安全/diagnostic 口径清理、Schema Retrieval 后端配置开关；不做递归类目、知识库归因、完整 EvalOps、JSON mode 大实验。
   - `result_match` 只做最小结果集对比：执行 `expected_sql`，按行顺序和列值比较 API 返回 rows；不做 SQL AST 等价、历史库或平台化。当前仅给 5 条核心 challenge SQL case 启用，目的是加严结果校验，不追 diagnostic 满分。
   - 安全口径采用用户确认的方案 A：敏感字段优先于 admin 角色；`users.email/users.phone` 在 Text2SQL 路径中默认不直出，后续如需 admin 查看应走脱敏/审计/专门接口。
@@ -64,26 +83,10 @@
   - Milvus/SiliconFlow A/B 结论来自 M13 后续接文档与 `.agent_work/temp/milvus-eval/` 临时实验记录：formal `10/10` 持平，challenge `14/16` 持平，diagnostic `23/32 -> 20/32`，所以没有切默认，也没有把 diagnostic 下降伪装成配置收益。
 - 临时记录：`.agent_work/temp/m14-lite-notes.md`。
 
-### Phase 3A M13 后续接文档新增（2026-07-26）
-
-- 改动范围：新增 `docs/phase3a-m13-current-state-and-next-fixes.md`。
-- 关键决策：按用户要求新增新会话速览文档，集中说明 M13 已验收后的当前状态、formal/challenge/diagnostic 最新结果、剩余问题分类、潜伏问题、是否建议开 M14-lite 以及进入阶段三 RAG / Hybrid 前的修改建议。
-- 验证：人工回读文档结构；仅文档新增，未跑 pytest。
-
-### M13 accept-module 验收通过（2026-07-26）
-
-accept-module 7 项检查全部通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 78 passed + 1 既有 warning），报告 `accept-M13-20260726.md`。检查 4 发现 AI_CONTEXT M13 两批条目缺「参考资料」小节，已当场修复。后续可进入阶段三 RAG / Hybrid。
-
-### M13 dev-log 面试复盘扩写（2026-07-26）
-
-- 改动范围：`docs/dev-log.md`。
-- 关键决策：按用户反馈扩写 M13「这次做了什么」和「面试怎么讲」两节；前者补齐“如何发现显式/隐藏问题、如何按证据强弱制定 fix 计划、如何小步验证”的过程，后者拆成多个面试场景，覆盖排查 Agent 效果差、核心 bug、避免刷榜、业务口径、trace 可观测性、结果与边界。
-- 验证：人工回读文档段落；仅文档改动，未跑 pytest。
-
-### M13 第二批：alias scorer + item_gmv/转化率 prompt 修复（2026-07-26）
+### [模块任务] M13 第二批：alias scorer + item_gmv/转化率 prompt 修复（2026-07-26）
 
 - 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`tests/test_phase3a_pipeline.py`、`eval/reports/phase3a-*.md`、`docs/phase3a-issues-and-fixes-v5.md`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m13-notes.md`。
-- 关键决策：
+- 关键记录：
   - 继续按分步修复，不做 JSON mode 大改；先用 trace 证明失败位于 eval 评分、QueryPlan prompt、SQL prompt 还是数据预期。
   - `expected_value` 单指标题新增单列兜底：如果结果只有一列，即使列名是 `"2026年6月GMV"` 这类中文别名，也交给数值校验判定；多列结果仍按列名/显式 alias 检查。
   - 给 formal/challenge 补显式 alias：`usage_count`、`add_to_pay_conversion_rate`、`total_gmv`、`category_gmv`、`product_name_snapshot`、中文 `"商品名称"` / `"平均售价"` 等。原则是只放语义等价别名，不用 alias 掩盖缺表或错表。
@@ -107,10 +110,10 @@ accept-module 7 项检查全部通过（废弃口径清零/目录地图一致/�
   - diagnostic 仍有 9 条未过：5 条偏输出列/诊断评分严格性，2 条 plan validation/guard blocked，1 条非阻塞递归类目 SQL Guard block，1 条安全诊断 `db_sec_004` safety_mismatch。
   - Windows 下默认 `.agent_work/temp/pytest-tmp` 仍可能被锁，已改用本次专属 `--basetemp` 规避。
 
-### M13 第一批：eval 固定事实校准 + metrics prompt 管道修复（2026-07-26）
+### [模块任务] M13 第一批：eval 固定事实校准 + metrics prompt 管道修复（2026-07-26）
 
 - 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`docs/archive-dormant/phase3a-issues-and-fixes-v5.md`、`.agent_work/temp/m13-notes.md`。
-- 关键决策：
+- 关键记录：
   - 按 v5 执行 M13 分步修复，不一步到位。第一批先解决"测不准"和"metrics prompt 管道断裂"，暂不改 JSON mode，不直接优化 Schema Retrieval。
   - 新增 `expected_value` eval check，优先拦住 `gmv=NULL` 但 `contains: gmv` 误判通过的问题。正式 regression/challenge 中 GMV 使用固定事实 `11285752.00`，净收入按确定性 seed 查询得到 `11293058.25`。
   - `_format_plan_metrics()` 现在会把 `filter` 和 `default_time_field` 注入新 pipeline 的 QueryPlan / 局部 SQL prompt，恢复旧 M4 `_format_metrics()` 已有的结构化指标口径。
@@ -132,10 +135,10 @@ accept-module 7 项检查全部通过（废弃口径清零/目录地图一致/�
 - 遗留：
   - M13 已确认原始 `paid_at` / `unpaid` / NULL 类问题基本修复。剩余失败主要是 alias / expected table 严格匹配、SQL 生成阶段没有采用已召回表、以及少数真实 SQL 语义问题（如转化率别名/整数除法、一级类目销售额漂到 `orders_wide`/`gmv`）。下一轮不要再优先改 metrics prompt，应基于新增 trace metadata 判断是 plan prompt、SQL prompt 还是 eval 评分口径需要调整。
 
-### Phase 3A 问题分析 v5 修订（2026-07-26）
+### [小修] Phase 3A 问题分析 v5 修订（2026-07-26）
 
 - 改动范围：新增 `docs/archive-dormant/phase3a-issues-and-fixes-v5.md`（由 v4 复制后修订），未改源码。
-- 关键决策：
+- 关键记录：
   - v4 主线判断保持：M12 新 pipeline 低通过率的确定性根因优先看 `_format_plan_metrics()` 漏传 `metrics.yaml` 的 `filter/default_time_field`，以及 eval 只做列名 / contains 检查导致 GMV=NULL 也 pass。
   - v5 收紧优先级：第一批执行顺序改为先做 `expected_value` 最小 eval，让固定事实数值错误能被测出来；再修 metrics prompt 管道和 system prompt；之后重跑 formal / challenge / diagnostic。
   - JSON mode 影响从"可能根因"降级为"待验证假设"，仅保留三组对照实验（当前 / SQL 层放开 / 全部放开），不在第一批直接改。

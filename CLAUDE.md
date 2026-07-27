@@ -11,7 +11,7 @@
 > **参考资料速查**：[REFERENCE_GUIDE.md](D:/.Work/Practice/Python-Practice/references/REFERENCE_GUIDE.md) — 参考项目的定位、可借鉴点、不要照搬的坑。写代码时按场景查对应项目，不用通读。
 
 ## 用户背景
-- **用户信息**：2028 届硕士研究生，计划 9 月开始集中投递 + 面试，目标 10 月找到 AI 应用开发 / Agent 开发 / 后端开发的日常实习。两个实践项目服务简历和面试
+- **用户信息**：2028 届硕士研究生，目标 10 月找到 AI 应用开发 / Agent 开发 / 后端开发的日常实习。两个实践项目服务简历和面试
 - **已学习技术栈**：Java / SpringBoot / MySQL / Redis / Python / FastAPI / LangChain-LangGraph（讲解和注释时可适当用这些技术作类比）
 - 用户使用 Claude Code 和 Codex 协作开发，项目 AGENTS.md 通过符号链接到 CLAUDE.md，从而实现文档同步
 
@@ -92,9 +92,10 @@ tests/                  # pytest 测试
 
 ## 开发记录要求
 
-- `AI_CONTEXT.md`（技术档案）：记录 git 和代码查不到的信息——决策理由、踩坑、验证结论等。顶部「当前状态」是模块进度唯一权威出处，「已知的坑」维护活跃列表，过期即删。
-- 「当前状态」含「上一模块验收」字段（finish-module 收工时置「未验收」，accept-module 通过后改「已验收」）。每次任务开始读「当前状态」时一并核对。
-- `dev-log.md`（学习复盘）：面向用户，模块故事 + 新概念 + 面试讲法。
-- 两者的详细模板和写作要求见 `finish-module` skill，模块完成后才调用该 skill 记录 `AI_CONTEXT.md` 和 `dev-log.md`。
-- 开发中遇到关键决策/踩坑/验证命令/临时取舍，随手记入 `AI_CONTEXT.md`「变更记录」或 `.agent_work/temp/<module>-notes.md`，不要求格式——目的是给 `finish-module` skill 收工记录时留素材。
-- 配置修正、文档调整、增改注释等小修复，也需要更新 AI_CONTEXT「变更记录」。
+- `AI_CONTEXT.md` 是 AI 续接技术档案，记录 git 和代码查不到的信息：当前状态、默认配置、评测基线、关键决策、实验结论、失败原因和活跃坑。
+- 普通小修改如果会影响后续理解，就在「变更记录」用一段简短记录；文档整理、表达润色、无技术含义等修改可以不记。
+- 较完整模块开发、影响默认行为/安全口径/评测口径/架构边界的修改，才需要写结构化记录，建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
+- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须同步到 `AI_CONTEXT.md`；这类信息通常无法从 git diff 看出来。
+- 开发中遇到关键决策/踩坑/验证命令/临时取舍，先把素材写入 `.agent_work/temp/<module>-notes.md`，收工或形成阶段性结论后再同步到 `AI_CONTEXT.md`。
+- `dev-log.md` 面向用户学习复盘。
+- `AI_CONTEXT.md` 和 `dev-log.md` 的详细模板和写作要求见 `finish-module` skill，模块完成后才调用该 skill 记录 `AI_CONTEXT.md` 和 `dev-log.md`。
