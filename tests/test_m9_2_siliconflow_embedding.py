@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from engine.schema_retrieval.embedding_provider import SiliconFlowEmbeddingProvider
+from engine.schema_retrieval.embedding_provider import DashScopeEmbeddingProvider, SiliconFlowEmbeddingProvider
 
 
 def test_siliconflow_embedding_provider_sends_batch_request_and_parses_vectors() -> None:
@@ -62,3 +62,72 @@ def test_siliconflow_embedding_provider_accepts_qwen_dimensions() -> None:
     provider.embed("渠道 GMV")
 
     assert captured_payloads[0]["dimensions"] == 1024
+
+
+def test_dashscope_embedding_provider_sends_text_embedding_request_and_parses_vectors() -> None:
+    """Qwen embedding 应走 DashScope 文本向量契约，并只把 dense vector 交给现有 Milvus。"""
+
+    calls: list[dict[str, object]] = []
+
+    def fake_post_json(url: str, headers: dict[str, str], payload: dict[str, object], timeout: float) -> dict[str, object]:
+        calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+        return {
+            "output": {
+                "embeddings": [
+                    {"embedding": [0.1, 0.2, 0.3], "text_index": 1},
+                    {"embedding": [0.4, 0.5, 0.6], "text_index": 0},
+                ]
+            },
+            "usage": {"total_tokens": 10},
+        }
+
+    provider = DashScopeEmbeddingProvider(
+        api_key="dashscope-key",
+        base_url="https://dashscope.aliyuncs.com/api/v1",
+        model="qwen3.7-text-embedding",
+        dimensions=1024,
+        text_type="document",
+        output_type="dense",
+        post_json=fake_post_json,
+    )
+
+    vectors = provider.embed_texts(["订单金额", "渠道 GMV"])
+
+    assert vectors == [[0.4, 0.5, 0.6], [0.1, 0.2, 0.3]]
+    assert calls[0]["url"] == "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+    assert calls[0]["headers"]["Authorization"] == "Bearer dashscope-key"
+    assert calls[0]["payload"]["model"] == "qwen3.7-text-embedding"
+    assert calls[0]["payload"]["input"] == {"texts": ["订单金额", "渠道 GMV"]}
+    assert calls[0]["payload"]["parameters"]["dimension"] == 1024
+    assert calls[0]["payload"]["parameters"]["text_type"] == "document"
+    assert calls[0]["payload"]["parameters"]["output_type"] == "dense"
+
+
+def test_dashscope_embedding_provider_batches_large_schema_document_sets() -> None:
+    """DashScope embedding 有 batch size 上限，Schema 文档入库时必须自动拆批。"""
+
+    batch_sizes: list[int] = []
+
+    def fake_post_json(_url: str, _headers: dict[str, str], payload: dict[str, object], _timeout: float) -> dict[str, object]:
+        texts = payload["input"]["texts"]
+        batch_sizes.append(len(texts))
+        return {
+            "output": {
+                "embeddings": [
+                    {"embedding": [float(index), 0.0], "text_index": index}
+                    for index, _text in enumerate(texts)
+                ]
+            }
+        }
+
+    provider = DashScopeEmbeddingProvider(
+        api_key="dashscope-key",
+        model="qwen3.7-text-embedding",
+        max_batch_size=20,
+        post_json=fake_post_json,
+    )
+
+    vectors = provider.embed_texts([f"schema doc {index}" for index in range(45)])
+
+    assert batch_sizes == [20, 20, 5]
+    assert len(vectors) == 45

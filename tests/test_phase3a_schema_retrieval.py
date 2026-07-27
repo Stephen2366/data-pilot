@@ -140,6 +140,90 @@ def test_retrieve_schema_can_explicitly_select_milvus_backend_without_changing_d
     assert calls["query"] == "2026 年 6 月 GMV 是多少？"
 
 
+def test_retrieve_schema_can_select_dashscope_embedding_with_milvus(monkeypatch) -> None:
+    """Qwen embedding 只在显式配置 Milvus 时启用，避免默认 pytest 联网。"""
+
+    from app.core.config import get_settings
+    from engine.schema_retrieval import retriever
+
+    calls: dict[str, object] = {}
+
+    class FakeMilvusVectorIndex:
+        """记录 embedding provider 类型，避免测试连接真实 Milvus。"""
+
+        def __init__(self, **kwargs: object) -> None:
+            calls.update(kwargs)
+
+        def search(self, query: str, *, top_k: int) -> list[object]:
+            calls["query"] = query
+            calls["top_k"] = top_k
+            return []
+
+    monkeypatch.setenv("SCHEMA_VECTOR_BACKEND", "milvus")
+    monkeypatch.setenv("SCHEMA_EMBEDDING_PROVIDER", "dashscope")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+    monkeypatch.setenv("QWEN_EMBEDDING_MODEL", "qwen3.7-text-embedding")
+    monkeypatch.setenv("QWEN_EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setattr(retriever, "MilvusVectorIndex", FakeMilvusVectorIndex, raising=False)
+    get_settings.cache_clear()
+    try:
+        retrieve_schema(
+            question="2026 年 6 月 GMV 是多少？",
+            user_role="ops",
+            top_k=8,
+            domain_schema=load_domain_schema(),
+            relations_path=RELATIONS_PATH,
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert calls["embedding_provider"].__class__.__name__ == "DashScopeEmbeddingProvider"
+    assert calls["dimension"] == 1024
+    assert calls["query"] == "2026 年 6 月 GMV 是多少？"
+
+
+def test_retrieve_schema_profile_can_select_milvus_qwen_embedding_without_env_backend(monkeypatch) -> None:
+    """演示页按钮使用 profile 切换 Milvus + Qwen embedding，不污染默认环境变量。"""
+
+    from app.core.config import get_settings
+    from engine.schema_retrieval import retriever
+
+    calls: dict[str, object] = {}
+
+    class FakeMilvusVectorIndex:
+        """记录 profile 预设展开后的 Milvus 参数。"""
+
+        def __init__(self, **kwargs: object) -> None:
+            calls.update(kwargs)
+
+        def search(self, query: str, *, top_k: int) -> list[object]:
+            calls["query"] = query
+            calls["top_k"] = top_k
+            return []
+
+    monkeypatch.delenv("SCHEMA_VECTOR_BACKEND", raising=False)
+    monkeypatch.delenv("SCHEMA_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+    monkeypatch.setattr(retriever, "MilvusVectorIndex", FakeMilvusVectorIndex, raising=False)
+    get_settings.cache_clear()
+    try:
+        retrieve_schema(
+            question="2026 年 6 月 GMV 是多少？",
+            user_role="ops",
+            top_k=8,
+            domain_schema=load_domain_schema(),
+            relations_path=RELATIONS_PATH,
+            schema_retrieval_profile="milvus_qwen37",
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert calls["embedding_provider"].__class__.__name__ == "DashScopeEmbeddingProvider"
+    assert calls["dimension"] == 1024
+    assert calls["collection_name"] == "datapilot_schema_docs"
+    assert calls["query"] == "2026 年 6 月 GMV 是多少？"
+
+
 def test_allow_formal_cases_recall_expected_tables_columns_and_metrics() -> None:
     """8 条允许类 formal case：表 100% 命中，字段/指标总体召回不低于 80%。"""
 

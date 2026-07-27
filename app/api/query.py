@@ -264,6 +264,7 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             user_role=request_body.user_role,
             db=db,
             trace_id=trace_id,
+            schema_retrieval_profile=request_body.schema_retrieval_profile,
         )
         if pipeline_result.tool_result is None or pipeline_result.safety_status != "passed":
             return _blocked_response(

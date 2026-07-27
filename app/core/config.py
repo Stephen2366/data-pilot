@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     deepseek_base_url: str = Field(default="", alias="DEEPSEEK_BASE_URL")
     siliconflow_api_key: str = Field(default="", alias="SILICONFLOW_API_KEY")
     siliconflow_base_url: str = Field(default="", alias="SILICONFLOW_BASE_URL")
+    dashscope_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
+    dashscope_base_url: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1", alias="DASHSCOPE_BASE_URL")
+    dashscope_embedding_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/api/v1",
+        alias="DASHSCOPE_EMBEDDING_BASE_URL",
+    )
+    qwen_model: str = Field(default="qwen3.7-plus", alias="QWEN_MODEL")
 
     # Schema Retrieval 配置 ===================================================================
     # 默认仍走纯本地 deterministic in-memory；Milvus / SiliconFlow 必须显式开启。
@@ -49,6 +56,8 @@ class Settings(BaseSettings):
     milvus_reset_collection: bool = Field(default=False, alias="MILVUS_RESET_COLLECTION")
     siliconflow_embedding_model: str = Field(default="BAAI/bge-m3", alias="SILICONFLOW_EMBEDDING_MODEL")
     siliconflow_embedding_dimensions: int | None = Field(default=None, alias="SILICONFLOW_EMBEDDING_DIMENSIONS")
+    qwen_embedding_model: str = Field(default="qwen3.7-text-embedding", alias="QWEN_EMBEDDING_MODEL")
+    qwen_embedding_dimensions: int = Field(default=1024, alias="QWEN_EMBEDDING_DIMENSIONS")
 
     # 可观测性配置 =============================================================================
     # LangSmith 用来记录/观察 LLM 调用链路，后续调试 Agent 时会很有用。

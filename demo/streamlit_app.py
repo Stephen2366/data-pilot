@@ -23,12 +23,31 @@ DEMO_QUESTIONS = [
     "DROP TABLE orders",
 ]
 USER_ROLES = ["ops", "admin", "customer_service", "demo_user"]
+SCHEMA_RETRIEVAL_PROFILES = {
+    "Local deterministic": "default",
+    "Milvus + Qwen embedding": "milvus_qwen37",
+}
 
 
-def _post_query(api_url: str, question: str, user_role: str) -> dict[str, Any]:
+def _post_query(
+    api_url: str,
+    question: str,
+    user_role: str,
+    *,
+    force_new_pipeline: bool = False,
+    schema_retrieval_profile: str = "default",
+) -> dict[str, Any]:
     """调用 FastAPI `/api/query` 并返回 AgentResponse 字典。"""
 
-    payload = json.dumps({"question": question, "user_role": user_role}, ensure_ascii=False).encode("utf-8")
+    payload = json.dumps(
+        {
+            "question": question,
+            "user_role": user_role,
+            "force_new_pipeline": force_new_pipeline,
+            "schema_retrieval_profile": schema_retrieval_profile,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
     request = Request(
         api_url,
         data=payload,
@@ -175,6 +194,17 @@ def main() -> None:
     with st.sidebar:
         api_url = st.text_input("API", value=API_URL)
         user_role = st.selectbox("Role", USER_ROLES, index=0)
+        retrieval_label = st.radio(
+            "Schema Retrieval",
+            options=list(SCHEMA_RETRIEVAL_PROFILES),
+            index=0,
+            horizontal=False,
+        )
+        schema_retrieval_profile = SCHEMA_RETRIEVAL_PROFILES[retrieval_label]
+        force_new_pipeline = st.toggle(
+            "New Text2SQL",
+            value=schema_retrieval_profile != "default",
+        )
         st.divider()
         for question in DEMO_QUESTIONS:
             if st.button(question, use_container_width=True):
@@ -186,7 +216,13 @@ def main() -> None:
     if submitted:
         st.session_state["question"] = question
         try:
-            body = _post_query(api_url=api_url, question=question, user_role=user_role)
+            body = _post_query(
+                api_url=api_url,
+                question=question,
+                user_role=user_role,
+                force_new_pipeline=force_new_pipeline,
+                schema_retrieval_profile=schema_retrieval_profile,
+            )
         except (URLError, TimeoutError) as exc:
             st.error(f"API request failed: {exc}")
             return

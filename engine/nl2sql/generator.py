@@ -10,6 +10,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from typing import Protocol
 
 from pydantic import BaseModel, Field
@@ -19,6 +20,21 @@ from engine.nl2sql.planner import QueryPlan, QueryPlanStep
 from engine.nl2sql.prompt import build_local_schema_sql_prompt, build_query_plan_prompt, build_sql_prompt
 from engine.nl2sql.schema_loader import DomainSchema
 from engine.schema_retrieval.objects import SchemaGraph
+
+PostJson = Callable[[str, dict[str, str], dict[str, object], float], dict[str, object]]
+
+
+def _post_json(url: str, headers: dict[str, str], payload: dict[str, object], timeout: float) -> dict[str, object]:
+    """发送 JSON POST 请求；provider 测试可替换这个 transport，避免真实联网。"""
+
+    request = urllib.request.Request(
+        url=url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 class LLMGenerationError(RuntimeError):
@@ -62,19 +78,38 @@ class GeneratedSQL(BaseModel):
     reasoning_summary: str = ""
 
 
-class DeepSeekChatClient:
-    """DeepSeek OpenAI-compatible chat completion 客户端。"""
+class OpenAICompatibleChatClient:
+    """OpenAI-compatible chat completion 客户端基类。
 
-    def __init__(self, *, api_key: str, base_url: str, model: str) -> None:
+    ★ DeepSeek 和 Qwen 都提供兼容 `/chat/completions` 的接口。把 HTTP 契约收在这里，
+    后续做主模型 A/B 时只切 provider 配置，不复制整套网络调用和错误处理。
+    """
+
+    provider_label = "LLM"
+    default_base_url = ""
+    default_model = ""
+    missing_key_message = "LLM API key 缺失。"
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        post_json: PostJson = _post_json,
+        timeout: float = 45.0,
+    ) -> None:
         self.api_key = api_key
-        self.base_url = base_url.rstrip("/") or "https://api.deepseek.com"
-        self.model = model or "deepseek-v4-pro"
+        self.base_url = base_url.rstrip("/") or self.default_base_url
+        self.model = model or self.default_model
+        self._post_json = post_json
+        self.timeout = timeout
 
     def complete(self, *, prompt: str, system_prompt: str | None = None) -> str:
-        """调用 DeepSeek chat completions 接口。"""
+        """调用 OpenAI-compatible chat completions 接口。"""
 
         if not self.api_key:
-            raise LLMGenerationError("DeepSeek API key 缺失，请配置 DEEPSEEK_API_KEY 或 LLM_API_KEY。")
+            raise LLMGenerationError(self.missing_key_message)
 
         # 步骤 1：按 OpenAI-compatible chat 格式组装请求 -------------------------------
         resolved_system_prompt = system_prompt or "你只负责把中文业务问题转换为安全的单条 SELECT SQL。"
@@ -87,33 +122,49 @@ class DeepSeekChatClient:
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
-        request = urllib.request.Request(
-            url=f"{self.base_url}/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
 
         # 步骤 2：真实网络调用只在这里发生；失败统一转成 LLMGenerationError。
         try:
-            with urllib.request.urlopen(request, timeout=45) as response:
-                response_payload = json.loads(response.read().decode("utf-8"))
+            response_payload = self._post_json(
+                f"{self.base_url}/chat/completions",
+                {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                payload,
+                self.timeout,
+            )
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            raise LLMGenerationError(f"DeepSeek HTTP 调用失败：{exc.code} {detail[:300]}") from exc
+            raise LLMGenerationError(f"{self.provider_label} HTTP 调用失败：{exc.code} {detail[:300]}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise LLMGenerationError(f"DeepSeek 网络调用失败：{exc}") from exc
+            raise LLMGenerationError(f"{self.provider_label} 网络调用失败：{exc}") from exc
         except json.JSONDecodeError as exc:
-            raise LLMGenerationError(f"DeepSeek 返回非 JSON：{exc}") from exc
+            raise LLMGenerationError(f"{self.provider_label} 返回非 JSON：{exc}") from exc
 
         # 步骤 3：只把模型正文交给 SQL 提取器；token / cost 等细节留给 M5 trace。
         try:
             return str(response_payload["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMGenerationError(f"DeepSeek 返回结构缺少 choices/message/content：{response_payload}") from exc
+            raise LLMGenerationError(f"{self.provider_label} 返回结构缺少 choices/message/content：{response_payload}") from exc
+
+
+class DeepSeekChatClient(OpenAICompatibleChatClient):
+    """DeepSeek OpenAI-compatible chat completion 客户端。"""
+
+    provider_label = "DeepSeek"
+    default_base_url = "https://api.deepseek.com"
+    default_model = "deepseek-v4-pro"
+    missing_key_message = "DeepSeek API key 缺失，请配置 DEEPSEEK_API_KEY 或 LLM_API_KEY。"
+
+
+class QwenChatClient(OpenAICompatibleChatClient):
+    """Qwen / DashScope OpenAI-compatible chat completion 客户端。"""
+
+    provider_label = "Qwen"
+    default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    default_model = "qwen3.7-plus"
+    missing_key_message = "Qwen API key 缺失，请配置 DASHSCOPE_API_KEY。"
 
 
 def get_default_llm_client() -> LLMClient:
@@ -125,8 +176,16 @@ def get_default_llm_client() -> LLMClient:
 
     settings = get_settings()
     provider = settings.llm_provider.lower()
-    if provider not in {"deepseek", "mock"}:
-        raise LLMGenerationError(f"M4 仅支持 DeepSeek 主路径，当前 LLM_PROVIDER={settings.llm_provider}。")
+    if provider not in {"deepseek", "mock", "qwen"}:
+        raise LLMGenerationError(f"当前仅支持 DeepSeek / Qwen 主模型，LLM_PROVIDER={settings.llm_provider}。")
+
+    if provider == "qwen":
+        model = settings.qwen_model or (settings.llm_model if settings.llm_model != "mock-sql-generator" else "qwen3.7-plus")
+        return QwenChatClient(
+            api_key=settings.dashscope_api_key,
+            base_url=settings.dashscope_base_url,
+            model=model,
+        )
 
     api_key = settings.deepseek_api_key or settings.llm_api_key
     model = settings.llm_model if settings.llm_model != "mock-sql-generator" else "deepseek-v4-pro"

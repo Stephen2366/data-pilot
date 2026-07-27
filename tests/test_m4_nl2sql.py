@@ -119,6 +119,54 @@ def test_generator_extracts_structured_json_and_fenced_sql() -> None:
     assert fenced.confidence == 0.5
 
 
+def test_qwen_chat_client_uses_dashscope_openai_compatible_contract() -> None:
+    """Qwen 主模型应复用 OpenAI-compatible 契约，便于和 DeepSeek 做公平 A/B。"""
+
+    from engine.nl2sql.generator import QwenChatClient
+
+    calls: list[dict[str, object]] = []
+
+    def fake_post_json(url: str, headers: dict[str, str], payload: dict[str, object], timeout: float) -> dict[str, object]:
+        calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+        return {"choices": [{"message": {"content": '{"sql":"SELECT 1","tables_used":[]}'}}]}
+
+    client = QwenChatClient(
+        api_key="dashscope-key",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model="qwen3.7-plus",
+        post_json=fake_post_json,
+    )
+
+    assert client.complete(prompt="生成 SQL", system_prompt="系统约束") == '{"sql":"SELECT 1","tables_used":[]}'
+    assert calls[0]["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+    assert calls[0]["headers"]["Authorization"] == "Bearer dashscope-key"
+    assert calls[0]["payload"]["model"] == "qwen3.7-plus"
+    assert calls[0]["payload"]["messages"][0] == {"role": "system", "content": "系统约束"}
+    assert calls[0]["payload"]["response_format"] == {"type": "json_object"}
+
+
+def test_get_default_llm_client_can_select_qwen_provider(monkeypatch: Any) -> None:
+    """LLM_PROVIDER=qwen 时应显式走 DashScope key，而不是误用 DeepSeek key。"""
+
+    from app.core.config import get_settings
+    from engine.nl2sql.generator import QwenChatClient, get_default_llm_client
+
+    monkeypatch.setenv("LLM_PROVIDER", "qwen")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+    monkeypatch.setenv("DASHSCOPE_BASE_URL", "https://dashscope.example/compatible-mode/v1")
+    monkeypatch.setenv("QWEN_MODEL", "qwen3.7-plus")
+    get_settings.cache_clear()
+    try:
+        client = get_default_llm_client()
+    finally:
+        get_settings.cache_clear()
+
+    assert isinstance(client, QwenChatClient)
+    assert client.api_key == "dashscope-key"
+    assert client.base_url == "https://dashscope.example/compatible-mode/v1"
+    assert client.model == "qwen3.7-plus"
+
+
 def test_enhanced_guard_blocks_sensitive_fields_and_role_table_access() -> None:
     # 红灯目标：只读 SELECT 还不够，M4 必须拦截敏感字段和越权角色访问。
     from engine.nl2sql.schema_loader import load_domain_schema

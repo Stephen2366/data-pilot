@@ -16,11 +16,14 @@ class QueryRequest(BaseModel):
     `user_role` 会进入 SQL Guard 的 RBAC 权限矩阵，决定这个问题能访问哪些表和字段。
     `force_new_pipeline` 是 M11 给评测用的显式开关：默认 False 保持模板优先，True 才绕过
     模板进入新 Text2SQL pipeline。
+    `schema_retrieval_profile` 是本地实验开关：默认不传时沿用环境变量；演示页可显式选择
+    Milvus + Qwen embedding，方便 Phase 3 RAG / Hybrid 前手动对比。
     """
 
     question: str = Field(min_length=1)
     user_role: str = Field(default="ops")
     force_new_pipeline: bool = Field(default=False)
+    schema_retrieval_profile: Literal["default", "milvus_qwen37"] = Field(default="default")
 
 
 class CostInfo(BaseModel):

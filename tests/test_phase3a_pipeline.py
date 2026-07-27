@@ -233,6 +233,38 @@ def test_default_query_keeps_template_path_without_trace_steps(tmp_path: Path, m
     assert "trace_steps" not in trace or trace["trace_steps"] == []
 
 
+def test_query_can_request_milvus_qwen_embedding_profile_for_new_pipeline(tmp_path: Path, monkeypatch) -> None:
+    """演示页按钮传入的 profile 必须进入 schema retrieval，而不是只停留在前端。"""
+
+    from engine.nl2sql import pipeline as text2sql_pipeline
+
+    _patch_m11_llm(monkeypatch)
+    original_retrieve_schema = text2sql_pipeline.retrieve_schema
+    calls: dict[str, object] = {}
+
+    def wrapped_retrieve_schema(**kwargs):
+        calls["schema_retrieval_profile"] = kwargs.get("schema_retrieval_profile")
+        kwargs["schema_retrieval_profile"] = "default"
+        return original_retrieve_schema(**kwargs)
+
+    monkeypatch.setattr(text2sql_pipeline, "retrieve_schema", wrapped_retrieve_schema)
+    trace_path = tmp_path / "retrieval-profile-traces.jsonl"
+
+    with _seeded_test_client(trace_path) as client:
+        response = client.post(
+            "/api/query",
+            json={
+                "question": "各渠道订单量是多少？",
+                "user_role": "ops",
+                "force_new_pipeline": True,
+                "schema_retrieval_profile": "milvus_qwen37",
+            },
+        )
+
+    assert response.status_code == 200
+    assert calls["schema_retrieval_profile"] == "milvus_qwen37"
+
+
 def test_eval_new_text2sql_mode_sends_force_flag_and_records_actual_mode(tmp_path: Path, monkeypatch) -> None:
     """eval 的 `pipeline_mode=new_text2sql` 要真正触发新链路，而不是只改报告字段。"""
 

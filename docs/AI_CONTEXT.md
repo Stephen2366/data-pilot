@@ -28,7 +28,7 @@
 
 ### 技术默认值
 
-- Schema Retrieval 默认：`inmemory + deterministic`；`milvus` / `siliconflow` 只通过环境变量显式开启，不作为当前 Text2SQL 主线默认值。
+- Schema Retrieval 默认：`inmemory + deterministic`；`milvus` / `siliconflow` / `dashscope(qwen3.7-text-embedding)` 只通过环境变量显式开启，不作为当前 Text2SQL 主线默认值。
 - SQL 安全默认：敏感字段优先于角色权限；`admin` 也不能通过 Text2SQL 直出 `users.email/users.phone`，后续如需查看应走脱敏 / 审计 / 专门接口。
 - Trace 默认：Agent Trace 写入 `eval/traces/traces.jsonl`；测试、smoke 和临时实验可改写到 `.agent_work/temp/`。
 - Eval 默认：formal / challenge 用于主线验收和回归对照；diagnostic 用于定位边界和下一步问题，不追满分。
@@ -44,6 +44,7 @@
 
 - Milvus/SiliconFlow：2026-07-26 临时 A/B 显示 formal `10/10` 持平、challenge `14/16` 持平、diagnostic `23/32 -> 20/32`，所以不切默认。
 - M9.1/M9.2 结论：Milvus adapter / SiliconFlow embedding provider 可用，但当前 Text2SQL 主线默认仍保留轻量 deterministic / in-memory。
+- Qwen/DashScope：2026-07-27 临时 A/B 显示 `qwen3.7-plus` 已明显好于旧 `qwen-plus`。主模型 formal：DeepSeek `9/10`、Qwen `qwen3.7-plus` `9/10`；challenge：DeepSeek `12/16`、Qwen `qwen3.7-plus` `13/16`。Embedding 侧 formal：`Milvus + qwen3.7-text-embedding` `9/10`，高于 `Milvus + SiliconFlow BAAI/bge-m3` `8/10`。结论：Qwen 值得继续对照，但 Phase 3A 默认仍不切。
 
 ## 已知的坑（活跃列表，过期即删）
 
@@ -63,6 +64,26 @@
 > - `[小修]`：文档措辞、口径同步、注释补充、轻量整理；只需简写，不要求完整模板。
 >
 > 未来新增记录优先使用这些标签；小修可以只写一段话，模块任务建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
+
+### [实验] Qwen / DashScope 主模型与 Embedding Provider 临时 A/B（2026-07-27）
+
+- 改动范围：`app/core/config.py`、`engine/nl2sql/generator.py`、`engine/schema_retrieval/embedding_provider.py`、`engine/schema_retrieval/retriever.py`、`.env.example`、`scripts/run_qwen_ab_experiments.py`、相关配置 / LLM / embedding 单元测试；同步记录本次临时实验结论，不切默认。
+- 关键记录：
+  - 新增 Qwen / DashScope 显式 provider 支持：`LLM_PROVIDER=qwen` 可走 DashScope OpenAI-compatible chat completion；`SCHEMA_VECTOR_BACKEND=milvus` + `SCHEMA_EMBEDDING_PROVIDER=dashscope|qwen` 可走 DashScope `qwen3.7-text-embedding`。
+  - 默认保持 `LLM_PROVIDER=deepseek` 与 `SCHEMA_VECTOR_BACKEND=inmemory` / `SCHEMA_EMBEDDING_PROVIDER=deterministic`，避免 Phase 3A 收口基线被联网模型、Milvus 服务状态、费用和非确定性影响。
+  - 本轮主模型第一轮 formal 初测：DeepSeek formal `9/10`；Qwen `qwen-plus` formal `7/10`。该结果不能证明 Qwen 系列整体不适合 Agent，只说明在当前 DataPilot prompt / JSON 解析 / SQL 兜底均长期按 DeepSeek 调过的前提下，`qwen-plus` 这个旧/通用入口不适合作为 Qwen 主模型代表。
+  - 改测官方新代际模型 `qwen3.7-plus` 后，formal 与 DeepSeek 持平：DeepSeek `9/10`、Qwen `qwen3.7-plus` `9/10`；challenge 上 Qwen 略高：DeepSeek `12/16`、Qwen `qwen3.7-plus` `13/16`。失败形态不同：DeepSeek formal 主要卡 `p3a_multi_003` LLM 生成失败；Qwen formal 主要卡 `p3a_multi_001` 缺 `coupon_order_count`。challenge 中 Qwen 过了 DeepSeek 未过的 `db_core_003`、`db_multi_002`，但仍卡 `db_core_004` 结果口径、`db_multi_001` alias/列名和 `db_hard_001` LLM 生成。
+  - 本轮 embedding formal 初测：`Milvus + SiliconFlow BAAI/bge-m3` formal `8/10`；`Milvus + DashScope qwen3.7-text-embedding` formal `9/10`。Qwen embedding 在 formal 上略好，值得继续跑 challenge / diagnostic；但仍未达到足以替换默认 deterministic in-memory 的证据标准。
+  - qwen3.7-text-embedding 口径：官方文档推荐纯文本 / 代码场景使用，支持 1024 默认维度、最长 128K token、批量最多 20 条，并支持 instruct / sparse 等高级功能。本次只接 dense 1024，未启用 sparse / hybrid / rerank。
+  - Milvus 启动坑：在 Docker Desktop 直接启动单个 `milvusdb/milvus:v3.0-beta` 容器会自动退出；正确本地方式是官方 Docker Compose 三容器 `milvus-standalone` + `milvus-etcd` + `milvus-minio`，端口 `19530` / `9091`。本次 compose 文件放在 `.agent_work/temp/milvus/docker-compose.yml`，属于本地实验环境，不写入 `.env`。
+- 验证快照：
+  - 相关单元测试：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_config.py tests\test_m4_nl2sql.py tests\test_m9_2_siliconflow_embedding.py tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work\temp\pytest-qwen-final-related` -> 23 passed，1 个既有 Starlette / httpx warning。
+  - 实验脚本：`scripts/run_qwen_ab_experiments.py`，报告写入 `.agent_work/temp/qwen-ab/`。
+  - 已完成报告：`main-deepseek-formal.md` `9/10`、`main-deepseek-challenge.md` `12/16`、`main-qwen-plus-formal.md` `7/10`、`main-qwen37-plus-formal.md` `9/10`、`main-qwen37-plus-challenge.md` `13/16`、`embedding-siliconflow-bge-m3-formal.md` `8/10`、`embedding-qwen37-formal.md` `9/10`；主模型新汇总 `summary-20260727-170319.md` / `summary-20260727-171213.md`，embedding 汇总 `summary-20260727-163220.md`。
+- 遗留 / 后续：
+  - 不再用 `qwen-plus` 代表 Qwen 主模型优劣；后续主模型对照使用 `qwen3.7-plus`，并显式确认是否启用 thinking / structured output / OpenAI-compatible 参数。
+  - `qwen3.7-max` 是否适合作为主 Agent 模型，要先看所选 API 面是否支持结构化输出；DataPilot 当前强依赖可解析 JSON / Pydantic 校验，若某个模型或接口不支持可靠 structured output，只适合做对照或离线上限测试，不适合直接切默认。
+  - Qwen embedding 继续跑 challenge / diagnostic 后，再决定是否在 Phase 3 RAG / Hybrid 中作为推荐 provider；Phase 3A 默认仍保留轻量 deterministic / in-memory。
 
 ### [模块任务] M14-lite Phase 3A 收口开发中（2026-07-27）
 
