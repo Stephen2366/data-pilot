@@ -2,16 +2,16 @@
 
 企业数据分析 Agent 系统。接受自然语言问题，自动判断查 SQL / 查文档 / 混合推理，生成结果 + 可视化 + 分析报告。
 
-> **总路线**：[LEARNING_ROADMAP.md](D:/.Work/Practice/Python-Practice/LEARNING_ROADMAP_v3.md) — 总体规划。日常模块开发优先读 `CLAUDE.md / AGENTS.md`、`AI_CONTEXT.md` 和当前阶段计划文件（见 `AI_CONTEXT.md`「当前状态」）；阶段切换、范围调整或技术取舍等情况时再读完整 `LEARNING_ROADMAP.md`。
+> **总路线**：[LEARNING_ROADMAP.md](D:/.Work/Practice/Python-Practice/LEARNING_ROADMAP_v3.md) — 总体规划。日常模块开发优先读 `CLAUDE.md / AGENTS.md`、`AI_CONTEXT.md` 和当前阶段计划文件（见 `AI_CONTEXT.md`「当前状态」）；阶段切换、范围调整或技术取舍等情况再读完整 ROADMAP。
 >
-> **技术档案**：[AI_CONTEXT.md](docs/AI_CONTEXT.md) — AI 续接 / 查 bug 优先阅读，记录当前状态、决策理由、验证快照和已知坑。
+> **技术档案**：[AI_CONTEXT.md](docs/AI_CONTEXT.md) — AI 续接 / 查 bug 优先阅读，只保留当前状态、默认配置、最新基线、关键结论和活跃坑；完整改动历史见 [AI_CONTEXT_CHANGELOG.md](docs/AI_CONTEXT_CHANGELOG.md)。
 >
 > **学习复盘日志**：[dev-log.md](docs/dev-log.md) — 面向用户阅读，记录模块故事、关键概念和面试讲法。
 >
 > **参考资料速查**：[REFERENCE_GUIDE.md](D:/.Work/Practice/Python-Practice/references/REFERENCE_GUIDE.md) — 参考项目的定位、可借鉴点、不要照搬的坑。写代码时按场景查对应项目，不用通读。
 
 ## 用户背景
-- **用户信息**：2028 届硕士研究生，目标 10 月找到 AI 应用开发 / Agent 开发 / 后端开发的日常实习。两个实践项目服务简历和面试
+- 2028 届硕士研究生，目标 10 月找到 AI 应用开发 / Agent 开发 / 后端开发的日常实习。项目服务简历和面试
 - **已学习技术栈**：Java / SpringBoot / MySQL / Redis / Python / FastAPI / LangChain-LangGraph（讲解和注释时可适当用这些技术作类比）
 - 用户使用 Claude Code 和 Codex 协作开发，项目 AGENTS.md 通过符号链接到 CLAUDE.md，从而实现文档同步
 
@@ -56,6 +56,7 @@ docs/                   # 项目文档
   archive-versions/     # 同文档的 v1→v2→v3 迭代链存档
   archive-dormant/      # 阶段结束暂时不用、以后可能复盘
   AI_CONTEXT.md         # 技术档案（AI 续接 / 查 bug 入口）
+  AI_CONTEXT_CHANGELOG.md # 技术档案完整变更记录 / 实验历史
   dev-log.md            # 学习复盘（用户阅读）
   phase2-plan.md        # 阶段二模块计划（后续阶段计划也放这里）
 
@@ -74,8 +75,8 @@ tests/                  # pytest 测试
 - 所有 AI 工具共享同一个临时目录：`.agent_work/temp/`，用于存放脚本中间产物、一次性 JSON、缓存、临时 smoke 摘要等。
 - 可复用运行数据不要放临时目录：模块 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），Agent Trace 写入 `eval/traces/`；smoke 的一次性输出摘要仍放临时目录。
 - 路径、验收数字、Schema、命名只保留一个权威定义，优先登记在当前阶段计划文件的“单一事实源”章节。
-- 开始较完整的模块开发时，先在 `.agent_work/temp/<module>-notes.md` 写 5-8 条极短 implementation checklist；开发中同步记录关键决策、踩坑和验证素材，供 finish-module 收工复用。
-- README 默认只在模块内做必要命令 / 入口 / 契约更新；完整能力介绍、示例和已知限制在阶段结束时统一整理。模块学习复盘优先写入 `dev-log.md`。
+- 开始较完整的模块开发时，先在 `.agent_work/temp/<module>-notes.md` 写几条极短 implementation checklist；开发中在 `<module>-notes.md` 同步记录关键决策、踩坑和验证素材，供 finish-module 收工复用。
+- README 只在阶段结束时统一整理和更新。
 
 ## 代码风格
 
@@ -84,18 +85,21 @@ tests/                  # pytest 测试
 新增 / 大幅修改的代码默认写新手友好的注释，基本要求：
 
 - 语言：叙述用中文，术语等用中文和英文里更常用或顺口的
-- 覆盖位置完整：每个文件/类/函数的开头、复杂处、关键处、新手容易不熟悉处等
+- 覆盖位置完整和全面：每个文件/类/函数的开头、复杂处、关键处、新手容易不熟悉处等
 - 注释写给“未来准备面试的用户”读，包括但不限于解释：职责、设计理念、新概念、新手易混点等
-- 注释内容：详细，通俗易懂，直击要点；适当用类比或比喻帮助理解
+- 注释内容：完整详细，通俗易懂，直击要点；适当用类比或比喻帮助理解
 - 适当用 ★ 标记关键点
 - 较长或复杂的代码需要添加分隔注释：大步骤 `# 描述 ==========`、小步骤 `# 描述 ----------`，必要时加序号 `步骤 N：`/`步骤 N-M：`
 
 ## 开发记录要求
 
-- `AI_CONTEXT.md` 是 AI 续接技术档案，记录 git 和代码查不到的信息：当前状态、默认配置、评测基线、关键决策、实验结论、失败原因和活跃坑。
-- 普通小修改如果会影响后续理解，就在「变更记录」用一段简短记录；文档整理、表达润色、无技术含义等修改可以不记。
-- 较完整模块开发、影响默认行为/安全口径/评测口径/架构边界的修改，才需要写结构化记录，建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
-- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须同步到 `AI_CONTEXT.md`；这类信息通常无法从 git diff 看出来。
-- 开发中遇到关键决策/踩坑/验证命令/临时取舍，先把素材写入 `.agent_work/temp/<module>-notes.md`，收工或形成阶段性结论后再同步到 `AI_CONTEXT.md`。
+- `AI_CONTEXT.md` 是 AI 续接技术档案，记录 git 和代码查不到的信息：当前状态、默认配置、评测基线、关键结论和活跃坑；保持短小，优先服务快速续接。
+- `AI_CONTEXT_CHANGELOG.md` 保存完整变更记录、模块档案、真实 LLM eval、A/B 实验、smoke 结论和历史取舍。
+  - 普通小修改如果会影响后续理解，就在 `AI_CONTEXT_CHANGELOG.md` 加一段简短记录；不记录文档整理、表达润色、无技术含义等修改。
+  - 较完整模块开发、影响默认行为/安全口径/评测口径/架构边界的修改，才需要写结构化记录，建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
+
+- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须同步到 `AI_CONTEXT_CHANGELOG.md`，并把会影响当前路线的最新结论摘要同步到 `AI_CONTEXT.md`「最新事实快照」。
+
+- 开发中遇到关键决策/踩坑/验证命令/临时取舍，先把素材写入 `.agent_work/temp/<module>-notes.md`，收工或形成阶段性结论后再同步到 `AI_CONTEXT_CHANGELOG.md`。
 - `dev-log.md` 面向用户学习复盘。
-- `AI_CONTEXT.md` 和 `dev-log.md` 的详细模板和写作要求见 `finish-module` skill，模块完成后才调用该 skill 记录 `AI_CONTEXT.md` 和 `dev-log.md`。
+- `AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md` 和 `dev-log.md` 的详细模板和写作要求见 `finish-module` skill，模块完成后才调用该 skill 记录技术档案和学习复盘。

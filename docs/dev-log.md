@@ -1,6 +1,6 @@
 # DataPilot 开发日志（学习复盘）
 
-> 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `AI_CONTEXT.md`「当前状态」；完整技术档案看 `AI_CONTEXT.md` 对应模块，查 bug 找那边。
+> 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `AI_CONTEXT.md`「当前状态」；完整技术档案和历史实验看 `AI_CONTEXT_CHANGELOG.md`，查 bug 时按需追溯。
 
 ## ★ M0 工程骨架与配置（2026-07-16）
 
@@ -1933,3 +1933,69 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetem
 **本地启动体验：**
 
 M14-lite 没有新增 API 端点，体验入口仍是批量评测和 trace。想看变化，优先看 eval 报告里的 `result_match` case 是否更严格，再看新 pipeline trace 中 LLM 失败时的 metadata 是否包含 raw preview / parse error。
+
+## ★ Phase 3A 收口前：Qwen / Milvus / 文档结构实验整理（2026-07-27）
+
+**简述**：这不是一个完整功能模块，更像进入 Phase 3 前的一次 **技术路线体检**：确认 Qwen 是否值得作为主模型候选，确认 Qwen embedding 是否比 SiliconFlow BGE-M3 更适合后续 RAG / Hybrid，并把过长的 `AI_CONTEXT.md` 拆成当前快照和历史 changelog。
+
+### 这次做了什么
+
+修正了 Milvus 的本地启动方式。直接在 Docker Desktop 里启动单个 `milvusdb/milvus:v3.0-beta` 容器会自动退出，因为 standalone 还需要 etcd 和 minio；正确方式是官方 docker compose 三件套。这个坑已经记录到技术档案，后续做 RAG 不会再从环境问题上绕圈。
+
+| 主模型对比 | 链路 / 配置 | 测试范围 | 结果 | 这次怎么理解 |
+|---|---|---|---|---|
+| deepseek-v4-pro | DeepSeek + 本地 `inmemory + deterministic` | formal / challenge / diagnostic | `8~9/10`、`12/16`、`24/32` | 综合最稳；formal 有真实 LLM 波动，但 diagnostic 仍领先 |
+| qwen3.7-plus | `qwen3.7-plus` + 本地 retrieval | formal / challenge / diagnostic | `9/10`、`13/16`、`21/32` | 常规复杂题有竞争力，边界体检不如 DeepSeek |
+| qwen3.7-max | `qwen3.7-max` + 本地 retrieval | diagnostic | `22/32` | 比 plus 略好，但独有 blocking 失败更重，不适合切默认 |
+
+| embedding对比         | 链路 / 配置                                  | 测试范围 | 结果   | 这次怎么理解                                       |
+| --------------------- | -------------------------------------------- | -------- | ------ | -------------------------------------------------- |
+| SiliconFlow embedding | DeepSeek + `Milvus + BAAI/bge-m3`            | formal   | `8/10` | 没明显超过本地 baseline                            |
+| Qwen embedding        | DeepSeek + `Milvus + qwen3.7-text-embedding` | formal   | `9/10` | 略好 1 题，值得 Phase 3 继续测，但证据不足以切默认 |
+
+### 新概念
+
+- **主模型 A/B**：比较的是“谁来规划和生成 SQL”。它影响 QueryPlan、JSON 稳定性、SQL 生成风格和安全边界表现。
+- **Embedding Provider A/B**：比较的是“检索时用什么向量表示文本”。它影响 Schema / 文档召回，不等于主模型能力。Qwen 主模型不一定默认更好，但 Qwen embedding 仍可能更适合后续 RAG。
+- **diagnostic 体检**：formal / challenge 更像考试分数，diagnostic 更像体检报告。它不只看答对多少，还暴露失败发生在漏表、漏列、plan validation、LLM 生成失败、安全拦截还是 trace 证据不足。
+- **错误严重性对比**：不只比较谁错得少，还要比较错在哪里。DeepSeek 独有错误更多在非阻塞生成失败；`qwen3.7-max` 独有错误包含 blocking 的核心生成失败、多表缺列、plan validation 和 trace 证据缺失，所以即使分数只差 2 分，也更不适合当默认。
+- **Context / Changelog 拆分**：`AI_CONTEXT.md` 只保留当前快照，`AI_CONTEXT_CHANGELOG.md` 保存完整历史。这样 AI 续接时先读短上下文，需要查原因时再追溯历史，减少“每次都把几百行旧记录塞进上下文”的负担。
+
+### 关键文件
+
+- `engine/nl2sql/generator.py`：新增 Qwen / DashScope OpenAI-compatible 主模型客户端，默认 Qwen 模型改为 `qwen3.7-plus`。
+- `engine/schema_retrieval/embedding_provider.py`：新增 DashScope `qwen3.7-text-embedding` provider。
+- `engine/schema_retrieval/retriever.py`：支持显式选择 `Milvus + qwen3.7-text-embedding`。
+- `demo/streamlit_app.py`：侧边栏新增 Schema Retrieval 选择项，方便以后手动切本地 / Milvus Qwen embedding。
+- `scripts/run_qwen_ab_experiments.py`：集中跑 DeepSeek、Qwen、SiliconFlow / Qwen embedding 的 A/B 实验。
+- `docs/AI_CONTEXT.md`、`docs/AI_CONTEXT_CHANGELOG.md`：一个保留当前状态，一个保存完整历史。
+
+### 设计要点
+
+- **不因为 Qwen challenge 多 1 条或 max 稍高于 plus 就切默认**：diagnostic 补测后，Qwen 在漏表、漏列、证据字段完整性上更不稳；`qwen3.7-max` 虽然比 plus 多过 1 条，但独有失败更影响主线，所以默认仍保留 DeepSeek。
+- **不把主模型和 embedding 混在一起判断**：Qwen 主模型暂不切，不代表 Qwen embedding 没价值；后者可能更适合 Phase 3 的中文文档检索。
+- **按钮只是实验开关，不改变默认链路**：Streamlit 里可以切 `Milvus + Qwen embedding`，但默认请求和 pytest 仍不依赖 Milvus 或联网 API。
+
+### 面试怎么讲
+
+“我在 Phase 3A 收口前做了一轮模型和检索后端 A/B。没有只看单次分数，而是分成主模型和 embedding 两条线测：主模型方面，`qwen3.7-plus` formal 和 DeepSeek 持平，challenge 略高，但 diagnostic 更低；追加 `qwen3.7-max` 后 diagnostic 到 `22/32`，仍低于 DeepSeek 的 `24/32`，而且独有错误更偏 blocking 主线问题。这说明 Qwen 在常规复杂题上有竞争力，但边界稳定性还不如 DeepSeek。embedding 方面，`qwen3.7-text-embedding` formal 表现优于 SiliconFlow BGE-M3，值得后续 RAG 继续验证。最后我没有盲目换默认，而是把 Qwen 保留为显式候选，把 DeepSeek 保持为当前稳定默认，并把技术档案拆成当前快照和 changelog，降低后续 Agent 续接成本。”
+
+### 验证与下一步
+
+- 相关单元回归：**30 passed**，仅既有 Starlette/httpx warning。
+- 主模型 A/B：formal DeepSeek `9/10`、Qwen plus `9/10`；challenge DeepSeek `12/16`、Qwen plus `13/16`；diagnostic DeepSeek `24/32`、Qwen plus `21/32`、Qwen max `22/32`。
+- Embedding A/B：formal 本地 `8/10`、SiliconFlow BGE-M3 `8/10`、Qwen `qwen3.7-text-embedding` `9/10`。
+- 下一步：Phase 3 进入 RAG / Hybrid 时，优先继续验证 Qwen embedding 在文档检索上的收益；主模型默认暂不从 DeepSeek 切到 Qwen。
+
+可复制验证命令：
+
+```powershell
+# 相关回归，预期 30 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_config.py tests\test_m4_nl2sql.py tests\test_phase3a_pipeline.py tests\test_phase3a_schema_retrieval.py tests\test_m9_2_siliconflow_embedding.py -p no:cacheprovider --basetemp=.agent_work\temp\pytest-qwen37-related
+
+# 主模型 diagnostic A/B，真实联网调用，结果本轮为 DeepSeek 24/32、Qwen plus 21/32。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_experiments.py --group main --suite diagnostic
+
+# Qwen max 单独 diagnostic，结果本轮为 22/32。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_experiments.py --group main --experiment main-qwen37-max --suite diagnostic
+```

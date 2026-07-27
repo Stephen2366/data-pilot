@@ -15,6 +15,7 @@ description: 项目模块代码完成后的收工整理。Use when the user says
 
 - 当前对话
 - `docs/AI_CONTEXT.md`
+- `docs/AI_CONTEXT_CHANGELOG.md`
 - `.agent_work/temp/<module>-notes.md`
 - git diff
 - 终端验证输出
@@ -56,7 +57,8 @@ accept-module
    - 只处理本模块相关文件，不回滚用户改动
 
 4. 收集过程素材：
-   - 读取 `docs/AI_CONTEXT.md`「变更记录」
+   - 读取 `docs/AI_CONTEXT.md` 当前状态 / 最新事实快照
+   - 按需读取 `docs/AI_CONTEXT_CHANGELOG.md` 近期变更记录
    - 读取 `.agent_work/temp/<module>-notes.md`，如果存在
    - 查找当前对话中已经跑过的验证命令输出
    - 如果模块中曾向用户确认关键取舍，必须记录当时给出的选项、主要风险、推荐方案和用户最终选择；不要只写最终结论
@@ -193,39 +195,37 @@ accept-module
 - 有 warning 要说明是否影响本模块
 - 命令失败时，不要掩盖；写明失败原因和是否阻塞
 
-## 阶段 3：更新 AI_CONTEXT.md
+## 阶段 3：更新 AI_CONTEXT.md / AI_CONTEXT_CHANGELOG.md
 
-模块完成时，在 `docs/AI_CONTEXT.md`「变更记录」头部新增一节（`###` 标题），方便 AI 续接优先看到最新状态。
+模块完成时，在 `docs/AI_CONTEXT_CHANGELOG.md`「变更记录」头部新增一节（`###` 标题），保存完整模块档案和实验记录。
 
-按照以下模板的要求写：
+同时只把会影响续接判断的最新事实摘要同步到 `docs/AI_CONTEXT.md`，例如当前模块、默认配置、最新评测基线、重要实验结论或活跃坑。`AI_CONTEXT.md` 必须保持短小，不再承载完整历史变更记录。
+
+「变更记录」按照以下模板的要求写：
 
 ```md
 ### Mx 模块名（YYYY-MM-DD）
 
 - 改动范围：先跑 `git diff --name-only <base>..HEAD`（base 为本模块起始 commit）获取完整变更清单，再归并为 glob 模式（如 `engine/nl2sql/*`、`app/schemas/agent.py`），归并后逐条对照原始清单确认无遗漏。如果无明确起始 commit，用 `git status --short` 和 `git diff --stat --cached` 代替。
-- 关键决策：
-  - 决策 1：为什么这样做
-  - 决策 2：为什么不用另一个方案
-  - 用户确认：如本模块有确认过的方案选择，写清选项、风险、推荐方案和用户最终确认
+- 关键记录：
+  - 比如关键决策、决策原因、实验结果、新发现、用户做出的选择
 - 参考资料：
-  - 查了什么
-  - 借鉴了什么
-  - 没照搬什么
-  - 如果未查阅，写“未查阅外部参考”
+  - 查了什么，借鉴了什么，没照搬什么
+  - 如果未查阅，写“无”
 - 验证快照：
   - pytest：结果
   - alembic / seed / API / eval：结果
   - warning：是否影响
-- 遗留：
-  - 下一模块要接什么
-  - 当前还有什么风险
+- 遗留/后续：
+  - 比如：下一模块要接什么，当前还有什么风险，后续采用什么技术或方法
 ```
 
-同时更新顶部「当前状态」：
+同时更新 `docs/AI_CONTEXT.md` 顶部「当前状态」：
 
 ```md
 - 当前阶段计划文件：
 - 当前模块：
+- 下一模块：
 - 上一模块验收：
 - 阻塞项：
 - 更新时间：
@@ -233,7 +233,7 @@ accept-module
 
 「上一模块验收」在收工时填「Mx 未验收（待 accept-module）」（Mx = 本次收工的模块）；验收通过后由 accept-module 改写，本 skill 不代填「已验收」。
 
-如果只是小修复，不写完整档案，只在「变更记录」新增一个 `###` 条目（内容 1-3 行）：
+如果只是小修复，不写完整档案，只在 `AI_CONTEXT_CHANGELOG.md`「变更记录」新增一个 `###` 条目（内容 1-3 行）；仅当它影响当前路线时，再同步一句到 `AI_CONTEXT.md`「最新事实快照」：
 
 ## 阶段 4：更新 dev-log.md
 
@@ -333,7 +333,7 @@ accept-module
 
 ## 阶段 5：收尾确认
 
-写完 AI_CONTEXT.md 和 dev-log.md 后，回读各自刚写入的章节，确认格式正确、内容完整、没有截断或乱码。发现异常立即修正。
+写完 AI_CONTEXT.md、AI_CONTEXT_CHANGELOG.md 和 dev-log.md 后，回读各自刚写入的章节，确认格式正确、内容完整、没有截断或乱码。发现异常立即修正。
 
 最后回复用户，列出本次收工做了什么：
 

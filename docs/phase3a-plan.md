@@ -108,7 +108,7 @@
 - 每个模块都必须能独立学习、实现、验证和复盘；测试、smoke、README 小修跟随对应功能模块，不单独拆模块。
 - 每个模块开始时在 `.agent_work/temp/m<module>-notes.md` 写 5-8 条极短 checklist，开发中同步记录关键决策、踩坑和验证素材。
 - 每个模块完成后先跑本模块验收门，再用 `finish-module` 收工整理；用户人工检查后再跑 `accept-module` 验收。
-- 涉及降级、技术选型变更、模块边界变更、验收标准变更时，先在 `AI_CONTEXT.md`「变更记录」写清原因、迁移风险、回切条件，再问用户确认。
+- 涉及降级、技术选型变更、模块边界变更、验收标准变更时，先在 `AI_CONTEXT_CHANGELOG.md`「变更记录」写清原因、迁移风险、回切条件；若影响当前路线，再同步摘要到 `AI_CONTEXT.md`「最新事实快照」，然后问用户确认。
 - 默认 TDD：先写失败测试，再实现最小功能，再跑聚焦测试和必要回归。
 
 ## 目录与文件规划
@@ -151,7 +151,8 @@
 | `tests/test_phase3a_pipeline.py` | 新建 | M11 | 强制新 pipeline、trace_steps、SQL Guard 集成测试 |
 | `scripts/smoke_phase3a_text2sql.py` | 新建 | M12 | 阶段三A 本地 smoke，一键跑 10 条 formal、16 条 challenge、32 条 diagnostic 和对照报告 |
 | `README.md` | 修改 | M12 | 阶段三A 入口、命令、能力边界和 Milvus 实际状态 |
-| `docs/AI_CONTEXT.md` | 修改 | 每模块 | 当前状态、变更记录 |
+| `docs/AI_CONTEXT.md` | 修改 | 每模块 | 当前状态、默认配置、最新基线和重要结论摘要 |
+| `docs/AI_CONTEXT_CHANGELOG.md` | 修改 | 每模块 | 完整变更记录、实验历史和模块档案 |
 | `docs/dev-log.md` | 修改 | 每模块 | 面向用户的学习复盘 |
 
 ## 模块划分说明
@@ -217,7 +218,7 @@
 - [ ] [顺序] 运行旧链路 baseline | 输入：当前 `/api/query` | 输出：`eval/reports/phase3a-baseline.md` 和 `.agent_work/temp/phase3a-baseline-traces.jsonl`
 - [ ] [顺序] 运行旧链路 challenge baseline | 输入：当前 `/api/query` | 输出：`eval/reports/phase3a-challenge-baseline.md` 和 `.agent_work/temp/phase3a-challenge-baseline-traces.jsonl`
 - [ ] [并行] 更新 `docs/AI_CONTEXT.md`「当前状态」 | 输入：M8 进度 | 输出：当前阶段计划文件指向 `docs/phase3a-plan.md`，当前模块更新为 M8
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 变更记录和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md` 变更记录、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -273,7 +274,7 @@
 - [ ] [顺序] 增加 diagnostic 报告字段 | 输入：EvalResult | 输出：报告含 `source_file`、`phase3a_capabilities`、`phase3a_blocking`、`case_properties`、`skipped_due_to_pipeline_mode`
 - [ ] [顺序] 增加一致性检查测试 | 输入：`db_multi_003` 与 `db_plan_001` 等 linked case | 输出：共享问题 case 标注 `linked_case_id`，GMV 等指标口径不漂移；多答案 case 能记录实际命中的 alternative
 - [ ] [顺序] 运行旧链路 32 条 diagnostic baseline | 输入：challenge 16 + extra 16 | 输出：`eval/reports/phase3a-diagnostic-baseline.md` 和 `.agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl`
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -336,7 +337,7 @@
 - [ ] [顺序] 同步记录 challenge 召回表现 | 输入：16 条 challenge | 输出：challenge expected_tables / expected_columns / expected_metrics 命中摘要，困难题可标记 manual review
 - [ ] [顺序] 同步记录 diagnostic 召回表现 | 输入：32 条 diagnostic 中带 `schema_retrieval` / `join_path` capability 的 case | 输出：按 capability 汇总 expected_tables / expected_columns / expected_metrics / JoinPath 命中摘要；不属于 M9 的 `query_plan` / `trace_steps` 检查只保留 skipped 或待后续模块处理
 - [ ] [可选] 新增 Milvus adapter smoke 脚本草案 | 输入：本机 `localhost:19530` | 输出：只在环境可用时运行，不阻塞 pytest
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -399,7 +400,7 @@
 - [ ] [可选] 增强聚合函数类型校验 | 输入：`QueryPlanStep.aggregations` 与 `SchemaDocument.metadata.data_type` | 输出：若类型信息存在，`SUM/AVG` 只能作用于数值字段，非法时映射 `invalid_aggregation_column`
 - [ ] [可选] 增加 `QueryPlan.to_human_explanation()` | 输入：QueryPlan、SchemaGraph、JoinPath | 输出：把结构化计划转成可读解释，用于 trace / report / dev-log；不承担展示决策
 - [ ] [顺序] 新建 `tests/test_phase3a_planner.py` | 输入：合法 / 非法 plan fixture | 输出：合法计划通过；不存在字段、非法 Join、敏感字段计划被拦截
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -458,7 +459,7 @@
 - [ ] [顺序] 修改 `app/api/query.py` | 输入：`QueryRequest.force_new_pipeline` | 输出：默认模板优先；`force_new_pipeline=true` 强制走新 pipeline；两条路径最终都写 trace
 - [ ] [顺序] 修改 `eval/run_eval.py` 的 pipeline mode 映射 | 输入：`configured_pipeline_mode` | 输出：`new_text2sql` 自动以 `force_new_pipeline=true` 调 API，`baseline` 保持旧链路；报告记录 `actual_pipeline_mode`
 - [ ] [顺序] 新建 `tests/test_phase3a_pipeline.py` | 输入：fake LLM / seeded TestClient | 输出：强制新链路 trace_steps 完整、模板问题也能绕过模板、新 SQL 仍过 SQL Guard
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -518,7 +519,7 @@
 - [ ] [顺序] 新建 `scripts/smoke_phase3a_text2sql.py` | 输入：评测入口 | 输出：一键生成 formal baseline / challenge baseline / diagnostic baseline / formal new / challenge new / diagnostic new / comparison 报告的本地 smoke
 - [ ] [顺序] 修改 `README.md` | 输入：阶段三A真实实现 | 输出：命令入口、能力边界、Milvus 当前实际状态、未实现 P1/P2 不虚报
 - [ ] [顺序] 运行阶段三A最终门禁 | 输入：全量测试 + smoke | 输出：验收快照写入 AI_CONTEXT
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT.md` 和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 

@@ -100,6 +100,17 @@ def _experiments(selected: str) -> list[Experiment]:
             },
             suites=("formal", "challenge", "diagnostic"),
         ),
+        Experiment(
+            name="main-qwen37-max",
+            description="主模型 Qwen qwen3.7-max，默认 in-memory deterministic schema retrieval",
+            env={
+                "LLM_PROVIDER": "qwen",
+                "QWEN_MODEL": "qwen3.7-max",
+                "SCHEMA_VECTOR_BACKEND": "inmemory",
+                "SCHEMA_EMBEDDING_PROVIDER": "deterministic",
+            },
+            suites=("formal", "challenge", "diagnostic"),
+        ),
     ]
     embedding = [
         Experiment(
