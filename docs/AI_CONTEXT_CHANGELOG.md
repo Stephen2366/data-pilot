@@ -12,6 +12,11 @@
 >
 > 未来新增记录优先使用这些标签；小修可以只写一段话，模块任务建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
 
+### [验收] M14-lite 验收通过（2026-07-28，报告 accept-M14-lite-20260728.md）
+
+- accept-module 全 7 项检查通过：废弃口径 2 处命中仅在 archive 归档文件属冻结历史；目录地图一致；进度状态一致（M14-lite 为 M8-M13 收口轻量补强，范围已在 changelog/dev-log 记载）；日志完整；注释合规（⚠️ RBAC admin 敏感字段改动建议补 inline 注释）；单一事实源 4 项一致；pytest 89 passed, 2 skipped, 1 warning。
+- 后续可进入阶段三 RAG / Hybrid。
+
 ### [小修] AI_CONTEXT 拆分为当前快照 + Changelog（2026-07-27）
 
 - 按用户确认，将 `docs/AI_CONTEXT.md` 的完整历史变更记录拆到 `docs/AI_CONTEXT_CHANGELOG.md`；`AI_CONTEXT.md` 保留当前状态、默认配置、最新基线、重要实验结论、活跃坑和 changelog 索引，减少后续 AI 续接时默认加载的历史上下文。
