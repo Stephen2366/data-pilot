@@ -13,6 +13,29 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M16 Trace 双写与降级（2026-07-28）
+
+- 改动范围：`engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、`tests/test_m16_trace_router.py`；临时验证素材写入 `.agent_work/temp/m16-notes.md`、`.agent_work/temp/smoke_m16_trace_double_write.py`、`.agent_work/temp/m16-double-write-traces.jsonl`、`.agent_work/temp/m16-eval-*`。
+- 关键记录：
+  - 用户确认采用方案 A：TraceRouter + JSONL 主路 + LangFuse 旁路 + flat spans；不在 M16 伪造嵌套 span 和真实时间线，RAG/Hybrid 阶段 pipeline 埋点下沉后再补。
+  - `append_trace(record, path=...)` 保持兼容入口，内部改为模块级 `TraceRouter`；新增 `build_trace_router(settings=None)` 和 `configure_trace_router(router)`，测试 / smoke 可在同一进程切换 LangFuse 开关。
+  - `TraceRecord` 新增 `langfuse_trace_id`、`langfuse_trace_url`、`langfuse_write_status=ok/skipped/failed`，字段只进入 JSONL，不进入 `/api/query` 的 `AgentResponse`。
+  - `LangFuseBackend` 使用 SDK 4.14.1 的 `start_observation(trace_context=...)` + `flush()`；成功时回填独立 32 位 hex `langfuse_trace_id`，异常由 router 捕获并标记 `failed`，JSONL 继续写入。
+  - Router 顺序为 `LangFuseBackend -> JSONLBackend`：这样 LangFuse 成功/失败后的映射字段能写入同一行 JSONL；LangFuse 异常不阻断后续 JSONL。
+  - Cloud payload 最小化：不上传完整 rows / docs，只上传 question、answer、安全状态、columns/tables、行数、step 摘要和 cost metadata。
+- 参考资料：
+  - 未浏览外部文档；实现依据 M15 本地 SDK 4.14.1 API smoke 结果和 `docs/phase3b-langfuse-plan-v6.md` 的 M16 设计。
+- 验证快照：
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m16_trace_router.py --basetemp=.agent_work/temp/pytest-m16-final-related`：6 passed，1 个既有 Starlette/httpx warning。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m5_agent_response.py tests\test_config.py --basetemp=.agent_work/temp/pytest-m16-related-1`：7 passed，1 个既有 Starlette/httpx warning。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\smoke_m16_trace_double_write.py`：真实 LangFuse + JSONL 双写通过，`langfuse_trace_id=e62319e3b05944ca90d4fbc6540cb5df`，`langfuse_write_status=ok`。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\check_m15_langfuse_visibility.py e62319e3b05944ca90d4fbc6540cb5df`：`visible_after_seconds=0.7`，`score_count=0`（M16 不写 score）。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --trace .agent_work/temp/m16-eval-traces.jsonl --report .agent_work/temp/m16-eval-report.md`：passed=6/6；抽查 JSONL 首行 `langfuse_trace_id=None`、`langfuse_write_status=skipped`。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m16-full-final-2`：96 passed, 2 skipped, 1 warning；warning 为既有 Starlette/httpx deprecation。一次 300s 全量复跑超时，420s 复跑通过，判定为耗时波动。
+- 遗留/后续：
+  - M17 接 Scorer 分层与 Score 回写，按 `langfuse_trace_id` 写 LangFuse score；M16 只写 trace，不写 score。
+  - LangFuse flat spans 暂不表达真实父子嵌套 / start-end 时间线；RAG/Hybrid 阶段补更细粒度 pipeline 埋点。
+
 ### [模块任务] M15 LangFuse Cloud 接入基线（2026-07-28）
 
 - 改动范围：`app/core/config.py`、`.env.example`、`pyproject.toml`、`tests/test_config.py`；临时验证素材写入 `.agent_work/temp/m15-notes.md`、`.agent_work/temp/smoke_m15_langfuse_sdk.py`、`.agent_work/temp/check_m15_langfuse_visibility.py`。

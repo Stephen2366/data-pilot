@@ -5,9 +5,9 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M16（待开发）
-- 下一模块：M17（待 M16 完成后进入）
-- 上一模块验收：M15 已验收（2026-07-28）
+- 当前模块：M17（待开发）
+- 下一模块：M18（待 M17 完成后进入）
+- 上一模块验收：M16 未验收（待 accept-module）
 - 阻塞项：无
 - 更新时间：2026-07-28
 
@@ -20,7 +20,7 @@
 - NL2SQL：M3 模板 SQL 优先；M4 起模板未命中时走 DeepSeek，Schema / KPI / few-shot 从 `domain_pack/` 加载
 - SQL 安全：sqlglot AST 只读检查 + 表级 RBAC + `users.email/users.phone` 敏感字段策略；安全能力不只靠 prompt
 - Agent 编排：先用普通 Python pipeline，不上复杂 LangGraph；字段按未来 graph state 预留；后续进入多步骤 Agent / RAG 编排时，可在不改响应契约的前提下迁移到 LangGraph。
-- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M15 已确认 LangFuse Cloud JP + SDK `4.14.1` 可作为可选旁路观测基线，后续 M16 才接入双写；JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalBench 平台
+- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M16 已接入 TraceRouter + 可选 LangFuseBackend，`LANGFUSE_ENABLED=true` 时先写 LangFuse flat spans、再写 JSONL 映射字段；JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalBench 平台
 - 图表：后端输出 Vega-Lite 兼容 `chart_spec`，当前仅覆盖基础 bar / line / horizontal_bar 和单指标柱图
 - 演示：M6 已提供 `demo/streamlit_app.py` 最小演示控制台，通过 HTTP 调用 `/api/query` 展示 answer / SQL / table / chart / trace
 
@@ -30,8 +30,8 @@
 
 - Schema Retrieval 默认：`inmemory + deterministic`；`milvus` / `siliconflow` / `dashscope(qwen3.7-text-embedding)` 只通过环境变量显式开启，不作为当前 Text2SQL 主线默认值。
 - SQL 安全默认：敏感字段优先于角色权限；`admin` 也不能通过 Text2SQL 直出 `users.email/users.phone`，后续如需查看应走脱敏 / 审计 / 专门接口。
-- Trace 默认：Agent Trace 写入 `eval/traces/traces.jsonl`；测试、smoke 和临时实验可改写到 `.agent_work/temp/`。
-- LangFuse 默认：`LANGFUSE_ENABLED=false`，`langfuse` 作为 `observability` optional extra 固定 `4.14.1`；DataPilot `trace_id` 不被 LangFuse 接管，LangFuse trace id 使用独立 `uuid4().hex`。
+- Trace 默认：Agent Trace 通过 `TraceRouter` 写入 JSONL；测试、smoke 和临时实验可用 `append_trace(path=...)` 或 `app.state.trace_path` 改写到 `.agent_work/temp/`。
+- LangFuse 默认：`LANGFUSE_ENABLED=false`，`langfuse` 作为 `observability` optional extra 固定 `4.14.1`；启用后 LangFuse 作为旁路写入 flat spans，DataPilot `trace_id` 不被接管，LangFuse trace id 使用独立 `uuid4().hex` 并回填 JSONL。
 - Eval 默认：formal / challenge 用于主线验收和回归对照；diagnostic 用于定位边界和下一步问题，不追满分。
 
 ### 最新评测基线

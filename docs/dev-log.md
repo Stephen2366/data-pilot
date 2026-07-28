@@ -338,7 +338,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 ```
 
-## ★ M4 NL2SQL 最小链路与安全（2026-07-20）
+## ★ ★ M4 NL2SQL 最小链路与安全（2026-07-20）
 
 **简述**：把 SQL 来源从固定模板扩展到 **DeepSeek LLM 生成**，但数据库执行前仍然必须经过同一个安全闸门。
 
@@ -507,7 +507,7 @@ M3 模板问题 —— 大致结果：`safety_status=passed`，`answer` 会提�
 }
 ```
 
-## ★ M5 AgentResponse 扩展、Trace、Tool 与图表（2026-07-20）
+## ★ ★ M5 AgentResponse 扩展、Trace、Tool 与图表（2026-07-20）
 
 **简述**：把 `/api/query` 从“能查出表格”升级成一个**可评测、可演示、可追踪**的结构化 Agent 输出。
 
@@ -1395,7 +1395,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_2_rea
 
 本章节没有 Swagger 页面；它的体验方式是对比报告。日常开发不需要启动 Milvus，也不需要调用 SiliconFlow。只有想验证真实向量检索时，才启动 Docker Milvus，并运行 `scripts/smoke_m9_2_real_embedding.py`。报告会写到 `.agent_work/temp/`，重点看 `merged_top30` 判断当前系统是否受益，看 `vector_only_top12` 判断 embedding 模型本身是否更强。
 
-## ★ M10 QueryPlanStep 与自检（2026-07-24）
+## ★ ★ M10 QueryPlanStep 与自检（2026-07-24）
 
 **简述**：M10 给 Text2SQL 加了一个 **SQL 生成前的结构化计划层**，像后端接口里的 DTO + Validator，先检查“准备查什么”是否合法，再交给后续 SQL 生成。M9 已经把问题相关的表、字段、Join 召回出来了，但如果让 LLM 直接拿着这些信息写 SQL，它仍可能编造不存在的字段、乱连表、或者在 SQL 里偷查敏感数据——这在代码里叫"幻觉"，在企业里叫"事故"。M10 的做法是：在 LLM 写 SQL 之前，先让它填一张"申请表"（QueryPlanStep），写明要查哪些表、用哪些字段、按什么 Join 条件、输出什么列；填完后系统逐项核对这张申请表是否都在 M9 的合法"菜单"里。整个过程相当于后端接口收到请求后先做参数校验——没通过就不往下走，通过了才交给 M11 生成 SQL。
 
@@ -1509,7 +1509,7 @@ git diff --check
 
 本模块暂无独立 Swagger 或页面入口，因为 M10 还没有接入 `/api/query`。学习体验建议直接读 `tests/test_phase3a_planner.py`：它就是一组可运行的小样例，展示合法计划如何通过，以及缺字段、非法 Join、敏感字段、多 SQL step 会怎样被拦截。M11 接入 pipeline 后，才会出现通过 API 强制走新 Text2SQL 链路的体验流程。
 
-## ★ M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
+## ★ ★ M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
 
 **简述**：M11 把 M9 的 **Schema Retrieval / JoinPath**、M10 的 **QueryPlanStep 自检** 和 M5 的 **SQL Tool / Trace** 串成了一条真正能从 `/api/query` 触发的新 Text2SQL 链路。
 
@@ -2078,3 +2078,98 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 **本地启动体验：**
 
 M15 暂无新的 API 端点或页面，因为它只完成 LangFuse 接入基线。可交互体验在 LangFuse Cloud UI：用 smoke 输出的 trace URL 打开后，应能看到 `datapilot-m15-cloud-smoke-20260728T144148Z` 这条 trace 和 `rule:m15_smoke` score。真正从 `/api/query` 自动写 LangFuse trace，要等 M16。
+
+## ★ M16 Trace 双写与降级（2026-07-28）
+
+**简述**：M16 把原来“只能写 JSONL 文件”的 trace recorder，升级成 **TraceRouter + 多后端写入**。默认仍然只写 JSONL；只有 `LANGFUSE_ENABLED=true` 时，才额外写入 LangFuse。这个模块的核心不是炫技，而是把可观测系统做成 **旁路增强**：它能帮我们看 trace，但不能绑架 `/api/query`、JSONL 和 eval。
+
+### 这次做了什么
+
+这次先保留了老入口 `append_trace(record, path=...)`。旧代码、测试和 eval 不需要知道内部已经换成了 router；它们继续传临时 trace 路径，JSONL 仍然写到指定文件。
+
+然后新增了 **TraceRouter**：它按顺序调用多个 backend。启用 LangFuse 时，顺序是 `LangFuseBackend -> JSONLBackend`，这样 LangFuse 成功或失败后的 `langfuse_trace_id`、`langfuse_trace_url`、`langfuse_write_status` 能一起写进 JSONL。即使 LangFuse 报错，router 也只记录 warning，并继续写 JSONL。
+
+最后新增了 **LangFuseBackend**。它按 M15 确认的 SDK 4.14.1 API 写入 `start_observation(trace_context=...)`，每条请求生成一个独立的 32 位 hex LangFuse trace id。DataPilot 自己的 `trace_id` 继续作为主 ID，只放进 LangFuse metadata 做反查。
+
+### 新概念
+
+- **TraceRouter**：像一个分发器。业务代码只把 trace 交给它，它再决定写 JSONL、写 LangFuse，未来也可以写 SQLite 或 EvalBench。
+- **Backend 协议**：这里用 `TraceBackend` 描述“只要有 `record()` 方法，就能接进 router”。类比 Java 里的 interface，调用方依赖接口，不依赖具体实现。
+- **旁路降级**：LangFuse 是增强能力，不是主系统的生命线。Cloud 不通、key 错、SDK 出问题时，API 不能 500，JSONL 也不能丢。
+- **Flat spans**：M16 只把每个 `TraceStep` 平铺到同一个 LangFuse trace 下，不做父子嵌套。因为当前 trace 是请求结束后一次性生成，没有真实 started_at / ended_at，硬做时间线会变成伪数据。
+
+### 关键文件
+
+- `engine/trace/recorder.py`：Trace 数据模型、JSONLBackend、TraceRouter、router 构建和 `append_trace()` 兼容入口。
+- `engine/trace/langfuse_backend.py`：LangFuse SDK 延迟导入、flat span 写入、flush 和映射字段回填。
+- `tests/test_m16_trace_router.py`：覆盖 path override、router 重置、LangFuse 失败降级、fake client 成功路径和 API 响应契约。
+- `.agent_work/temp/m16-notes.md`：记录用户确认的方案 A、双写 smoke、eval 路径覆盖和全量测试结果。
+
+### 代码阅读路线
+
+1. **兼容入口**：`engine/trace/recorder.py`
+   从 `append_trace()` 开始读。它现在很薄，只把 record 交给模块级 `trace_router`。然后看 `build_trace_router()`：默认只加 `JSONLBackend`；如果 `settings.langfuse_enabled` 为 true，才延迟导入并追加 `LangFuseBackend`。
+
+2. **降级逻辑**：`TraceRouter.record()`
+   重点看 `try/except`。每个 backend 独立执行，一个失败不会阻断另一个。LangFuse backend 失败时会把 `langfuse_write_status` 标成 `failed`，这样 JSONL 里能看出“请求成功了，但旁路观测失败了”。
+
+3. **Cloud 写入**：`engine/trace/langfuse_backend.py`
+   先看 `record()`：生成 `uuid4().hex` 作为 LangFuse trace id，写一个 `datapilot-query` root span，再把 `trace_steps` 平铺成 step spans，最后 `flush()`。读的时候别纠结 UI 里 trace name 的细节，M16 的重点是 ID 映射和降级。
+
+4. **测试证明**：`tests/test_m16_trace_router.py`
+   可以按风险读：默认关闭时 path override 不变；LangFuse 抛异常时 JSONL 还在；缺 key 时降级；fake client 成功时能看到 flat spans；API body 不出现 LangFuse 内部字段。
+
+核心流向：
+
+`/api/query`
+→ `_record_trace()`
+→ `append_trace()`
+→ `TraceRouter`
+→ `LangFuseBackend（可选）`
+→ `JSONLBackend`
+
+### 设计要点
+
+- **为什么 LangFuse 先写、JSONL 后写**：不是让 LangFuse 变主路，而是为了让 JSONL 同一行能记录 LangFuse 的成功/失败状态和 trace id。LangFuse 失败会被捕获，JSONL 仍继续写。
+- **为什么不做嵌套 span**：当前没有真实时间线，只有 post-hoc trace 快照。为了 UI 好看而伪造嵌套，会让后续排障误判。
+- **为什么字段只进 JSONL 不进 API**：`langfuse_trace_id` 是观测系统内部映射，不是业务响应契约。API 用户只需要 DataPilot `trace_id`。
+- **Cloud payload 最小化**：不上传完整 rows / docs，只上传摘要和计数，避免 Cloud trace 变成业务数据副本。
+
+### 面试怎么讲
+
+“M16 我把 trace recorder 从单一 JSONL 写入重构成 TraceRouter 架构，但没有改变业务入口和 API 响应。`append_trace(record, path=...)` 仍然兼容旧调用；默认只写 JSONL，启用 LangFuse 时才额外写入 Cloud。LangFuse 失败会被捕获并标记 `langfuse_write_status=failed`，JSONL 仍然落盘。为了避免第三方系统接管内部契约，我保留 DataPilot 自己的 `trace_id`，单独生成 LangFuse trace id，并把映射写进 JSONL。这个模块体现的是我引入可观测平台时，优先考虑兼容性、降级和数据边界，而不是只追求 UI 上能看到 trace。”
+
+1. **面试官可能问：TraceRouter 有什么价值？**
+   可以答：它把“业务生成 trace”和“trace 写到哪里”解耦。今天写 JSONL + LangFuse，明天接 EvalBench 或 SQLite，不需要改 `/api/query`。
+
+2. **面试官可能问：LangFuse 挂了怎么办？**
+   可以答：router 捕获 backend 异常，标记 `failed`，继续写 JSONL；API 不返回 500，eval 也不受影响。
+
+3. **面试官可能问：为什么不上传完整 rows？**
+   可以答：Cloud 可观测系统不应该成为敏感业务数据的副本。M16 只传摘要、计数、表名、列名和步骤信息，完整数据仍留在本地 JSONL。
+
+### 验证与下一步
+
+- 验证：M16 专项 **6 passed**；M5/config 相关回归 **7 passed**；eval smoke **6/6 passed**；真实 LangFuse + JSONL 双写 smoke `langfuse_write_status=ok`；全量 pytest **96 passed, 2 skipped**。
+- warning：仍是既有 Starlette/httpx deprecation，不影响 M16。
+- 下一步：M17 做 Scorer 分层与 LangFuse Score 回写，按 M16 写入的 `langfuse_trace_id` 关联分数。
+
+可复制验证命令：
+
+```powershell
+# M16 trace router 专项，预期 6 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m16_trace_router.py --basetemp=.agent_work\temp\pytest-m16-final-related
+
+# 真实 LangFuse + JSONL 双写 smoke，预期 langfuse_write_status=ok。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\smoke_m16_trace_double_write.py
+
+# eval 路径覆盖，预期 passed=6/6，trace 写入指定 .agent_work/temp 文件。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --trace .agent_work\temp\m16-eval-traces.jsonl --report .agent_work\temp\m16-eval-report.md
+
+# 全量验证，预期 96 passed, 2 skipped。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work\temp\pytest-m16-full-final-2
+```
+
+**本地启动体验：**
+
+M16 没有新增 API 端点，体验入口仍是 `/api/query` 和 trace 文件。默认 `LANGFUSE_ENABLED=false` 时，请求只写 JSONL；如果本地 `.env` 开启 LangFuse 并配置 key，请求会额外写入 LangFuse Cloud，同时 JSONL 行里出现 `langfuse_trace_id`、`langfuse_trace_url`、`langfuse_write_status`。实际业务 API 响应体不会出现这些字段。

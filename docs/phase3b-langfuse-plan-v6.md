@@ -310,13 +310,16 @@ def append_trace(record: TraceRecord, *, path: Path = DEFAULT_TRACE_PATH) -> Tra
 
 ## 模块划分说明
 
-Phase 3B 从 `M15` 开始编号。本阶段不再按 6 个细碎 step 写 dev-log，而是压成 4 个能独立学习、实现、验证和复盘的模块。v6 默认使用 LangFuse Cloud 做最小验证，避免被本地 self-host 的 Docker / ClickHouse / Redis / MinIO 运维细节拖偏；自部署只做资料记录和迁移风险分析，正式落地留给 EvalBench。
+Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 dev-log，而是压成 4 个能独立学习、实现、验证和复盘的模块。v6 默认使用 LangFuse Cloud 做最小验证，避免被本地 self-host 的 Docker / ClickHouse / Redis / MinIO 运维细节拖偏；自部署只做资料记录和迁移风险分析，正式落地留给 EvalBench。
+
+> 2026-07-29 补充：M16 的 post-hoc flat spans 足够验证 LangFuse 的接入、双写、降级和 Score/Experiment 关联，但不足以充分验证“排障观测体验”。因此新增 **M16B Trace Lifecycle 下沉预备分支**：它不阻塞 M17/M18 主线验收，单独作为后续 RAG/Hybrid 观测底座的架构对照实验。
 
 模块拆分原则：
 
 - 每个模块结束时只写一段 dev-log 复盘，避免把配置、脚手架、smoke 小步骤拆成一堆学习日志。
 - M15 先钉 Cloud / SDK / ID 策略，因为 LangFuse 接入最容易踩在版本 API 和 trace id 语义上。
 - M16 单独做 trace 双写，因为这是“不破坏原 JSONL 主链路”的核心风险面。
+- M16B 作为并行预备分支，不替换 M16 主线：目标是把 trace lifecycle 下沉到 pipeline 执行层，验证真实层级 span / 异常路径 / 观测排障价值是否值得作为后续底座。
 - M17 合并 L1/L2/L3 scorer 和 Score 回写，因为它们共同回答“怎么评测、怎么把分数送到 LangFuse”。
 - M18 合并 smoke、手动 Experiment 和文档收尾，因为这些都是阶段闭环材料，不单独拆模块。
 
@@ -326,6 +329,7 @@ Phase 3B 从 `M15` 开始编号。本阶段不再按 6 个细碎 step 写 dev-lo
 |------|------|------|----------|----------|
 | M15 LangFuse Cloud 接入基线 | 1 | Phase 3A / M14-lite 收口 | 纳入配置、复跑 Cloud SDK smoke、固定 `datapilot_trace_id` / `langfuse_trace_id` 双 ID 策略、验证 `langfuse` 依赖可选 | Settings / `.env.example`、`.agent_work/temp/m15-notes.md`、ID 策略记录 |
 | M16 Trace 双写与降级 | 2 | M15 | 保留 JSONL 主链路，新增 LangFuse 旁路写入和 payload 脱敏；LangFuse 失败不影响 `/api/query` / eval | `engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、双写 / 降级测试 |
+| M16B Trace Lifecycle 下沉预备分支 | 2B（并行，不阻塞主线） | M16 | 在独立 `M16B` 分支上把 trace start/end/fail lifecycle 下沉到 Text2SQL pipeline，验证是否适合作为 RAG/Hybrid 观测底座 | `engine/trace/lifecycle.py`（拟新增）、`engine/nl2sql/pipeline.py`、lifecycle 测试、A/B 观测对照记录 |
 | M17 Scorer 分层与 Score 回写 | 3 | M16 | 把现有规则评分迁移为单一事实源，补最小 L3 judge，并按 `langfuse_trace_id` 写回 LangFuse Score | `eval/scorers/*`、`eval/run_eval.py`、score 回写测试 |
 | M18 Smoke / Experiment / 阶段收尾 | 4 | M17 | 一键 smoke、5 条代表性 case 手动 Experiment、阶段档案和学习复盘收尾 | `scripts/smoke_phase3b_langfuse.py`、Experiment 记录、`AI_CONTEXT.md` / CHANGELOG / dev-log |
 
@@ -439,6 +443,139 @@ langfuse_write_status: Literal["ok", "skipped", "failed"] = "skipped"
 - `eval/run_eval.py --trace .agent_work/temp/<name>.jsonl` 仍写到指定路径，不污染默认 `eval/traces/traces.jsonl`
 - LangFuse 挂了：JSONL 仍正常写入，API 不返回 500
 - 已有测试全部通过（`pytest tests/ -x`）
+
+## M16B：Trace Lifecycle 下沉预备分支（并行，不阻塞主线）
+
+**定位**：M16B 是从 M16 主线切出的架构对照分支，用来验证“pipeline 执行层实时埋点”是否值得作为后续 RAG / Hybrid / Agent 观测底座。它不替代 M16，也不阻塞 M17 / M18；主线继续用 M16 的 TraceRouter + post-hoc flat spans 完成 Phase 3B trace → score → experiment 闭环。
+
+> ★ 关键判断：如果只是验证 LangFuse Cloud 接入，M16 的 post-hoc flat spans 已经够；如果要验证 LangFuse 的排障观测价值，以及为后续 RAG/Hybrid 做底座，只挑 `force_new_pipeline` 的 3-5 个 span 不够。M16B 应该做轻量但正式的 Trace lifecycle 抽象，再让 Text2SQL pipeline 作为第一个接入方。
+
+### M16B-0：分支与范围
+
+**操作要点**：
+
+- 从 M16 完成后的工作状态切独立分支：建议分支名 `M16B`（或按工具约定使用 `codex/M16B`），主线不在该分支上继续做 M17 / M18。
+- M16B 只做观测底座对照，不新增 scorer / score 回写，不改 M17/M18 主线验收口径。
+- M16B 完成后与 M16A 主线做 A/B 对照，记录：
+  - LangFuse UI 排障体验是否明显提升
+  - 代码侵入度和测试复杂度是否可接受
+  - JSONL 与 LangFuse step 口径是否一致
+  - 后续 RAG/Hybrid 是否值得基于 M16B 继续演进
+
+**非目标**：
+
+- 不把 LangFuse SDK 直接散落到 pipeline 业务代码里
+- 不建设完整跨项目 tracing SDK
+- 不在 DataPilot 内做 EvalBench 平台化能力
+- 不要求在 M16B 中完成 RAG/Hybrid，只为后续阶段建立 lifecycle seam
+
+### M16B-1：Trace Lifecycle 抽象
+
+**目标**：新增 DataPilot 自己的 trace lifecycle 层，让业务 pipeline 只依赖项目内接口，而不是直接依赖 LangFuse SDK 或 JSONL 写入细节。
+
+**拟改动文件**：
+
+1. `engine/trace/lifecycle.py`（新文件，建议）：
+   - 定义 `TraceContext` / `SpanRecorder` / `SpanHandle` 或等价轻量抽象
+   - 支持：
+
+```python
+trace_context.start_span(name, step_type, input_summary="", metadata=None)
+span.end(output_summary="", metadata=None)
+span.fail(error_type, message, metadata=None)
+```
+
+   - 支持 context manager 用法，确保异常时 span 自动 close：
+
+```python
+with trace_context.span("sql_generation", step_type="llm") as span:
+    ...
+    span.end(output_summary="generated_sql")
+```
+
+   - 每个 span lifecycle 同时产出：
+     - JSONL 需要的 `TraceStep`
+     - LangFuse 需要的 observation/span 事件
+   - LangFuse 写入失败不得影响业务执行；失败状态进入 trace metadata 或 lifecycle 状态
+
+2. `engine/trace/recorder.py`：
+   - 继续保留 M16 的 `TraceRouter` / `append_trace()` 兼容入口
+   - M16B 不删除 post-hoc TraceRecord 写入，避免 eval / JSONL 主链路断开
+   - 如需新增 lifecycle-aware backend，只能作为内部扩展，不改变 `/api/query` 响应契约
+
+3. `engine/trace/langfuse_backend.py`：
+   - 复用 M16 的 SDK 延迟导入、双 ID 策略、flush 语义
+   - 如果 lifecycle 层需要实时 start/end span，封装在 DataPilot adapter 内，业务 pipeline 不直接 import `langfuse`
+
+**关键设计决策**：
+
+- ★ lifecycle 抽象是 DataPilot 的边界，不是 LangFuse 的边界。业务层只说“开始/结束一个步骤”，不关心最终写入 LangFuse、JSONL 还是 EvalBench。
+- ★ JSONL 和 LangFuse 必须共用同一套 step lifecycle，避免出现两套 trace 口径：一个 step 在 JSONL 叫 `sql_generation`，LangFuse 里叫 `llm_sql_generator`。
+- ★ lifecycle 层必须优先保证业务不中断：span start/end/fail 任一步失败，都不能改变 pipeline 的 SQL 生成、Guard、执行结果。
+
+### M16B-2：完整接入 Text2SQL pipeline
+
+**目标**：不是只补 3-5 个示意 span，而是让当前新 Text2SQL pipeline 的主要步骤都通过 lifecycle 生成 trace。
+
+**优先接入范围**：
+
+- pipeline root：一次 `force_new_pipeline` 请求的整体 span
+- `schema_retrieval`：schema 检索、候选表/字段数量、profile、backend
+- `join_path`：join path 推断结果、候选关系数
+- `query_plan`：QueryPlan 生成 / 校验 / blocked 原因
+- `sql_generation`：SQL 生成成功/失败、raw preview、parse error
+- `sql_guard`：只读检查、RBAC、敏感字段拦截、blocked reason
+- `sql_execution`：执行耗时、表名、列名、行数，不上传完整 rows
+- `chart_generation`：图表 mark、x/y 字段、是否 skipped
+- error / blocked path：LLM 失败、plan validation failed、SQL Guard blocked、tool error 都必须 close span
+
+**拟改动文件**：
+
+- `engine/nl2sql/pipeline.py`
+  - 把当前手工 append `TraceStep(...)` 的位置逐步迁移到 lifecycle
+  - 保留返回 `pipeline_result.trace_steps`，确保 `/api/query`、eval 和 JSONL 消费方不变
+- `app/api/query.py`
+  - 如需传入 `trace_context`，只在 `force_new_pipeline` 分支接入；旧模板链路暂不强行改
+  - 不新增 `AgentResponse` 字段
+
+**验收**：
+
+- 成功路径：LangFuse UI 能看到 root span + 主要 step spans，并且 JSONL `trace_steps` 与 LangFuse step 名称一致
+- blocked 路径：SQL Guard / plan validation blocked 时 span 正常 close，JSONL 仍有完整 `error_type` / `blocked_reason`
+- LLM 失败路径：span 记录 `raw_response_preview` / `parse_error` 等已有 M14-lite trace 信息，不因异常丢失后续 JSONL
+- `LANGFUSE_ENABLED=false` 时，lifecycle 仍能产出 JSONL trace_steps，不要求安装或调用 LangFuse
+- `LANGFUSE_ENABLED=true` 且 Cloud 不可用时，业务请求不 500，JSONL 仍写入，LangFuse failure 可诊断
+
+### M16B-3：A/B 对照与采用决策
+
+**目标**：用同一批 case 对比 M16A 与 M16B，不靠主观感觉决定是否把 M16B 合回后续主线。
+
+**建议对照集**：
+
+- 3 条成功路径：
+  - 单表聚合
+  - 多表 join
+  - 带 chart 的聚合题
+- 3 条异常 / blocked 路径：
+  - 危险 SQL / prompt injection
+  - 敏感字段查询
+  - LLM 生成失败或 plan validation failed（可用 mock / monkeypatch 制造）
+
+**对照维度**：
+
+| 维度 | M16A post-hoc flat spans | M16B lifecycle spans | 结论记录 |
+|------|--------------------------|----------------------|----------|
+| LangFuse UI 是否能快速定位慢步骤 | 待测 | 待测 | 写入 `.agent_work/temp/m16b-notes.md` |
+| blocked / error path 是否完整 | 待测 | 待测 | 写入 `.agent_work/temp/m16b-notes.md` |
+| JSONL 与 LangFuse step 口径是否一致 | 待测 | 待测 | 写入 `.agent_work/temp/m16b-notes.md` |
+| 代码侵入度 | 低 | 待评估 | 统计改动文件和关键函数 |
+| 测试复杂度 | 低 | 待评估 | 统计新增测试和 mock 边界 |
+
+**合入建议标准**：
+
+- 如果 M16B 明显提升 UI 排障体验，且 lifecycle 抽象没有把 LangFuse SDK 泄漏进业务层，则可作为 RAG/Hybrid 前的推荐底座。
+- 如果 M16B 只带来 UI 层轻微改善，却显著增加 pipeline 复杂度，则主线保持 M16A，等 RAG/Hybrid 真正出现多步骤分支后再做下沉。
+- 无论是否合入，M16B 的实验结论都写入 `AI_CONTEXT_CHANGELOG.md`；影响路线的摘要同步到 `AI_CONTEXT.md`。
 
 ## M17：Scorer 分层与 Score 回写
 
@@ -820,8 +957,8 @@ EvalBench 不应该直接照搬 DataPilot 内部业务代码，而应复用本�
 
 | 简化方案 | 预留接口/字段 | 后续何时补 |
 |----------|-------------|-----------|
-| LangFuse Span 先不完美映射 TraceStep 的嵌套关系 | `TraceStep.parent_step_id` 保留 | RAG/Hybrid 阶段 pipeline 变复杂后补 DAG 化 span |
-| LangFuse Span 先不伪造精确 start/end 时间 | `TraceStep.latency_ms` 放 metadata | 后续 trace 埋点下沉到 pipeline 执行过程后补真实时间线 |
+| LangFuse Span 先不完美映射 TraceStep 的嵌套关系 | `TraceStep.parent_step_id` 保留；M16B 可在分支验证 Trace lifecycle 下沉 | M16B 对照通过后作为 RAG/Hybrid 前底座；否则 RAG/Hybrid 阶段再补 DAG 化 span |
+| LangFuse Span 先不伪造精确 start/end 时间 | `TraceStep.latency_ms` 放 metadata；M16B 可验证真实 start/end lifecycle | M16B 对照通过后合入后续底座；否则后续 pipeline 埋点下沉时再补真实时间线 |
 | L3 Hallucination/Faithfulness 可能直接复用 LangFuse 内置评估器 | 自定义 prompt 模板作为 fallback | M17-1 调研后决定 |
 | 评分结果回写 LangFuse Score 先走同步调用 | 预留 `async_score()` 方法签名 | 如果评分数量上到 50+ 条且延迟显著，再补异步批量写入 |
 | Experiment 只做手动验证，不做 API 自动化 | 实验结论记录在 m18-notes.md | EvalBench 项目启动后补 Experiment SDK 自动化 |
@@ -833,6 +970,7 @@ EvalBench 不应该直接照搬 DataPilot 内部业务代码，而应复用本�
 Phase 3B 完成后，后续阶段的受益：
 
 - **Phase 3B.1 工具调用容错与重试（可选轻量阶段）**：基于 Phase 3B 的 LangFuse trace 数据，分析当前工具调用失败模式，实现或整理 `ToolResult` 统一结构（status 分类、error_type、是否可重试、重试次数、降级原因），成为面试中回答“工具调用失败怎么办”的直接素材。它不是 Phase 3B 主验收项，只在 trace 暴露出足够失败样本时执行。
+- **M16B Trace Lifecycle 下沉预备分支（并行对照）**：如果用户要验证 LangFuse 的真实排障观测价值，先在独立 M16B 分支做 lifecycle 下沉，而不是等 RAG/Hybrid 一口气叠加检索、生成、工具、judge 等复杂度。M16B 不阻塞 M17/M18 主线；它的产出用于决定后续 RAG/Hybrid 是否采用 lifecycle 底座。
 - **Phase 3 RAG（检索增强生成）**：LangFuse 上看 retrieval span → generation span 的全链路；L1/L2/L3 评分器已就绪，RAG 专用评分器（faithfulness、context_relevancy）可直接启用。⚠️ 同行踩坑预警：retrieval recall 评测时，开源数据集的 reference text 和自己切片后的 chunk 粒度不一致，容易误判 miss。Phase 3 RAG 应设计 **coverage 指标**（将 reference 按句子拆分，计算 chunk 对 reference 的覆盖度）作为 L1 规则评分器，不做 LLM judge
 - **Phase 3 Hybrid（混合推理）**：多步 Agent 的每一步都是独立 span，debug 时不用翻 JSONL
 - **EvalBench（独立评测平台）**：吸收 LangFuse Cloud 接入经验、Trace Backend 抽象、Scorer 模块、Experiment 结论和后续 self-host 部署经验，但重新设计成通用框架：adapter 接入多个 Agent、统一 case / run / scorer / report / experiment 管理，从"只测 DataPilot"升级为"可测多个 Agent 项目"
@@ -840,6 +978,19 @@ Phase 3B 完成后，后续阶段的受益：
 ---
 
 ## 修订记录
+
+### v6.1（2026-07-29）—— M16B Trace Lifecycle 下沉预备分支
+
+依据：M16 的 post-hoc flat spans 足以验证 LangFuse 接入、双写、降级、Score/Experiment 关联，但不足以充分验证“LangFuse 作为排障观测底座”的价值。若等到 RAG/Hybrid 再首次下沉埋点，会把 trace lifecycle 设计问题和 RAG 本身复杂度混在一起。
+
+| 改动 | 说明 |
+|------|------|
+| 新增 M16B 并行分支 | M16B 不阻塞 M17/M18 主线，作为 Trace lifecycle 下沉和观测体验对照实验 |
+| M16B 目标从“3-5 个 span spike”升级为底座验证 | 明确只挑少数 span 不足以服务后续 RAG/Hybrid；应新增 DataPilot 自己的 `TraceContext/SpanRecorder` 抽象 |
+| 规定 SDK 边界 | pipeline 业务代码不得直接 import `langfuse`；只依赖 DataPilot trace lifecycle 接口 |
+| 规定完整 Text2SQL 接入范围 | 覆盖 pipeline root、schema_retrieval、join_path、query_plan、sql_generation、sql_guard、sql_execution、chart_generation 和 error/blocked path |
+| 规定 A/B 采用标准 | 对比 M16A post-hoc flat spans 与 M16B lifecycle spans 的 UI 排障价值、口径一致性、代码侵入度和测试复杂度 |
+| 更新 P1 和后续衔接 | 把真实嵌套 span / start-end 时间线从“只等 RAG/Hybrid 后补”调整为“可先由 M16B 分支验证，验证通过再作为后续底座” |
 
 ### v6（2026-07-28）—— 双 ID 边界与模块粒度收敛
 
