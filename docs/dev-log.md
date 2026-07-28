@@ -1999,3 +1999,82 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_ex
 # Qwen max 单独 diagnostic，结果本轮为 22/32。
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_experiments.py --group main --experiment main-qwen37-max --suite diagnostic
 ```
+
+## ★ M15 LangFuse Cloud 接入基线（2026-07-28）
+
+**简述**：M15 是 Phase 3B 的第一块地基：先确认 **LangFuse Cloud、Python SDK、配置入口和 trace id 边界** 都可靠，再让后续 M16 去做真正的 JSONL + LangFuse 双写。它没有改 `/api/query`，也没有替代现有 JSONL trace，而是把“能不能安全接入 LangFuse”这件事先钉牢。
+
+### 这次做了什么
+
+这次先用 `.env` 里已有的 LangFuse Cloud key 复跑了 SDK smoke：创建一条观察 span，按 LangFuse trace id 写入一条 score，调用 `flush()`，再用 SDK 查询确认 trace 和 score 已经能在 Cloud 侧读到。本轮 trace id 是 `a5b22262bb154b3a9b08b0b09b5f8cc5`，查询可见约 `0.6s`。
+
+然后把 LangFuse 配置正式纳入 `Settings` 和 `.env.example`：默认 `LANGFUSE_ENABLED=false`，也就是说项目原来的 API、JSONL trace、eval 报告不会因为 LangFuse 没装、没开或 Cloud 不通而受影响。`langfuse==4.14.1` 被放进 `observability` optional extra，后续需要观测能力时再显式安装。
+
+最后清理了遗留 LangSmith 配置字段。Phase 3B 当前路线只做 LangFuse，不保留两套 tracing 配置入口，避免以后排查“到底哪个系统在接管 trace”时绕晕。
+
+### 新概念
+
+- **旁路观测**：LangFuse 在这里不是主链路，而是像“额外抄送一份运行记录”。主路仍是 JSONL；LangFuse 挂了，主系统继续跑。
+- **optional extra**：Python 项目里的一种可选依赖分组。`pip install -e .[observability]` 才安装 LangFuse SDK，普通开发和测试不用被外部观测依赖绑住。
+- **双 ID 策略**：DataPilot 自己的 `trace_id` 继续服务 API、日志、JSONL 和 eval；LangFuse 使用独立 `langfuse_trace_id`。这类似业务订单号和第三方支付流水号，两个都重要，但不能混成一个。
+- **flush 语义**：`flush()` 代表 SDK 把事件送到 LangFuse API，不保证 UI 或查询立刻同步完成。所以 smoke 需要允许短暂 ingestion 延迟，而不是看到一秒内查不到就判失败。
+
+### 关键文件
+
+- `app/core/config.py`：新增 LangFuse 和 L3 judge 的统一配置入口，删除 LangSmith 遗留字段。
+- `.env.example`：新增 LangFuse Cloud 和 `EVAL_JUDGE_MODEL` 模板，真实 key 仍只放本地 `.env`。
+- `pyproject.toml`：新增 `observability` optional extra，固定 `langfuse==4.14.1`。
+- `tests/test_config.py`：验证默认关闭、Cloud/self-host URL 可配置、judge model 可读取。
+
+### 代码阅读路线
+
+1. **配置入口**：`app/core/config.py`
+   先看 `Settings` 的“可观测性配置”和“Eval Judge 配置”。重点理解 `LANGFUSE_ENABLED=false` 为什么是默认值：Phase 3B 要证明 LangFuse 可用，但不能让它成为生产强依赖。
+
+2. **依赖边界**：`pyproject.toml`
+   看 `[project.optional-dependencies]` 里的 `observability`。它把 LangFuse SDK 和核心依赖分开，后续 M16 写 backend 时也要保持延迟导入，避免默认链路被可选依赖拖住。
+
+3. **本地验证素材**：`.agent_work/temp/m15-notes.md`
+   这里是 M16 最应该先读的材料：SDK 4.14.1 没有旧版 `client.trace()`，要用 `start_observation(trace_context=...)`；LangFuse trace id 要用 32 位小写 hex。
+
+### 设计要点
+
+- **不让 LangFuse 接管 DataPilot trace_id**：这是 M15 最重要的边界。API 响应、响应头、JSONL、eval 报告都继续用 DataPilot 自己的 trace id；LangFuse id 只服务 Cloud trace 和 score。
+- **不提前做 M16 双写**：M15 只做 Cloud / SDK / Settings 基线。真正把请求 trace 写到 LangFuse，会触及 payload 脱敏、失败降级和 JSONL 兼容，留到 M16 单独做。
+- **不做 self-host**：Cloud 已能验证 trace / score 能力；自部署组件较重，留给后续 EvalBench 阶段更合理。
+
+### 面试怎么讲
+
+“M15 我没有一上来就把 LangFuse 接进业务请求，而是先做 observability 的接入基线：确认 Cloud key、SDK 版本、span 写入、score 写入和 flush 都可用；同时明确 DataPilot 的 trace_id 不被 LangFuse 接管，LangFuse 用独立 32 位 hex id，并通过 metadata 建立映射。依赖上我把 `langfuse==4.14.1` 放到 optional extra，默认 `LANGFUSE_ENABLED=false`，保证观测系统不可用时不影响主链路。这体现的是我在引入外部平台时，会先守住响应契约、依赖边界和故障降级，而不是为了可视化把核心链路绑死。”
+
+1. **面试官可能问：为什么不用同一个 trace_id？**
+   可以答：DataPilot trace id 已经服务 API、日志、JSONL 和 eval，语义稳定；LangFuse SDK 对 trace id 格式有要求。分成两个 ID 后，既能映射，又不会让第三方系统改变内部契约。
+
+2. **面试官可能问：为什么 LangFuse 放 optional extra？**
+   可以答：可观测性是增强能力，不应该成为默认运行依赖。这样本地测试、CI 或 Cloud 不可用时，原系统仍然能跑。
+
+### 验证与下一步
+
+- 验证：LangFuse Cloud smoke PASS；trace 查询约 `0.6s` 可见；配置单测 **4 passed**；全量 pytest **90 passed, 2 skipped**。
+- warning：仍是既有 Starlette/httpx deprecation，不影响 M15。
+- 下一步：M16 做 Trace 双写与降级，重点是保留 JSONL 主链路、LangFuse 失败不影响 `/api/query` / eval，并处理 Cloud payload 脱敏。
+
+可复制验证命令：
+
+```powershell
+# LangFuse SDK smoke，预期 auth / observation / score / flush 全部 PASS。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\smoke_m15_langfuse_sdk.py
+
+# 查询本次 smoke trace 的可见性，预期能看到 visible_after_seconds 和 score_count=1。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\check_m15_langfuse_visibility.py a5b22262bb154b3a9b08b0b09b5f8cc5
+
+# 配置单测，预期 4 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_config.py --basetemp=.agent_work\temp\pytest-m15-config
+
+# 全量验证，预期 90 passed, 2 skipped。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work\temp\pytest-m15-full-2
+```
+
+**本地启动体验：**
+
+M15 暂无新的 API 端点或页面，因为它只完成 LangFuse 接入基线。可交互体验在 LangFuse Cloud UI：用 smoke 输出的 trace URL 打开后，应能看到 `datapilot-m15-cloud-smoke-20260728T144148Z` 这条 trace 和 `rule:m15_smoke` score。真正从 `/api/query` 自动写 LangFuse trace，要等 M16。

@@ -24,11 +24,11 @@ description: 项目模块验收门禁，在收工整理和用户人工检查之�
 ```bash
 rg -n -f .claude/skills/accept-module/deprecated-terms.txt --hidden \
    -g '!.git' -g '!dev-log.md' -g '!AI_CONTEXT.md' -g '!AI_CONTEXT_CHANGELOG.md' -g '!CLAUDE.md' \
-   -g '!.agent_work/**' -g '!.claude/skills/accept-module/**' .
+   -g '!.agent_work/**' -g '!docs/archive-dormant/**' -g '!docs/archive-versions/**' -g '!.claude/skills/accept-module/**' .
 ```
 
 - 无输出（exit code 1）= ✅；有命中 = ❌，逐条列出 `文件:行` 与命中内容。
-- 排除原因：dev-log.md 的旧日志、AI_CONTEXT.md / AI_CONTEXT_CHANGELOG.md 的「历史档案」「历史补充」是冻结的旧记录（AI_CONTEXT「当前状态」「已知的坑」的时效性由检查 3 兜底）；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
+- 排除原因：dev-log.md 的旧日志、AI_CONTEXT.md / AI_CONTEXT_CHANGELOG.md 的「历史档案」「历史补充」是冻结的旧记录（AI_CONTEXT「当前状态」「已知的坑」的时效性由检查 3 兜底）；`docs/archive-dormant/` 和 `docs/archive-versions/` 是冻结历史文档，引用的旧路径/旧口径不代表当前项目；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
 - rg 默认跳过 .gitignore 覆盖的文件。若本次模块改过路径类配置，额外人工看一眼本地 `.env`。
 
 ## 检查 2：目录地图一致
@@ -161,8 +161,7 @@ PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:c
 
 报告落点（防止结论只活在临时目录里）：
 
-- 每次验收结束，在 `AI_CONTEXT_CHANGELOG.md`「变更记录」头部新增一个 `###` 条目：验收结论概要 + 报告文件名。
-- 同步改写「当前状态」的「上一模块验收」：全部通过 → 「Mx 已验收（日期，报告文件名）」；有 ❌ → 「Mx 验收未通过（日期，报告文件名）」，修复复检通过后再改写为已验收。
+- 更新 `AI_CONTEXT.md`「当前状态」的「上一模块验收」：全部通过 → 「Mx 已验收（日期）」；有 ❌ → 「Mx 验收未通过（日期）」，修复复检通过后再改写为已验收。验收事件不写入 `AI_CONTEXT_CHANGELOG.md`。
 - ⚠️ / 遗留项不允许只写在报告里：需要跟进的，登记进 `AI_CONTEXT.md`「已知的坑」或下一模块任务清单，让后续验收的检查 3 / 4 能自然看到它。
 
 ## 报告后提醒

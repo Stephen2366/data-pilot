@@ -60,11 +60,16 @@ class Settings(BaseSettings):
     qwen_embedding_dimensions: int = Field(default=1024, alias="QWEN_EMBEDDING_DIMENSIONS")
 
     # 可观测性配置 =============================================================================
-    # LangSmith 用来记录/观察 LLM 调用链路，后续调试 Agent 时会很有用。
-    langsmith_tracing: str = Field(default="false", alias="LANGSMITH_TRACING")
-    langsmith_endpoint: str = Field(default="", alias="LANGSMITH_ENDPOINT")
-    langsmith_api_key: str = Field(default="", alias="LANGSMITH_API_KEY")
-    langsmith_project: str = Field(default="", alias="LANGSMITH_PROJECT")
+    # Phase 3B 只把 LangFuse 作为“旁路观测系统”：默认关闭，不影响 JSONL 主链路。
+    langfuse_enabled: bool = Field(default=False, alias="LANGFUSE_ENABLED")
+    langfuse_public_key: str = Field(default="", alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: str = Field(default="", alias="LANGFUSE_SECRET_KEY")
+    # ★ base_url 不写死 Cloud 地址，后续 EvalBench / self-host 只需换环境变量。
+    langfuse_base_url: str = Field(default="https://jp.cloud.langfuse.com", alias="LANGFUSE_BASE_URL")
+
+    # Eval Judge 配置 ==========================================================================
+    # M17 才会真正使用；M15 先把配置入口钉住，空字符串表示默认不启用 L3 judge。
+    eval_judge_model: str = Field(default="", alias="EVAL_JUDGE_MODEL")
 
     # ★ extra="ignore" 表示 `.env` 里多出来的字段先忽略，不让本地私有配置拖垮服务启动。
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

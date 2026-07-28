@@ -49,3 +49,25 @@ def test_settings_load_provider_specific_llm_keys() -> None:
     assert settings.qwen_model == "qwen3.7-plus"
     assert settings.qwen_embedding_model == "qwen3.7-text-embedding"
     assert settings.qwen_embedding_dimensions == 1024
+
+
+def test_settings_load_langfuse_and_judge_config() -> None:
+    """验证 Phase 3B LangFuse / L3 judge 配置能读取，且默认关闭不影响原链路。"""
+    default_settings = Settings(_env_file=None)
+
+    assert default_settings.langfuse_enabled is False
+    assert default_settings.eval_judge_model == ""
+
+    settings = Settings(
+        LANGFUSE_ENABLED="true",
+        LANGFUSE_PUBLIC_KEY="pk-test",
+        LANGFUSE_SECRET_KEY="sk-test",
+        LANGFUSE_BASE_URL="http://localhost:3000",
+        EVAL_JUDGE_MODEL="deepseek-v3-judge",
+    )
+
+    assert settings.langfuse_enabled is True
+    assert settings.langfuse_public_key == "pk-test"
+    assert settings.langfuse_secret_key == "sk-test"
+    assert settings.langfuse_base_url == "http://localhost:3000"
+    assert settings.eval_judge_model == "deepseek-v3-judge"

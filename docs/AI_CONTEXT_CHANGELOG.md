@@ -2,20 +2,36 @@
 
 > 这里保存 `docs/AI_CONTEXT.md` 拆出的完整历史变更、实验记录和模块档案。续接任务时先读 `AI_CONTEXT.md` 的当前状态；只有需要追溯原因、验证快照或历史实验时再读本文。
 
+M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先级：
+
+- `[模块任务]`：功能、架构、默认行为、安全口径、评测口径等实质性任务。
+- `[实验]`：A/B、真实 LLM eval、smoke 或会影响路线判断的实验结论。
+- `[验收]`：accept-module、阶段验收、明确的模块完成状态。
+- `[小修]`：文档措辞、口径同步、注释补充、轻量整理；只需简写，不要求完整模板。
+
+未来新增记录优先使用这些标签；小修可以只写一段话，模块任务建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
+
 ## 变更记录（新的在上）
 
-> M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先级：
-> - `[模块任务]`：功能、架构、默认行为、安全口径、评测口径等实质性任务。
-> - `[实验]`：A/B、真实 LLM eval、smoke 或会影响路线判断的实验结论。
-> - `[验收]`：accept-module、阶段验收、明确的模块完成状态。
-> - `[小修]`：文档措辞、口径同步、注释补充、轻量整理；只需简写，不要求完整模板。
->
-> 未来新增记录优先使用这些标签；小修可以只写一段话，模块任务建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
+### [模块任务] M15 LangFuse Cloud 接入基线（2026-07-28）
 
-### [验收] M14-lite 验收通过（2026-07-28，报告 accept-M14-lite-20260728.md）
-
-- accept-module 全 7 项检查通过：废弃口径 2 处命中仅在 archive 归档文件属冻结历史；目录地图一致；进度状态一致（M14-lite 为 M8-M13 收口轻量补强，范围已在 changelog/dev-log 记载）；日志完整；注释合规（⚠️ RBAC admin 敏感字段改动建议补 inline 注释）；单一事实源 4 项一致；pytest 89 passed, 2 skipped, 1 warning。
-- 后续可进入阶段三 RAG / Hybrid。
+- 改动范围：`app/core/config.py`、`.env.example`、`pyproject.toml`、`tests/test_config.py`；临时验证素材写入 `.agent_work/temp/m15-notes.md`、`.agent_work/temp/smoke_m15_langfuse_sdk.py`、`.agent_work/temp/check_m15_langfuse_visibility.py`。
+- 关键记录：
+  - 复跑 LangFuse Cloud JP smoke：`auth_check`、span/observation 写入、`create_score(trace_id=...)`、`flush()` 均通过，trace `a5b22262bb154b3a9b08b0b09b5f8cc5` 约 `0.6s` 可通过 SDK 查询，score_count=1。
+  - 固定双 ID 策略：DataPilot 请求级 `trace_id` 继续用现有 UUID；LangFuse trace id 由 DataPilot 使用独立 `uuid4().hex` 生成。原因是 SDK 4.14.1 要求传入 trace id 为 32 位小写 hex，且这样不会让 LangFuse 接管 API / JSONL / eval 主链路 ID。
+  - SDK 基线固定为 `langfuse==4.14.1`，纳入 `pyproject.toml` 的 `observability` optional extra；默认 `LANGFUSE_ENABLED=false`，未启用时原链路不要求安装该 extra。
+  - `Settings` 新增 `langfuse_enabled`、`langfuse_public_key`、`langfuse_secret_key`、`langfuse_base_url`、`eval_judge_model`；删除未使用的 LangSmith 字段，`rg -n "langsmith_|LANGSMITH" app engine eval scripts tests .env.example pyproject.toml` 无命中。
+  - 踩坑：SDK 4.14.1 没有旧版 `client.trace()` builder；M16 应使用 `start_observation(trace_context=...)`、`create_score(trace_id=...)`、`flush()` 这组 API。
+- 参考资料：
+  - 未浏览外部文档；本次以本地已安装 SDK 4.14.1 的真实签名和 smoke 结果为准。
+- 验证快照：
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\smoke_m15_langfuse_sdk.py`：PASS，输出 Cloud base URL、DataPilot trace id、LangFuse trace id、trace URL、auth/observation/score/flush PASS。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe .agent_work\temp\check_m15_langfuse_visibility.py a5b22262bb154b3a9b08b0b09b5f8cc5`：`visible_after_seconds=0.6`，`score_count=1`。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_config.py --basetemp=.agent_work/temp/pytest-m15-config`：4 passed。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m15-full-2`：90 passed, 2 skipped, 1 warning；warning 为既有 Starlette/httpx deprecation。
+- 遗留/后续：
+  - M16 才接入 Trace 双写与降级；M15 不改 `/api/query` 响应契约，不替代 JSONL。
+  - DataPilot Phase 3B 不默认 self-host；EvalBench 阶段再做完整 self-host 部署 spike。
 
 ### [小修] AI_CONTEXT 拆分为当前快照 + Changelog（2026-07-27）
 
@@ -178,9 +194,6 @@
   - M12 未解决 LLM 列名别名漂移问题（category/category_name、coupon_order_count 等），属于 P0 schema/plan/prompt 优化范畴，留给后续阶段。
   - 阶段三A 全部 5 个模块（M8-M12）代码已就绪；M12 收工整理后等待人工检查和 accept-module。
 
-### M11 accept-module 验收通过（2026-07-24）
-accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 65 passed + 2 skipped），报告 `accept-M11-20260724.md`。⚠️ 测试文件 4 个 test 函数缺单行"守住什么"注释，建议 M12 补。后续可进入 M12 对照报告与阶段收尾。
-
 ### Phase 3A M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
 
 - 改动范围：未提供模块起始 commit，本次按 `git status --short`、`git diff --name-only` 和未跟踪文件检查；`engine/nl2sql/pipeline.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/trace/recorder.py`、`app/schemas/agent.py`、`app/api/query.py`、`tests/test_phase3a_pipeline.py`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m11-notes.md`
@@ -206,9 +219,6 @@ accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进�
   - M11 只完成新 pipeline 接入和 trace_steps；M12 负责跑 formal / challenge / diagnostic 新链路报告、生成对照报告、smoke 脚本和 README 阶段收尾。
   - 当前测试用 fake LLM 固定 QueryPlan / SQL 验证链路结构；真实 LLM 质量、通过率和 issue tags 需要 M12 批量报告如实呈现。
   - `trace_steps` 已写 JSONL，但公开 API 响应暂不展示；后续若 demo 需要展示 trace，可在不改 JSONL 顶层结构的前提下增量做。
-
-### M10 QueryPlanStep 与自检 验收通过（2026-07-24）
-accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进度状态一致/最新日志完整/注释合规/单一事实源/测试 63 passed），报告 `accept-M10-20260724.md`。⚠️ 目录地图 `engine/schema_retrieval/` 漏登待补。后续可进入 M11。
 
 ## 历史档案（2026-07-24 冻结）
 
@@ -681,4 +691,3 @@ accept-module 全 7 项检查通过（废弃口径清零/目录地图一致/进�
 - 2026-07-17 架构底线与降级边界：phase2-plan 新增 P0（不可降级）/ P1（可简化）边界；简化版 AgentResponse 前置到 M3。仅文档，未跑测试
 
     
-
