@@ -1,7 +1,7 @@
 """M5 JSONL Trace Recorder。
 
 Trace 先写 JSONL，这是 phase2-plan 允许的主路径：字段结构先稳定，后续要迁到 SQLite 或
-独立 AgentEvalOps 时，只替换存储层，不改 `/api/query` 响应契约。
+独立 EvalBench 时，只替换存储层，不改 `/api/query` 响应契约。
 """
 
 from __future__ import annotations

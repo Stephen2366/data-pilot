@@ -31,12 +31,13 @@ alembic/                # 数据库迁移
   versions/             # Alembic migration 版本
 
 engine/                 # 通用引擎，换行业不用改
-  router/               # 意图路由（SQL / RAG / 混合）
+  router/               # 意图路由（SQL / RAG / 混合）（暂无此文件夹）
   nl2sql/               # NL2SQL 流水线
   sql_guard/            # SQL 沙箱安全
   rag/                  # RAG 知识库检索
   tools/                # Agent tools 封装
   trace/                # 全链路追踪
+  schema_retrieval/     # Schema 检索
 
 domain_pack/            # 业务配置，换行业只换这里
   schema_desc/          # 表结构描述
@@ -45,7 +46,7 @@ domain_pack/            # 业务配置，换行业只换这里
   metrics.yaml          # KPI 定义
   chart_templates/      # 图表模板
 
-eval/                   # EvalOps-lite（评测前置），完整评测平台在独立项目 agent-eval-ops
+eval/                   # EvalOps-lite（评测前置），完整评测平台在独立项目 eval-bench
   cases/                # YAML 测试用例
   run_eval.py           # 批量执行入口
   scorers/              # 评分器
@@ -53,12 +54,13 @@ eval/                   # EvalOps-lite（评测前置），完整评测平台在
   traces/               # Agent 运行 Trace，默认不提交 JSONL
 
 docs/                   # 项目文档
-  archive-versions/     # 同文档的 v1→v2→v3 迭代链存档
-  archive-dormant/      # 阶段结束暂时不用、以后可能复盘
+  archive-dormant/      # 存档1（暂时不用但以后可能复盘）
+  archive-versions/     # 存档2（同文档的迭代链和不用的文档）
   AI_CONTEXT.md         # 技术档案（AI 续接 / 查 bug 入口）
   AI_CONTEXT_CHANGELOG.md # 技术档案完整变更记录 / 实验历史
   dev-log.md            # 学习复盘（用户阅读）
-  phase2-plan.md        # 阶段二模块计划（后续阶段计划也放这里）
+  database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
+  phase3a-plan.md       # 阶段三A模块计划（参考设计文档；当前执行的阶段以 AI_CONTEXT.md「当前状态」为准）
 
 demo/                   # Streamlit 演示页
 scripts/                # 本地脚本，例如 seed 数据

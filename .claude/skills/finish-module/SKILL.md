@@ -43,7 +43,7 @@ accept-module
 1. 读取：
    - `AGENTS.md` 或 `CLAUDE.md`
    - `docs/AI_CONTEXT.md`
-   - 当前阶段计划文件，例如 `docs/phase2-plan.md`
+   - 当前阶段计划文件
    - 当前模块小节
 
 2. 确认模块范围：

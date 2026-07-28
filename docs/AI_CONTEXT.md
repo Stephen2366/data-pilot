@@ -1,6 +1,6 @@
 # DataPilot AI Context（技术档案）
 
-> 续接任务、查 bug 读这个。记录 git 和代码里查不到的信息：为什么这么做、验证过什么、有什么坑等。硬约束见 CLAUDE.md/AGENTS.md（自动加载），任务见当前阶段计划文件（现指向见下方「当前状态」），均不在此重复。「当前状态」「已知的坑」「变更记录」保持最新；「历史档案」「历史补充」是 2026-07-24 之前的旧记录，只查不改。
+> 续接任务、查 bug 读这个。记录 git 和代码里查不到的信息：为什么这么做、验证过什么、有什么坑等。硬约束见 CLAUDE.md/AGENTS.md（自动加载），任务见当前阶段计划文件（现指向见下方「当前状态」）。「当前状态」「已知的坑」「最新事实快照」「当前技术选型快照」保持最新；「变更记录」已移至 `AI_CONTEXT_CHANGELOG.md`。
 
 ## 当前状态（唯一权威出处）
 
@@ -19,8 +19,8 @@
 - 数据准备：`scripts/seed_data.py` 写入确定性电商 / SaaS 运营数据和固定业务事实
 - NL2SQL：M3 模板 SQL 优先；M4 起模板未命中时走 DeepSeek，Schema / KPI / few-shot 从 `domain_pack/` 加载
 - SQL 安全：sqlglot AST 只读检查 + 表级 RBAC + `users.email/users.phone` 敏感字段策略；安全能力不只靠 prompt
-- Agent 编排：Phase 2 先用普通 Python pipeline，不上复杂 LangGraph；字段按未来 graph state 预留；后续进入多步骤 Agent / RAG 编排时，可在不改响应契约的前提下迁移到 LangGraph。
-- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M6 EvalOps-lite 已复用 AgentResponse / trace 字段跑 6 条 SQL smoke；JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalOps 平台
+- Agent 编排：先用普通 Python pipeline，不上复杂 LangGraph；字段按未来 graph state 预留；后续进入多步骤 Agent / RAG 编排时，可在不改响应契约的前提下迁移到 LangGraph。
+- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M6 EvalOps-lite 已复用 AgentResponse / trace 字段跑 6 条 SQL smoke；JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalBench 平台
 - 图表：后端输出 Vega-Lite 兼容 `chart_spec`，当前仅覆盖基础 bar / line / horizontal_bar 和单指标柱图
 - 演示：M6 已提供 `demo/streamlit_app.py` 最小演示控制台，通过 HTTP 调用 `/api/query` 展示 answer / SQL / table / chart / trace
 
@@ -59,5 +59,6 @@
 
 - 完整历史变更、实验记录和模块档案已拆到 `docs/AI_CONTEXT_CHANGELOG.md`。
 - `AI_CONTEXT.md` 只维护当前状态、当前默认值、最新基线、重要实验结论和活跃坑，避免续接时默认加载过长历史。
-- 新增模块档案、真实 LLM eval、A/B 实验、smoke 结论和“不切默认”等路线判断，写入 `docs/AI_CONTEXT_CHANGELOG.md`；必要的最新结论同步摘要到本文件「最新事实快照」。
+- 新增模块档案、真实 LLM eval、A/B 实验、smoke 结论和”不切默认”等路线判断，写入 `docs/AI_CONTEXT_CHANGELOG.md`；必要的最新结论同步摘要到本文件「最新事实快照」。
+- 2026-07-28：第二个项目已由 AgentEvalOps / agent-eval-ops 改名为 **EvalBench / eval-bench**。文档中旧名已批量替换，历史存档（archive-dormant / archive-versions、phase3b-langfuse-plan v1-v3、phase3b-langfuse-plan-review.md）保留原名不改。
 

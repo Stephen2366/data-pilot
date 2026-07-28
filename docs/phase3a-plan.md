@@ -62,7 +62,7 @@
 | Rerank 不做主线实现，只保留候选列表和 rerank hook | `rerank_score`、`rerank_reason` 可选字段 | 向量召回稳定后或阶段四 EvalOps 需要失败归因时补 |
 | Schema Linking 不做 M9 主线 LLM 二次筛选，只保留后续 hook 位置 | `retrieve_schema()` 输出保留 `merged_hits`，`build_schema_graph()` 前可插入可选 filter | 局部 Schema prompt 噪音明显影响 M10/M11 时再评估；Phase 3A 先靠召回融合 + plan validation |
 | `user_role` 预过滤先只在检索入参和结果 metadata 中保留，最终安全仍靠 SQL Guard | `SchemaRetrievalRequest.user_role` | 若 prompt 中频繁出现越权字段再前移实现 |
-| 对照报告先输出 Markdown，不做 HTML 仪表盘和历史结果库 | `ComparisonCaseResult` 数据结构保留可序列化字段 | 阶段四 AgentEvalOps 独立平台补 |
+| 对照报告先输出 Markdown，不做 HTML 仪表盘和历史结果库 | `ComparisonCaseResult` 数据结构保留可序列化字段 | 阶段四 EvalBench 独立平台补 |
 
 ### P2：锦上添花，不阻塞模块验收
 
@@ -494,7 +494,7 @@
 
 **需用户确认的决策点**
 
-默认只输出 Markdown 对照报告和 smoke 脚本，不做 HTML 仪表盘、历史结果库或完整 scorer 平台。若用户希望阶段三A就补完整 EvalOps，请先重新评估阶段四 AgentEvalOps 边界。
+默认只输出 Markdown 对照报告和 smoke 脚本，不做 HTML 仪表盘、历史结果库或完整 scorer 平台。若用户希望阶段三A就补完整 EvalOps，请先重新评估阶段四 EvalBench 边界。
 
 ### 参考资料
 
@@ -503,8 +503,8 @@
 | `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md` | 新旧链路对照报告要求 | 报告展示局部表字段数量、trace steps、JoinPath、10 条 formal 通过率和 16 条 challenge 诊断摘要 |
 | `docs/phase3a-diagnostic-benchmark-proposal-v5.md` | 32 条 diagnostic benchmark 报告口径 | M12 输出 capability / improvement / blocking / skipped / manual 多维摘要 |
 | `docs/reference-dbgpt-analysis.md` | DB-GPT vs DataPilot 的取舍结论和 M9-M12 借鉴路线 | M12 README / dev-log 明确“借鉴成熟平台结构，但 DataPilot 未基于 DB-GPT 重开” |
-| `references/DB-GPT/packages/dbgpt-serve/src/dbgpt_serve/evaluate/api/schemas.py` | evaluate request 的 `scene_key / datasets / metrics / context` 抽象 | 阶段三A仍只做 Markdown；后续 AgentEvalOps 独立化时再服务化 |
-| `references/DB-GPT/examples/client/client_evaluation.py` | RAG recall / app answer 的评测调用示例 | 作为阶段四 AgentEvalOps adapter 参考，M12 不提前做 DB-GPT client |
+| `references/DB-GPT/packages/dbgpt-serve/src/dbgpt_serve/evaluate/api/schemas.py` | evaluate request 的 `scene_key / datasets / metrics / context` 抽象 | 阶段三A仍只做 Markdown；后续 EvalBench 独立化时再服务化 |
+| `references/DB-GPT/examples/client/client_evaluation.py` | RAG recall / app answer 的评测调用示例 | 作为阶段四 EvalBench adapter 参考，M12 不提前做 DB-GPT client |
 | `eval/run_eval.py` | Markdown 报告生成 | 扩展对照报告，不引入新平台 |
 | `docs/dev-log.md` | 学习复盘风格 | 写清 Schema Retrieval、QueryPlanStep、Trace Steps 的面试讲法 |
 
@@ -542,7 +542,7 @@
 | 卡住场景 | 触发信号 | 降级方案 | 不影响的验收 |
 |---|---|---|---|
 | 新链路通过率低于 7/8 | 允许类 SQL 多个失败 | 不隐藏失败；对照报告列 issue tags，先修 P0 schema/plan/prompt，不做 SQL 自修复 | 报告结构、trace_steps、安全 |
-| 对照报告膨胀成 EvalOps 平台 | 需要历史库、HTML、复杂 scorer | 停止扩展，保留 Markdown 报告；完整平台回到阶段四 AgentEvalOps | 阶段三A核心验收 |
+| 对照报告膨胀成 EvalOps 平台 | 需要历史库、HTML、复杂 scorer | 停止扩展，保留 Markdown 报告；完整平台回到阶段四 EvalBench | 阶段三A核心验收 |
 | README 与实际 Milvus 状态不一致 | 自动化用 memory，但 README 写 Milvus 已完成 | README 拆成“已完成 / 测试兜底 / 后续计划”，以实际 smoke 为准 | 代码能力与报告 |
 
 ## 阶段三A验收标准
@@ -592,7 +592,7 @@ flowchart TD
 | Milvus 主路径与自动化测试环境冲突 | M9/M12 | Docker / client 连接不稳定，pytest 依赖外部服务 | 自动化测试使用 in-memory vector index；Milvus adapter 和 README 实际状态分开说明 | Schema doc、召回、JoinPath、10 条 formal 和 16 条 challenge 报告 |
 | LLM 输出计划或 SQL 不稳定 | M10/M11/M12 | JSON 解析失败、字段幻觉、SQL 执行失败 | 强化结构化 prompt 与 plan validation；失败写 issue tag，不做 SQL 自修复 | trace_steps、安全、对照报告 |
 | 新 pipeline 破坏旧模板优先链路 | M11 | M4/M5/M6 既有测试失败 | `force_new_pipeline` 默认 False，旧路径保持原行为 | 新链路强制评测 |
-| eval 扩展超出阶段三A | M8/M8.5/M12 | 开始做历史库、HTML dashboard、复杂 scorer | 只保留 Markdown + issue tags / skipped / capability 摘要；完整能力交给阶段四 AgentEvalOps | 阶段三A报告 |
+| eval 扩展超出阶段三A | M8/M8.5/M12 | 开始做历史库、HTML dashboard、复杂 scorer | 只保留 Markdown + issue tags / skipped / capability 摘要；完整能力交给阶段四 EvalBench | 阶段三A报告 |
 | SchemaGraph 复杂化 | M9/M10 | 开始引入图数据库或复杂路径搜索 | 只做当前问题相关表关系视图；JoinPath 来自已知 relation | 多表 Join 约束 |
 | DB-GPT 借鉴变成平台迁移 | M9-M12 | 开始新增 `dbgpt-*` 依赖、AWEL DAG 运行时、Skill Manager、Sandbox 服务或多数据源平台代码 | 停止扩展，回到 `docs/reference-dbgpt-analysis.md` 的结论：只借鉴结构；阶段三A坚持 DataPilot 自研轻量 pipeline | Schema Retrieval、QueryPlan、trace_steps、对照报告 |
 | 安全边界前移导致误判 | M10/M11 | planner 预检和 SQL Guard 结果冲突 | 以 SQL Guard 为最终安全门，planner 只做提前诊断 | 最终安全用例 |

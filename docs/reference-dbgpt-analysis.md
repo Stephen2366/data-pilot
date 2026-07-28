@@ -58,7 +58,7 @@ DB-GPT 使用 uv workspace，顶层 `pyproject.toml` 中版本为 `0.8.1`，核�
 |---|---|---|
 | `dbgpt-core` | 核心抽象：Agent、AWEL、LLM、RAG、Datasource、Storage、Model、Util | 抽象层不要依赖具体业务 |
 | `dbgpt-ext` | 具体扩展：数据库连接、向量库、RAG 实现、LLM provider、可视化 | 具体 provider 放 adapter 层 |
-| `dbgpt-serve` | 服务层：Agent、Datasource、RAG、Prompt、Flow、Evaluate 等 API | 后期 AgentEvalOps 可服务化 |
+| `dbgpt-serve` | 服务层：Agent、Datasource、RAG、Prompt、Flow、Evaluate 等 API | 后期 EvalBench 可服务化 |
 | `dbgpt-app` | 应用层：FastAPI app、业务 scene、openapi、初始化 | 业务场景和底层引擎分开 |
 | `dbgpt-client` | Python SDK 和 API client | 后期可给 DataPilot 做 SDK，但不是 P0 |
 | `dbgpt-sandbox` | 独立沙箱服务 | 任意代码执行必须单独隔离 |
@@ -238,12 +238,12 @@ DB-GPT 的 evaluate 服务支持：
 - DAO 持久化 evaluate task。
 - client SDK 通过 `/evaluate/evaluation` 触发评测。
 
-这比 DataPilot 当前的 EvalOps-lite 更平台化，但 DataPilot 的路线是先在主项目里轻量跑通，再拆独立 AgentEvalOps。两者不冲突。
+这比 DataPilot 当前的 EvalOps-lite 更平台化，但 DataPilot 的路线是先在主项目里轻量跑通，再拆独立 EvalBench。两者不冲突。
 
 DataPilot 可借鉴：
 
 - 评测请求结构里保留 `scene_key / scene_value / context / metrics / datasets`。
-- AgentEvalOps 独立项目后，可以把 target 抽象成 `scene_key=datapilot_api` 或 adapter。
+- EvalBench 独立项目后，可以把 target 抽象成 `scene_key=datapilot_api` 或 adapter。
 - RAG 阶段可以补 HitRate/MRR/Similarity，不要只靠人工判断。
 
 暂时不要借鉴：
@@ -268,7 +268,7 @@ DataPilot 可借鉴：
 | Agent | 通用 multi-agent + memory + action + resource | 当前是单 pipeline，后续再封装 tools/skills |
 | Skill | 完整 Skill Manager + loader + scripts | roadmap P2，加分项 |
 | 沙箱 | 独立代码执行服务 | 当前只做 SQL sandbox |
-| 评测 | evaluate service + metrics + DAO | EvalOps-lite 已有 YAML/Markdown/Trace，后续独立 AgentEvalOps |
+| 评测 | evaluate service + metrics + DAO | EvalOps-lite 已有 YAML/Markdown/Trace，后续独立 EvalBench |
 | 面试叙事 | “参与/二开一个大平台” | “从 0 到 1 搭业务 Agent，并用评测驱动迭代” |
 
 关键判断：DB-GPT 更全，DataPilot 更聚焦。对你找实习而言，**聚焦和可讲清楚比平台大而全更重要**。
@@ -328,7 +328,7 @@ DataPilot 落地方式：
 
 - Phase 3A 仍输出 Markdown，不做服务化。
 - 报告里按 capability 汇总：schema_retrieval、join_path、query_plan、local_schema_prompt、trace_steps、security_guard。
-- 后续 AgentEvalOps 独立项目再把 DataPilot eval runner 包成 adapter。
+- 后续 EvalBench 独立项目再把 DataPilot eval runner 包成 adapter。
 
 ### 5.5 后期 RAG / Hybrid / Skill
 
@@ -417,8 +417,8 @@ DataPilot 的目标不是做“开源通用平台”，而是做一个可演示�
 2. **作为参考项目复盘**  
    在面试问“有没有看过成熟数据 Agent 项目”时，可以讲：我读过 DB-GPT，借鉴了它的 schema retriever、workflow、skill、sandbox，但 DataPilot 因为求职主线选择了轻量自研。
 
-3. **作为 AgentEvalOps adapter 的外部目标**  
-   如果后续想证明 AgentEvalOps 可评测多个 Agent，可以写一个 DB-GPT adapter，但这属于阶段四/五之后。
+3. **作为 EvalBench adapter 的外部目标**  
+   如果后续想证明 EvalBench 可评测多个 Agent，可以写一个 DB-GPT adapter，但这属于阶段四/五之后。
 
 4. **作为 Skill/MCP 后期原型**  
    DataPilot 自己的 Skill 设计可以参考 DB-GPT 的 `SkillMetadata + required_tools + references/scripts/templates`。
@@ -484,7 +484,7 @@ DataPilot 的目标不是做“开源通用平台”，而是做一个可演示�
 | Hybrid / Workflow | `examples/awel/*`、`agent/core/plan/*` |
 | Skill 后期 | `agent/skill/*`、`skills/README.md`、`skills/*/SKILL.md` |
 | Python 分析沙箱 | `packages/dbgpt-sandbox/src/dbgpt_sandbox/sandbox/*` |
-| AgentEvalOps 独立化 | `dbgpt_serve/evaluate/*`、`dbgpt_client/evaluation.py`、`examples/client/client_evaluation.py` |
+| EvalBench 独立化 | `dbgpt_serve/evaluate/*`、`dbgpt_client/evaluation.py`、`examples/client/client_evaluation.py` |
 
 ## 12. 最终建议
 

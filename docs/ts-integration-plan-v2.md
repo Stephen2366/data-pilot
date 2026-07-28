@@ -1,6 +1,6 @@
 # DataPilot TypeScript 集成方案 v2
 
-> 三个独立 TypeScript 外壳项目，通过 HTTP 调 FastAPI。Demo 和 MCP Server 复用现有 `/api/query` 接口，不新增 Python 业务代码。Dashboard 所需的 eval 查询接口属于阶段四 AgentEvalOps 后端计划内，不视为 TS 项目引入的额外负担。AI 全量生成代码，用户只验收 UI 效果。
+> 三个独立 TypeScript 外壳项目，通过 HTTP 调 FastAPI。Demo 和 MCP Server 复用现有 `/api/query` 接口，不新增 Python 业务代码。Dashboard 所需的 eval 查询接口属于阶段四 EvalBench 后端计划内，不视为 TS 项目引入的额外负担。AI 全量生成代码，用户只验收 UI 效果。
 >
 > 创建时间：2026-07-24 | 修订：2026-07-24（v2，根据审查意见修订）
 
@@ -293,7 +293,7 @@ Claude Desktop / Cursor
 
 ---
 
-## 三、AgentEvalOps 评测仪表盘
+## 三、EvalBench 评测仪表盘
 
 ### 3.1 定位
 
@@ -332,7 +332,7 @@ Claude Desktop / Cursor
 | 框架 | Next.js（复用 demo-next，Route Groups 隔离） | `app/(demo)/` vs `app/(eval)/` |
 | 图表 | Recharts + `dynamic(() => import(...), { ssr: false })` | 动态导入隔离，不影响 Demo 页首屏加载 |
 | 组件 | shadcn/ui（Card, Table, Badge, Tabs, Progress, Select） | 和 Demo 共享组件库 |
-| 数据源 | FastAPI `/api/eval/*` + SQLite | 阶段四 AgentEvalOps 后端计划内新增 3 个查询接口 |
+| 数据源 | FastAPI `/api/eval/*` + SQLite | 阶段四 EvalBench 后端计划内新增 3 个查询接口 |
 | 部署 | 和 Demo 同 Vercel 项目，`/eval` 路径 | 同一域名 |
 
 ### 3.4 目录结构（在 demo-next 内扩展，Route Groups 隔离）
@@ -364,9 +364,9 @@ demo-next/
     eval-types.ts             # 评测 Zod schema（独立于 Demo 类型）
 ```
 
-### 3.5 FastAPI 新增接口（阶段四 AgentEvalOps 计划内）
+### 3.5 FastAPI 新增接口（阶段四 EvalBench 计划内）
 
-Dashboard 需要 FastAPI 新增 3 个查询接口（约 80 行 Python），这些接口属于阶段四 AgentEvalOps 的后端开发计划，不是 TS 项目引入的额外负担：
+Dashboard 需要 FastAPI 新增 3 个查询接口（约 80 行 Python），这些接口属于阶段四 EvalBench 的后端开发计划，不是 TS 项目引入的额外负担：
 
 ```python
 # GET  /api/eval/summary          → 返回仪表盘聚合数据
@@ -431,7 +431,7 @@ Dashboard 需要 FastAPI 新增 3 个查询接口（约 80 行 Python），这�
 ├─ Demo 页补 RAG/Docs 渲染（半天）                   ← 1️⃣ 增量
 ├─ MCP Server Query Tool 骨架（1 天）                 ← 2️⃣ 第一波
 │
-阶段四 AgentEvalOps（约 2 周，8/9 - 8/22）
+阶段四 EvalBench（约 2 周，8/9 - 8/22）
 │
 ├─ FastAPI eval 接口（在阶段四内实现）                 ← Python
 ├─ 评测仪表盘骨架 + 假数据（1 天）                    ← 3️⃣ 第一波
@@ -485,7 +485,7 @@ Dashboard 需要 FastAPI 新增 3 个查询接口（约 80 行 Python），这�
 
 三个 TS 项目完成后，简历中可以在 Python 技术栈之外，加一段 TypeScript/全栈能力相关的描述：
 
-> **全栈工程化**：用 Next.js + Vercel AI SDK 构建 DataPilot 演示应用，支持多轮对话、结构化结果渲染（SQL/表格/图表/Trace）和 Tool Call 可视化；用 MCP SDK (TypeScript) 将 NL2SQL/RAG/混合分析封装为标准 MCP Server，支持 Claude Desktop、Cursor 等 AI 工具直接调用；用 Recharts + shadcn/ui 搭建 AgentEvalOps 评测仪表盘，可视化通过率、失败归因分布和用例详情。
+> **全栈工程化**：用 Next.js + Vercel AI SDK 构建 DataPilot 演示应用，支持多轮对话、结构化结果渲染（SQL/表格/图表/Trace）和 Tool Call 可视化；用 MCP SDK (TypeScript) 将 NL2SQL/RAG/混合分析封装为标准 MCP Server，支持 Claude Desktop、Cursor 等 AI 工具直接调用；用 Recharts + shadcn/ui 搭建 EvalBench 评测仪表盘，可视化通过率、失败归因分布和用例详情。
 
 面试追问应对：
 - "为什么 MCP Server 用 TypeScript 而不是 Python FastMCP？" → 四个理由：① MCP 协议是 TypeScript-first 设计的，官方 SDK 的 spec 覆盖度和更新速度领先；② 进程隔离——MCP 调用不应拖起加载了 torch/pymilvus 的 Python 进程；③ Node.js 冷启动远快于 Python；④ 全栈能力展示，且 MCP 作为协议层独立于引擎层，证明了架构分层能力。如果未来需要深度集成（直接调用引擎内部函数而非 HTTP 转一层），FastMCP 更合适

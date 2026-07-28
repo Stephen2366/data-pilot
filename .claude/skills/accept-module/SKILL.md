@@ -23,12 +23,12 @@ description: 项目模块验收门禁，在收工整理和用户人工检查之�
 
 ```bash
 rg -n -f .claude/skills/accept-module/deprecated-terms.txt --hidden \
-   -g '!.git' -g '!dev-log.md' -g '!AI_CONTEXT.md' -g '!CLAUDE.md' \
+   -g '!.git' -g '!dev-log.md' -g '!AI_CONTEXT.md' -g '!AI_CONTEXT_CHANGELOG.md' -g '!CLAUDE.md' \
    -g '!.agent_work/**' -g '!.claude/skills/accept-module/**' .
 ```
 
 - 无输出（exit code 1）= ✅；有命中 = ❌，逐条列出 `文件:行` 与命中内容。
-- 排除原因：dev-log.md 与 AI_CONTEXT.md 的「历史档案」「历史补充」是冻结的旧记录（AI_CONTEXT「当前状态」「已知的坑」「变更记录」的时效性由检查 3 兜底）；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
+- 排除原因：dev-log.md 的旧日志、AI_CONTEXT.md / AI_CONTEXT_CHANGELOG.md 的「历史档案」「历史补充」是冻结的旧记录（AI_CONTEXT「当前状态」「已知的坑」的时效性由检查 3 兜底）；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
 - rg 默认跳过 .gitignore 覆盖的文件。若本次模块改过路径类配置，额外人工看一眼本地 `.env`。
 
 ## 检查 2：目录地图一致
@@ -64,12 +64,12 @@ ls -la
 
 ## 检查 4：最新日志完整性
 
-读 `AI_CONTEXT.md`「变更记录」最新一条 `###` 条目和 `dev-log.md` 最新一条模块日志：
+读 `AI_CONTEXT_CHANGELOG.md`「变更记录」最新一条 `###` 条目和 `dev-log.md` 最新一条模块日志：
 
-- `AI_CONTEXT.md` 模块档案须含 5 个部分：改动范围、关键决策、参考资料、验证快照、遗留。缺项 = ❌。
+- `AI_CONTEXT_CHANGELOG.md` 模块档案须含 5 个部分：改动范围、关键记录、参考资料、验证快照、遗留/后续。缺项 = ❌。
 - `dev-log.md` 模块日志须含 6 个部分：简述、这次做了什么、新概念、设计要点、面试怎么讲、验证与下一步。缺项 = ❌。
   - 历史日志兼容：旧模块日志里若使用“我该理解什么”承载新概念解释，不因小节名不同判 ❌；但新模块应按 CLAUDE.md 最新模板写“新概念”和“设计要点”。
-- 小修复走 `AI_CONTEXT.md`「变更记录」，放宽为：改了什么 / 为什么 / 验证了什么，或等价信息。
+- 小修复走 `AI_CONTEXT_CHANGELOG.md`「变更记录」，放宽为：改了什么 / 为什么 / 验证了什么，或等价信息。
 - 「验证快照」出现"期待 / 预计 / 预期 / 应该会"这类措辞时，判断是否属于"没跑命令就下结论"，是则 ❌——验证快照必须来自真实执行过的命令 + 真实输出（铁律的日志版）。
 - 如果日志中出现“过程细节未记录”，不自动判 ❌。这是 `finish-module` 的防幻觉诚实标记；但如果大量关键决策都未记录，应给 ⚠️，建议后续开发中维护 `.agent_work/temp/<module>-notes.md`。
 
@@ -161,7 +161,7 @@ PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:c
 
 报告落点（防止结论只活在临时目录里）：
 
-- 每次验收结束，在 `AI_CONTEXT.md`「变更记录」头部新增一个 `###` 条目：验收结论概要 + 报告文件名。
+- 每次验收结束，在 `AI_CONTEXT_CHANGELOG.md`「变更记录」头部新增一个 `###` 条目：验收结论概要 + 报告文件名。
 - 同步改写「当前状态」的「上一模块验收」：全部通过 → 「Mx 已验收（日期，报告文件名）」；有 ❌ → 「Mx 验收未通过（日期，报告文件名）」，修复复检通过后再改写为已验收。
 - ⚠️ / 遗留项不允许只写在报告里：需要跟进的，登记进 `AI_CONTEXT.md`「已知的坑」或下一模块任务清单，让后续验收的检查 3 / 4 能自然看到它。
 
