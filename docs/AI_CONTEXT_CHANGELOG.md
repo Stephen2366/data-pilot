@@ -13,6 +13,26 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M16B Trace Lifecycle 下沉预备分支（2026-07-29）
+
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `engine/trace/lifecycle.py`、`engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、`engine/nl2sql/pipeline.py`、`engine/tools/sql_tool.py`、`app/api/query.py`、`tests/test_m16_trace_router.py`、`tests/test_phase3a_pipeline.py`、`docs/AI_CONTEXT.md`、`.agent_work/temp/m16b-notes.md`。
+- 关键记录：
+  - 用户确认重复 span 处理采用方案 1：`TraceRecord.langfuse_span_mode` 显式区分 `post_hoc` / `live`。M16 post-hoc 继续由 `LangFuseBackend.record()` 请求结束后拆 flat spans；M16B live 由 pipeline/tool lifecycle 执行中写 LangFuse spans，最终 backend 只保留 JSONL 映射字段，不再重复写 post-hoc spans。
+  - 用户确认 SQL tool 分层采用方案 1：`run_sql_tool()` 增加可选 DataPilot `trace_context` 参数，在工具层内部记录 `sql_guard` / `sql_execution` spans。原因是 guard 与 DB 执行真实边界在 tool 内部；pipeline 事后补 span 改动更小，但不适合作为后续 RAG/Hybrid 底座。
+  - 新增 `engine/trace/lifecycle.py`：`TraceContext` / `SpanHandle` / `TraceLifecycleSnapshot` 作为 DataPilot 自己的 lifecycle 抽象；业务 pipeline 不直接 import `langfuse`，LangFuse SDK 细节封装在内部 live writer。
+  - `force_new_pipeline` 主链路迁移为 lifecycle 生成 `TraceStep`，覆盖 `schema_retrieval`、`schema_context`、`join_path`、`query_plan`、`plan_validation`、`sql_generation`、`sql_guard`、`sql_execution`、`chart_generation` 和 blocked/error path。
+  - LangFuse root span 采用 live-only `datapilot-query` observation，不写入 JSONL `trace_steps`，避免打乱 eval 依赖的 step_index；JSONL 与 LangFuse step spans 保持同名。
+  - M16B 统一图表步骤名为 `chart_generation`，替换旧 M11 的 `chart_decision` trace 命名。
+- 参考资料：
+  - 未浏览外部文档；实现依据 `docs/phase3b-langfuse-plan-v6.md` M16B 小节、M15 SDK 4.14.1 smoke 结果、M16 TraceRouter 现有实现和用户对方案 1 的确认。
+- 验证快照：
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m16_trace_router.py tests\test_phase3a_pipeline.py --basetemp=.agent_work\temp\pytest-m16b-3`：14 passed，1 个既有 Starlette/httpx deprecation warning。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --basetemp=.agent_work\temp\pytest-m16b-full-2`：98 passed, 2 skipped, 1 warning；warning 为既有 Starlette/httpx deprecation。第一次 180s 全量跑到 69% 后超时，360s 复跑通过，判定为耗时波动。
+  - 临时 live smoke（fake LLM + SQLite seed + `LANGFUSE_ENABLED=true` + `force_new_pipeline`）：HTTP 200，`safety_status=passed`，JSONL `langfuse_span_mode=live`、`langfuse_write_status=ok`，LangFuse trace URL：`https://jp.cloud.langfuse.com/project/traces/c1e4a46844fb49ea9cc2fb77a21b737d`。
+- 遗留/后续：
+  - M16B 是并行预备分支，不自动替换 M16 主线；后续按计划对比 M16A post-hoc flat spans 与 M16B lifecycle spans 的 UI 排障价值、代码侵入度和测试复杂度，再决定是否作为 RAG/Hybrid 观测底座。
+  - M16B 不做 M17 scorer / score 回写，也不补 M18 正式 smoke 脚本和 Experiment workflow。
+
 ### [模块任务] M16 Trace 双写与降级（2026-07-28）
 
 - 改动范围：`engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、`tests/test_m16_trace_router.py`；临时验证素材写入 `.agent_work/temp/m16-notes.md`、`.agent_work/temp/smoke_m16_trace_double_write.py`、`.agent_work/temp/m16-double-write-traces.jsonl`、`.agent_work/temp/m16-eval-*`。

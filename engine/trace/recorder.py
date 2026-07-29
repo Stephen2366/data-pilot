@@ -73,6 +73,7 @@ class TraceRecord(BaseModel):
     langfuse_trace_id: str | None = None
     langfuse_trace_url: str | None = None
     langfuse_write_status: Literal["ok", "skipped", "failed"] = "skipped"
+    langfuse_span_mode: Literal["post_hoc", "live"] = "post_hoc"
 
 
 class TraceBackend(Protocol):

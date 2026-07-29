@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.schemas.agent import ToolCallTrace
 from engine.nl2sql.schema_loader import DomainSchema
 from engine.sql_guard.policy import extract_sql_access, validate_sql_policy
+from engine.trace.lifecycle import TraceContext
 
 
 @dataclass(frozen=True)
@@ -64,19 +65,37 @@ def run_sql_tool(
     user_role: str,
     trace_id: str,
     domain_schema: DomainSchema,
+    trace_context: TraceContext | None = None,
+    trace_parent_step_id: str | None = None,
 ) -> SQLToolResult:
     """★ 执行一次受 SQL Guard 保护的查询。
 
     处理顺序固定为：先 policy 校验，再提取表名，再执行数据库。这样即便未来换成 Agent
     编排，SQL Tool 的安全边界也不会被绕开。
+
+    `trace_context` 是 M16B 的可选 lifecycle 接口：新 Text2SQL pipeline 传入后，SQL Tool
+    会在真实边界内记录 `sql_guard` / `sql_execution` spans；旧模板链路不传，行为保持不变。
     """
 
     started_at = perf_counter()
 
     # 步骤 1：所有 SQL 来源统一先过 M4 policy ------------------------------------------------
+    guard_span = trace_context.start_span(
+        name="sql_guard",
+        step_type="sql_guard",
+        input_summary="validate generated SQL",
+        parent_step_id=trace_parent_step_id,
+    ) if trace_context is not None else None
     guard_result = validate_sql_policy(sql, user_role=user_role, domain_schema=domain_schema)
     if not guard_result.is_allowed:
         latency_ms = _elapsed_ms(started_at)
+        if guard_span is not None:
+            guard_span.end(
+                status="blocked",
+                output_summary=guard_result.blocked_reason or "SQL Guard blocked",
+                error_type="sql_guard_blocked",
+                metadata={"blocked_reason": guard_result.blocked_reason},
+            )
         tool_call = ToolCallTrace(
             tool_name="sql_guard",
             status="blocked",
@@ -96,12 +115,30 @@ def run_sql_tool(
     # 步骤 2：安全通过后提取 tables_used，供响应体和 trace 共用。----------------------------
     access = extract_sql_access(sql, domain_schema)
     tables_used = sorted(access.tables)
+    if guard_span is not None:
+        guard_span.end(
+            output_summary="SQL Guard passed",
+            metadata={"tables_used": tables_used, "blocked_reason": None},
+        )
 
     # 步骤 3：执行数据库查询并记录 SQL tool 耗时。-------------------------------------------
+    execution_span = trace_context.start_span(
+        name="sql_execution",
+        step_type="sql_query",
+        input_summary="execute generated SQL",
+        metadata={"tables_used": tables_used},
+        parent_step_id=trace_parent_step_id,
+    ) if trace_context is not None else None
     try:
         result = db.execute(text(sql), parameters)
     except SQLAlchemyError as exc:
         latency_ms = _elapsed_ms(started_at)
+        if execution_span is not None:
+            execution_span.fail(
+                output_summary=f"SQL 执行失败：{exc}",
+                error_type="sql_execution_error",
+                metadata={"tables_used": tables_used, "latency_ms": latency_ms},
+            )
         tool_call = ToolCallTrace(
             tool_name="sql_query",
             status="error",
@@ -123,6 +160,16 @@ def run_sql_tool(
     columns = list(result.keys())
     rows = [_row_to_dict(row) for row in result.mappings().all()]
     latency_ms = _elapsed_ms(started_at)
+    if execution_span is not None:
+        execution_span.end(
+            output_summary=_sql_execution_summary(rows),
+            metadata={
+                "row_count": len(rows),
+                "column_count": len(columns),
+                "latency_ms": latency_ms,
+                "tables_used": tables_used,
+            },
+        )
     tool_call = ToolCallTrace(
         tool_name="sql_query",
         status="success",
@@ -144,3 +191,13 @@ def _elapsed_ms(started_at: float) -> float:
     """返回保留 3 位小数的毫秒耗时，便于测试和日志稳定阅读。"""
 
     return round((perf_counter() - started_at) * 1000, 3)
+
+
+def _sql_execution_summary(rows: list[dict[str, Any]]) -> str:
+    """把 SQL 执行结果压成一句话，供 lifecycle span 和 pipeline trace 共用口径。"""
+
+    if not rows:
+        return "暂无数据。"
+    first_row = rows[0]
+    first_row_summary = "，".join(f"{key}={value}" for key, value in first_row.items())
+    return f"首行：{first_row_summary}（共 {len(rows)} 行结果）"

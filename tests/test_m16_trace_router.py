@@ -31,6 +31,7 @@ from engine.trace.recorder import (
     build_trace_router,
     configure_trace_router,
 )
+from engine.trace.lifecycle import build_trace_context
 from engine.trace.langfuse_backend import LangFuseBackend
 from scripts.seed_data import seed_database
 
@@ -83,6 +84,12 @@ class FakeSpan:
         """初始化为未结束状态。"""
 
         self.ended = False
+        self.updates: list[dict[str, Any]] = []
+
+    def update(self, **kwargs: Any) -> None:
+        """模拟 SDK 的 span.update()。"""
+
+        self.updates.append(kwargs)
 
     def end(self) -> None:
         """模拟 SDK 的 span.end()。"""
@@ -258,6 +265,69 @@ def test_langfuse_backend_records_flat_spans_and_flushes() -> None:
     assert factory.client.observations[0]["metadata"]["datapilot_trace_id"] == record.trace_id
     assert factory.client.observations[0]["metadata"]["rows_count"] == 1
     assert factory.client.observations[1]["metadata"]["step_index"] == 1
+
+
+def test_langfuse_backend_skips_post_hoc_spans_when_record_is_live() -> None:
+    """M16B live mode 已经在执行中写 span，最终 backend 不能重复拆 TraceStep。"""
+
+    factory = FakeLangFuseFactory()
+    settings = Settings(
+        _env_file=None,
+        LANGFUSE_ENABLED="true",
+        LANGFUSE_PUBLIC_KEY="pk-test",
+        LANGFUSE_SECRET_KEY="sk-test",
+        LANGFUSE_BASE_URL="http://localhost:3000",
+    )
+    record = _sample_record()
+    record.langfuse_span_mode = "live"
+    record.langfuse_trace_id = "live-trace-1"
+    record.langfuse_write_status = "ok"
+    backend = LangFuseBackend(settings, client_factory=factory)
+
+    backend.record(record)
+
+    assert record.langfuse_trace_url == "http://localhost:3000/project/traces/live-trace-1"
+    assert record.langfuse_write_status == "ok"
+    assert factory.client is None
+
+
+def test_trace_lifecycle_writes_live_span_and_returns_snapshot() -> None:
+    """M16B lifecycle 在执行中写 LangFuse span，并把映射字段交回 JSONL。"""
+
+    factory = FakeLangFuseFactory()
+    settings = Settings(
+        _env_file=None,
+        LANGFUSE_ENABLED="true",
+        LANGFUSE_PUBLIC_KEY="pk-test",
+        LANGFUSE_SECRET_KEY="sk-test",
+        LANGFUSE_BASE_URL="http://localhost:3000",
+    )
+    trace_context = build_trace_context(
+        trace_id="datapilot-trace-1",
+        question="各渠道订单量是多少？",
+        user_role="ops",
+        settings=settings,
+        client_factory=factory,
+    )
+
+    span = trace_context.start_span(name="schema_retrieval", input_summary="question")
+    span.end(output_summary="merged_hits=3", metadata={"merged_hit_count": 3})
+    snapshot = trace_context.snapshot()
+
+    assert factory.client is not None
+    assert factory.client.flush_called is True
+    assert snapshot.langfuse_trace_id is not None
+    assert snapshot.langfuse_trace_url == f"http://localhost:3000/project/traces/{snapshot.langfuse_trace_id}"
+    assert snapshot.langfuse_write_status == "ok"
+    assert snapshot.langfuse_span_mode == "live"
+    assert [step.name for step in snapshot.trace_steps] == ["schema_retrieval"]
+    assert [observation["name"] for observation in factory.client.observations] == [
+        "datapilot-query",
+        "schema_retrieval",
+    ]
+    assert factory.client.spans[0].ended is True
+    assert factory.client.spans[1].updates[0]["metadata"]["step_index"] == 1
+    assert factory.client.spans[1].ended is True
 
 
 def test_api_response_contract_hides_langfuse_internal_fields(tmp_path: Path) -> None:

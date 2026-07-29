@@ -184,7 +184,9 @@ def test_force_new_pipeline_bypasses_template_and_writes_required_trace_steps(tm
     assert sql_generation_step["metadata"]["plan_step_metrics"] == ["order_count"]
     assert sql_generation_step["metadata"]["plan_step_joins"] == ["orders_channel"]
     assert sql_generation_step["metadata"]["plan_step_output_columns"] == ["channels.channel_name", "order_count"]
-    assert trace["trace_steps"][-1]["name"] == "chart_decision"
+    assert trace["trace_steps"][-1]["name"] == "chart_generation"
+    assert trace["langfuse_span_mode"] == "live"
+    assert trace["langfuse_write_status"] == "skipped"
 
 
 def test_new_pipeline_generated_sql_still_goes_through_sql_guard(tmp_path: Path, monkeypatch) -> None:

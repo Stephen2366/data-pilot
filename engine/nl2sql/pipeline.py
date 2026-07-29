@@ -7,8 +7,7 @@ trace 可观测性，不是重开一个运行时平台。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from time import perf_counter
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -28,6 +27,7 @@ from engine.schema_retrieval.objects import SchemaGraph, SchemaRetrievalResult
 from engine.schema_retrieval.retriever import retrieve_schema
 from engine.tools.chart_tool import build_chart_spec
 from engine.tools.sql_tool import SQLToolResult, run_sql_tool
+from engine.trace.lifecycle import TraceContext, TraceLifecycleSnapshot, build_trace_context
 from engine.trace.recorder import TraceStep
 
 
@@ -60,6 +60,10 @@ class Text2SQLPipelineResult:
     error_type: str | None = None
     tool_call: ToolCallTrace | None = None
     chart_spec: dict[str, Any] | None = None
+    langfuse_trace_id: str | None = None
+    langfuse_trace_url: str | None = None
+    langfuse_write_status: str = "skipped"
+    langfuse_span_mode: str = "post_hoc"
 
     @property
     def safety_status(self) -> str:
@@ -68,41 +72,6 @@ class Text2SQLPipelineResult:
         if self.tool_result is not None:
             return self.tool_result.safety_status
         return "blocked" if self.blocked_reason else "passed"
-
-
-def _elapsed_ms(started_at: float) -> float:
-    """返回保留 3 位小数的毫秒耗时。"""
-
-    return round((perf_counter() - started_at) * 1000, 3)
-
-
-def _step(
-    *,
-    name: str,
-    step_index: int,
-    step_type: str | None = None,
-    status: str = "success",
-    started_at: float,
-    input_summary: str = "",
-    output_summary: str = "",
-    error_type: str | None = None,
-    metadata: dict[str, Any] | None = None,
-    parent_step_id: str | None = None,
-) -> TraceStep:
-    """创建一条 TraceStep，统一耗时和字段默认值。"""
-
-    return TraceStep(
-        name=name,
-        step_index=step_index,
-        step_type=step_type or name,
-        status=status,
-        input_summary=input_summary,
-        output_summary=output_summary,
-        latency_ms=_elapsed_ms(started_at),
-        error_type=error_type,
-        metadata=metadata or {},
-        parent_step_id=parent_step_id,
-    )
 
 
 def _blocked_result(
@@ -134,6 +103,31 @@ def _blocked_result(
         blocked_reason=blocked_reason,
         error_type=error_type,
         tool_call=resolved_tool_call,
+    )
+
+
+def _with_trace_snapshot(
+    result: Text2SQLPipelineResult,
+    trace_context: TraceContext,
+) -> Text2SQLPipelineResult:
+    """把 lifecycle 最终状态合并进 pipeline result。
+
+    `snapshot()` 会 flush LangFuse live writer；所有 return 分支都走这里，避免成功/拦截/异常路径
+    写出的 JSONL 映射字段不一致。
+    """
+
+    snapshot: TraceLifecycleSnapshot = trace_context.snapshot(
+        status=result.safety_status,
+        output_summary=result.blocked_reason or result.answer_hint,
+        error_type=result.error_type,
+    )
+    return replace(
+        result,
+        trace_steps=snapshot.trace_steps,
+        langfuse_trace_id=snapshot.langfuse_trace_id,
+        langfuse_trace_url=snapshot.langfuse_trace_url,
+        langfuse_write_status=snapshot.langfuse_write_status,
+        langfuse_span_mode=snapshot.langfuse_span_mode,
     )
 
 
@@ -230,13 +224,12 @@ def run_text2sql_pipeline(
     """
 
     active_domain_schema = domain_schema or load_domain_schema()
-    trace_steps: list[TraceStep] = []
-    step_index = 1
+    trace_context = build_trace_context(trace_id=trace_id, question=question, user_role=user_role)
     answer_hint = "新 Text2SQL 查询结果"
     llm_client = get_default_llm_client()
 
     # 步骤 1：Schema Retrieval ==============================================================
-    started_at = perf_counter()
+    span = trace_context.start_span(name="schema_retrieval", input_summary=question)
     retrieval_result = retrieve_schema(
         question=question,
         user_role=user_role,
@@ -244,58 +237,42 @@ def run_text2sql_pipeline(
         domain_schema=active_domain_schema,
         schema_retrieval_profile=schema_retrieval_profile,
     )
-    trace_steps.append(
-        _step(
-            name="schema_retrieval",
-            step_index=step_index,
-            started_at=started_at,
-            input_summary=question,
-            output_summary=f"merged_hits={len(retrieval_result.merged_hits)}",
-            metadata=_retrieval_metadata(
-                retrieval_result,
-                schema_retrieval_profile=schema_retrieval_profile,
-            ),
-        )
+    span.end(
+        output_summary=f"merged_hits={len(retrieval_result.merged_hits)}",
+        metadata=_retrieval_metadata(
+            retrieval_result,
+            schema_retrieval_profile=schema_retrieval_profile,
+        ),
     )
-    step_index += 1
     if not retrieval_result.merged_hits:
-        return _blocked_result(
-            sql=None,
-            answer_hint=answer_hint,
-            trace_steps=trace_steps,
-            issue_tags=["insufficient_schema_context"],
-            blocked_reason="Schema Retrieval 未召回可用上下文。",
-            error_type="insufficient_schema_context",
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=None,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=["insufficient_schema_context"],
+                blocked_reason="Schema Retrieval 未召回可用上下文。",
+                error_type="insufficient_schema_context",
+            ),
+            trace_context,
         )
 
     # 步骤 2：构建局部 SchemaGraph -----------------------------------------------------------
-    started_at = perf_counter()
+    span = trace_context.start_span(name="schema_context")
     schema_graph = build_schema_graph(retrieval_result.merged_hits, domain_schema=active_domain_schema)
-    trace_steps.append(
-        _step(
-            name="schema_context",
-            step_index=step_index,
-            started_at=started_at,
-            output_summary=f"tables={len(schema_graph.tables)}, fields={sum(len(v) for v in schema_graph.fields.values())}",
-            metadata=_schema_graph_metadata(schema_graph),
-        )
+    span.end(
+        output_summary=f"tables={len(schema_graph.tables)}, fields={sum(len(v) for v in schema_graph.fields.values())}",
+        metadata=_schema_graph_metadata(schema_graph),
     )
-    step_index += 1
 
-    started_at = perf_counter()
-    trace_steps.append(
-        _step(
-            name="join_path",
-            step_index=step_index,
-            started_at=started_at,
-            output_summary=f"join_paths={len(schema_graph.join_paths)}",
-            metadata=_join_path_metadata(schema_graph),
-        )
+    span = trace_context.start_span(name="join_path")
+    span.end(
+        output_summary=f"join_paths={len(schema_graph.join_paths)}",
+        metadata=_join_path_metadata(schema_graph),
     )
-    step_index += 1
 
     # 步骤 3：QueryPlan 生成与自检 -----------------------------------------------------------
-    started_at = perf_counter()
+    span = trace_context.start_span(name="query_plan")
     try:
         plan = generate_query_plan(
             question=question,
@@ -304,103 +281,91 @@ def run_text2sql_pipeline(
             llm_client=llm_client,
         )
     except QueryPlanExtractionError as exc:
-        trace_steps.append(
-            _step(
-                name="query_plan",
-                step_index=step_index,
-                status="error",
-                started_at=started_at,
-                error_type=exc.issue_tag,
-                output_summary=str(exc),
-                metadata=_llm_error_metadata(exc),
-            )
-        )
-        return _blocked_result(
-            sql=None,
-            answer_hint=answer_hint,
-            trace_steps=trace_steps,
-            issue_tags=[exc.issue_tag],
-            blocked_reason=f"QueryPlan 生成失败：{exc}",
+        span.fail(
             error_type=exc.issue_tag,
+            output_summary=str(exc),
+            metadata=_llm_error_metadata(exc),
+        )
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=None,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=[exc.issue_tag],
+                blocked_reason=f"QueryPlan 生成失败：{exc}",
+                error_type=exc.issue_tag,
+            ),
+            trace_context,
         )
     except LLMGenerationError as exc:
-        trace_steps.append(
-            _step(
-                name="query_plan",
-                step_index=step_index,
-                status="error",
-                started_at=started_at,
-                error_type="llm_generation_error",
-                output_summary=str(exc),
-                metadata=_llm_error_metadata(exc),
-            )
-        )
-        return _blocked_result(
-            sql=None,
-            answer_hint=answer_hint,
-            trace_steps=trace_steps,
-            issue_tags=["llm_generation_error"],
-            blocked_reason=f"QueryPlan 生成失败：{exc}",
+        span.fail(
             error_type="llm_generation_error",
+            output_summary=str(exc),
+            metadata=_llm_error_metadata(exc),
+        )
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=None,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=["llm_generation_error"],
+                blocked_reason=f"QueryPlan 生成失败：{exc}",
+                error_type="llm_generation_error",
+            ),
+            trace_context,
         )
 
-    trace_steps.append(
-        _step(
-            name="query_plan",
-            step_index=step_index,
-            started_at=started_at,
-            output_summary=plan.to_human_explanation(),
-            metadata={
-                "step_count": len(plan.steps),
-                "sql_step_count": sum(1 for step in plan.steps if step.step_type == "sql_query"),
-                "step_ids": [step.step_id for step in plan.steps],
-            },
-        )
+    span.end(
+        output_summary=plan.to_human_explanation(),
+        metadata={
+            "step_count": len(plan.steps),
+            "sql_step_count": sum(1 for step in plan.steps if step.step_type == "sql_query"),
+            "step_ids": [step.step_id for step in plan.steps],
+        },
     )
-    step_index += 1
 
-    started_at = perf_counter()
+    span = trace_context.start_span(name="plan_validation")
     validation = validate_query_plan(
         plan,
         schema_graph=schema_graph,
         domain_schema=active_domain_schema,
         user_role=user_role,
     )
-    trace_steps.append(
-        _step(
-            name="plan_validation",
-            step_index=step_index,
-            status="success" if validation.is_valid else "blocked",
-            started_at=started_at,
-            output_summary="valid" if validation.is_valid else "; ".join(validation.errors),
-            error_type=None if validation.is_valid else "plan_validation_failed",
-            metadata={"issue_tags": validation.issue_tags, "errors": validation.errors},
-        )
+    span.end(
+        status="success" if validation.is_valid else "blocked",
+        output_summary="valid" if validation.is_valid else "; ".join(validation.errors),
+        error_type=None if validation.is_valid else "plan_validation_failed",
+        metadata={"issue_tags": validation.issue_tags, "errors": validation.errors},
     )
-    step_index += 1
     if not validation.is_valid:
-        return _blocked_result(
-            sql=None,
-            answer_hint=answer_hint,
-            trace_steps=trace_steps,
-            issue_tags=validation.issue_tags,
-            blocked_reason="QueryPlan 自检未通过：" + "；".join(validation.errors),
-            error_type="plan_validation_failed",
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=None,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=validation.issue_tags,
+                blocked_reason="QueryPlan 自检未通过：" + "；".join(validation.errors),
+                error_type="plan_validation_failed",
+            ),
+            trace_context,
         )
 
     plan_step = _first_sql_step(plan)
     if plan_step is None:
-        return _blocked_result(
-            sql=None,
-            answer_hint=answer_hint,
-            trace_steps=trace_steps,
-            issue_tags=["invalid_query_plan"],
-            blocked_reason="QueryPlan 缺少可执行 sql_query step。",
-            error_type="invalid_query_plan",
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=None,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=["invalid_query_plan"],
+                blocked_reason="QueryPlan 缺少可执行 sql_query step。",
+                error_type="invalid_query_plan",
+            ),
+            trace_context,
         )
 
     # 步骤 4：局部 Schema SQL 生成 -----------------------------------------------------------
-    started_at = perf_counter()
+    span = trace_context.start_span(name="sql_generation", parent_step_id=plan_step.step_id)
     try:
         generated_sql = generate_sql_from_plan_step(
             question=question,
@@ -411,48 +376,37 @@ def run_text2sql_pipeline(
             llm_client=llm_client,
         )
     except LLMGenerationError as exc:
-        trace_steps.append(
-            _step(
-                name="sql_generation",
-                step_index=step_index,
-                status="error",
-                started_at=started_at,
-                error_type="llm_generation_error",
-                output_summary=str(exc),
-                metadata=_llm_error_metadata(exc),
-                parent_step_id=plan_step.step_id,
-            )
-        )
-        return _blocked_result(
-            sql=None,
-            answer_hint=answer_hint,
-            trace_steps=trace_steps,
-            issue_tags=["llm_generation_error"],
-            blocked_reason=f"局部 Schema SQL 生成失败：{exc}",
+        span.fail(
             error_type="llm_generation_error",
+            output_summary=str(exc),
+            metadata=_llm_error_metadata(exc),
+        )
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=None,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=["llm_generation_error"],
+                blocked_reason=f"局部 Schema SQL 生成失败：{exc}",
+                error_type="llm_generation_error",
+            ),
+            trace_context,
         )
 
-    trace_steps.append(
-        _step(
-            name="sql_generation",
-            step_index=step_index,
-            started_at=started_at,
-            output_summary=generated_sql.reasoning_summary,
-            metadata={
-                "tables_used": generated_sql.tables_used,
-                "confidence": generated_sql.confidence,
-                "sql_preview": generated_sql.sql[:300],
-                "plan_step_tables": plan_step.tables,
-                "plan_step_columns": plan_step.columns,
-                "plan_step_filters": plan_step.filters,
-                "plan_step_metrics": plan_step.metrics,
-                "plan_step_joins": plan_step.joins,
-                "plan_step_output_columns": plan_step.output_columns,
-            },
-            parent_step_id=plan_step.step_id,
-        )
+    span.end(
+        output_summary=generated_sql.reasoning_summary,
+        metadata={
+            "tables_used": generated_sql.tables_used,
+            "confidence": generated_sql.confidence,
+            "sql_preview": generated_sql.sql[:300],
+            "plan_step_tables": plan_step.tables,
+            "plan_step_columns": plan_step.columns,
+            "plan_step_filters": plan_step.filters,
+            "plan_step_metrics": plan_step.metrics,
+            "plan_step_joins": plan_step.joins,
+            "plan_step_output_columns": plan_step.output_columns,
+        },
     )
-    step_index += 1
 
     # 步骤 5：SQL Guard + SQL 执行 -----------------------------------------------------------
     tool_result = run_sql_tool(
@@ -462,75 +416,41 @@ def run_text2sql_pipeline(
         user_role=user_role,
         trace_id=trace_id,
         domain_schema=active_domain_schema,
+        trace_context=trace_context,
+        trace_parent_step_id=plan_step.step_id,
     )
-    guard_status = "success" if tool_result.safety_status == "passed" else "blocked"
-    trace_steps.append(
-        TraceStep(
-            name="sql_guard",
-            step_index=step_index,
-            step_type="sql_guard",
-            status=guard_status,
-            input_summary="validate generated SQL",
-            output_summary=tool_result.blocked_reason or "SQL Guard passed",
-            latency_ms=tool_result.tool_call.latency_ms if tool_result.tool_call else 0.0,
-            error_type=tool_result.error_type if tool_result.safety_status != "passed" else None,
-            metadata={"tables_used": tool_result.tables_used, "blocked_reason": tool_result.blocked_reason},
-            parent_step_id=plan_step.step_id,
-        )
-    )
-    step_index += 1
 
     if tool_result.safety_status != "passed":
-        return Text2SQLPipelineResult(
+        return _with_trace_snapshot(
+            Text2SQLPipelineResult(
+                sql=generated_sql.sql,
+                answer_hint=answer_hint,
+                tool_result=tool_result,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=[tool_result.error_type or "sql_guard_blocked"],
+                blocked_reason=tool_result.blocked_reason,
+                error_type=tool_result.error_type,
+                tool_call=tool_result.tool_call,
+            ),
+            trace_context,
+        )
+
+    # 步骤 6：图表决策只做附加观察，不影响 SQL 答案。-----------------------------------------
+    span = trace_context.start_span(name="chart_generation", step_type="chart_generation")
+    chart_spec = build_chart_spec(columns=tool_result.columns, rows=tool_result.rows, question=question)
+    span.end(
+        status="success" if chart_spec else "skipped",
+        output_summary=f"chart_mark={chart_spec.get('mark')}" if chart_spec else "no chart",
+        metadata={"has_chart": chart_spec is not None, "mark": chart_spec.get("mark") if chart_spec else None},
+    )
+
+    return _with_trace_snapshot(
+        Text2SQLPipelineResult(
             sql=generated_sql.sql,
             answer_hint=answer_hint,
             tool_result=tool_result,
-            trace_steps=trace_steps,
-            issue_tags=[tool_result.error_type or "sql_guard_blocked"],
-            blocked_reason=tool_result.blocked_reason,
-            error_type=tool_result.error_type,
-            tool_call=tool_result.tool_call,
-        )
-
-    trace_steps.append(
-        TraceStep(
-            name="sql_execution",
-            step_index=step_index,
-            step_type="sql_query",
-            status="success",
-            input_summary="execute generated SQL",
-            output_summary=_sql_execution_summary(tool_result),
-            latency_ms=tool_result.sql_time_ms,
-            metadata={
-                "row_count": len(tool_result.rows),
-                "column_count": len(tool_result.columns),
-                "latency_ms": tool_result.sql_time_ms,
-                "tables_used": tool_result.tables_used,
-            },
-            parent_step_id=plan_step.step_id,
-        )
-    )
-    step_index += 1
-
-    # 步骤 6：图表决策只做附加观察，不影响 SQL 答案。-----------------------------------------
-    started_at = perf_counter()
-    chart_spec = build_chart_spec(columns=tool_result.columns, rows=tool_result.rows, question=question)
-    trace_steps.append(
-        _step(
-            name="chart_decision",
-            step_index=step_index,
-            step_type="chart_decision",
-            status="success" if chart_spec else "skipped",
-            started_at=started_at,
-            output_summary=f"chart_mark={chart_spec.get('mark')}" if chart_spec else "no chart",
-            metadata={"has_chart": chart_spec is not None, "mark": chart_spec.get("mark") if chart_spec else None},
-        )
-    )
-
-    return Text2SQLPipelineResult(
-        sql=generated_sql.sql,
-        answer_hint=answer_hint,
-        tool_result=tool_result,
-        trace_steps=trace_steps,
-        chart_spec=chart_spec,
+            trace_steps=trace_context.trace_steps,
+            chart_spec=chart_spec,
+        ),
+        trace_context,
     )

@@ -36,6 +36,13 @@ class LangFuseBackend:
         由 TraceRouter 捕获并降级，确保 JSONL 主链路继续写入。
         """
 
+        if record.langfuse_span_mode == "live":
+            # M16B：pipeline/tool 已经在真实执行边界写过 live spans，这里不能再按 M16 方式
+            # post-hoc 重放，否则 LangFuse 里会出现两套同名 step。
+            if record.langfuse_trace_id is not None and record.langfuse_trace_url is None:
+                record.langfuse_trace_url = self._trace_url(record.langfuse_trace_id)
+            return
+
         client = self._build_client()
         langfuse_trace_id = record.langfuse_trace_id or uuid4().hex
         record.langfuse_trace_id = langfuse_trace_id

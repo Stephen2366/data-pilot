@@ -76,6 +76,10 @@ def _record_trace(
     request_body: QueryRequest,
     response: AgentResponse,
     trace_steps: list[TraceStep] | None = None,
+    langfuse_trace_id: str | None = None,
+    langfuse_trace_url: str | None = None,
+    langfuse_write_status: str = "skipped",
+    langfuse_span_mode: str = "post_hoc",
 ) -> None:
     """把 AgentResponse 的关键信息同步追加到 JSONL trace。"""
 
@@ -97,6 +101,10 @@ def _record_trace(
         tool_calls=response.tool_calls,
         trace_steps=trace_steps or [],
         error_type=response.error_type,
+        langfuse_trace_id=langfuse_trace_id,
+        langfuse_trace_url=langfuse_trace_url,
+        langfuse_write_status=langfuse_write_status,
+        langfuse_span_mode=langfuse_span_mode,
     )
     path = _trace_path(request)
     if path is None:
@@ -116,6 +124,10 @@ def _blocked_response(
     tool_call: ToolCallTrace | None = None,
     error_type: str = "sql_guard_blocked",
     trace_steps: list[TraceStep] | None = None,
+    langfuse_trace_id: str | None = None,
+    langfuse_trace_url: str | None = None,
+    langfuse_write_status: str = "skipped",
+    langfuse_span_mode: str = "post_hoc",
 ) -> AgentResponse:
     """构造统一的拦截响应，并同步写 trace。"""
 
@@ -147,7 +159,16 @@ def _blocked_response(
         error_type=error_type,
         trace_id=trace_id,
     )
-    _record_trace(request=request, request_body=request_body, response=response, trace_steps=trace_steps)
+    _record_trace(
+        request=request,
+        request_body=request_body,
+        response=response,
+        trace_steps=trace_steps,
+        langfuse_trace_id=langfuse_trace_id,
+        langfuse_trace_url=langfuse_trace_url,
+        langfuse_write_status=langfuse_write_status,
+        langfuse_span_mode=langfuse_span_mode,
+    )
     return response
 
 
@@ -193,6 +214,10 @@ def _success_response(
     started_at: float,
     trace_steps: list[TraceStep] | None = None,
     chart_spec: dict[str, Any] | None = None,
+    langfuse_trace_id: str | None = None,
+    langfuse_trace_url: str | None = None,
+    langfuse_write_status: str = "skipped",
+    langfuse_span_mode: str = "post_hoc",
 ) -> AgentResponse:
     """把 SQL Tool 结果整理成 M5 AgentResponse，并追加 trace。"""
 
@@ -221,7 +246,16 @@ def _success_response(
         error_type=None,
         trace_id=trace_id,
     )
-    _record_trace(request=request, request_body=request_body, response=response, trace_steps=trace_steps)
+    _record_trace(
+        request=request,
+        request_body=request_body,
+        response=response,
+        trace_steps=trace_steps,
+        langfuse_trace_id=langfuse_trace_id,
+        langfuse_trace_url=langfuse_trace_url,
+        langfuse_write_status=langfuse_write_status,
+        langfuse_span_mode=langfuse_span_mode,
+    )
     return response
 
 
@@ -277,6 +311,10 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
                 tool_call=pipeline_result.tool_call,
                 error_type=pipeline_result.error_type or "text2sql_pipeline_blocked",
                 trace_steps=pipeline_result.trace_steps,
+                langfuse_trace_id=pipeline_result.langfuse_trace_id,
+                langfuse_trace_url=pipeline_result.langfuse_trace_url,
+                langfuse_write_status=pipeline_result.langfuse_write_status,
+                langfuse_span_mode=pipeline_result.langfuse_span_mode,
             )
         return _success_response(
             request=request,
@@ -288,6 +326,10 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             started_at=started_at,
             trace_steps=pipeline_result.trace_steps,
             chart_spec=pipeline_result.chart_spec,
+            langfuse_trace_id=pipeline_result.langfuse_trace_id,
+            langfuse_trace_url=pipeline_result.langfuse_trace_url,
+            langfuse_write_status=pipeline_result.langfuse_write_status,
+            langfuse_span_mode=pipeline_result.langfuse_span_mode,
         )
 
     if matched is None and _looks_like_dangerous_sql(request_body.question):

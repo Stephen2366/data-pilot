@@ -2173,3 +2173,85 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 **本地启动体验：**
 
 M16 没有新增 API 端点，体验入口仍是 `/api/query` 和 trace 文件。默认 `LANGFUSE_ENABLED=false` 时，请求只写 JSONL；如果本地 `.env` 开启 LangFuse 并配置 key，请求会额外写入 LangFuse Cloud，同时 JSONL 行里出现 `langfuse_trace_id`、`langfuse_trace_url`、`langfuse_write_status`。实际业务 API 响应体不会出现这些字段。
+
+## ★ M16B Trace Lifecycle 下沉预备分支（2026-07-29）
+
+**简述**：M16B 是在独立分支上做的一次观测底座实验。M16 已经能把请求结束后的 `TraceRecord` 写成 LangFuse flat spans，但那更像“事后整理日志”。M16B 把埋点下沉到 Text2SQL pipeline 和 SQL tool 的真实执行边界，让 LangFuse 看到更接近真实运行过程的 spans，同时 JSONL / eval 仍然消费同一套 `TraceStep`。
+
+### 这次做了什么
+
+这次先新增了 **TraceContext / SpanHandle**。pipeline 不直接 import LangFuse，而是只说“开始一个步骤、结束一个步骤、这个步骤失败了”。这有点像 SpringBoot 里业务代码依赖自己的 service interface，而不是到处直接调用第三方 SDK。
+
+然后把 `force_new_pipeline` 主链路迁移到 lifecycle：`schema_retrieval`、`join_path`、`query_plan`、`sql_generation`、`sql_guard`、`sql_execution`、`chart_generation` 都从同一套 lifecycle 生成 trace。SQL Guard 和 SQL Execution 没有在 pipeline 里事后补，而是通过 `run_sql_tool(trace_context=...)` 在工具层内部记录，因为真正的安全检查和数据库执行边界就在 tool 里。
+
+最后补了一个显式去重字段 **`langfuse_span_mode`**。M16 的 `post_hoc` 模式继续在请求结束后由 backend 拆 spans；M16B 的 `live` 模式说明 spans 已经在执行中写过，最终 `LangFuseBackend.record()` 不能再重放一遍，否则 Cloud UI 会出现重复步骤。
+
+### 新概念
+
+- **Trace lifecycle**：不是等请求结束后再回忆发生了什么，而是在每个步骤开始和结束时记录。这样排障时能更像看真实调用链。
+- **Live span**：运行中写入的 span。它比 post-hoc span 更接近真实时间线，适合后续 RAG / Hybrid 这种多步骤 Agent。
+- **Post-hoc 去重**：同一件事不能既 live 写一遍，又请求结束后再拆一遍。`langfuse_span_mode` 就是告诉 backend 当前 trace 属于哪种模式。
+
+### 关键文件
+
+- `engine/trace/lifecycle.py`：M16B 新增的 lifecycle 抽象，封装 `TraceContext`、`SpanHandle` 和 LangFuse live writer。
+- `engine/nl2sql/pipeline.py`：`force_new_pipeline` 主链路从手工 append `TraceStep` 改为 lifecycle 记录。
+- `engine/tools/sql_tool.py`：SQL Guard / SQL Execution 的真实 span 边界，保持 `trace_context` 可选，旧模板链路不受影响。
+- `engine/trace/langfuse_backend.py`：识别 `langfuse_span_mode=live` 后跳过 post-hoc spans，避免重复写入。
+
+### 代码阅读路线
+
+1. **先看 lifecycle 抽象**：`engine/trace/lifecycle.py`
+   从 `TraceContext.start_span()` 和 `SpanHandle.end()` 读起。重点理解业务代码只产生 DataPilot 的 `TraceStep`，LangFuse SDK 被藏在内部 writer 里。
+
+2. **再看 pipeline 接入**：`engine/nl2sql/pipeline.py`
+   顺着 `run_text2sql_pipeline()` 看一条请求怎么穿过 schema retrieval、plan、SQL generation、SQL tool 和 chart generation。每个早退分支都会走 `_with_trace_snapshot()`，避免异常路径漏掉 flush 或 JSONL 映射字段。
+
+3. **最后看 SQL tool 下沉**：`engine/tools/sql_tool.py`
+   这里是本模块最关键的分层选择。`run_sql_tool()` 的 `trace_context` 是可选参数，只有新 pipeline 传入；旧路径不传时行为不变。
+
+核心流向：
+
+`/api/query force_new_pipeline`
+→ `run_text2sql_pipeline()`
+→ `TraceContext.start_span()`
+→ `run_sql_tool(trace_context=...)`
+→ `TraceLifecycleSnapshot`
+→ `TraceRecord(langfuse_span_mode=live)`
+→ `JSONL + LangFuse`
+
+### 设计要点
+
+- **为什么不用事后补 span**：SQL Guard 和 DB 执行的真实边界在 `run_sql_tool()` 里，pipeline 事后补只能猜结果，不适合作为后续底座。
+- **为什么 root span 不放进 JSONL steps**：LangFuse UI 需要请求级 root span；JSONL / eval 更依赖稳定的业务 step 序号，所以 root 只作为 LangFuse live observation。
+- **为什么 M16B 不直接替换主线**：这是对照实验分支。它证明 lifecycle 能跑通，但是否合回，要看它对排障体验的提升是否值得代码侵入度。
+
+### 面试怎么讲
+
+“我在 M16B 做了一个 Trace lifecycle 下沉分支。原来的 LangFuse 接入是 post-hoc，把请求结束后的 trace_steps 平铺上传，能看但不够像真实调用链。M16B 新增了 DataPilot 自己的 TraceContext / SpanHandle，pipeline 和 SQL tool 只依赖这个抽象，不直接依赖 LangFuse。SQL Guard 和 SQL Execution 的 span 放在 tool 内部，因为安全检查和数据库执行的真实边界在那里。为了避免 live spans 和 post-hoc spans 重复，我加了 `langfuse_span_mode`，live 模式下 backend 只保留 JSONL 映射，不再重放 spans。这个分支的价值是为 RAG / Hybrid 阶段提前验证观测底座，而不是等复杂度叠上来以后再一起改。”
+
+1. **面试官可能问：为什么要做 M16B？**
+   可以答：M16 能验证 LangFuse 双写，但排障价值有限；M16B 验证真实 lifecycle，提前为多步骤 Agent 做观测底座。
+
+2. **面试官可能问：为什么不让业务代码直接调 LangFuse？**
+   可以答：第三方观测系统应该被 adapter 隔离。业务层只表达 DataPilot 的生命周期事件，后续换 LangFuse、自建平台或 EvalBench backend 都不用污染 pipeline。
+
+### 验证与下一步
+
+- 验证：M16B 专项 **14 passed**；全量 pytest **98 passed, 2 skipped**；临时 live smoke 写入 LangFuse Cloud 成功，JSONL 中 `langfuse_span_mode=live`、`langfuse_write_status=ok`。
+- warning：仍是既有 Starlette/httpx deprecation，不影响 M16B。
+- 下一步：把 M16A post-hoc 和 M16B lifecycle 放到相同 case 下对比 UI 排障价值、代码侵入度和测试复杂度，再决定是否作为 RAG / Hybrid 底座。
+
+可复制验证命令：
+
+```powershell
+# M16B lifecycle / LangFuse 去重 / 新 pipeline 专项，预期 14 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m16_trace_router.py tests\test_phase3a_pipeline.py --basetemp=.agent_work\temp\pytest-m16b-3
+
+# 全量回归，预期 98 passed, 2 skipped。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --basetemp=.agent_work\temp\pytest-m16b-full-2
+```
+
+**本地启动体验：**
+
+M16B 仍然使用 `/api/query`，没有新增端点。体验方式是在 `.env` 中启用 LangFuse 后，请求 `force_new_pipeline=true` 的问题；JSONL 会写出 `langfuse_span_mode=live`，LangFuse Cloud UI 里能看到请求级 `datapilot-query` root span 和各个 Text2SQL step spans。
