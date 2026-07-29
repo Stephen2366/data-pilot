@@ -5,9 +5,9 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M16B Trace Lifecycle 下沉预备分支（已完成，待 accept-module / 对照评估）
-- 下一模块：主线 M17/M18 继续在 M16 主分支推进；M16B 后续用于对比是否作为 RAG/Hybrid 观测底座
-- 上一模块验收：M16B 未验收（待 accept-module）
+- 当前模块：M17 Scorer 分层与 Score 回写（已完成，待 accept-module）
+- 下一模块：M18 Smoke / Experiment / 阶段收尾（基于 M16B 分支继续）
+- 上一模块验收：M17 未验收（待 accept-module）
 - 阻塞项：无
 - 更新时间：2026-07-29
 
@@ -22,6 +22,7 @@
 - Agent 编排：先用普通 Python pipeline，不上复杂 LangGraph；字段按未来 graph state 预留；后续进入多步骤 Agent / RAG 编排时，可在不改响应契约的前提下迁移到 LangGraph。
 - Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M16 已接入 TraceRouter + 可选 LangFuseBackend，`LANGFUSE_ENABLED=true` 时先写 LangFuse flat spans、再写 JSONL 映射字段；JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalBench 平台
 - M16B 分支方案：Trace lifecycle 下沉采用显式 `langfuse_span_mode` 去重；`force_new_pipeline` 主链路 live spans 运行中写 LangFuse，最终 JSONL 只保留映射字段，`LangFuseBackend.record()` 不再重复拆 post-hoc spans。SQL Guard / SQL Execution 的真实边界在 `run_sql_tool()` 内部，因此该函数增加可选 DataPilot `trace_context` 参数，由工具层内部记录 `sql_guard` / `sql_execution` spans，而不是 pipeline 事后补 span。
+- M17 评分：`eval/scorers/` 是 L1/L2/L3 评分单一事实源；`eval.run_eval._score_case()` 仅保留兼容薄壳。默认不启用 L3；`--judge-model` 或 `EVAL_JUDGE_MODEL` 非空时追加 `llm:correctness`。LangFuse Score 回写只按 JSONL `langfuse_trace_id`，不等待 trace 可查询；LangFuse 不可用时只跳过/失败计数，不影响 Markdown eval。
 - 图表：后端输出 Vega-Lite 兼容 `chart_spec`，当前仅覆盖基础 bar / line / horizontal_bar 和单指标柱图
 - 演示：M6 已提供 `demo/streamlit_app.py` 最小演示控制台，通过 HTTP 调用 `/api/query` 展示 answer / SQL / table / chart / trace
 
@@ -34,6 +35,7 @@
 - Trace 默认：Agent Trace 通过 `TraceRouter` 写入 JSONL；测试、smoke 和临时实验可用 `append_trace(path=...)` 或 `app.state.trace_path` 改写到 `.agent_work/temp/`。
 - LangFuse 默认：`LANGFUSE_ENABLED=false`，`langfuse` 作为 `observability` optional extra 固定 `4.14.1`；启用后 LangFuse 作为旁路写入 flat spans，DataPilot `trace_id` 不被接管，LangFuse trace id 使用独立 `uuid4().hex` 并回填 JSONL。
 - M16B live trace：`M16B` 分支已跑通 `force_new_pipeline` lifecycle 下沉 smoke；JSONL `langfuse_span_mode=live`、`langfuse_write_status=ok`，Cloud trace URL 示例为 `https://jp.cloud.langfuse.com/project/traces/c1e4a46844fb49ea9cc2fb77a21b737d`。此分支用于和 M16 post-hoc flat spans 对比，不自动替换主线。
+- M17 score smoke：真实 LangFuse score 回写 smoke 通过，baseline/post-hoc 路径 `langfuse_scores=ok:16`；M16B live lifecycle 路径 `score_payload_count=6`、`score_write_result.ok=6`、`langfuse_span_mode=live`。本地出现 LangFuse SDK OTLP trace export `WinError 10013` warning，但 eval 返回 0，score writer 返回 ok。
 - Eval 默认：formal / challenge 用于主线验收和回归对照；diagnostic 用于定位边界和下一步问题，不追满分。
 
 ### 最新评测基线

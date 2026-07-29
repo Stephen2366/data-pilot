@@ -320,6 +320,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 - M15 先钉 Cloud / SDK / ID 策略，因为 LangFuse 接入最容易踩在版本 API 和 trace id 语义上。
 - M16 单独做 trace 双写，因为这是“不破坏原 JSONL 主链路”的核心风险面。
 - M16B 作为并行预备分支，不替换 M16 主线：目标是把 trace lifecycle 下沉到 pipeline 执行层，验证真实层级 span / 异常路径 / 观测排障价值是否值得作为后续底座。
+- 2026-07-29 执行路线补充：用户决定在 `M16B` 分支上继续完成 M17 / M18，完成后再整体合并回 `main`。因此本文后续 M17 / M18 不新增 `M17B` / `M18B` 双章节；现有 M17 / M18 目标保持不变，只把执行底座从 M16 post-hoc flat spans 调整为 M16B live lifecycle spans。M16 post-hoc 路线保留为 fallback / 对照，不再作为当前执行分支的默认前提。
 - M17 合并 L1/L2/L3 scorer 和 Score 回写，因为它们共同回答“怎么评测、怎么把分数送到 LangFuse”。
 - M18 合并 smoke、手动 Experiment 和文档收尾，因为这些都是阶段闭环材料，不单独拆模块。
 
@@ -329,9 +330,9 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 |------|------|------|----------|----------|
 | M15 LangFuse Cloud 接入基线 | 1 | Phase 3A / M14-lite 收口 | 纳入配置、复跑 Cloud SDK smoke、固定 `datapilot_trace_id` / `langfuse_trace_id` 双 ID 策略、验证 `langfuse` 依赖可选 | Settings / `.env.example`、`.agent_work/temp/m15-notes.md`、ID 策略记录 |
 | M16 Trace 双写与降级 | 2 | M15 | 保留 JSONL 主链路，新增 LangFuse 旁路写入和 payload 脱敏；LangFuse 失败不影响 `/api/query` / eval | `engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、双写 / 降级测试 |
-| M16B Trace Lifecycle 下沉预备分支 | 2B（并行，不阻塞主线） | M16 | 在独立 `M16B` 分支上把 trace start/end/fail lifecycle 下沉到 Text2SQL pipeline，验证是否适合作为 RAG/Hybrid 观测底座 | `engine/trace/lifecycle.py`（拟新增）、`engine/nl2sql/pipeline.py`、lifecycle 测试、A/B 观测对照记录 |
-| M17 Scorer 分层与 Score 回写 | 3 | M16 | 把现有规则评分迁移为单一事实源，补最小 L3 judge，并按 `langfuse_trace_id` 写回 LangFuse Score | `eval/scorers/*`、`eval/run_eval.py`、score 回写测试 |
-| M18 Smoke / Experiment / 阶段收尾 | 4 | M17 | 一键 smoke、5 条代表性 case 手动 Experiment、阶段档案和学习复盘收尾 | `scripts/smoke_phase3b_langfuse.py`、Experiment 记录、`AI_CONTEXT.md` / CHANGELOG / dev-log |
+| M16B Trace Lifecycle 下沉预备分支 | 2B（已作为当前执行底座） | M16 | 在独立 `M16B` 分支上把 trace start/end/fail lifecycle 下沉到 Text2SQL pipeline，验证是否适合作为 RAG/Hybrid 观测底座 | `engine/trace/lifecycle.py`、`engine/nl2sql/pipeline.py`、lifecycle 测试、A/B 观测对照记录 |
+| M17 Scorer 分层与 Score 回写 | 3 | M16B（当前分支） | 把现有规则评分迁移为单一事实源，补最小 L3 judge，并按 `langfuse_trace_id` 写回 LangFuse Score | `eval/scorers/*`、`eval/run_eval.py`、score 回写测试 |
+| M18 Smoke / Experiment / 阶段收尾 | 4 | M17（基于 M16B） | 一键 smoke、5 条代表性 case 手动 Experiment、阶段档案和学习复盘收尾 | `scripts/smoke_phase3b_langfuse.py`、Experiment 记录、`AI_CONTEXT.md` / CHANGELOG / dev-log |
 
 ## 模块实施明细
 
@@ -580,6 +581,8 @@ with trace_context.span("sql_generation", step_type="llm") as span:
 ## M17：Scorer 分层与 Score 回写
 
 M17 拆为三个子步骤，先调研，再迁移规则评分，最后补最小 L3 judge。
+
+> **基于 M16B 执行的补充说明**：当前分支后续 M17 / M18 以 M16B live lifecycle trace 为底座。Score 回写语义仍然只依赖 JSONL 中的 `langfuse_trace_id`，因此不需要新增 `M17B`；但实现和测试要覆盖 `langfuse_span_mode=live` 时不会触发 post-hoc span 重放，且 scorer / score 回写只读取映射字段，不依赖 LangFuse trace 已可查询。
 
 ### M17-1：调研 LangFuse 内置评估器（先做）
 

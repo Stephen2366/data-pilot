@@ -2,7 +2,9 @@
 
 > 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `AI_CONTEXT.md`「当前状态」；完整技术档案和历史实验看 `AI_CONTEXT_CHANGELOG.md`，查 bug 时按需追溯。
 
-## ★ M0 工程骨架与配置（2026-07-16）
+## ★ M0 工程骨架与配置
+
+（2026-07-16）
 
 **简述：**把空仓库变成一个能启动、能跑测试的 FastAPI 项目——相当于盖房子前先打好地基、通好水电。
 
@@ -66,7 +68,9 @@ DataPilot 不是只写一个脚本 demo，而是从第一天按**真实后端服
 python -m pytest
 ```
 
-## ★ M1 数据底座（2026-07-17）
+## ★ M1 数据底座
+
+（2026-07-17）
 
 **简述**：建好 7 张业务表、数据库迁移和确定性假数据——先把"仓库和货"备齐，之后 Agent 才有东西可查。
 
@@ -140,7 +144,9 @@ python -m alembic current
 python -m alembic check
 ```
 
-## ★ M2 API 与后端工程基础（2026-07-18）
+## ★ M2 API 与后端工程基础
+
+（2026-07-18）
 
 **简述**：给 M1 的数据底座装上稳定 API 出入口——像给仓库开了带登记簿的取货窗口，后续 Agent 和演示页都从这里拿数据。
 
@@ -224,7 +230,9 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
 ```
 
-## ★ M3 v0 模板 SQL 闭环（2026-07-19）
+## ★ M3 v0 模板 SQL 闭环
+
+（2026-07-19）
 
 **简述**：让 DataPilot 第一次能“听懂问题并查数据库”——先不用 LLM，靠 5 条稳定模板 SQL 跑通自然语言到表格答案的闭环。
 
@@ -338,7 +346,9 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 ```
 
-## ★ ★ M4 NL2SQL 最小链路与安全（2026-07-20）
+## ★ ★ M4 NL2SQL 最小链路与安全
+
+（2026-07-20）
 
 **简述**：把 SQL 来源从固定模板扩展到 **DeepSeek LLM 生成**，但数据库执行前仍然必须经过同一个安全闸门。
 
@@ -507,7 +517,9 @@ M3 模板问题 —— 大致结果：`safety_status=passed`，`answer` 会提�
 }
 ```
 
-## ★ ★ M5 AgentResponse 扩展、Trace、Tool 与图表（2026-07-20）
+## ★ ★ M5 AgentResponse 扩展、Trace、Tool 与图表
+
+（2026-07-20）
 
 **简述**：把 `/api/query` 从“能查出表格”升级成一个**可评测、可演示、可追踪**的结构化 Agent 输出。
 
@@ -668,7 +680,9 @@ python -m uvicorn app.main:app --reload
 }
 ```
 
-## ★ M6 EvalOps-lite 与演示收尾（2026-07-20）
+## ★ M6 EvalOps-lite 与演示收尾
+
+（2026-07-20）
 
 **简述**：把阶段二的 SQL Agent 闭环收成一个**能批量评测、能本地演示、能进入阶段三**的 v1 小系统。
 
@@ -777,7 +791,9 @@ python -m streamlit run demo\streamlit_app.py
 
 打开 `http://localhost:8501` 后，可以点左侧预置问题，例如“各渠道订单量是多少？”。大致结果：主区域展示自然语言答案、SQL、表格、柱状图和 trace；如果点 `DROP TABLE orders`，会看到 `safety_status=blocked` 和 `sql_guard_blocked`。
 
-## ★ Phase 2.7 数据库升级（2026-07-22）
+## ★ Phase 2.7 数据库升级
+
+（2026-07-22）
 
 **简述**：把阶段二的 7 表数据底座升级成 **14 张物理表 + 1 万级订单数据**，让后续 Phase 3A Text2SQL 深化面对的不是小 demo 库，而是更接近真实企业分析系统的复杂 schema。
 
@@ -913,7 +929,9 @@ python -m uvicorn app.main:app --reload
 
 打开 `http://127.0.0.1:8000/docs` 后，可以继续用 `POST /api/query` 测阶段二旧问题，例如”2026年6月本月GMV是多少？”。大致结果：`safety_status=passed`，`chart_spec` 是单指标柱图，GMV 会变成新库的 **11285752.0**。如果测”各渠道订单量是多少？”，仍会返回 Mobile App 等渠道结果，说明旧链路在新库上保持兼容。
 
-## ★ Phase 3A M8 回归基线冻结（2026-07-22）
+## ★ Phase 3A M8 回归基线冻结
+
+（2026-07-22）
 
 **简述**：把阶段二旧 SQL 链路放到 Phase 3A 的 10 条 formal regression 和 16 条 challenge 上跑一遍，像做性能优化前先量一次旧机器的真实速度，后续 M9-M12 才有可信对照。
 
@@ -1034,7 +1052,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cas
 
 本模块暂无新的交互页面；它的交互方式是评测报告。运行上面的 baseline 命令后，打开 `eval/reports/phase3a-baseline.md` 和 `eval/reports/phase3a-challenge-baseline.md`，可以看到每条 case 的 pass/fail、review_required、issue tag、trace_id 和实际 SQL。这两个报告就是后续 M12 新旧链路对照的旧链路输入。
 
-## ★ M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线（2026-07-23）
+## ★ M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线
+
+（2026-07-23）
 
 **简述**：这次把 Phase 3A 的诊断评测从 16 条 challenge 扩成 **32 条 diagnostic benchmark**，像给后续 Text2SQL 改造装了一块更细的仪表盘。
 
@@ -1140,7 +1160,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 本模块暂无新的 Swagger 或前端页面；它的交互入口是评测报告。运行 diagnostic baseline 命令后，打开 `eval/reports/phase3a-diagnostic-baseline.md`，先看顶部 total / passed / failed / skipped，再看 **Capability Summary**，最后挑几条 Case Details 看实际 SQL 和 issue tag。这个报告就是后续 M12 新旧链路对照的旧链路诊断输入。
 
-## ★ M9 Schema Retrieval 与 JoinPath（2026-07-23）
+## ★ M9 Schema Retrieval 与 JoinPath
+
+（2026-07-23）
 
 **简述**：这次给 Text2SQL 新链路加上 **Schema Retrieval**，让系统先查“数据字典和关系图”，再进入后续 QueryPlan / SQL 生成。
 
@@ -1260,7 +1282,9 @@ git diff --check
 
 本模块暂无新的 Swagger 或前端页面；它是后端 Text2SQL 中间层能力。学习时可以先跑上面的 M9 测试，再打开 `tests/test_phase3a_schema_retrieval.py` 看每个断言：它会告诉你哪些中文问题召回了哪些表、字段、指标和 JoinPath。后续 M10/M11 会把这块能力接到 QueryPlan 和新 pipeline 里。
 
-## ★ M9.1 / M9.2 可选 Milvus + SiliconFlow Embedding（2026-07-23 ~ 2026-07-24）
+## ★ M9.1 / M9.2 分支试验 Milvus + SiliconFlow Embedding
+
+（2026-07-23 ~ 2026-07-24）
 
 **简述**：这两次实验已经合并进主线：DataPilot 现在 **默认仍用 in-memory 检索**，同时 **可选支持 Milvus + SiliconFlow 真实中文 embedding**。
 
@@ -1395,7 +1419,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_2_rea
 
 本章节没有 Swagger 页面；它的体验方式是对比报告。日常开发不需要启动 Milvus，也不需要调用 SiliconFlow。只有想验证真实向量检索时，才启动 Docker Milvus，并运行 `scripts/smoke_m9_2_real_embedding.py`。报告会写到 `.agent_work/temp/`，重点看 `merged_top30` 判断当前系统是否受益，看 `vector_only_top12` 判断 embedding 模型本身是否更强。
 
-## ★ ★ M10 QueryPlanStep 与自检（2026-07-24）
+## ★ ★ M10 QueryPlanStep 与自检
+
+（2026-07-24）
 
 **简述**：M10 给 Text2SQL 加了一个 **SQL 生成前的结构化计划层**，像后端接口里的 DTO + Validator，先检查“准备查什么”是否合法，再交给后续 SQL 生成。M9 已经把问题相关的表、字段、Join 召回出来了，但如果让 LLM 直接拿着这些信息写 SQL，它仍可能编造不存在的字段、乱连表、或者在 SQL 里偷查敏感数据——这在代码里叫"幻觉"，在企业里叫"事故"。M10 的做法是：在 LLM 写 SQL 之前，先让它填一张"申请表"（QueryPlanStep），写明要查哪些表、用哪些字段、按什么 Join 条件、输出什么列；填完后系统逐项核对这张申请表是否都在 M9 的合法"菜单"里。整个过程相当于后端接口收到请求后先做参数校验——没通过就不往下走，通过了才交给 M11 生成 SQL。
 
@@ -1509,7 +1535,9 @@ git diff --check
 
 本模块暂无独立 Swagger 或页面入口，因为 M10 还没有接入 `/api/query`。学习体验建议直接读 `tests/test_phase3a_planner.py`：它就是一组可运行的小样例，展示合法计划如何通过，以及缺字段、非法 Join、敏感字段、多 SQL step 会怎样被拦截。M11 接入 pipeline 后，才会出现通过 API 强制走新 Text2SQL 链路的体验流程。
 
-## ★ ★ M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
+## ★ ★ M11 新 Text2SQL Pipeline 与 Trace Steps
+
+（2026-07-24）
 
 **简述**：M11 把 M9 的 **Schema Retrieval / JoinPath**、M10 的 **QueryPlanStep 自检** 和 M5 的 **SQL Tool / Trace** 串成了一条真正能从 `/api/query` 触发的新 Text2SQL 链路。
 
@@ -1651,7 +1679,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:ap
 
 点 Execute 后，响应体仍是原来的 `AgentResponse` 形状；分步骤证据写在 JSONL trace 里。真实 LLM 的 SQL 质量留到 M12 用批量报告评估，不建议只凭一次 Swagger 结果判断新链路效果。
 
-## ★ M12 对照报告与阶段收尾（2026-07-25）
+## ★ M12 对照报告与阶段收尾
+
+（2026-07-25）
 
 **简述**：M12 是阶段三A（Text2SQL 深化）的收尾模块，把 M8 冻结的**旧链路 baseline** 和 M11 实现的**新 Text2SQL pipeline** 并排对比，用数据证明新链路在 Schema 精简度、Trace 可观测性和 Issue Tag 归因方面的改进——同时如实记录 LLM 列名不稳定的真实瓶颈。不写新能力，**只做测量和收口**。
 
@@ -1751,7 +1781,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 M12 本身没有新的 API 端点——它的体验入口是**批量评测报告**而非 Swagger。建议先看 `eval/reports/phase3a-comparison.md` 了解新旧链路差异的全貌，再用 `scripts/smoke_phase3a_text2sql.py` 一键复现（需要 DeepSeek API key）。
 
-## ★ M13 Phase 3A 新 pipeline 质量修复（2026-07-26）
+## ★ ★ M13 Phase 3A 新 pipeline 质量修复
+
+（2026-07-26）
 
 **简述**：M13 是 M12 收工后的质量修复模块。M12 已经把新旧 pipeline 的差异量出来了，但新 pipeline 通过率偏低；M13 做的不是“盲目调 prompt”，而是先修**评测尺子**，再沿着 trace 一层层定位：到底是评测误杀、指标口径没进 prompt、QueryPlan 选错口径，还是 SQL 生成时关系边用错。按“真实通过”口径重新校准后，最终 formal 新 pipeline 从 **4/10** 提升到 **10/10**，challenge 从 **6/16** 到 **14/16**，diagnostic 从 **12/32** 到 **23/32**。(40%→100%，37.5%→87.5%，37.5%→71.9%)
 
@@ -1876,7 +1908,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pip
 
 M13 没有新增 API 端点，体验入口仍是批量评测报告。想看效果，优先打开 `eval/reports/phase3a-new-pipeline.md`、`eval/reports/phase3a-challenge-new-pipeline.md`、`eval/reports/phase3a-diagnostic-new-pipeline.md`，再对照 `eval/reports/phase3a-*-comparison.md` 看 M12 → M13 后失败形态怎么变化。
 
-## ★ M14-lite Phase 3A 收口（2026-07-27）
+## ★ M14-lite 对小问题进行修复
+
+（2026-07-27）
 
 **简述**：M14-lite 是进入 RAG / Hybrid 前的一次小收口，不追 diagnostic 满分，而是把 **评测更可信、失败更好查、安全边界更清楚、Schema Retrieval 可显式切换后端** 这几件基础卫生补齐。
 
@@ -1934,7 +1968,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetem
 
 M14-lite 没有新增 API 端点，体验入口仍是批量评测和 trace。想看变化，优先看 eval 报告里的 `result_match` case 是否更严格，再看新 pipeline trace 中 LLM 失败时的 metadata 是否包含 raw preview / parse error。
 
-## ★ Phase 3A 收口前：Qwen / Milvus / 文档结构实验整理（2026-07-27）
+## ★ [实验] 主模型与 embedding 试用 Qwen / Milvus
+
+（2026-07-27）
 
 **简述**：这不是一个完整功能模块，更像进入 Phase 3 前的一次 **技术路线体检**：确认 Qwen 是否值得作为主模型候选，确认 Qwen embedding 是否比 SiliconFlow BGE-M3 更适合后续 RAG / Hybrid，并把过长的 `AI_CONTEXT.md` 拆成当前快照和历史 changelog。
 
@@ -2000,7 +2036,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_ex
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_experiments.py --group main --experiment main-qwen37-max --suite diagnostic
 ```
 
-## ★ M15 LangFuse Cloud 接入基线（2026-07-28）
+## ★ [Phase3B] M15 LangFuse Cloud 接入基线
+
+（2026-07-28）
 
 **简述**：M15 是 Phase 3B 的第一块地基：先确认 **LangFuse Cloud、Python SDK、配置入口和 trace id 边界** 都可靠，再让后续 M16 去做真正的 JSONL + LangFuse 双写。它没有改 `/api/query`，也没有替代现有 JSONL trace，而是把“能不能安全接入 LangFuse”这件事先钉牢。
 
@@ -2079,7 +2117,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 M15 暂无新的 API 端点或页面，因为它只完成 LangFuse 接入基线。可交互体验在 LangFuse Cloud UI：用 smoke 输出的 trace URL 打开后，应能看到 `datapilot-m15-cloud-smoke-20260728T144148Z` 这条 trace 和 `rule:m15_smoke` score。真正从 `/api/query` 自动写 LangFuse trace，要等 M16。
 
-## ★ M16 Trace 双写与降级（2026-07-28）
+## ★ M16 Trace 双写与降级（实际使用的 M16B）
+
+（2026-07-28）
 
 **简述**：M16 把原来“只能写 JSONL 文件”的 trace recorder，升级成 **TraceRouter + 多后端写入**。默认仍然只写 JSONL；只有 `LANGFUSE_ENABLED=true` 时，才额外写入 LangFuse。这个模块的核心不是炫技，而是把可观测系统做成 **旁路增强**：它能帮我们看 trace，但不能绑架 `/api/query`、JSONL 和 eval。
 
@@ -2174,7 +2214,9 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 M16 没有新增 API 端点，体验入口仍是 `/api/query` 和 trace 文件。默认 `LANGFUSE_ENABLED=false` 时，请求只写 JSONL；如果本地 `.env` 开启 LangFuse 并配置 key，请求会额外写入 LangFuse Cloud，同时 JSONL 行里出现 `langfuse_trace_id`、`langfuse_trace_url`、`langfuse_write_status`。实际业务 API 响应体不会出现这些字段。
 
-## ★ M16B Trace Lifecycle 下沉预备分支（2026-07-29）
+## ★ M16B Trace Lifecycle 下沉预备分支
+
+（2026-07-29）
 
 **简述**：M16B 是在独立分支上做的一次观测底座实验。M16 已经能把请求结束后的 `TraceRecord` 写成 LangFuse flat spans，但那更像“事后整理日志”。M16B 把埋点下沉到 Text2SQL pipeline 和 SQL tool 的真实执行边界，让 LangFuse 看到更接近真实运行过程的 spans，同时 JSONL / eval 仍然消费同一套 `TraceStep`。
 
@@ -2255,3 +2297,99 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --b
 **本地启动体验：**
 
 M16B 仍然使用 `/api/query`，没有新增端点。体验方式是在 `.env` 中启用 LangFuse 后，请求 `force_new_pipeline=true` 的问题；JSONL 会写出 `langfuse_span_mode=live`，LangFuse Cloud UI 里能看到请求级 `datapilot-query` root span 和各个 Text2SQL step spans。
+
+## ★ ★ M17 Scorer 分层与 Score 回写
+
+（2026-07-29）
+
+**简述**：M17 把 DataPilot 的 eval 从“只有一个 pass/fail 结果”升级成 **多 scorer 明细 + 旧报告兼容 + LangFuse Score 回写**。简单说，以前像老师只在卷子上写“对/错”；现在会同时写“表命中几分、列召回几分、安全是否合格、结果是否匹配、可选 LLM judge 怎么看”，并把这些分数贴回 LangFuse trace。
+
+### 这次做了什么
+
+这次先调整了 plan：后续 M17/M18 直接在 **M16B live lifecycle** 分支上继续，不再额外拆 `M17B` / `M18B`。M17 的目标没有变，仍然是 scorer 分层和 score 回写；变的是它消费的 trace 底座优先来自 M16B。
+
+代码上新增了 `eval/scorers/`。原来 `_score_case()` 里有一大段早返回判断：HTTP 状态、route、安全、表、列、expected_value、result_match、contains、manual review。M17 把这些判断搬进 `rule_scorers.py`，作为 **L1/L2 规则评分单一事实源**。`eval.run_eval._score_case()` 还在，但只做兼容薄壳，所以旧 Markdown 报告和旧测试不用改读法。
+
+然后补了最小 **L3 `llm:correctness`**。它默认关闭，只有传 `--judge-model` 或 `.env` 里配置 `EVAL_JUDGE_MODEL` 时才启用。最后新增 LangFuse Score writer：它从 JSONL 里读取 `trace_id -> langfuse_trace_id` 映射，按 LangFuse trace id 写 score，不等待 Cloud trace 查询可见。
+
+### 新概念
+
+- **Scorer 明细**：一条 case 不再只有一个总分，而是拆成多条 detail，例如 `rule:table_hit`、`rule:column_recall`、`rule:safety_compliance`。
+- **L1/L2/L3 分层**：L1 看结构和安全，L2 看结果是否匹配固定事实，L3 才让 LLM 做语义判断。能用规则就不用 LLM。
+- **Score 回写**：把本地评测结果写回 LangFuse trace。这样你在 Cloud UI 看某条 trace 时，不只看到它怎么跑，还能看到它每个评分项的结果。
+- **兼容薄壳**：旧函数名 `_score_case()` 保留，但内部调用新 scorer。类比 SpringBoot 里旧 Controller endpoint 不变，内部 service 换了新实现。
+
+### 关键文件
+
+- `eval/scorers/base.py`：定义 `EvalScoreDetail`、`EvalScoreSummary` 和 `LangFuseScorePayload`。
+- `eval/scorers/rule_scorers.py`：L1/L2 规则评分单一事实源。
+- `eval/scorers/llm_judge.py`：显式开启才运行的 `llm:correctness` judge。
+- `eval/scorers/langfuse_scores.py`：从 JSONL 映射生成 LangFuse Score payload，并调用 SDK 写回。
+- `eval/run_eval.py`：保留 CLI、报告和 `_score_case()` 兼容入口，新增 `--judge-model` 和 score 回写。
+
+### 代码阅读路线
+
+1. **先看评分数据结构**：`eval/scorers/base.py`
+   重点看 `EvalScoreDetail`。它是 M17 的核心：既能表达 pass/fail，也能表达 skipped/null，还能带 metadata 写回 LangFuse。
+
+2. **再看规则评分**：`eval/scorers/rule_scorers.py`
+   从 `score_case_rules()` 开始读。它按旧 `_score_case()` 的顺序执行规则：先判断 pipeline mode、HTTP/route，再看安全、表、列、SQL success、latency 和结果检查。重点理解这里是 **单一事实源**，不是和旧函数并行判断。
+
+3. **然后看 eval 薄壳**：`eval/run_eval.py`
+   看 `_score_case()` 和 `run_cases()`。`_score_case()` 负责把 detail 汇总成旧 `EvalScore`；`run_cases()` 则把 detail 保存在 `EvalResult.score_details`，给 LangFuse 回写使用。
+
+4. **最后看 Score 回写**：`eval/scorers/langfuse_scores.py`
+   重点看 `build_langfuse_score_payloads()`。它不查 Cloud trace 是否可见，只读 JSONL 里的 `langfuse_trace_id`。这和 M16/M16B 的双 ID 策略连上了。
+
+核心流向：
+
+`EvalCase`
+→ `/api/query`
+→ `AgentResponse`
+→ `score_case_rules() / llm:correctness`
+→ `EvalResult.score_details`
+→ `Markdown summary`
+→ `LangFuse create_score(trace_id=langfuse_trace_id)`
+
+### 设计要点
+
+- **为什么不直接用 LangFuse 托管 evaluator**：M17 要保持 Markdown、JSONL 和 LangFuse Score 同一套口径。把规则评分放到 LangFuse UI 托管执行会引入 observation target、UI 配置和调度依赖，现阶段会扩大范围。
+- **为什么 L3 默认关闭**：外部 LLM judge 有费用、延迟和抖动，不能让普通 eval 默认变慢或变贵。
+- **为什么 score 回写不等待 trace 可查询**：LangFuse ingestion 有延迟。M16 已经把 `langfuse_trace_id` 写到 JSONL，M17 直接按这个 ID 写 score，查询可见性留给 M18 smoke。
+- **为什么 latency 不影响 pass/fail**：延迟是重要观测指标，但本地网络和 LLM 波动很大。M17 把 `rule:latency_p95` 作为可回写 score，不让它改变旧 Markdown 的正确率。
+
+### 面试怎么讲
+
+“M17 我把 eval 的评分逻辑从一个大函数重构成 scorer 分层。原来 `_score_case()` 只能返回单个 pass/fail，现在每条 case 会产生多条 `EvalScoreDetail`，比如表命中、列召回、安全合规、结果匹配和可选的 LLM correctness。为了兼容旧报告，我保留 `_score_case()` 作为薄壳，把 detail 汇总回原来的 `EvalScore`。LangFuse 回写不直接查 Cloud trace，而是读取 JSONL 中 DataPilot trace id 到 LangFuse trace id 的映射，再调用 `create_score()`。这样本地 Markdown 和 Cloud Score 用的是同一套评分口径，也不会因为 LangFuse 查询延迟影响 eval。”
+
+1. **面试官可能问：为什么要把 scorer 拆出来？**
+   可以答：为了避免 Markdown 报告和 LangFuse Score 各有一套评分逻辑。拆出来后，规则评分是单一事实源，报告和 Cloud 都消费同一批结果。
+
+2. **面试官可能问：LLM judge 怎么控制成本和稳定性？**
+   可以答：默认不启用，只有 `--judge-model` 或 `EVAL_JUDGE_MODEL` 显式配置才运行；失败记 skipped/null，不阻断 eval。
+
+3. **面试官可能问：LangFuse trace 查不到时 score 怎么办？**
+   可以答：不等待查询。只要 JSONL 有 `langfuse_trace_id`，就可以先写 score；trace ingestion 完成后会关联，查询只用于 smoke/debug。
+
+### 验证与下一步
+
+- 验证：M17 scorer/eval 专项 **27 passed**；默认 eval CLI 返回 0，judge disabled；真实 LangFuse score smoke `ok:16`；M16B live score smoke `ok:6`；全量 pytest **104 passed, 2 skipped**。
+- warning：仍有既有 Starlette/httpx deprecation；真实 LangFuse smoke 中还有 SDK OTLP trace export `WinError 10013` warning，但 score writer 返回 ok，不阻断 M17。
+- 下一步：M18 做正式一键 smoke、trace/score 可见性检查和手动 Experiment 记录。
+
+可复制验证命令：
+
+```powershell
+# M17 scorer + 旧 eval 兼容测试，预期 27 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m17_scorers.py tests\test_phase3a_eval.py --basetemp=.agent_work\temp\pytest-m17-3
+
+# 默认 eval CLI，预期 judge_model=<disabled>，命令返回 0。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --report .agent_work\temp\m17-eval-report-2.md --trace .agent_work\temp\m17-eval-traces-2.jsonl
+
+# 全量回归，预期 104 passed, 2 skipped。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --basetemp=.agent_work\temp\pytest-m17-full
+```
+
+**本地启动体验：**
+
+M17 仍然没有新增 API 端点，体验入口是 eval CLI 和 LangFuse Cloud UI。默认运行 `python -m eval.run_eval` 会生成 Markdown 报告；如果 `.env` 中启用 LangFuse，eval 会在 JSONL 里找到 `langfuse_trace_id` 并把规则分数写回对应 trace。要体验 L3 judge，则显式加 `--judge-model <模型名>`；不加时不会调用外部裁判模型。

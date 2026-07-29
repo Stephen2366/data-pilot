@@ -8,19 +8,17 @@ pipeline_mode 覆盖和诊断报告字段，复杂 scorer / 历史库 / HTML 仪
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -31,6 +29,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from eval.scorers.base import EvalScoreDetail, summarize_score_details
+from eval.scorers.factory import score_case as score_case_details
+from eval.scorers.langfuse_scores import LangFuseScoreWriter, build_langfuse_score_payloads
+from eval.scorers.llm_judge import resolve_judge_model
+from eval.scorers.rule_scorers import score_case_rules, should_skip_due_to_pipeline_mode
 from scripts.seed_data import seed_database
 
 DEFAULT_CASES_PATH = PROJECT_ROOT / "eval" / "cases" / "smoke.yaml"
@@ -107,19 +110,7 @@ class EvalResult:
     sql: str | None
     response_body: dict[str, Any]
     actual_pipeline_mode: str
-
-
-# 旧 baseline 无法真实验证的新链路检查类型。
-#
-# 这些 check 依赖 M9-M11 才会出现的 QueryPlan、局部 Schema 或 trace_steps。M8.5 如果硬判
-# 失败，会把“能力尚未实现”和“旧链路答错了”混在一起；硬判通过又会虚报能力，所以单独记 skipped。
-NEW_PIPELINE_ONLY_CHECKS = {
-    "plan_structure_match",
-    "plan_validation_blocked",
-    "schema_context_match",
-    "schema_context_size",
-    "trace_steps_complete",
-}
+    score_details: list[EvalScoreDetail] = field(default_factory=list)
 
 
 def _source_file_label(path: Path) -> str:
@@ -239,141 +230,23 @@ def seeded_api_client(trace_path: Path = DEFAULT_TRACE_PATH) -> Generator[TestCl
         Base.metadata.drop_all(engine)
 
 
-def _body_text(body: dict[str, Any]) -> str:
-    """把响应体转成稳定字符串，供 contains / equals 轻量评分使用。"""
-
-    return json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
-
-
 def _score_expected_value(case: EvalCase, body: dict[str, Any]) -> EvalScore:
-    """按固定事实数值检查首行结果，先解决 GMV=NULL 被误判通过的问题。"""
+    """兼容旧测试入口：实际评分逻辑已迁移到 `eval.scorers.rule_scorers`。"""
 
-    field_name = str(case.check.get("field") or "").strip()
-    if not field_name:
-        return EvalScore(False, "expected_value_field_empty", ["unexpected_error"])
-
-    rows = body.get("rows") or []
-    if not rows or not isinstance(rows[0], dict):
-        return EvalScore(False, f"expected_value_missing_row field={field_name}", ["unexpected_error"])
-
-    row = rows[0]
-    actual_field_name = field_name
-    actual_value = row.get(field_name)
-    if actual_value is None:
-        for alias in case.expected_column_aliases.get(field_name, []):
-            if alias in row:
-                actual_field_name = alias
-                actual_value = row.get(alias)
-                break
-    # ★ 单指标固定事实题只返回一列时，列名常被 LLM 写成中文业务标题；
-    # 此时继续卡列名会误杀正确数值，所以让 Decimal 数值校验承担最终判断。
-    if actual_value is None and len(row) == 1:
-        actual_field_name, actual_value = next(iter(row.items()))
-    if actual_value is None:
-        return EvalScore(False, f"expected_value field={field_name} actual=NULL", ["unexpected_error"])
-
-    try:
-        expected = Decimal(str(case.check.get("value")))
-        actual = Decimal(str(actual_value))
-        tolerance = Decimal(str(case.check.get("tolerance", "0")))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        return EvalScore(False, f"expected_value_invalid_number field={field_name}: {exc}", ["unexpected_error"])
-
-    if abs(actual - expected) > tolerance:
-        return EvalScore(
-            False,
-            f"expected_value field={actual_field_name} expected={expected} actual={actual} tolerance={tolerance}",
-            ["unexpected_error"],
-        )
-    return EvalScore(True, "expected_value_ok", [])
-
-
-def _normalize_result_value(value: Any) -> Any:
-    """把 SQL 结果值压成稳定可比形式，供最小 result_match 使用。"""
-
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError):
-        return str(value)
-
-
-def _rows_match(
-    *,
-    actual_rows: list[dict[str, Any]],
-    expected_rows: list[dict[str, Any]],
-    tolerance: Decimal,
-) -> tuple[bool, str]:
-    """比较两组结果行；M14-lite 只做行顺序一致的轻量结果对比。"""
-
-    if len(actual_rows) != len(expected_rows):
-        return False, f"row_count expected={len(expected_rows)} actual={len(actual_rows)}"
-    for row_index, (actual_row, expected_row) in enumerate(zip(actual_rows, expected_rows, strict=True)):
-        if len(actual_row) != len(expected_row):
-            return (
-                False,
-                f"row[{row_index}] column_count expected={len(expected_row)} actual={len(actual_row)}",
-            )
-        for column_index, (actual_value, expected_value) in enumerate(
-            zip(actual_row.values(), expected_row.values(), strict=True)
-        ):
-            normalized_actual = _normalize_result_value(actual_value)
-            normalized_expected = _normalize_result_value(expected_value)
-            if isinstance(normalized_actual, Decimal) and isinstance(normalized_expected, Decimal):
-                if abs(normalized_actual - normalized_expected) <= tolerance:
-                    continue
-            elif normalized_actual == normalized_expected:
-                continue
-            return (
-                False,
-                f"row[{row_index}] col[{column_index}] expected={normalized_expected} actual={normalized_actual}",
-            )
-    return True, "result_match_ok"
-
+    detail = score_case_rules(case=case, body=body, status_code=200, actual_pipeline_mode=case.pipeline_mode)[-1]
+    return EvalScore(bool(detail.passed), detail.reason, detail.issue_tags, review_required=detail.review_required)
 
 def _score_result_match(case: EvalCase, body: dict[str, Any]) -> EvalScore:
-    """执行 expected_sql 并与 generated SQL 的返回结果做最小对照。"""
+    """兼容旧测试入口：实际评分逻辑已迁移到 `eval.scorers.rule_scorers`。"""
 
-    if not case.expected_sql.strip():
-        return EvalScore(False, "result_match_expected_sql_empty", ["unexpected_error"])
-    actual_rows = body.get("rows") or []
-    if not isinstance(actual_rows, list) or any(not isinstance(row, dict) for row in actual_rows):
-        return EvalScore(False, "result_match_actual_rows_invalid", ["unexpected_error"])
-    try:
-        tolerance = Decimal(str(case.check.get("tolerance", "0.000001")))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        return EvalScore(False, f"result_match_invalid_tolerance: {exc}", ["unexpected_error"])
-
-    engine = _prepare_sqlite_seed()
-    try:
-        with Session(engine) as session:
-            expected_result = session.execute(text(case.expected_sql))
-            expected_rows = [dict(row) for row in expected_result.mappings().all()]
-    except Exception as exc:  # noqa: BLE001 - eval 报告需要保留 SQL 对照失败原因。
-        return EvalScore(False, f"result_match_expected_sql_error: {exc}", ["unexpected_error"])
-    finally:
-        Base.metadata.drop_all(engine)
-
-    matched, reason = _rows_match(actual_rows=actual_rows, expected_rows=expected_rows, tolerance=tolerance)
-    if not matched:
-        return EvalScore(False, f"result_mismatch {reason}", ["result_mismatch"])
-    return EvalScore(True, reason, [])
+    detail = score_case_rules(case=case, body=body, status_code=200, actual_pipeline_mode=case.pipeline_mode)[-1]
+    return EvalScore(bool(detail.passed), detail.reason, detail.issue_tags, review_required=detail.review_required)
 
 
 def _should_skip_due_to_pipeline_mode(case: EvalCase, actual_pipeline_mode: str) -> bool:
-    """判断旧链路是否无法验证这条 case 的核心检查。
+    """兼容旧入口；实际判断在 `eval.scorers.rule_scorers`。"""
 
-    M8.5 的核心边界是“先把诊断骨架落地”，不是让旧 pipeline 硬装成新 pipeline。plan、
-    trace_steps、local schema 这些字段只有 M9-M11 后才有真实证据，所以 baseline 下只能记
-    skipped，不能算失败或成功。
-    """
-
-    if actual_pipeline_mode != "baseline":
-        return False
-    if case.check_type in NEW_PIPELINE_ONLY_CHECKS:
-        return True
-    return bool(case.expected_plan or case.expected_schema_context or case.expected_trace_steps)
+    return should_skip_due_to_pipeline_mode(case, actual_pipeline_mode)
 
 
 def _score_case(
@@ -382,95 +255,26 @@ def _score_case(
     status_code: int,
     actual_pipeline_mode: str | None = None,
 ) -> EvalScore:
-    """按 EvalOps-lite 最小评分规则判断单条 case。
-
-    评分只覆盖接口成功、route、表/列命中、安全期望和简单内容检查；它故意不做复杂 SQL
-    语义判等，避免 M8 baseline 扩大成完整评测平台。
-    """
+    """兼容旧报告的薄壳评分入口，内部调用 M17 scorer 单一事实源。"""
 
     actual_mode = actual_pipeline_mode or case.pipeline_mode
-    if _should_skip_due_to_pipeline_mode(case, actual_mode):
-        return EvalScore(
-            False,
-            "skipped_due_to_pipeline_mode",
-            ["skipped_due_to_pipeline_mode"],
-            skipped_due_to_pipeline_mode=True,
-        )
-
-    if status_code != 200:
-        return EvalScore(False, f"http_status={status_code}", ["unexpected_error"])
-    if body.get("route") != "sql":
-        return EvalScore(False, f"route={body.get('route')}", ["unexpected_error"])
-
-    safety_status = body.get("safety_status")
-    if case.security_expectation == "block":
-        if safety_status != "blocked":
-            return EvalScore(False, f"safety_status={safety_status}", ["safety_mismatch"])
-        if case.check_type == "sql_guard_block" and not body.get("blocked_reason"):
-            return EvalScore(False, "blocked_reason_empty", ["safety_mismatch"])
-        return EvalScore(True, "blocked_as_expected", [])
-
-    if safety_status != "passed":
-        tag = "unexpected_error" if body.get("error_type") else "safety_mismatch"
-        return EvalScore(
-            False,
-            f"safety_status={safety_status}, error_type={body.get('error_type')}",
-            [tag],
-            review_required=case.check_type == "manual",
-        )
-
-    actual_tables = set(body.get("tables_used") or [])
-    missing_tables = [table for table in case.expected_tables if table not in actual_tables]
-    if missing_tables:
-        return EvalScore(
-            False,
-            f"missing_tables={missing_tables}",
-            ["missing_table"],
-            review_required=case.check_type == "manual",
-        )
-
-    actual_columns = set(body.get("columns") or [])
-    missing_columns = [
-        column
-        for column in case.expected_columns
-        if column not in actual_columns
-        and not any(alias in actual_columns for alias in case.expected_column_aliases.get(column, []))
-    ]
-    if (
-        missing_columns
-        and case.check_type == "expected_value"
-        and len(case.expected_columns) == 1
-        and len(actual_columns) == 1
-    ):
-        # ★ 和 `_score_expected_value()` 的单列兜底保持一致：先别因别名失败短路。
-        missing_columns = []
-    if missing_columns:
-        return EvalScore(
-            False,
-            f"missing_columns={missing_columns}",
-            ["missing_column"],
-            review_required=case.check_type == "manual",
-        )
-
-    text = _body_text(body)
-    if case.check_type == "expected_value":
-        return _score_expected_value(case, body)
-    if case.check_type == "result_match":
-        return _score_result_match(case, body)
-    if case.check_type == "contains" and case.check_value not in text:
-        return EvalScore(False, f"missing_text={case.check_value}", ["unexpected_error"])
-    if case.check_type == "equals" and case.check_value not in text:
-        return EvalScore(False, f"expected_value={case.check_value}", ["unexpected_error"])
-    if case.check_type == "manual":
-        return EvalScore(True, "manual_review_required", [], review_required=True)
-
-    return EvalScore(True, "ok", [])
+    details = score_case_rules(case=case, body=body, status_code=status_code, actual_pipeline_mode=actual_mode)
+    summary = summarize_score_details(details)
+    return EvalScore(
+        summary.passed,
+        summary.reason,
+        summary.issue_tags,
+        review_required=summary.review_required,
+        skipped_due_to_pipeline_mode=summary.skipped_due_to_pipeline_mode,
+    )
 
 
 def run_cases(
     cases: list[EvalCase],
     client: TestClient,
     pipeline_mode: str | None = None,
+    judge_model: str = "",
+    judge_client: Any | None = None,
 ) -> list[EvalResult]:
     """逐条调用 `/api/query` 并收集 pass / fail / error_type。"""
 
@@ -478,15 +282,21 @@ def run_cases(
     for case in cases:
         actual_pipeline_mode = pipeline_mode or case.pipeline_mode
         if _should_skip_due_to_pipeline_mode(case, actual_pipeline_mode):
-            score = _score_case(case, {}, 0, actual_pipeline_mode=actual_pipeline_mode)
+            score_details = score_case_rules(
+                case=case,
+                body={},
+                status_code=0,
+                actual_pipeline_mode=actual_pipeline_mode,
+            )
+            score_summary = summarize_score_details(score_details)
             results.append(
                 EvalResult(
                     case=case,
-                    passed=score.passed,
-                    reason=score.reason,
-                    issue_tags=score.issue_tags,
-                    review_required=score.review_required,
-                    skipped_due_to_pipeline_mode=score.skipped_due_to_pipeline_mode,
+                    passed=score_summary.passed,
+                    reason=score_summary.reason,
+                    issue_tags=score_summary.issue_tags,
+                    review_required=score_summary.review_required,
+                    skipped_due_to_pipeline_mode=score_summary.skipped_due_to_pipeline_mode,
                     status_code=0,
                     route=None,
                     safety_status=None,
@@ -495,6 +305,7 @@ def run_cases(
                     sql=None,
                     response_body={},
                     actual_pipeline_mode=actual_pipeline_mode,
+                    score_details=score_details,
                 )
             )
             continue
@@ -507,15 +318,23 @@ def run_cases(
             json=request_body,
         )
         body = response.json()
-        score = _score_case(case, body, response.status_code, actual_pipeline_mode=actual_pipeline_mode)
+        score_details = score_case_details(
+            case=case,
+            body=body,
+            status_code=response.status_code,
+            actual_pipeline_mode=actual_pipeline_mode,
+            judge_model=judge_model,
+            judge_client=judge_client,
+        )
+        score_summary = summarize_score_details(score_details)
         results.append(
             EvalResult(
                 case=case,
-                passed=score.passed,
-                reason=score.reason,
-                issue_tags=score.issue_tags,
-                review_required=score.review_required,
-                skipped_due_to_pipeline_mode=score.skipped_due_to_pipeline_mode,
+                passed=score_summary.passed,
+                reason=score_summary.reason,
+                issue_tags=score_summary.issue_tags,
+                review_required=score_summary.review_required,
+                skipped_due_to_pipeline_mode=score_summary.skipped_due_to_pipeline_mode,
                 status_code=response.status_code,
                 route=body.get("route"),
                 safety_status=body.get("safety_status"),
@@ -524,6 +343,7 @@ def run_cases(
                 sql=body.get("sql"),
                 response_body=body,
                 actual_pipeline_mode=actual_pipeline_mode,
+                score_details=score_details,
             )
         )
     return results
@@ -658,19 +478,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
     parser.add_argument("--extra-cases", type=Path, action="append", default=[])
     parser.add_argument("--pipeline-mode", choices=["baseline", "new_text2sql"], default=None)
+    parser.add_argument("--judge-model", default="", help="显式启用 L3 llm:correctness；优先级高于 EVAL_JUDGE_MODEL。")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--trace", type=Path, default=DEFAULT_TRACE_PATH)
     args = parser.parse_args(argv)
 
     cases = load_cases(args.cases, extra_cases=args.extra_cases)
+    judge_model = resolve_judge_model(args.judge_model)
     with seeded_api_client(args.trace) as client:
-        results = run_cases(cases, client, pipeline_mode=args.pipeline_mode)
+        results = run_cases(cases, client, pipeline_mode=args.pipeline_mode, judge_model=judge_model)
     write_report(results, args.report)
+    score_payloads = build_langfuse_score_payloads(results=results, trace_path=args.trace)
+    score_write_result = LangFuseScoreWriter().write_scores(score_payloads)
 
     passed_count = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in results)
     skipped_count = sum(result.skipped_due_to_pipeline_mode for result in results)
     print(f"report={args.report}")
     print(f"trace_path={args.trace}")
+    print(f"judge_model={judge_model or '<disabled>'}")
+    print(
+        "langfuse_scores="
+        f"ok:{score_write_result['ok']} skipped:{score_write_result['skipped']} failed:{score_write_result['failed']}"
+    )
     print(f"passed={passed_count}/{len(results)}")
     print(f"skipped_due_to_pipeline_mode={skipped_count}/{len(results)}")
     for result in results:

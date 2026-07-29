@@ -13,6 +13,31 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M17 Scorer 分层与 Score 回写（2026-07-29）
+
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `docs/phase3b-langfuse-plan-v6.md`、`eval/run_eval.py`、`eval/scorers/*`、`tests/test_m17_scorers.py`、`docs/AI_CONTEXT.md`、`.agent_work/temp/m17-notes.md`。`git diff --name-only` 只列出已跟踪文件，完整范围以 `git status --short` 为准。
+- 关键记录：
+  - 按用户要求先补 plan：当前执行路线改为在 `M16B` 分支继续 M17/M18，完成后整体合并回 `main`；不新增 `M17B` / `M18B` 双章节，现有 M17/M18 目标不变，只把底座调整为 M16B live lifecycle spans。
+  - M17-1 调研结论：LangFuse Scores 是统一质量评估对象；Code evaluators 适合 deterministic checks，LLM-as-a-Judge 适合 semantic judgment。本模块不把规则评分迁到 LangFuse 托管 evaluator，原因是会引入 UI 配置、observation target 和 dispatcher 依赖；M17 先做本地 scorer 单一事实源 + SDK/API score 回写。
+  - 新增 `eval/scorers/`：`base.py` 定义 `EvalScoreDetail` / `LangFuseScorePayload`，`rule_scorers.py` 承接 L1/L2 规则评分，`llm_judge.py` 实现显式开启的 `llm:correctness`，`langfuse_scores.py` 负责按 JSONL `langfuse_trace_id` 回写 Score，`factory.py` 提供统一 scorer 入口。
+  - `eval.run_eval._score_case()` 保留旧函数名，但变为兼容薄壳；旧 Markdown pass/fail/reason 语义保持，例如 `expected_value_ok`、`blocked_as_expected` 不因 M17 迁移变成统一 `ok`。
+  - `rule:latency_p95` 作为 numeric score 明细回写 LangFuse，但不参与旧 Markdown pass/fail 汇总。原因：延迟有运行环境波动，M17 的“不退化”门禁优先守住答案/安全/结果口径；性能分数用于观测趋势。
+  - L3 judge 默认关闭；CLI `--judge-model` 优先于 `EVAL_JUDGE_MODEL`，两者都为空时不创建 L3 scorer。judge 失败返回 null/skipped detail，不阻断 eval。
+  - Score 回写语义：只按 JSONL 里的 DataPilot `trace_id -> langfuse_trace_id` 映射构造 payload，不等待 LangFuse trace 可查询；没有有效映射时只写 Markdown / EvalResult，不回写 LangFuse。
+- 参考资料：
+  - 官方 LangFuse Scores / Code evaluators / LLM-as-a-Judge 文档；实现前按 `langfuse` skill 要求查阅当前文档。M17 只吸收“score 对象和 evaluator 用途边界”，不照搬托管 evaluator 流程。
+- 验证快照：
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m17_scorers.py tests\test_phase3a_eval.py --basetemp=.agent_work\temp\pytest-m17-3`：27 passed，1 个既有 Starlette/httpx deprecation warning。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m compileall eval\run_eval.py eval\scorers`：通过。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --report .agent_work\temp\m17-eval-report-2.md --trace .agent_work\temp\m17-eval-traces-2.jsonl`：命令返回 0，`judge_model=<disabled>`，`langfuse_scores=ok:0 skipped:0 failed:0`，passed=3/6（当前 baseline smoke 现状）。
+  - `$env:LANGFUSE_ENABLED='true'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --report .agent_work\temp\m17-langfuse-score-report.md --trace .agent_work\temp\m17-langfuse-score-traces.jsonl`：命令返回 0，`langfuse_scores=ok:16 skipped:0 failed:0`。
+  - M16B live lifecycle score smoke（fake LLM + `new_text2sql` + `LANGFUSE_ENABLED=true`）：`passed=true`，`score_payload_count=6`，`score_write_result.ok=6`，JSONL `langfuse_span_mode=live` / `langfuse_write_status=ok`，`langfuse_trace_id=dbcbce212ae74e6cb998642310687dc4`。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --basetemp=.agent_work\temp\pytest-m17-full`：104 passed, 2 skipped, 1 warning。
+  - `git diff --check`：通过；仅 Windows CRLF warning。
+- 遗留/后续：
+  - M18 补正式 `scripts/smoke_phase3b_langfuse.py` 和手动 Experiment 记录；M17 的临时 live score smoke 只作为模块验证素材。
+  - 真实 LangFuse smoke 中出现 SDK OTLP trace export `WinError 10013` warning / `Unexpected error occurred` 日志，但 eval 返回 0、JSONL 映射存在、Score writer 返回 ok。M18 smoke 应把 trace upload warning、score write status、trace visibility 分开显示，避免误判。
+
 ### [模块任务] M16B Trace Lifecycle 下沉预备分支（2026-07-29）
 
 - 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `engine/trace/lifecycle.py`、`engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、`engine/nl2sql/pipeline.py`、`engine/tools/sql_tool.py`、`app/api/query.py`、`tests/test_m16_trace_router.py`、`tests/test_phase3a_pipeline.py`、`docs/AI_CONTEXT.md`、`.agent_work/temp/m16b-notes.md`。
