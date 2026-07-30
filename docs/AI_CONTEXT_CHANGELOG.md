@@ -13,6 +13,33 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M18 Smoke / Experiment / 阶段收尾（2026-07-30）
+
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `scripts/smoke_phase3b_langfuse.py`、`tests/test_m18_phase3b_smoke.py`、`docs/AI_CONTEXT.md`、`docs/AI_CONTEXT_CHANGELOG.md`、`docs/dev-log.md`、`.agent_work/temp/m18-notes.md`、`.agent_work/temp/m18-experiment-workflow-cases.yaml`。用户导出的 LangFuse Dataset CSV `1785405281245-lf-dataset_items-export-<REDACTED_LANGFUSE_PROJECT_ID>.csv` 保留在项目根目录作为 UI 验证素材。
+- 关键记录：
+  - 新增 `scripts/smoke_phase3b_langfuse.py`：一键验证配置摘要、真实 `/api/query`、JSONL trace 写入、DataPilot trace id 与 JSONL 匹配、LangFuse trace mapping、`rule:m18_smoke` Score 回写和 trace visibility 查询。脚本默认允许 `LANGFUSE_ENABLED=false` 时 Cloud 检查 SKIP；显式 `--require-langfuse` 时 LangFuse disabled / 缺 key / SDK 不可用 / score 或 visibility 失败均会 FAIL。
+  - smoke 复用 `eval.run_eval.seeded_api_client()`，使用内存 SQLite seed + FastAPI TestClient 调真实 `/api/query`，不碰 MySQL 开发库，不绕过 API seam。
+  - 脚本启动前显式 `configure_trace_router(build_trace_router(settings))`，避免 M16 模块级 router 在 import 时锁死旧环境变量。
+  - Score 写入和 trace visibility 分开检查：Score 可按 `langfuse_trace_id` 直接写；trace/observation 查询可能受 ingestion 延迟或本机网络影响，脚本以独立 PASS / FAIL / PENDING / SKIP 呈现。
+  - 手动 Experiment 结论：LangFuse UI 支持从 trace 创建 Dataset item；用户创建 `datapilot-m18-workflow-smoke-20260730` 并导出 5 条 ACTIVE items。`Run experiment -> via User Interface` 需要项目 LLM API key + prompt/model 配置；`via Webhook` 需要 remote experiment URL。当前 DataPilot 没有 webhook runner，因此不临时实现；后续 EvalBench 更适合通过 Webhook / SDK API 接入 dataset run。
+  - 5 条 workflow smoke case 仅用于验证 Experiment 工作流，不替代 formal/challenge/diagnostic benchmark。DeepSeek 组本地 eval `passed=4/5`、`langfuse_scores=ok:25 skipped:0 failed:0`；Qwen `qwen3.7-plus` 组 `passed=3/5`、`langfuse_scores=ok:22 skipped:0 failed:0`。
+  - Dataset CSV 复盘发现：1 条 item 可能从 `schema_retrieval` span/observation 生成，input/expected output 不是 root query/answer；M18 workflow smoke 可接受，但后续正式 EvalBench dataset 应从 case 定义或 root trace 统一生成样本。CSV metadata 包含 telemetry 噪音和 LangFuse public key（非 secret），后续正式数据集应清理 metadata。
+- 参考资料：
+  - 按 `langfuse` skill 重新读取要求；实现前用官方 LangFuse docs 确认 Scores / Datasets / Experiment 当前语义。M18 只吸收“score 与 visibility 可分离、Experiment UI/API/Webhook 边界”，未把手动 UI workflow 擅自替换成自动化 Experiment。
+- 验证快照：
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m18_phase3b_smoke.py tests\test_m17_scorers.py --basetemp=.agent_work\temp\pytest-m18-final-focused`：9 passed，1 个既有 Starlette/httpx deprecation warning。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m compileall scripts\smoke_phase3b_langfuse.py tests\test_m18_phase3b_smoke.py`：通过。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3b_langfuse.py --trace .agent_work\temp\m18-final-default-traces.jsonl --visibility-timeout-seconds 5`：返回 0；config snapshot PASS；`api.query` PASS；`jsonl.trace` PASS；LangFuse mapping / score / visibility 均因默认 `LANGFUSE_ENABLED=false` 正常 SKIP。
+  - `$env:LANGFUSE_ENABLED='true'; $env:HTTP_PROXY='http://127.0.0.1:7897'; $env:HTTPS_PROXY='http://127.0.0.1:7897'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3b_langfuse.py --trace .agent_work\temp\m18-final-langfuse-traces.jsonl --require-langfuse --visibility-timeout-seconds 45`：返回 0；trace mapping PASS，`langfuse_trace_id=8937e57d85814f74a47d25dc2f431c8e`；score PASS `ok=1`；trace visibility PASS `observations=8 waited=7s`。
+  - 裸连真实 LangFuse require smoke 曾出现 `WinError 10013`：trace mapping 和 score 写入 PASS，但 visibility query FAIL；设置项目代理后复跑通过，判定为本机网络出口/权限问题。
+  - DeepSeek 5-case Experiment workflow smoke eval：`passed=4/5`，`langfuse_scores=ok:25 skipped:0 failed:0`，报告 `.agent_work/temp/m18-experiment-deepseek-report.md`，trace `.agent_work/temp/m18-experiment-deepseek-traces.jsonl`。
+  - Qwen `qwen3.7-plus` 5-case Experiment workflow smoke eval：`passed=3/5`，`langfuse_scores=ok:22 skipped:0 failed:0`，报告 `.agent_work/temp/m18-experiment-qwen37-plus-report.md`，trace `.agent_work/temp/m18-experiment-qwen37-plus-traces.jsonl`。
+  - `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --basetemp=.agent_work\temp\pytest-m18-full`：107 passed, 2 skipped, 1 warning。
+- 遗留/后续：
+  - 不在 M18 临时实现 remote experiment webhook。进入 Phase 3 RAG / Hybrid 或 EvalBench 时，再设计 LangFuse DatasetRun / Webhook / SDK runner 边界。
+  - 正式 EvalBench dataset 应清洗 telemetry metadata，并明确从 root trace / case 定义生成 input、expected output，避免误选中间 span。
+  - LangFuse Cloud 查询在当前 Windows 环境建议配置 Clash 代理；Cloud trace 只是 Phase 3B 实验记录，不作为 DataPilot 长期数据资产。
+
 ### [模块任务] M17 Scorer 分层与 Score 回写（2026-07-29）
 
 - 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `docs/phase3b-langfuse-plan-v6.md`、`eval/run_eval.py`、`eval/scorers/*`、`tests/test_m17_scorers.py`、`docs/AI_CONTEXT.md`、`.agent_work/temp/m17-notes.md`。`git diff --name-only` 只列出已跟踪文件，完整范围以 `git status --short` 为准。

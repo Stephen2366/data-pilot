@@ -2446,3 +2446,115 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --b
 **本地启动体验：**
 
 M17 仍然没有新增 API 端点，体验入口是 eval CLI 和 LangFuse Cloud UI。默认运行 `python -m eval.run_eval` 会生成 Markdown 报告；如果 `.env` 中启用 LangFuse，eval 会在 JSONL 里找到 `langfuse_trace_id` 并把规则分数写回对应 trace。要体验 L3 judge，则显式加 `--judge-model <模型名>`；不加时不会调用外部裁判模型。
+
+## ★ M18 Smoke / Experiment / 阶段收尾
+
+（2026-07-30）
+
+**简述**：M18 给 Phase 3B 做收口：新增 **一键 LangFuse smoke 脚本**，复核 API / JSONL / trace mapping / score / visibility；同时手动验证 LangFuse **trace → Dataset** 工作流，明确 Experiment run 当前需要 **LLM key 或 Webhook**，不在 DataPilot 里临时补远程实验服务。
+
+### 先用大白话讲
+
+M18 做的事情，可以理解成给 Phase 3B 做一次“交卷前总检查”。
+
+前面 M15-M17 已经分别证明了：LangFuse Cloud 能连、DataPilot trace 能写到 LangFuse、eval 分数能回写到 trace。但这些能力如果分散在临时脚本和对话记录里，下一轮开发就很难复用。M18 把它们整理成一个正式 smoke：一条命令就能检查 **配置、API 请求、JSONL trace、LangFuse trace id、score 回写和 trace 可见性**。
+
+同时，M18 也验证了 LangFuse Experiment 的真实 UI 边界。Dataset 可以从 trace 创建，这部分是可用的；但 `Run experiment` 不是把已有 trace 手动编成两组 run，而是要么让 LangFuse 自己用 Prompt + LLM key 执行，要么通过 Webhook 调远程服务。DataPilot 当前没有这个 webhook runner，所以 M18 不临时扩展架构。
+
+所以本模块的核心价值是：把 Phase 3B 的 **trace → score → dataset** 能力收成可复用基线，并把 **Experiment run 需要 EvalBench 级 runner** 这件事提前验证清楚。
+
+### 这次做了什么
+
+这次先新增了 `scripts/smoke_phase3b_langfuse.py`。它不直接绕过业务函数，而是复用 eval 的 `seeded_api_client()`，用内存 SQLite seed 调真实 `/api/query`。这样既不污染 MySQL 开发库，也能验证 API 响应、JSONL trace 和 LangFuse 映射是不是连在一起。
+
+脚本有两种模式。默认模式允许 `LANGFUSE_ENABLED=false`，这时 API 和 JSONL 必须 PASS，LangFuse 相关检查输出 SKIP。验收模式加 `--require-langfuse`，如果 LangFuse disabled、缺 key、SDK 不可用、score 写入失败或 visibility 查询失败，就会明确 FAIL。
+
+然后跑了真实 Cloud smoke。裸连时，trace mapping 和 score 写入都成功，但 trace visibility 查询遇到 Windows `WinError 10013`；设置项目代理 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` 后，全链路 PASS，能查到 observations。
+
+最后做了手动 Experiment workflow smoke。我们准备了 5 条临时 case，DeepSeek 跑出 `4/5`、Qwen `qwen3.7-plus` 跑出 `3/5`，两组分数都写回 LangFuse。你在 UI 中创建了 Dataset 并导出 5 条 ACTIVE items，证明 trace → Dataset item 可用。但 UI 的 run 入口要求 LLM key 或 Webhook URL，所以本阶段只记录这个边界，不临时实现远程 runner。
+
+### 新概念
+
+- **Smoke 脚本**：不是完整 benchmark，而是快速确认关键链路还活着。M18 的 smoke 关心“能不能跑通 API、写 JSONL、写 score、查 trace”，不追求模型答题满分。
+- **Trace visibility**：LangFuse SDK `flush()` 和 score 写入成功，不等于 trace 立刻能被查询 API 查到。M18 把 score write 和 visibility query 拆开，避免把 ingestion 延迟误判成 score 失败。
+- **Dataset item**：LangFuse 里可复用的测试样本。它通常包含 input、expected output、metadata 和 source trace。后续 EvalBench 可以把 case 管理和 Dataset 对齐。
+- **Remote experiment webhook**：LangFuse UI 触发实验时调用你的服务 URL，让你的服务读取 dataset、执行系统、再把 run 结果写回 LangFuse。它更像后续 EvalBench adapter，不适合 M18 临时补。
+
+### 代码阅读路线
+
+1. **一键 smoke 入口**：`scripts/smoke_phase3b_langfuse.py`
+   从 `main()` 和 `run_smoke()` 看。它先读取 Settings，再按 `require_langfuse` 决定 Cloud 检查是 SKIP 还是 FAIL。重点理解这里不是 eval runner，而是 Phase 3B 的健康检查器。
+
+2. **真实 API 调用**：`scripts/smoke_phase3b_langfuse.py`
+   看 `_run_api_smoke()`。它用 `seeded_api_client()` 发 `/api/query`，并检查 JSONL 最后一行的 `trace_id` 是否等于响应体 trace id。这里守住的是 **API seam**，不是内部函数单测。
+
+3. **Score 与 visibility**：`scripts/smoke_phase3b_langfuse.py`
+   看 `_write_smoke_score()` 和 `_query_trace_visibility()`。前者按 JSONL 里的 `langfuse_trace_id` 写 `rule:m18_smoke`；后者再轮询 observations。两者分开，是为了把“score 写入失败”和“trace 暂时查不到”区别开。
+
+4. **测试门禁**：`tests/test_m18_phase3b_smoke.py`
+   重点看三个测试：默认关闭时 Cloud 检查 SKIP、`--require-langfuse` 时 disabled 必须 FAIL、PENDING 不等于 FAIL。这保证 smoke 不会因为设计语义含糊而变成脆弱脚本。
+
+核心流向：
+
+`smoke_phase3b_langfuse.py`
+→ `seeded_api_client()`
+→ `/api/query`
+→ `TraceRouter / JSONL / LangFuse`
+→ `LangFuseScoreWriter`
+→ `LangFuse observations query`
+
+### 设计要点
+
+- **为什么 smoke 复用 `/api/query`**：M18 要检查真实响应契约、trace path override 和 LangFuse 映射。如果直接调用内部 pipeline，会绕过 API seam。
+- **为什么不自动创建 Experiment run**：计划要求验证 UI Experiment 体验。LangFuse 当前 UI run 需要 LLM key 或 Webhook；自动补一个 webhook 会扩大到 EvalBench adapter 范围。
+- **为什么保留 SKIP / PENDING**：默认关闭 LangFuse 是项目正式行为，不能算失败；trace ingestion 有延迟，短时不可见也不能和 score 写入失败混在一起。
+- **为什么记录 Dataset metadata 噪音**：导出的 CSV 里带 telemetry 字段和 public key。public key 不是 secret，但正式 EvalBench dataset 应该清理 metadata，避免样本变脏。
+
+### 面试怎么讲
+
+“我在 M18 做的是 Phase 3B 的 **可观测性收口**。前面已经有 LangFuse trace 双写和 score 回写，但还缺一个可重复的总验收入口，所以我新增了 `scripts/smoke_phase3b_langfuse.py`：它用真实 `/api/query` 跑一条请求，检查 **API 响应、JSONL trace、LangFuse trace id 映射、Score 回写和 trace visibility**。默认 `LANGFUSE_ENABLED=false` 时 Cloud 检查是 SKIP，不影响主链路；显式 `--require-langfuse` 才把 Cloud 作为硬门禁。Experiment 这部分我没有临时造 webhook，而是按 UI 真实验证：Dataset 创建可用，但 run 需要 **LLM key 或 Webhook runner**，所以后续应该放到 EvalBench 里正式设计。”
+
+1. **[基础追问] M18 和 M17 的区别是什么？M17 不是已经能写 score 了吗？**
+
+   可以答：M17 解决的是 **评分能力本身**：把 scorer 拆出来，并按 JSONL `langfuse_trace_id` 写回 LangFuse Score。M18 解决的是 **阶段收口和可重复验证**：用一个正式 smoke 把 API、JSONL、trace mapping、score write 和 trace visibility 串起来。简单说，M17 是“能打分”，M18 是“以后怎么一键确认整条链路还正常”。
+
+2. **[工程追问] 为什么 smoke 默认不要求 LangFuse enabled？这样会不会降低验收强度？**
+
+   可以答：默认不要求，是因为 DataPilot 的正式设计就是 **LangFuse 旁路增强，默认关闭**。如果默认 smoke 因 Cloud 不可用而失败，就违背了 M15-M16 定下的降级边界。但 M18 同时提供 `--require-langfuse`，在阶段验收或真实 Cloud 检查时可以把 LangFuse 变成硬门禁。也就是说，默认 smoke 验证主链路，require 模式验证 Cloud 闭环。
+
+3. **[工程追问] 你怎么处理 trace 已经写了 score 但 UI/API 暂时查不到 trace 的情况？**
+
+   可以答：M18 把 **score write** 和 **trace visibility** 拆成两个检查点。Score 回写只依赖 JSONL 里的 `langfuse_trace_id`，成功就说明 Score API 已接受；visibility 查询另做轮询，短时不可见可以报 PENDING。这样排障时能区分是 score 写入失败、LangFuse ingestion 延迟，还是本机网络查询失败。
+
+4. **[深挖追问] 为什么不在 M18 顺手实现一个 Webhook runner，把 LangFuse Experiment 直接跑通？**
+
+   可以答：因为这会改变模块边界。Webhook runner 需要定义 dataset item 输入格式、执行 DataPilot 的 adapter、写回 dataset run item、处理鉴权和错误重试，这已经是 **EvalBench 级实验编排能力**。M18 的目标是验证 LangFuse 是否适合作为后续底座，而不是在 DataPilot 里临时实现半套评测平台。真实结论是：Dataset UI 可用；Experiment run 需要 LLM key 或 Webhook，后续应该在 EvalBench 里正式设计。
+
+### 验证与下一步
+
+- 验证：M18 focused **9 passed**；脚本 compileall 通过；默认 smoke API / JSONL PASS、LangFuse SKIP；带代理的真实 LangFuse require smoke 全 PASS；全量 pytest **107 passed, 2 skipped**。
+- warning：仍有既有 Starlette/httpx deprecation；裸连 LangFuse Cloud visibility 查询曾触发 Windows `WinError 10013`，设置 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` 后通过。
+- 下一步：进入 Phase 3 RAG / Hybrid，基于 M16B live lifecycle 继续扩展多步骤链路；独立 EvalBench 阶段再设计 LangFuse Webhook / SDK Experiment runner。
+
+可复制验证命令：
+
+```powershell
+# M18 smoke + M17 score 兼容测试，预期 9 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m18_phase3b_smoke.py tests\test_m17_scorers.py --basetemp=.agent_work\temp\pytest-m18-final-focused
+
+# 默认 smoke：预期 API / JSONL PASS，LangFuse 因默认关闭显示 SKIP。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3b_langfuse.py --trace .agent_work\temp\m18-final-default-traces.jsonl --visibility-timeout-seconds 5
+
+# 真实 LangFuse smoke：预期全部 PASS；当前 Windows 环境建议显式设置代理。
+$env:LANGFUSE_ENABLED='true'
+$env:HTTP_PROXY='http://127.0.0.1:7897'
+$env:HTTPS_PROXY='http://127.0.0.1:7897'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3b_langfuse.py --trace .agent_work\temp\m18-final-langfuse-traces.jsonl --require-langfuse --visibility-timeout-seconds 45
+
+# 全量回归，预期 107 passed, 2 skipped。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --basetemp=.agent_work\temp\pytest-m18-full
+```
+
+**本地启动体验：**
+
+M18 没有新增 API 端点，体验入口是 smoke CLI 和 LangFuse Cloud UI。先运行默认 smoke，确认本地 API / JSONL 主链路；再按需开启 `LANGFUSE_ENABLED=true` 和代理运行 require smoke。LangFuse UI 侧可以打开本次 trace，查看 `datapilot-query` live spans 和 `rule:m18_smoke` score；Dataset 页面能看到 `datapilot-m18-workflow-smoke-20260730` 的 5 条 workflow items。

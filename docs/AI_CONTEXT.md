@@ -5,11 +5,11 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M17 Scorer 分层与 Score 回写（已完成，待 accept-module）
-- 下一模块：M18 Smoke / Experiment / 阶段收尾（基于 M16B 分支继续）
-- 上一模块验收：M17 未验收（待 accept-module）
+- 当前模块：M18 Smoke / Experiment / 阶段收尾（已完成，待 accept-module）
+- 下一模块：Phase 3 RAG / Hybrid（基于 M16B live lifecycle 底座继续评估）
+- 上一模块验收：M18 未验收（待 accept-module）
 - 阻塞项：无
-- 更新时间：2026-07-29
+- 更新时间：2026-07-30
 
 ## 当前技术选型快照
 
@@ -20,9 +20,10 @@
 - NL2SQL：M3 模板 SQL 优先；M4 起模板未命中时走 DeepSeek，Schema / KPI / few-shot 从 `domain_pack/` 加载
 - SQL 安全：sqlglot AST 只读检查 + 表级 RBAC + `users.email/users.phone` 敏感字段策略；安全能力不只靠 prompt
 - Agent 编排：先用普通 Python pipeline，不上复杂 LangGraph；字段按未来 graph state 预留；后续进入多步骤 Agent / RAG 编排时，可在不改响应契约的前提下迁移到 LangGraph。
-- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M16 已接入 TraceRouter + 可选 LangFuseBackend，`LANGFUSE_ENABLED=true` 时先写 LangFuse flat spans、再写 JSONL 映射字段；JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalBench 平台
+- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M16 已接入 TraceRouter + 可选 LangFuseBackend，M16B 已验证 `force_new_pipeline` live lifecycle spans；M17 scorer 可按 JSONL `langfuse_trace_id` 回写 LangFuse Scores；M18 提供 `scripts/smoke_phase3b_langfuse.py` 验证 API / JSONL / trace mapping / score / visibility，JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalBench 平台
 - M16B 分支方案：Trace lifecycle 下沉采用显式 `langfuse_span_mode` 去重；`force_new_pipeline` 主链路 live spans 运行中写 LangFuse，最终 JSONL 只保留映射字段，`LangFuseBackend.record()` 不再重复拆 post-hoc spans。SQL Guard / SQL Execution 的真实边界在 `run_sql_tool()` 内部，因此该函数增加可选 DataPilot `trace_context` 参数，由工具层内部记录 `sql_guard` / `sql_execution` spans，而不是 pipeline 事后补 span。
 - M17 评分：`eval/scorers/` 是 L1/L2/L3 评分单一事实源；`eval.run_eval._score_case()` 仅保留兼容薄壳。默认不启用 L3；`--judge-model` 或 `EVAL_JUDGE_MODEL` 非空时追加 `llm:correctness`。LangFuse Score 回写只按 JSONL `langfuse_trace_id`，不等待 trace 可查询；LangFuse 不可用时只跳过/失败计数，不影响 Markdown eval。
+- M18 Experiment 结论：LangFuse UI 的 trace -> Dataset item 工作流可用；`Run experiment` 的 UI 路径需要项目 LLM API key，Webhook 路径需要 remote experiment URL。DataPilot 当前不临时实现 webhook runner；后续 EvalBench 更适合通过 Webhook / SDK API 接入 dataset run。
 - 图表：后端输出 Vega-Lite 兼容 `chart_spec`，当前仅覆盖基础 bar / line / horizontal_bar 和单指标柱图
 - 演示：M6 已提供 `demo/streamlit_app.py` 最小演示控制台，通过 HTTP 调用 `/api/query` 展示 answer / SQL / table / chart / trace
 
@@ -36,6 +37,8 @@
 - LangFuse 默认：`LANGFUSE_ENABLED=false`，`langfuse` 作为 `observability` optional extra 固定 `4.14.1`；启用后 LangFuse 作为旁路写入 flat spans，DataPilot `trace_id` 不被接管，LangFuse trace id 使用独立 `uuid4().hex` 并回填 JSONL。
 - M16B live trace：`M16B` 分支已跑通 `force_new_pipeline` lifecycle 下沉 smoke；JSONL `langfuse_span_mode=live`、`langfuse_write_status=ok`，Cloud trace URL 示例为 `https://jp.cloud.langfuse.com/project/traces/c1e4a46844fb49ea9cc2fb77a21b737d`。此分支用于和 M16 post-hoc flat spans 对比，不自动替换主线。
 - M17 score smoke：真实 LangFuse score 回写 smoke 通过，baseline/post-hoc 路径 `langfuse_scores=ok:16`；M16B live lifecycle 路径 `score_payload_count=6`、`score_write_result.ok=6`、`langfuse_span_mode=live`。本地出现 LangFuse SDK OTLP trace export `WinError 10013` warning，但 eval 返回 0，score writer 返回 ok。
+- M18 smoke：`scripts/smoke_phase3b_langfuse.py` 默认模式下 API / JSONL PASS、LangFuse 检查 SKIP；`LANGFUSE_ENABLED=true --require-langfuse` 且设置 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` 时 trace mapping / `rule:m18_smoke` score / trace visibility 全 PASS（示例 `langfuse_trace_id=8937e57d85814f74a47d25dc2f431c8e`，observations=8，waited=7s）。不走代理时 trace visibility 查询曾因 Windows `WinError 10013` 失败。
+- M18 Experiment workflow smoke：临时 5-case Dataset `datapilot-m18-workflow-smoke-20260730` 已在 LangFuse UI 创建，CSV 导出 5 条 ACTIVE items；DeepSeek 5-case run 本地 eval `4/5`、scores `ok:25`，Qwen `qwen3.7-plus` `3/5`、scores `ok:22`。UI Dataset 可用，但现阶段不能在 UI 中纯手动把已有 traces/scores 编成两组 run 对比。
 - Eval 默认：formal / challenge 用于主线验收和回归对照；diagnostic 用于定位边界和下一步问题，不追满分。
 
 ### 最新评测基线
@@ -60,6 +63,7 @@
 | DB comment 在 PowerShell 离线 SQL 输出中乱码 | 影响离线 SQL 文件可读性；在线迁移和建表正常 | 暂不改业务；如需导出 SQL 文件，再统一处理输出编码或将 DB comment 改为 ASCII |
 | 工作树可能有用户或其他工具留下的未提交改动 | 容易误回滚非本次任务修改 | 动文件前看 `git status --short`，不回滚非本次任务改动 |
 | LangFuse SDK 4.14.1 已无旧版 `client.trace()` builder | 按旧博客 / 旧草稿写 smoke 或 M16 backend 会直接 `AttributeError` | 使用 `start_observation(trace_context={"trace_id": uuid4().hex})` / `create_score(trace_id=...)` / `flush()`；细节见 `.agent_work/temp/m15-notes.md` |
+| Windows 裸连 LangFuse Cloud 偶发 `WinError 10013` | trace visibility 查询 / OTLP export 可能失败，但 score 写入和 JSONL 主链路可正常 | 真实 Cloud smoke 建议显式设置 `HTTP_PROXY` / `HTTPS_PROXY` 为 `http://127.0.0.1:7897`；脚本将 score write 和 trace visibility 分开显示 |
 
 ## 变更记录索引
 
