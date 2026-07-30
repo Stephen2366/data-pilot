@@ -2042,13 +2042,21 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_ex
 
 **简述**：M15 是 Phase 3B 的第一块地基：先确认 **LangFuse Cloud、Python SDK、配置入口和 trace id 边界** 都可靠，再让后续 M16 去做真正的 JSONL + LangFuse 双写。它没有改 `/api/query`，也没有替代现有 JSONL trace，而是把“能不能安全接入 LangFuse”这件事先钉牢。
 
+### 先用大白话讲
+
+M15 做的事情，可以理解成：在把 LangFuse 接进正式业务前，先去确认“这套外部观测平台到底能不能稳定用”。
+
+如果一上来就把 LangFuse 接到 `/api/query`，问题会混在一起：到底是业务代码错了、SDK 用法错了、Cloud key 错了，还是 LangFuse 查询有延迟？M15 先把这些基础问题拆出来，单独验证 Cloud 写入、score 写入、flush 和查询可见性。
+
+同时，M15 还先定好边界：DataPilot 自己的 `trace_id` 继续当主 ID，LangFuse 用自己的 trace id；LangFuse 默认关闭，SDK 放在可选依赖里。这样后面接入 LangFuse 时，它只是给系统多一双“观察的眼睛”，不会反过来改变主业务怎么运行。
+
+所以本模块的核心价值是：先把 **外部观测平台的可用性、配置边界和 ID 边界** 验证清楚，为后续双写和 score 回写打地基。
+
 ### 这次做了什么
 
 这次先用 `.env` 里已有的 LangFuse Cloud key 复跑了 SDK smoke：创建一条观察 span，按 LangFuse trace id 写入一条 score，调用 `flush()`，再用 SDK 查询确认 trace 和 score 已经能在 Cloud 侧读到。本轮 trace id 是 `a5b22262bb154b3a9b08b0b09b5f8cc5`，查询可见约 `0.6s`。
 
-然后把 LangFuse 配置正式纳入 `Settings` 和 `.env.example`：默认 `LANGFUSE_ENABLED=false`，也就是说项目原来的 API、JSONL trace、eval 报告不会因为 LangFuse 没装、没开或 Cloud 不通而受影响。`langfuse==4.14.1` 被放进 `observability` optional extra，后续需要观测能力时再显式安装。
-
-最后清理了遗留 LangSmith 配置字段。Phase 3B 当前路线只做 LangFuse，不保留两套 tracing 配置入口，避免以后排查“到底哪个系统在接管 trace”时绕晕。
+然后把 LangFuse 配置正式纳入 `Settings` ：默认 `LANGFUSE_ENABLED=false`，也就是说项目原来的 API、JSONL trace、eval 报告不会因为 LangFuse 没装、没开或 Cloud 不通而受影响。`langfuse==4.14.1` 被放进 `observability` optional extra，后续需要观测能力时再显式安装。
 
 ### 新概念
 
@@ -2056,13 +2064,6 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_ex
 - **optional extra**：Python 项目里的一种可选依赖分组。`pip install -e .[observability]` 才安装 LangFuse SDK，普通开发和测试不用被外部观测依赖绑住。
 - **双 ID 策略**：DataPilot 自己的 `trace_id` 继续服务 API、日志、JSONL 和 eval；LangFuse 使用独立 `langfuse_trace_id`。这类似业务订单号和第三方支付流水号，两个都重要，但不能混成一个。
 - **flush 语义**：`flush()` 代表 SDK 把事件送到 LangFuse API，不保证 UI 或查询立刻同步完成。所以 smoke 需要允许短暂 ingestion 延迟，而不是看到一秒内查不到就判失败。
-
-### 关键文件
-
-- `app/core/config.py`：新增 LangFuse 和 L3 judge 的统一配置入口，删除 LangSmith 遗留字段。
-- `.env.example`：新增 LangFuse Cloud 和 `EVAL_JUDGE_MODEL` 模板，真实 key 仍只放本地 `.env`。
-- `pyproject.toml`：新增 `observability` optional extra，固定 `langfuse==4.14.1`。
-- `tests/test_config.py`：验证默认关闭、Cloud/self-host URL 可配置、judge model 可读取。
 
 ### 代码阅读路线
 
@@ -2083,13 +2084,23 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_ex
 
 ### 面试怎么讲
 
-“M15 我没有一上来就把 LangFuse 接进业务请求，而是先做 observability 的接入基线：确认 Cloud key、SDK 版本、span 写入、score 写入和 flush 都可用；同时明确 DataPilot 的 trace_id 不被 LangFuse 接管，LangFuse 用独立 32 位 hex id，并通过 metadata 建立映射。依赖上我把 `langfuse==4.14.1` 放到 optional extra，默认 `LANGFUSE_ENABLED=false`，保证观测系统不可用时不影响主链路。这体现的是我在引入外部平台时，会先守住响应契约、依赖边界和故障降级，而不是为了可视化把核心链路绑死。”
+“M15 我没有一上来就把 LangFuse 接进业务请求，而是先做 **observability 接入基线**：确认 **Cloud key、SDK 版本、span 写入、score 写入和 flush** 都可用；同时明确 **DataPilot 的 trace_id 不被 LangFuse 接管**，LangFuse 用独立 **32 位 hex id**，并通过 metadata 建立映射。依赖上我把 `langfuse==4.14.1` 放到 **optional extra**，默认 `LANGFUSE_ENABLED=false`，保证 **观测系统不可用时不影响主链路**。这体现的是我在引入外部平台时，会先守住 **响应契约、依赖边界和故障降级**，而不是为了可视化把核心链路绑死。”
 
-1. **面试官可能问：为什么不用同一个 trace_id？**
-   可以答：DataPilot trace id 已经服务 API、日志、JSONL 和 eval，语义稳定；LangFuse SDK 对 trace id 格式有要求。分成两个 ID 后，既能映射，又不会让第三方系统改变内部契约。
+1. **[基础追问] M15 明明还没有接入业务请求，那它到底交付了什么？**
 
-2. **面试官可能问：为什么 LangFuse 放 optional extra？**
-   可以答：可观测性是增强能力，不应该成为默认运行依赖。这样本地测试、CI 或 Cloud 不可用时，原系统仍然能跑。
+   可以答：M15 交付的是 **“能不能安全接入 LangFuse”的基线**，而不是业务埋点本身。它验证了 **Cloud key、SDK 4.14.1、span 写入、score 写入、flush 和查询可见性**；同时把 **配置入口、依赖边界、trace id 映射规则** 先定下来。这样 M16 真正接业务请求时，不需要边查 SDK 行为边改主链路，风险会小很多。
+
+2. **[工程追问] 为什么不直接复用 DataPilot 自己的 `trace_id` 作为 LangFuse trace id？多维护一个 ID 会不会复杂？**
+
+   可以答：多一个 ID 确实增加一点映射成本，但它保护了 **内部契约**。DataPilot 的 `trace_id` 已经服务 **API、响应头、JSONL、日志和 eval**，是项目自己的稳定语义；LangFuse trace id 则要满足第三方 SDK 的格式和查询习惯。M15 的做法是保留 **DataPilot trace id 作为主 ID**，LangFuse 生成独立 **32 位 hex id**，再通过 metadata 和 JSONL 字段建立映射。这样以后换观测平台或调整 LangFuse 写法，不会反向污染 **业务响应和历史 trace**。
+
+3. **[工程追问] 为什么把 LangFuse SDK 放到 optional extra，而不是直接作为默认依赖？**
+
+   可以答：因为 LangFuse 是 **旁路观测能力**，不是 DataPilot 的核心运行依赖。默认依赖里如果强绑定 SDK，本地开发、CI 或离线 eval 都会被外部观测平台影响。放进 `observability` optional extra 后，**普通路径不用安装 LangFuse 也能跑**；只有明确要看 Cloud trace 时，才用 `pip install -e .[observability]` 开启。这种边界能避免 **“观测系统坏了，业务系统也启动不了”** 的问题。
+
+4. **[深挖追问] 你怎么证明 M15 不是只把配置字段加上去，而是真的降低了后续接入风险？**
+
+   可以答：M15 的验证不是只跑配置单测，而是 **真实调用了 LangFuse Cloud**：写 observation、写 score、flush，再查询确认 **trace 和 score 可见**。本轮还记录了 **SDK 4.14.1 的实际用法**，比如不能沿用旧版 `client.trace()`，而是要用 `start_observation(trace_context=...)`。这些结果被写进 notes，后续 M16 可以直接按 **已验证路径** 实现，避免在业务链路里临时摸索 SDK 行为。
 
 ### 验证与下一步
 
@@ -2123,6 +2134,16 @@ M15 暂无新的 API 端点或页面，因为它只完成 LangFuse 接入基线�
 
 **简述**：M16 把原来“只能写 JSONL 文件”的 trace recorder，升级成 **TraceRouter + 多后端写入**。默认仍然只写 JSONL；只有 `LANGFUSE_ENABLED=true` 时，才额外写入 LangFuse。这个模块的核心不是炫技，而是把可观测系统做成 **旁路增强**：它能帮我们看 trace，但不能绑架 `/api/query`、JSONL 和 eval。
 
+### 先用大白话讲
+
+M16 做的事情，可以理解成：原来 DataPilot 只会把运行记录写进本地 JSONL 文件，现在它多了一个“分发器”，可以在不改变业务入口的情况下，把同一份 trace 同时写给不同地方。
+
+这个分发器就是 **TraceRouter**。业务代码仍然只说“我要记录一次 trace”，至于这条 trace 是写 JSONL、写 LangFuse，还是以后写 EvalBench，**都由 router 决定**。这样业务链路不用到处知道 LangFuse 的存在。
+
+更重要的是，LangFuse 在 M16 里不是主链路。Cloud 不通、key 配错、SDK 报错，都不能让 `/api/query` 失败，也不能让本地 JSONL 丢失。LangFuse 只是旁路增强：能写进去当然更好，写不进去也要留下失败状态，方便排查。
+
+所以本模块的核心价值是：把 trace 写入从 **单一 JSONL 文件** 升级成 **可扩展、可降级、保护业务契约的多后端写入机制**。
+
 ### 这次做了什么
 
 这次先保留了老入口 `append_trace(record, path=...)`。旧代码、测试和 eval 不需要知道内部已经换成了 router；它们继续传临时 trace 路径，JSONL 仍然写到指定文件。
@@ -2137,13 +2158,6 @@ M15 暂无新的 API 端点或页面，因为它只完成 LangFuse 接入基线�
 - **Backend 协议**：这里用 `TraceBackend` 描述“只要有 `record()` 方法，就能接进 router”。类比 Java 里的 interface，调用方依赖接口，不依赖具体实现。
 - **旁路降级**：LangFuse 是增强能力，不是主系统的生命线。Cloud 不通、key 错、SDK 出问题时，API 不能 500，JSONL 也不能丢。
 - **Flat spans**：M16 只把每个 `TraceStep` 平铺到同一个 LangFuse trace 下，不做父子嵌套。因为当前 trace 是请求结束后一次性生成，没有真实 started_at / ended_at，硬做时间线会变成伪数据。
-
-### 关键文件
-
-- `engine/trace/recorder.py`：Trace 数据模型、JSONLBackend、TraceRouter、router 构建和 `append_trace()` 兼容入口。
-- `engine/trace/langfuse_backend.py`：LangFuse SDK 延迟导入、flat span 写入、flush 和映射字段回填。
-- `tests/test_m16_trace_router.py`：覆盖 path override、router 重置、LangFuse 失败降级、fake client 成功路径和 API 响应契约。
-- `.agent_work/temp/m16-notes.md`：记录用户确认的方案 A、双写 smoke、eval 路径覆盖和全量测试结果。
 
 ### 代码阅读路线
 
@@ -2177,16 +2191,27 @@ M15 暂无新的 API 端点或页面，因为它只完成 LangFuse 接入基线�
 
 ### 面试怎么讲
 
-“M16 我把 trace recorder 从单一 JSONL 写入重构成 TraceRouter 架构，但没有改变业务入口和 API 响应。`append_trace(record, path=...)` 仍然兼容旧调用；默认只写 JSONL，启用 LangFuse 时才额外写入 Cloud。LangFuse 失败会被捕获并标记 `langfuse_write_status=failed`，JSONL 仍然落盘。为了避免第三方系统接管内部契约，我保留 DataPilot 自己的 `trace_id`，单独生成 LangFuse trace id，并把映射写进 JSONL。这个模块体现的是我引入可观测平台时，优先考虑兼容性、降级和数据边界，而不是只追求 UI 上能看到 trace。”
+“M16 我把 trace recorder 从 **单一 JSONL 写入** 重构成 **TraceRouter 架构**，但没有改变 **业务入口和 API 响应**。`append_trace(record, path=...)` 仍然兼容旧调用；默认只写 JSONL，启用 LangFuse 时才额外写入 Cloud。LangFuse 失败会被捕获并标记 `langfuse_write_status=failed`，**JSONL 仍然落盘**。为了避免第三方系统接管内部契约，我保留 **DataPilot 自己的 `trace_id`**，单独生成 LangFuse trace id，并把映射写进 JSONL。这个模块体现的是我引入可观测平台时，优先考虑 **兼容性、降级和数据边界**，而不是只追求 UI 上能看到 trace。”
 
-1. **面试官可能问：TraceRouter 有什么价值？**
-   可以答：它把“业务生成 trace”和“trace 写到哪里”解耦。今天写 JSONL + LangFuse，明天接 EvalBench 或 SQLite，不需要改 `/api/query`。
+1. **[基础追问] M16 里的 TraceRouter 解决的核心问题是什么？**
 
-2. **面试官可能问：LangFuse 挂了怎么办？**
-   可以答：router 捕获 backend 异常，标记 `failed`，继续写 JSONL；API 不返回 500，eval 也不受影响。
+   可以答：它解决的是 **“业务生成 trace”和“trace 写到哪里”耦合** 在一起的问题。M16 之前，`append_trace()` 基本等价于写 JSONL 文件；M16 之后，业务仍然调用 **同一个入口**，但内部由 **TraceRouter** 决定写 JSONL、写 LangFuse，或者未来写别的 backend。这样 `/api/query`、eval 和旧测试不用理解 LangFuse，也不会因为 **观测后端变化** 而跟着改。
 
-3. **面试官可能问：为什么不上传完整 rows？**
-   可以答：Cloud 可观测系统不应该成为敏感业务数据的副本。M16 只传摘要、计数、表名、列名和步骤信息，完整数据仍留在本地 JSONL。
+2. **[工程追问] 你为什么让 LangFuse 先写、JSONL 后写？这听起来像把 LangFuse 放在主链路前面了。**
+
+   可以答：顺序上 LangFuse 先写，是为了让 JSONL 同一行能记录 `langfuse_trace_id`、`langfuse_trace_url` 和 `langfuse_write_status`；语义上它 **仍然不是主链路**。TraceRouter 会捕获 LangFuse backend 的异常，失败时只标记 `failed`，然后继续写 JSONL。所以这里的重点不是“LangFuse 优先”，而是 **“JSONL 要带上旁路写入结果”**，方便后续 eval 和排障关联 Cloud trace。
+
+3. **[工程追问] 如果 LangFuse key 配错、Cloud 不通或者 SDK 报错，M16 怎么保证 API 和 eval 不受影响？**
+
+   可以答：M16 把 LangFuse 放在 **backend adapter** 里，router 对每个 backend **独立 try/except**。LangFuse 失败不会向上抛到 `/api/query`，而是把状态写成 `langfuse_write_status=failed`，再继续执行 **JSONLBackend**。测试里也覆盖了 **fake client 抛异常、缺 key 降级、API 响应体不暴露 LangFuse 字段** 这些路径，证明 **主响应契约和 eval trace 文件仍然稳定**。
+
+4. **[深挖追问] M16 为什么只做 flat spans，不做嵌套 span？这样在 LangFuse UI 里的可读性是不是差一些？**
+
+   可以答：是的，flat spans 的 UI 结构不如真实嵌套调用链漂亮，但 M16 当时只有请求结束后的 `TraceRecord` 快照，没有 **每一步真实开始和结束时间**。如果为了 UI 好看硬造父子 span 和时间线，会让观测数据看起来更精细，实际上却是 **伪时间线**。M16 的边界是先证明 **双写、降级和映射可靠**；真实 lifecycle 下沉留给 M16B 单独验证。
+
+5. **[深挖追问] 为什么 Cloud payload 只上传摘要和计数，不上传完整 SQL rows 或文档内容？这会不会降低排障能力？**
+
+   可以答：会牺牲一部分 Cloud 侧复盘细节，但这是有意的 **安全边界**。LangFuse Cloud 是第三方观测系统，不应该默认变成 **业务数据副本**。M16 上传 **表名、列名、步骤状态、SQL 摘要、行数和错误信息**，足够判断链路走到哪一步、是否生成了合理 SQL、是否执行成功；完整 rows 和更敏感的业务内容仍留在 **本地 JSONL 或数据库侧**。后续如果要上传样本，也应该 **显式脱敏和配置化**，而不是默认全量外发。
 
 ### 验证与下一步
 
@@ -2220,6 +2245,16 @@ M16 没有新增 API 端点，体验入口仍是 `/api/query` 和 trace 文件�
 
 **简述**：M16B 是在独立分支上做的一次观测底座实验。M16 已经能把请求结束后的 `TraceRecord` 写成 LangFuse flat spans，但那更像“事后整理日志”。M16B 把埋点下沉到 Text2SQL pipeline 和 SQL tool 的真实执行边界，让 LangFuse 看到更接近真实运行过程的 spans，同时 JSONL / eval 仍然消费同一套 `TraceStep`。
 
+### 先用大白话讲
+
+M16B 做的事情，可以理解成：M16 已经能把“事后整理好的运行记录”发给 LangFuse，但 M16B 想进一步验证，能不能在程序真正运行的时候，就把每一步开始、结束和失败记录下来。
+
+这就像看外卖订单轨迹。M16 更像订单结束后给你一张总结：“已接单、已出餐、已送达”；M16B 更像实时轨迹：“骑手什么时候到店、什么时候取餐、什么时候遇到异常”。对简单链路来说，总结够用；但后续 RAG / Hybrid 这种多步骤 Agent，一旦出问题，实时边界会更有排障价值。
+
+为了不让业务代码直接依赖 LangFuse，M16B 新增了 DataPilot 自己的 `TraceContext / SpanHandle`。pipeline 和 SQL tool 只记录“我的步骤开始了/结束了/失败了”，具体怎么写 LangFuse 被封装在 trace 层里。SQL Guard 和 SQL Execution 也放到 tool 内部记录，因为那里才是真正发生安全检查和数据库执行的地方。
+
+所以本模块的核心价值是：验证 **live lifecycle span** 是否适合作为后续 RAG / Hybrid 的观测底座，同时保持 JSONL、eval 和业务代码边界不被 LangFuse 绑死。
+
 ### 这次做了什么
 
 这次先新增了 **TraceContext / SpanHandle**。pipeline 不直接 import LangFuse，而是只说“开始一个步骤、结束一个步骤、这个步骤失败了”。这有点像 SpringBoot 里业务代码依赖自己的 service interface，而不是到处直接调用第三方 SDK。
@@ -2233,13 +2268,6 @@ M16 没有新增 API 端点，体验入口仍是 `/api/query` 和 trace 文件�
 - **Trace lifecycle**：不是等请求结束后再回忆发生了什么，而是在每个步骤开始和结束时记录。这样排障时能更像看真实调用链。
 - **Live span**：运行中写入的 span。它比 post-hoc span 更接近真实时间线，适合后续 RAG / Hybrid 这种多步骤 Agent。
 - **Post-hoc 去重**：同一件事不能既 live 写一遍，又请求结束后再拆一遍。`langfuse_span_mode` 就是告诉 backend 当前 trace 属于哪种模式。
-
-### 关键文件
-
-- `engine/trace/lifecycle.py`：M16B 新增的 lifecycle 抽象，封装 `TraceContext`、`SpanHandle` 和 LangFuse live writer。
-- `engine/nl2sql/pipeline.py`：`force_new_pipeline` 主链路从手工 append `TraceStep` 改为 lifecycle 记录。
-- `engine/tools/sql_tool.py`：SQL Guard / SQL Execution 的真实 span 边界，保持 `trace_context` 可选，旧模板链路不受影响。
-- `engine/trace/langfuse_backend.py`：识别 `langfuse_span_mode=live` 后跳过 post-hoc spans，避免重复写入。
 
 ### 代码阅读路线
 
@@ -2270,13 +2298,27 @@ M16 没有新增 API 端点，体验入口仍是 `/api/query` 和 trace 文件�
 
 ### 面试怎么讲
 
-“我在 M16B 做了一个 Trace lifecycle 下沉分支。原来的 LangFuse 接入是 post-hoc，把请求结束后的 trace_steps 平铺上传，能看但不够像真实调用链。M16B 新增了 DataPilot 自己的 TraceContext / SpanHandle，pipeline 和 SQL tool 只依赖这个抽象，不直接依赖 LangFuse。SQL Guard 和 SQL Execution 的 span 放在 tool 内部，因为安全检查和数据库执行的真实边界在那里。为了避免 live spans 和 post-hoc spans 重复，我加了 `langfuse_span_mode`，live 模式下 backend 只保留 JSONL 映射，不再重放 spans。这个分支的价值是为 RAG / Hybrid 阶段提前验证观测底座，而不是等复杂度叠上来以后再一起改。”
+“我在 M16B 做了一个 **Trace lifecycle 下沉分支**。原来的 LangFuse 接入是 **post-hoc**，把请求结束后的 trace_steps 平铺上传，能看但不够像真实调用链。M16B 新增了 DataPilot 自己的 **TraceContext / SpanHandle**，pipeline 和 SQL tool **只依赖这个抽象**，不直接依赖 LangFuse。**SQL Guard 和 SQL Execution 的 span 放在 tool 内部**，因为安全检查和数据库执行的真实边界在那里。为了避免 **live spans 和 post-hoc spans 重复**，我加了 `langfuse_span_mode`，live 模式下 backend 只保留 JSONL 映射，不再重放 spans。这个分支的价值是为 **RAG / Hybrid 阶段提前验证观测底座**，而不是等复杂度叠上来以后再一起改。”
 
-1. **面试官可能问：为什么要做 M16B？**
-   可以答：M16 能验证 LangFuse 双写，但排障价值有限；M16B 验证真实 lifecycle，提前为多步骤 Agent 做观测底座。
+1. **[基础追问] M16 已经能写 LangFuse 了，为什么还要做 M16B？**
 
-2. **面试官可能问：为什么不让业务代码直接调 LangFuse？**
-   可以答：第三方观测系统应该被 adapter 隔离。业务层只表达 DataPilot 的生命周期事件，后续换 LangFuse、自建平台或 EvalBench backend 都不用污染 pipeline。
+   可以答：M16 能证明 **“请求结束后可以把 trace 写进 LangFuse”**，但它更像事后整理日志。M16B 要验证的是另一件事：能不能在 **pipeline 和 tool 的真实执行边界记录 span**。这个差异对后续 **RAG / Hybrid** 很重要，因为多步骤 Agent 出问题时，排障不只看最终结果，还要看 **每一步到底何时开始、何时结束、在哪里失败**。
+
+2. **[工程追问] 为什么不让 pipeline 直接调用 LangFuse SDK，而要先做 `TraceContext / SpanHandle`？**
+
+   可以答：因为 pipeline 应该表达 **DataPilot 自己的业务生命周期**，而不是被 LangFuse SDK 污染。`TraceContext.start_span()` 表达的是“schema retrieval 开始了”、“SQL execution 结束了”这类内部事件；LangFuse 只是当前的一个 writer。这样后续如果**换**成自建观测、EvalBench，或者同时写多个后端，pipeline 不需要到处改 import 和 SDK 参数。这个分层会增加一点抽象成本，但能保护 **长期架构边界**。
+
+3. **[工程追问] SQL Guard 和 SQL Execution 为什么要下沉到 `run_sql_tool()` 里记录，而不是在 pipeline 调用前后包一层？**
+
+   可以答：因为 **真实边界在 tool 里**。SQL Guard 的安全检查、SQL 执行、异常捕获和返回结构都发生在 `run_sql_tool()` 内部；如果 pipeline 在外层事后补 span，只能**根据返回结果猜**发生了什么，**异常路径和安全拦截很容易失真**。M16B 把 `trace_context` 做成可选参数传进 tool，既让新 pipeline 得到 **真实 span**，又不影响旧路径。
+
+4. **[深挖追问] `langfuse_span_mode` 看起来只是一个小字段，为什么你把它当成关键设计？**
+
+   可以答：因为它解决的是 **重复观测** 的问题。M16 的 backend 会把请求结束后的 `trace_steps` 拆成 post-hoc spans；M16B 又在执行中写 live spans。如果没有 `langfuse_span_mode`，同一个步骤会在 LangFuse 里出现两次，排障时反而更混乱。这个字段明确告诉 backend：当前 trace 是 `live` 还是 `post_hoc`，**live 模式下只保留 JSONL 映射，不再重放步骤 span**。
+
+5. **[深挖追问] M16B 的代价是什么？如果要把它作为后续底座，你最担心什么？**
+
+   可以答：代价是 **代码侵入度和测试复杂度都变高**。M16 只改 recorder/backend，业务代码几乎无感；M16B 要把 lifecycle 参数传进 pipeline 和 tool，后续 RAG、Hybrid 接入时也要遵守同一套 span 边界。最担心的不是复杂度本身，而是 **边界不统一**：有的步骤 live 记录，有的步骤 post-hoc 补，有的错误路径漏 flush。所以下一步如果继续基于 M16B，应该把 **span 命名、错误记录、flush 时机和 JSONL snapshot 规则** 固定成约定，避免每条链路各写一套。
 
 ### 验证与下一步
 
@@ -2302,11 +2344,23 @@ M16B 仍然使用 `/api/query`，没有新增端点。体验方式是在 `.env` 
 
 （2026-07-29）
 
-**简述**：M17 把 DataPilot 的 eval 从“只有一个 pass/fail 结果”升级成 **多 scorer 明细 + 旧报告兼容 + LangFuse Score 回写**。简单说，以前像老师只在卷子上写“对/错”；现在会同时写“表命中几分、列召回几分、安全是否合格、结果是否匹配、可选 LLM judge 怎么看”，并把这些分数贴回 LangFuse trace。
+**简述**：M17 把 DataPilot 的 eval 从“只有一个 pass/fail 结果”升级成 **多 scorer 明细 + 旧报告兼容 + LangFuse Score 回写**。
+
+### 先用大白话讲
+
+M17 做的事情，可以理解成给 DataPilot 的 eval 系统换了一种“阅卷方式”。
+
+以前评测一条 case，最后只会得到一个很粗的结果：这题过了，或者没过。这个结果能告诉我们“有没有问题”，但不能清楚告诉我们“问题出在哪里”。
+
+M17 把这件事拆细了：一条 case 不再只有一个总结果，而是会拆成多项评分，比如 **表有没有找对**、**列有没有找对**、**安全拦截是否符合预期**、**查询结果是否匹配标准答案**，以及在显式开启时让 **LLM judge** 判断回答语义是否正确。
+
+这些小分数会先用于本地 Markdown 报告，同时也能按 `langfuse_trace_id` 写回 LangFuse。这样以后打开一条 trace，不只是看“这次请求怎么执行”，还能看到“这次请求质量怎么样”。
+
+所以 M17 的核心价值是：让 eval 从单纯的 **pass/fail**，升级成可解释、可回写、后续能支撑 Experiment 对比的评分体系。
 
 ### 这次做了什么
 
-这次先调整了 plan：后续 M17/M18 直接在 **M16B live lifecycle** 分支上继续，不再额外拆 `M17B` / `M18B`。M17 的目标没有变，仍然是 scorer 分层和 score 回写；变的是它消费的 trace 底座优先来自 M16B。
+这次先调整了 plan：后续 M17/M18 直接在 **M16B live lifecycle** 分支上继续。M17 的目标没有变，仍然是 scorer 分层和 score 回写。
 
 代码上新增了 `eval/scorers/`。原来 `_score_case()` 里有一大段早返回判断：HTTP 状态、route、安全、表、列、expected_value、result_match、contains、manual review。M17 把这些判断搬进 `rule_scorers.py`，作为 **L1/L2 规则评分单一事实源**。`eval.run_eval._score_case()` 还在，但只做兼容薄壳，所以旧 Markdown 报告和旧测试不用改读法。
 
@@ -2318,14 +2372,6 @@ M16B 仍然使用 `/api/query`，没有新增端点。体验方式是在 `.env` 
 - **L1/L2/L3 分层**：L1 看结构和安全，L2 看结果是否匹配固定事实，L3 才让 LLM 做语义判断。能用规则就不用 LLM。
 - **Score 回写**：把本地评测结果写回 LangFuse trace。这样你在 Cloud UI 看某条 trace 时，不只看到它怎么跑，还能看到它每个评分项的结果。
 - **兼容薄壳**：旧函数名 `_score_case()` 保留，但内部调用新 scorer。类比 SpringBoot 里旧 Controller endpoint 不变，内部 service 换了新实现。
-
-### 关键文件
-
-- `eval/scorers/base.py`：定义 `EvalScoreDetail`、`EvalScoreSummary` 和 `LangFuseScorePayload`。
-- `eval/scorers/rule_scorers.py`：L1/L2 规则评分单一事实源。
-- `eval/scorers/llm_judge.py`：显式开启才运行的 `llm:correctness` judge。
-- `eval/scorers/langfuse_scores.py`：从 JSONL 映射生成 LangFuse Score payload，并调用 SDK 写回。
-- `eval/run_eval.py`：保留 CLI、报告和 `_score_case()` 兼容入口，新增 `--judge-model` 和 score 回写。
 
 ### 代码阅读路线
 
@@ -2360,16 +2406,23 @@ M16B 仍然使用 `/api/query`，没有新增端点。体验方式是在 `.env` 
 
 ### 面试怎么讲
 
-“M17 我把 eval 的评分逻辑从一个大函数重构成 scorer 分层。原来 `_score_case()` 只能返回单个 pass/fail，现在每条 case 会产生多条 `EvalScoreDetail`，比如表命中、列召回、安全合规、结果匹配和可选的 LLM correctness。为了兼容旧报告，我保留 `_score_case()` 作为薄壳，把 detail 汇总回原来的 `EvalScore`。LangFuse 回写不直接查 Cloud trace，而是读取 JSONL 中 DataPilot trace id 到 LangFuse trace id 的映射，再调用 `create_score()`。这样本地 Markdown 和 Cloud Score 用的是同一套评分口径，也不会因为 LangFuse 查询延迟影响 eval。”
+“我在 M17 做的是把 DataPilot 的 eval 从一个大函数里的 **pass/fail 判断**，升级成 **可解释、可复用、可回写的 scorer 分层**。原来 `_score_case()` 既负责判断表列、安全、结果，又负责产出 Markdown 需要的总结果；这样继续接 LangFuse Score 时很容易出现 **两套评分口径**。M17 把规则评分迁到 `eval/scorers/`，每条 case 先产出多条 `EvalScoreDetail`，再汇总成旧 `EvalScore`，所以 **旧报告不变**，LangFuse 也能拿到 **同一批分数**。**L3 judge 默认关闭**，只有显式传 `--judge-model` 或配置 `EVAL_JUDGE_MODEL` 才运行。Score 回写只依赖 JSONL 里的 `langfuse_trace_id` 映射，**不等待 Cloud trace 可查询**。”
 
-1. **面试官可能问：为什么要把 scorer 拆出来？**
-   可以答：为了避免 Markdown 报告和 LangFuse Score 各有一套评分逻辑。拆出来后，规则评分是单一事实源，报告和 Cloud 都消费同一批结果。
+1. **[基础追问] 你说 M17 把 scorer 拆出来了，那它和原来的 `_score_case()` 到底是什么关系？为什么不直接删掉旧函数？**
 
-2. **面试官可能问：LLM judge 怎么控制成本和稳定性？**
-   可以答：默认不启用，只有 `--judge-model` 或 `EVAL_JUDGE_MODEL` 显式配置才运行；失败记 skipped/null，不阻断 eval。
+   可以答：直接结论是，`_score_case()` 现在是 **兼容薄壳**，真正的评分逻辑在 `eval/scorers/`。不直接删掉旧函数，是因为现有 **Markdown 报告、测试和历史 eval** 都依赖旧的 `EvalScore` 返回结构。M17 的取舍是多保留一层入口，但换来 **低风险迁移**：新 scorer 负责 **单一事实源**，旧入口只负责汇总和兼容。验证上，旧的 `test_phase3a_eval.py` 继续通过，同时新增 `test_m17_scorers.py` 覆盖 **score details 和 LangFuse payload**。
 
-3. **面试官可能问：LangFuse trace 查不到时 score 怎么办？**
-   可以答：不等待查询。只要 JSONL 有 `langfuse_trace_id`，就可以先写 score；trace ingestion 完成后会关联，查询只用于 smoke/debug。
+2. **[工程追问] 如果本地 Markdown 报告和 LangFuse 上的分数不一致，你会怎么定位？**
+
+   可以答：我会先确认两边是否来自 **同一批 `EvalScoreDetail`**。M17 的设计就是让 `rule_scorers.py` 产出统一 detail；Markdown 只走 `summarize_score_details()` 汇总，LangFuse 只把同一批 detail 转成 `LangFuseScorePayload`。如果不一致，优先查两层转换：**detail 到 summary 的汇总逻辑**，或者 **detail 到 LangFuse payload 的映射逻辑**，而不是维护两套评分规则。这个设计的核心价值是把排查范围缩小到 **“转换层”**，避免评分口径漂移。
+
+3. **[工程追问] 为什么 `rule:latency_p95` 不参与 pass/fail？如果延迟很高，难道不应该算失败吗？**
+
+   可以答：延迟应该被观测，但不应该在 M17 改变 **旧 eval 的正确率口径**。当前 eval 的主门禁是 **答案、安全和结果是否正确**；延迟受本地网络、LLM provider、LangFuse SDK 上传状态影响很大。如果让 latency 直接决定 pass/fail，可能会把一次外部抖动误判成 **业务能力退化**。所以 M17 把 `rule:latency_p95` 作为 numeric score 回写 LangFuse，用于 **趋势观察**；真正是否设为硬门禁，应该等 M18 或后续有稳定环境和阈值后再决定。
+
+4. **[深挖追问] 为什么 M17 不直接使用 LangFuse 的托管 evaluator，而是继续在本地实现 scorer？这是不是重复造轮子？**
+
+   可以答：不是完全不用 LangFuse evaluator，而是 M17 不把它作为 **主评分口径**。DataPilot 已经有 **YAML cases、Markdown 报告和一套历史规则评分**，如果直接迁到 LangFuse 托管 evaluator，会引入 **UI 配置、observation target 和调度依赖**，短期内容易让本地报告和 Cloud 分数各说各话。M17 的目标是先保证 **评分口径单一**：本地 scorer 产出 details，同时服务 Markdown 和 LangFuse Score。后续 M18 / EvalBench 如果验证 LangFuse evaluator workflow 足够稳定，再考虑把部分 evaluator 托管化。
 
 ### 验证与下一步
 
