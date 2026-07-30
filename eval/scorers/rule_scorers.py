@@ -249,8 +249,22 @@ def _score_output_check(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
         return _score_result_match(case, body)
     if case.check_type == "contains" and case.check_value not in text:
         return _fail("rule:contains", f"missing_text={case.check_value}", ["unexpected_error"])
-    if case.check_type == "equals" and case.check_value not in text:
-        return _fail("rule:equals", f"expected_value={case.check_value}", ["unexpected_error"])
+    if case.check_type == "equals":
+        actual_value = _resolve_equals_value(case, body)
+        if actual_value != case.check_value:
+            return _fail(
+                "rule:equals",
+                f"expected_value={case.check_value} actual={actual_value}",
+                ["unexpected_error"],
+                metadata={"field": case.check.get("field", "answer"), "actual": actual_value},
+            )
+        return EvalScoreDetail(
+            name="rule:equals",
+            value=1.0,
+            passed=True,
+            reason="equals_ok",
+            metadata={"field": case.check.get("field", "answer")},
+        )
     if case.check_type == "manual":
         return EvalScoreDetail(
             name="rule:manual_review",
@@ -260,6 +274,23 @@ def _score_output_check(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
             review_required=True,
         )
     return EvalScoreDetail(name=f"rule:{case.check_type or 'default'}", value=1.0, passed=True, reason="ok")
+
+
+def _resolve_equals_value(case: Any, body: dict[str, Any]) -> str:
+    """解析 equals 的比较对象；默认只比较最终 answer，不再对整个 JSON 做 substring。"""
+
+    field = str(case.check.get("field") or "answer")
+    if field == "body_json":
+        return _body_text(body)
+    if field.startswith("rows[0]."):
+        column = field.removeprefix("rows[0].")
+        rows = body.get("rows") or []
+        if rows and isinstance(rows[0], dict):
+            value = rows[0].get(column)
+            return "" if value is None else str(value)
+        return ""
+    value = body.get(field)
+    return "" if value is None else str(value)
 
 
 def _score_expected_value(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
@@ -337,7 +368,12 @@ def _score_result_match(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
     finally:
         Base.metadata.drop_all(engine)
 
-    matched, reason = _rows_match(actual_rows=actual_rows, expected_rows=expected_rows, tolerance=tolerance)
+    matched, reason = _rows_match(
+        actual_rows=actual_rows,
+        expected_rows=expected_rows,
+        tolerance=tolerance,
+        order_insensitive=bool(case.check.get("order_insensitive", False)),
+    )
     if not matched:
         return _fail("rule:result_match", f"result_mismatch {reason}", ["result_mismatch"])
     return EvalScoreDetail(name="rule:result_match", value=1.0, passed=True, reason=reason)
@@ -374,27 +410,36 @@ def _normalize_result_value(value: Any) -> Any:
         return str(value)
 
 
+def _row_sort_key(row: dict[str, Any]) -> tuple[str, ...]:
+    """为无序比较生成稳定排序 key。"""
+
+    return tuple(f"{key}={_normalize_result_value(value)}" for key, value in sorted(row.items()))
+
+
 def _rows_match(
     *,
     actual_rows: Sequence[dict[str, Any]],
     expected_rows: Sequence[dict[str, Any]],
     tolerance: Decimal,
+    order_insensitive: bool = False,
 ) -> tuple[bool, str]:
-    """比较两组结果行；M14-lite 只做行顺序一致的轻量结果对比。"""
+    """比较两组结果行；默认按列名对齐，必要时由 case 显式开启无序比较。"""
 
     if len(actual_rows) != len(expected_rows):
         return False, f"row_count expected={len(expected_rows)} actual={len(actual_rows)}"
-    for row_index, (actual_row, expected_row) in enumerate(zip(actual_rows, expected_rows, strict=True)):
-        if len(actual_row) != len(expected_row):
+    actual_sequence = sorted(actual_rows, key=_row_sort_key) if order_insensitive else list(actual_rows)
+    expected_sequence = sorted(expected_rows, key=_row_sort_key) if order_insensitive else list(expected_rows)
+    for row_index, (actual_row, expected_row) in enumerate(zip(actual_sequence, expected_sequence, strict=True)):
+        actual_columns = set(actual_row)
+        expected_columns = set(expected_row)
+        if actual_columns != expected_columns:
             return (
                 False,
-                f"row[{row_index}] column_count expected={len(expected_row)} actual={len(actual_row)}",
+                f"row[{row_index}] columns expected={sorted(expected_columns)} actual={sorted(actual_columns)}",
             )
-        for column_index, (actual_value, expected_value) in enumerate(
-            zip(actual_row.values(), expected_row.values(), strict=True)
-        ):
-            normalized_actual = _normalize_result_value(actual_value)
-            normalized_expected = _normalize_result_value(expected_value)
+        for column_name in expected_row:
+            normalized_actual = _normalize_result_value(actual_row[column_name])
+            normalized_expected = _normalize_result_value(expected_row[column_name])
             if isinstance(normalized_actual, Decimal) and isinstance(normalized_expected, Decimal):
                 if abs(normalized_actual - normalized_expected) <= tolerance:
                     continue
@@ -402,7 +447,7 @@ def _rows_match(
                 continue
             return (
                 False,
-                f"row[{row_index}] col[{column_index}] expected={normalized_expected} actual={normalized_actual}",
+                f"row[{row_index}] column={column_name} expected={normalized_expected} actual={normalized_actual}",
             )
     return True, "result_match_ok"
 

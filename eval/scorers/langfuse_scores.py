@@ -115,7 +115,7 @@ def _load_langfuse_trace_id_map(trace_path: Path) -> dict[str, str]:
             continue
         datapilot_trace_id = record.get("trace_id")
         langfuse_trace_id = record.get("langfuse_trace_id")
-        if datapilot_trace_id and langfuse_trace_id:
+        if datapilot_trace_id and langfuse_trace_id and record.get("langfuse_write_status") == "ok":
             mapping[str(datapilot_trace_id)] = str(langfuse_trace_id)
     return mapping
 

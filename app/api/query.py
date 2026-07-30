@@ -6,8 +6,6 @@
 """
 
 from __future__ import annotations
-
-import re
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -22,14 +20,13 @@ from engine.nl2sql.pipeline import run_text2sql_pipeline
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.nl2sql.templates import match_template
 from engine.sql_guard.guard import validate_readonly_sql
+from engine.sql_guard.precheck import looks_like_dangerous_sql
 from engine.tools.chart_tool import build_chart_spec
 from engine.tools.sql_tool import SQLToolResult, run_sql_tool
 from engine.trace.recorder import TraceRecord, TraceStep, append_trace
 
 
 router = APIRouter(prefix="/api", tags=["query"])
-
-DANGEROUS_SQL_KEYWORDS = ("drop", "delete", "update", "insert", "alter", "truncate")
 
 
 def _trace_id(request: Request) -> str:
@@ -172,17 +169,6 @@ def _blocked_response(
     return response
 
 
-def _looks_like_dangerous_sql(text: str) -> bool:
-    """判断用户输入是否明显在要求执行危险 SQL。
-
-    M3 没有 LLM，未命中模板可以直接交给 Guard；M4 需要让普通自然语言进入 LLM。
-    因此这里只提前拦截 DDL / DML 关键词，prompt injection 里的危险 SQL 也会被抓住。
-    """
-
-    normalized = text.lower()
-    return any(re.search(rf"\b{keyword}\b", normalized) for keyword in DANGEROUS_SQL_KEYWORDS)
-
-
 def _resolve_sql(request_body: QueryRequest) -> tuple[str, dict[str, str], str]:
     """解析自然语言请求对应的 SQL。
 
@@ -265,7 +251,7 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
 
     处理顺序：
     1. 先匹配模板；
-    2. 模板未命中时，如果用户输入本身像危险 SQL，先用 M3 只读 Guard 直接拦截；
+    2. 模板未命中时，如果用户输入本身像危险 SQL，旧链路先用 M3 只读 Guard 直接拦截；
     3. 其他未命中问题调用 LLM 生成 SQL；
     4. SQL 统一交给 M5 SQL Tool，返回表格、工具调用和耗时；
     5. 聚合结果尝试生成 chart_spec，并把完整过程写入 JSONL trace。
@@ -277,22 +263,6 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
 
     # 步骤 0：M11 评测开关显式绕过模板优先，只走新 Text2SQL pipeline。-----------------------
     if request_body.force_new_pipeline:
-        # ★ M12 补丁：新 pipeline 也必须做危险 SQL 关键词预检。旧链路在 matched is None 分支
-        # 里由 _looks_like_dangerous_sql 拦截；新链路此前绕过该分支，导致 DROP/DELETE 等
-        # 危险问题进入 LLM 后被转写成 SELECT，从而绕过安全用例。这里把预检提到 force 分支前，
-        # 确保新旧链路统一拦截恶意问题。
-        if _looks_like_dangerous_sql(request_body.question):
-            guard_result = validate_readonly_sql(request_body.question)
-            if not guard_result.is_allowed:
-                return _blocked_response(
-                    request=request,
-                    request_body=request_body,
-                    trace_id=trace_id,
-                    sql=request_body.question,
-                    blocked_reason=guard_result.blocked_reason or "SQL Guard 已拦截。",
-                    started_at=started_at,
-                )
-
         pipeline_result = run_text2sql_pipeline(
             question=request_body.question,
             user_role=request_body.user_role,
@@ -332,7 +302,7 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             langfuse_span_mode=pipeline_result.langfuse_span_mode,
         )
 
-    if matched is None and _looks_like_dangerous_sql(request_body.question):
+    if matched is None and looks_like_dangerous_sql(request_body.question):
         guard_result = validate_readonly_sql(request_body.question)
         if not guard_result.is_allowed:
             return _blocked_response(

@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from eval.run_eval import EvalCase, EvalResult, _score_case, load_cases, write_report
+from eval.scorers.base import EvalScoreDetail
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -406,9 +407,20 @@ def test_report_includes_issue_tags_and_sql(tmp_path: Path) -> None:
                 sql="SELECT product_name, category, status FROM products",
                 response_body={},
                 actual_pipeline_mode=case.pipeline_mode,
+                score_details=[
+                    # 这里刻意给一条 detail，验证 Markdown 主报告能独立承载 scorer 明细。
+                    # 没有这层时，只看 report 无法知道 rule 分数到底算了什么。
+                    EvalScoreDetail(
+                        name="rule:table_hit",
+                        value=1.0,
+                        passed=True,
+                        reason="table_hit_ok",
+                    )
+                ],
             )
         ],
         report_path,
+        langfuse_score_write_result={"ok": 0, "skipped": 1, "failed": 0},
     )
 
     report = report_path.read_text(encoding="utf-8")
@@ -416,6 +428,8 @@ def test_report_includes_issue_tags_and_sql(tmp_path: Path) -> None:
     assert "review_required" in report
     assert "trace-m8" in report
     assert "SELECT product_name, category, status FROM products" in report
+    assert "## Score Summary" in report
+    assert "rule:table_hit" in report
 
 
 def test_diagnostic_extra_cases_keep_m8_5_shape() -> None:

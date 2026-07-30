@@ -392,12 +392,12 @@ def build_trace_context(
             initial_write_status="failed",
         )
 
-    if client_factory is None:
-        from langfuse import Langfuse
-
-        client_factory = Langfuse
-
     try:
+        if client_factory is None:
+            from langfuse import Langfuse
+
+            client_factory = Langfuse
+
         live_writer = _LangFuseLiveWriter(
             resolved_settings,
             datapilot_trace_id=trace_id,

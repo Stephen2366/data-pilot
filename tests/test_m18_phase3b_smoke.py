@@ -54,3 +54,47 @@ def test_exit_code_treats_pending_as_non_fatal() -> None:
 
     assert smoke._exit_code([smoke.CheckResult("visibility", "PENDING", "waited=0s")]) == 0
     assert smoke._exit_code([smoke.CheckResult("score", "FAIL", "write failed")]) == 1
+
+
+def test_api_smoke_requires_ok_langfuse_mapping_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    """enabled 时有 langfuse_trace_id 但状态 failed，mapping 也不能误报 PASS。"""
+
+    settings = Settings(
+        _env_file=None,
+        LANGFUSE_ENABLED="true",
+        LANGFUSE_PUBLIC_KEY="pk-test",
+        LANGFUSE_SECRET_KEY="sk-test",
+    )
+
+    monkeypatch.setattr(smoke, "_read_last_trace", lambda _path: {
+        "trace_id": "datapilot-trace-1",
+        "langfuse_trace_id": "lf-trace-1",
+        "langfuse_write_status": "failed",
+    })
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"trace_id": "datapilot-trace-1"}
+
+    class FakeClient:
+        def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    class FakeSeededClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return FakeClient()
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(smoke, "seeded_api_client", FakeSeededClient)
+
+    results, _body, _trace = smoke._run_api_smoke(tmp_path / "trace.jsonl", settings)
+    by_name = {result.name: result for result in results}
+
+    assert by_name["jsonl.langfuse_mapping"].status == "FAIL"

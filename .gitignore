@@ -9,3 +9,6 @@ __pycache__/
 
 eval/traces/*.jsonl
 !eval/traces/.gitkeep
+
+*-dataset_items-export-*.csv
+*-lf-dataset_items-export-*.csv

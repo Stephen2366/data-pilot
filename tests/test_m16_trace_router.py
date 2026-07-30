@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -328,6 +329,105 @@ def test_trace_lifecycle_writes_live_span_and_returns_snapshot() -> None:
     assert factory.client.spans[0].ended is True
     assert factory.client.spans[1].updates[0]["metadata"]["step_index"] == 1
     assert factory.client.spans[1].ended is True
+
+
+def test_trace_lifecycle_degrades_when_langfuse_sdk_import_fails(monkeypatch) -> None:
+    """LANGFUSE_ENABLED=true 但 SDK 未安装时，新 pipeline lifecycle 不能抛异常。"""
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "langfuse":
+            raise ModuleNotFoundError("No module named 'langfuse'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    settings = Settings(
+        _env_file=None,
+        LANGFUSE_ENABLED="true",
+        LANGFUSE_PUBLIC_KEY="pk-test",
+        LANGFUSE_SECRET_KEY="sk-test",
+        LANGFUSE_BASE_URL="http://localhost:3000",
+    )
+
+    trace_context = build_trace_context(
+        trace_id="datapilot-trace-1",
+        question="各渠道订单量是多少？",
+        user_role="ops",
+        settings=settings,
+    )
+    span = trace_context.start_span(name="schema_retrieval")
+    span.end(output_summary="local only")
+    snapshot = trace_context.snapshot()
+
+    assert snapshot.langfuse_trace_id is None
+    assert snapshot.langfuse_write_status == "failed"
+    assert [step.name for step in snapshot.trace_steps] == ["schema_retrieval"]
+
+
+def test_trace_lifecycle_marks_failed_when_live_flush_fails() -> None:
+    """live writer flush 失败时仍返回本地 trace_steps，但状态不能伪装成 ok。"""
+
+    class FlushFailingClient(FakeLangFuseClient):
+        """模拟 SDK flush 失败。"""
+
+        def flush(self) -> None:
+            raise RuntimeError("flush failed")
+
+    class FlushFailingFactory:
+        """返回 flush 失败的 fake client。"""
+
+        def __init__(self) -> None:
+            self.client: FlushFailingClient | None = None
+
+        def __call__(self, **kwargs: Any) -> FlushFailingClient:
+            self.client = FlushFailingClient(**kwargs)
+            return self.client
+
+    factory = FlushFailingFactory()
+    settings = Settings(
+        _env_file=None,
+        LANGFUSE_ENABLED="true",
+        LANGFUSE_PUBLIC_KEY="pk-test",
+        LANGFUSE_SECRET_KEY="sk-test",
+        LANGFUSE_BASE_URL="http://localhost:3000",
+    )
+    trace_context = build_trace_context(
+        trace_id="datapilot-trace-1",
+        question="各渠道订单量是多少？",
+        user_role="ops",
+        settings=settings,
+        client_factory=factory,
+    )
+
+    span = trace_context.start_span(name="schema_retrieval")
+    span.end(output_summary="merged_hits=3")
+    snapshot = trace_context.snapshot()
+
+    assert snapshot.langfuse_trace_id is not None
+    assert snapshot.langfuse_write_status == "failed"
+    assert [step.name for step in snapshot.trace_steps] == ["schema_retrieval"]
+
+
+def test_force_new_pipeline_dangerous_sql_records_sql_guard_step(tmp_path: Path) -> None:
+    """危险 SQL 预检下沉到新 pipeline 后，blocked trace 也必须有 sql_guard step。"""
+
+    trace_path = tmp_path / "dangerous-sql-traces.jsonl"
+    configure_trace_router(TraceRouter(backends=[JSONLBackend()]))
+
+    with _seeded_test_client(trace_path) as client:
+        response = client.post(
+            "/api/query",
+            json={"question": "DROP TABLE orders", "user_role": "ops", "force_new_pipeline": True},
+        )
+
+    body = response.json()
+    trace = json.loads(trace_path.read_text(encoding="utf-8").strip())
+    assert response.status_code == 200
+    assert body["safety_status"] == "blocked"
+    assert body["error_type"] == "sql_guard_blocked"
+    assert [step["name"] for step in trace["trace_steps"]] == ["sql_guard"]
+    assert trace["trace_steps"][0]["status"] == "blocked"
 
 
 def test_api_response_contract_hides_langfuse_internal_fields(tmp_path: Path) -> None:

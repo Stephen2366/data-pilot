@@ -117,6 +117,7 @@ def test_build_langfuse_score_payloads_uses_jsonl_trace_mapping(tmp_path: Path) 
                 "trace_id": "datapilot-trace-1",
                 "langfuse_trace_id": "lf-trace-1",
                 "langfuse_span_mode": "live",
+                "langfuse_write_status": "ok",
             }
         ),
         encoding="utf-8",
@@ -148,6 +149,114 @@ def test_build_langfuse_score_payloads_uses_jsonl_trace_mapping(tmp_path: Path) 
     assert payloads[0].trace_id == "lf-trace-1"
     assert payloads[0].name == "rule:table_hit"
     assert payloads[0].metadata["case_id"] == "m17_case"
+
+
+def test_build_langfuse_score_payloads_ignores_failed_trace_mapping(tmp_path: Path) -> None:
+    """LangFuse trace 写入失败时，不应继续给未确认 trace 回写 score。"""
+
+    trace_path = tmp_path / "failed-traces.jsonl"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "trace_id": "datapilot-trace-1",
+                "langfuse_trace_id": "lf-trace-1",
+                "langfuse_span_mode": "live",
+                "langfuse_write_status": "failed",
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = EvalResult(
+        case=_case(),
+        passed=True,
+        reason="ok",
+        issue_tags=[],
+        review_required=False,
+        skipped_due_to_pipeline_mode=False,
+        status_code=200,
+        route="sql",
+        safety_status="passed",
+        error_type=None,
+        trace_id="datapilot-trace-1",
+        sql="SELECT 1",
+        response_body=_body(),
+        actual_pipeline_mode="new_text2sql",
+        score_details=[EvalScoreDetail(name="rule:table_hit", value=1.0, passed=True, reason="table_hit_ok")],
+    )
+
+    payloads = build_langfuse_score_payloads(results=[result], trace_path=trace_path)
+
+    assert payloads == []
+
+
+def test_equals_scorer_compares_answer_instead_of_json_substring() -> None:
+    """equals 不能因为 SQL / rows 里碰巧包含期望文本就误判通过。"""
+
+    case = _case(
+        check_type="equals",
+        check_value="Mobile App",
+        expected_columns=[],
+        check={"type": "equals"},
+    )
+    body = {
+        **_body(),
+        "answer": "不是期望答案",
+        "sql": "SELECT 'Mobile App' AS channel_name",
+        "rows": [{"channel_name": "Mobile App"}],
+        "columns": ["channel_name"],
+    }
+
+    details = score_case_rules(case=case, body=body, status_code=200, actual_pipeline_mode="new_text2sql")
+
+    assert details[-1].name == "rule:equals"
+    assert details[-1].passed is False
+
+
+def test_result_match_fails_when_column_name_differs_even_if_value_matches() -> None:
+    """result_match 要校验列名，不能只比较位置值。"""
+
+    case = _case(
+        check_type="result_match",
+        check_value="",
+        expected_tables=[],
+        expected_columns=[],
+        expected_sql="SELECT 1 AS expected_value",
+        check={"type": "result_match"},
+    )
+    body = {
+        **_body(),
+        "columns": ["wrong_name"],
+        "rows": [{"wrong_name": 1}],
+    }
+
+    details = score_case_rules(case=case, body=body, status_code=200, actual_pipeline_mode="new_text2sql")
+
+    assert details[-1].name == "rule:result_match"
+    assert details[-1].passed is False
+    assert "columns expected" in details[-1].reason
+
+
+def test_result_match_aligns_values_by_column_name() -> None:
+    """列顺序不同但列名和值一致时，result_match 应按列名通过。"""
+
+    case = _case(
+        check_type="result_match",
+        check_value="",
+        expected_tables=[],
+        expected_columns=["a", "b"],
+        expected_sql="SELECT 1 AS a, 2 AS b",
+        check={"type": "result_match"},
+    )
+    body = {
+        **_body(),
+        "columns": ["b", "a"],
+        "rows": [{"b": 2, "a": 1}],
+    }
+
+    details = score_case_rules(case=case, body=body, status_code=200, actual_pipeline_mode="new_text2sql")
+
+    assert details[-1].name == "rule:result_match"
+    assert details[-1].passed is True
 
 
 def test_langfuse_score_writer_degrades_when_disabled() -> None:

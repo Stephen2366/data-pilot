@@ -349,7 +349,12 @@ def run_cases(
     return results
 
 
-def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) -> None:
+def write_report(
+    results: list[EvalResult],
+    path: Path = DEFAULT_REPORT_PATH,
+    *,
+    langfuse_score_write_result: dict[str, int] | None = None,
+) -> None:
     """把评测结果写成 Markdown，方便 README / dev-log / 验收报告引用。"""
 
     passed_count = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in results)
@@ -367,11 +372,40 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
         f"- skipped_due_to_pipeline_mode: {skipped_count}",
         f"- review_required: {review_count}",
         "",
-        "## Blocking Summary",
+        "## Score Summary",
         "",
-        "| group | total | passed | failed | skipped | review_required |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| name | value | passed | skipped | reason |",
+        "|---|---:|---|---|---|",
     ]
+    score_details = [detail for result in results for detail in result.score_details]
+    if score_details:
+        for detail in score_details:
+            value = "-" if detail.value is None else detail.value
+            lines.append(
+                f"| {detail.name} | {value} | {detail.passed} | {detail.skipped} | {detail.reason or '-'} |"
+            )
+    else:
+        lines.append("| - | - | - | - | no_score_details |")
+    if langfuse_score_write_result is not None:
+        lines.extend(
+            [
+                "",
+                "## LangFuse Score Write",
+                "",
+                f"- ok: {langfuse_score_write_result.get('ok', 0)}",
+                f"- skipped: {langfuse_score_write_result.get('skipped', 0)}",
+                f"- failed: {langfuse_score_write_result.get('failed', 0)}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Blocking Summary",
+            "",
+            "| group | total | passed | failed | skipped | review_required |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
     for label, expected_blocking in [("blocking", True), ("non_blocking", False)]:
         group = [result for result in results if result.case.phase3a_blocking is expected_blocking]
         group_passed = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in group)
@@ -460,6 +494,7 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
                 f"- review_required: {'yes' if result.review_required else 'no'}",
                 f"- skipped_due_to_pipeline_mode: {'yes' if result.skipped_due_to_pipeline_mode else 'no'}",
                 f"- trace_id: {result.trace_id}",
+                f"- score_details: {_format_score_details(result.score_details)}",
                 "",
                 "```sql",
                 sql.replace("`", ""),
@@ -469,6 +504,19 @@ def write_report(results: list[EvalResult], path: Path = DEFAULT_REPORT_PATH) ->
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _format_score_details(details: list[EvalScoreDetail]) -> str:
+    """把 scorer 明细压成一行，避免 Case Details 过度膨胀。"""
+
+    if not details:
+        return "-"
+    parts = []
+    for detail in details:
+        value = "-" if detail.value is None else detail.value
+        status = "skipped" if detail.skipped else detail.passed
+        parts.append(f"{detail.name}={value}/{status}/{detail.reason or '-'}")
+    return "; ".join(parts)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -487,9 +535,9 @@ def main(argv: list[str] | None = None) -> int:
     judge_model = resolve_judge_model(args.judge_model)
     with seeded_api_client(args.trace) as client:
         results = run_cases(cases, client, pipeline_mode=args.pipeline_mode, judge_model=judge_model)
-    write_report(results, args.report)
     score_payloads = build_langfuse_score_payloads(results=results, trace_path=args.trace)
     score_write_result = LangFuseScoreWriter().write_scores(score_payloads)
+    write_report(results, args.report, langfuse_score_write_result=score_write_result)
 
     passed_count = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in results)
     skipped_count = sum(result.skipped_due_to_pipeline_mode for result in results)

@@ -25,6 +25,8 @@ from engine.nl2sql.schema_loader import DomainSchema, load_domain_schema
 from engine.schema_retrieval.graph import build_schema_graph
 from engine.schema_retrieval.objects import SchemaGraph, SchemaRetrievalResult
 from engine.schema_retrieval.retriever import retrieve_schema
+from engine.sql_guard.guard import validate_readonly_sql
+from engine.sql_guard.precheck import looks_like_dangerous_sql
 from engine.tools.chart_tool import build_chart_spec
 from engine.tools.sql_tool import SQLToolResult, run_sql_tool
 from engine.trace.lifecycle import TraceContext, TraceLifecycleSnapshot, build_trace_context
@@ -227,6 +229,48 @@ def run_text2sql_pipeline(
     trace_context = build_trace_context(trace_id=trace_id, question=question, user_role=user_role)
     answer_hint = "新 Text2SQL 查询结果"
     llm_client = get_default_llm_client()
+
+    # 步骤 0：用户原始输入危险 SQL 预检 ======================================================
+    # ★ 这一步属于 pipeline 的统一安全边界，而不是 API 层临时拦截。否则 `DROP TABLE ...`
+    # 会在进入 pipeline 前返回，JSONL / LangFuse 里看不到 `sql_guard` blocked span。
+    if looks_like_dangerous_sql(question):
+        span = trace_context.start_span(
+            name="sql_guard",
+            step_type="sql_guard",
+            input_summary="validate raw user SQL-like input",
+        )
+        guard_result = validate_readonly_sql(question)
+        if not guard_result.is_allowed:
+            blocked_reason = guard_result.blocked_reason or "SQL Guard 已拦截。"
+            span.end(
+                status="blocked",
+                output_summary=blocked_reason,
+                error_type="sql_guard_blocked",
+                metadata={"guard_stage": "raw_user_input", "blocked_reason": blocked_reason},
+            )
+            return _with_trace_snapshot(
+                _blocked_result(
+                    sql=question,
+                    answer_hint=answer_hint,
+                    trace_steps=trace_context.trace_steps,
+                    issue_tags=["sql_guard_blocked"],
+                    blocked_reason=blocked_reason,
+                    error_type="sql_guard_blocked",
+                    tool_call=ToolCallTrace(
+                        tool_name="sql_guard",
+                        status="blocked",
+                        latency_ms=0.0,
+                        sql=question,
+                        error_type="sql_guard_blocked",
+                        message=blocked_reason,
+                    ),
+                ),
+                trace_context,
+            )
+        span.end(
+            output_summary="raw input passed readonly precheck",
+            metadata={"guard_stage": "raw_user_input"},
+        )
 
     # 步骤 1：Schema Retrieval ==============================================================
     span = trace_context.start_span(name="schema_retrieval", input_summary=question)

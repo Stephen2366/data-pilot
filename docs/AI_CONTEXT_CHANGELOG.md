@@ -13,9 +13,15 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [小修] Phase 3B code review findings 修复（2026-07-30）
+
+- 依据 `docs/phase3b-code-review-findings.md` 处理 Phase3B LangFuse / Trace / Scorer / Eval 审查问题；用户确认 P2-2 采用方案 B：危险 SQL 预检下沉到 `new_text2sql` pipeline 的统一 guard lifecycle，而不是在 API 层补临时 TraceStep。
+- 修复重点：LangFuse SDK import failure 降级、只对 `langfuse_write_status=ok` 的 trace 回写 score、M18 smoke mapping 状态检查、危险 SQL blocked path 记录 `sql_guard` step、`equals` 不再做全 JSON substring、`result_match` 按列名对齐、Markdown report 输出 scorer 明细 / LangFuse score 写入结果。
+- 仓库卫生：LangFuse Dataset CSV 从 git 跟踪移除并加入 ignore，保留本地文件仅作临时 UI 验证素材；正式 EvalBench dataset 仍应从 YAML case 或清洗后的 root trace 生成。
+
 ### [模块任务] M18 Smoke / Experiment / 阶段收尾（2026-07-30）
 
-- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `scripts/smoke_phase3b_langfuse.py`、`tests/test_m18_phase3b_smoke.py`、`docs/AI_CONTEXT.md`、`docs/AI_CONTEXT_CHANGELOG.md`、`docs/dev-log.md`、`.agent_work/temp/m18-notes.md`、`.agent_work/temp/m18-experiment-workflow-cases.yaml`。用户导出的 LangFuse Dataset CSV `1785405281245-lf-dataset_items-export-<REDACTED_LANGFUSE_PROJECT_ID>.csv` 保留在项目根目录作为 UI 验证素材。
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `scripts/smoke_phase3b_langfuse.py`、`tests/test_m18_phase3b_smoke.py`、`docs/AI_CONTEXT.md`、`docs/AI_CONTEXT_CHANGELOG.md`、`docs/dev-log.md`、`.agent_work/temp/m18-notes.md`、`.agent_work/temp/m18-experiment-workflow-cases.yaml`。用户导出的 LangFuse Dataset CSV 曾作为 UI 验证素材保留在项目根目录；2026-07-30 review 修复后已从 git 跟踪移除并加入 ignore。
 - 关键记录：
   - 新增 `scripts/smoke_phase3b_langfuse.py`：一键验证配置摘要、真实 `/api/query`、JSONL trace 写入、DataPilot trace id 与 JSONL 匹配、LangFuse trace mapping、`rule:m18_smoke` Score 回写和 trace visibility 查询。脚本默认允许 `LANGFUSE_ENABLED=false` 时 Cloud 检查 SKIP；显式 `--require-langfuse` 时 LangFuse disabled / 缺 key / SDK 不可用 / score 或 visibility 失败均会 FAIL。
   - smoke 复用 `eval.run_eval.seeded_api_client()`，使用内存 SQLite seed + FastAPI TestClient 调真实 `/api/query`，不碰 MySQL 开发库，不绕过 API seam。

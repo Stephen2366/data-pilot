@@ -122,7 +122,7 @@ def _run_api_smoke(trace_path: Path, settings: Settings) -> tuple[list[CheckResu
             )
         )
 
-    if settings.langfuse_enabled and trace.get("langfuse_trace_id"):
+    if settings.langfuse_enabled and trace.get("langfuse_trace_id") and trace.get("langfuse_write_status") == "ok":
         results.append(
             CheckResult(
                 "jsonl.langfuse_mapping",
@@ -135,7 +135,7 @@ def _run_api_smoke(trace_path: Path, settings: Settings) -> tuple[list[CheckResu
             CheckResult(
                 "jsonl.langfuse_mapping",
                 "FAIL",
-                f"enabled but missing langfuse_trace_id; status={trace.get('langfuse_write_status')}",
+                f"enabled but mapping not healthy; status={trace.get('langfuse_write_status')} langfuse_trace_id={trace.get('langfuse_trace_id')}",
             )
         )
     else:
