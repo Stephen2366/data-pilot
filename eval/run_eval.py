@@ -374,18 +374,19 @@ def write_report(
         "",
         "## Score Summary",
         "",
-        "| name | value | passed | skipped | reason |",
-        "|---|---:|---|---|---|",
+        "| case_id | name | value | passed | skipped | reason |",
+        "|---|---|---:|---|---|---|",
     ]
-    score_details = [detail for result in results for detail in result.score_details]
-    if score_details:
-        for detail in score_details:
-            value = "-" if detail.value is None else detail.value
-            lines.append(
-                f"| {detail.name} | {value} | {detail.passed} | {detail.skipped} | {detail.reason or '-'} |"
-            )
+    has_score_details = any(result.score_details for result in results)
+    if has_score_details:
+        for result in results:
+            for detail in result.score_details:
+                value = "-" if detail.value is None else detail.value
+                lines.append(
+                    f"| {result.case.case_id} | {detail.name} | {value} | {detail.passed} | {detail.skipped} | {detail.reason or '-'} |"
+                )
     else:
-        lines.append("| - | - | - | - | no_score_details |")
+        lines.append("| - | - | - | - | - | no_score_details |")
     if langfuse_score_write_result is not None:
         lines.extend(
             [

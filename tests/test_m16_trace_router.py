@@ -430,6 +430,31 @@ def test_force_new_pipeline_dangerous_sql_records_sql_guard_step(tmp_path: Path)
     assert trace["trace_steps"][0]["status"] == "blocked"
 
 
+def test_dangerous_sql_precheck_runs_before_llm_client_configuration(tmp_path: Path, monkeypatch) -> None:
+    """危险 SQL 必须先被 guard 拦截，不能受 LLM_PROVIDER 配置错误影响。"""
+
+    from engine.nl2sql import pipeline
+
+    def fail_if_called():
+        raise RuntimeError("llm client should not be created for dangerous raw SQL")
+
+    monkeypatch.setattr(pipeline, "get_default_llm_client", fail_if_called)
+    trace_path = tmp_path / "dangerous-before-llm-traces.jsonl"
+    configure_trace_router(TraceRouter(backends=[JSONLBackend()]))
+
+    with _seeded_test_client(trace_path) as client:
+        response = client.post(
+            "/api/query",
+            json={"question": "DROP TABLE orders", "user_role": "ops", "force_new_pipeline": True},
+        )
+
+    body = response.json()
+    trace = json.loads(trace_path.read_text(encoding="utf-8").strip())
+    assert response.status_code == 200
+    assert body["error_type"] == "sql_guard_blocked"
+    assert trace["trace_steps"][0]["name"] == "sql_guard"
+
+
 def test_api_response_contract_hides_langfuse_internal_fields(tmp_path: Path) -> None:
     """TraceRecord 可写 LangFuse 字段，但 /api/query 响应体不能新增这些内部字段。"""
 

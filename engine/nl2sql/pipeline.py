@@ -228,7 +228,6 @@ def run_text2sql_pipeline(
     active_domain_schema = domain_schema or load_domain_schema()
     trace_context = build_trace_context(trace_id=trace_id, question=question, user_role=user_role)
     answer_hint = "新 Text2SQL 查询结果"
-    llm_client = get_default_llm_client()
 
     # 步骤 0：用户原始输入危险 SQL 预检 ======================================================
     # ★ 这一步属于 pipeline 的统一安全边界，而不是 API 层临时拦截。否则 `DROP TABLE ...`
@@ -271,6 +270,8 @@ def run_text2sql_pipeline(
             output_summary="raw input passed readonly precheck",
             metadata={"guard_stage": "raw_user_input"},
         )
+
+    llm_client = get_default_llm_client()
 
     # 步骤 1：Schema Retrieval ==============================================================
     span = trace_context.start_span(name="schema_retrieval", input_summary=question)

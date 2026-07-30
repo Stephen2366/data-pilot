@@ -53,7 +53,7 @@ eval/                   # EvalOps-lite（评测前置），完整评测平台在
   reports/              # Markdown / HTML 报告
   traces/               # Agent 运行 Trace，默认不提交 JSONL
 
-docs/                   # 项目文档
+docs/                   # 项目文档（有时用户会自行把 `docs` 下的文档移入两个 archive 文件夹）
   archive-dormant/      # 存档1（暂时不用但以后可能复盘）
   archive-versions/     # 存档2（同文档的迭代链和不用的文档）
   AI_CONTEXT.md         # 技术档案（AI 续接 / 查 bug 入口）

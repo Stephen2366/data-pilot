@@ -429,6 +429,7 @@ def test_report_includes_issue_tags_and_sql(tmp_path: Path) -> None:
     assert "trace-m8" in report
     assert "SELECT product_name, category, status FROM products" in report
     assert "## Score Summary" in report
+    assert f"| {case.case_id} | rule:table_hit | 1.0 | True | False | table_hit_ok |" in report
     assert "rule:table_hit" in report
 
 
