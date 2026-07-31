@@ -154,7 +154,9 @@ class DeepSeekChatClient(OpenAICompatibleChatClient):
 
     provider_label = "DeepSeek"
     default_base_url = "https://api.deepseek.com"
-    default_model = "deepseek-v4-pro"
+    # ★ 默认模型只兜底；.env 的 LLM_MODEL 会优先覆盖（见 get_default_llm_client）。
+    # 2026-07-31 主模型从 deepseek-v4-pro 切换为 deepseek-v4-flash（更快更便宜的非推理模型）。
+    default_model = "deepseek-v4-flash"
     missing_key_message = "DeepSeek API key 缺失，请配置 DEEPSEEK_API_KEY 或 LLM_API_KEY。"
 
 
@@ -188,7 +190,8 @@ def get_default_llm_client() -> LLMClient:
         )
 
     api_key = settings.deepseek_api_key or settings.llm_api_key
-    model = settings.llm_model if settings.llm_model != "mock-sql-generator" else "deepseek-v4-pro"
+    # ★ LLM_MODEL 是主模型单一事实源；"mock-sql-generator" 只是未配置时的占位，此时兜底用默认模型。
+    model = settings.llm_model if settings.llm_model != "mock-sql-generator" else "deepseek-v4-flash"
     return DeepSeekChatClient(
         api_key=api_key,
         base_url=settings.deepseek_base_url or "https://api.deepseek.com",

@@ -9,7 +9,7 @@
 - 下一模块：Phase 3 RAG / Hybrid（基于 M16B live lifecycle 底座继续评估）
 - 上一模块验收：M18 未验收（待 accept-module）
 - 阻塞项：无
-- 更新时间：2026-07-30
+- 更新时间：2026-07-31
 
 ## 当前技术选型快照
 
@@ -31,6 +31,7 @@
 
 ### 技术默认值
 
+- 主模型默认（2026-07-31 起）：DeepSeek `deepseek-v4-flash`；`.env` 的 `LLM_PROVIDER=deepseek` / `LLM_MODEL=deepseek-v4-flash` 是唯一配置入口，generator.py 兜底值已同步为 flash（此前为 `deepseek-v4-pro`）。切换后尚未重跑 formal / challenge / diagnostic 基线，真实 LLM 效果待验证；L3 judge 独立走 `EVAL_JUDGE_MODEL`。
 - Schema Retrieval 默认：`inmemory + deterministic`；`milvus` / `siliconflow` / `dashscope(qwen3.7-text-embedding)` 只通过环境变量显式开启，不作为当前 Text2SQL 主线默认值。
 - SQL 安全默认：敏感字段优先于角色权限；`admin` 也不能通过 Text2SQL 直出 `users.email/users.phone`，后续如需查看应走脱敏 / 审计 / 专门接口。
 - Trace 默认：Agent Trace 通过 `TraceRouter` 写入 JSONL；测试、smoke 和临时实验可用 `append_trace(path=...)` 或 `app.state.trace_path` 改写到 `.agent_work/temp/`。

@@ -215,7 +215,7 @@ LLM 配置示例：
 
 ```powershell
 $env:LLM_PROVIDER='deepseek'
-$env:LLM_MODEL='deepseek-v4-pro'
+$env:LLM_MODEL='deepseek-v4-flash'
 $env:DEEPSEEK_API_KEY='<your_key>'
 $env:DEEPSEEK_BASE_URL='https://api.deepseek.com'
 ```

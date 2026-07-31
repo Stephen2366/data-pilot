@@ -1,6 +1,6 @@
 # DataPilot AI Context Changelog（技术档案变更记录）
 
-> 这里保存 `docs/AI_CONTEXT.md` 拆出的完整历史变更、实验记录和模块档案。续接任务时先读 `AI_CONTEXT.md` 的当前状态；只有需要追溯原因、验证快照或历史实验时再读本文。
+> 这里保存 `docs/AI_CONTEXT.md` 拆出的完整历史变更、实验记录和模块档案。续接任务时先读 `AI_CONTEXT.md` 的当前状态；只有需要追溯原因、验证快照或历史实验时再读本文。「变更记录」模板见 `finish-module` skill。
 
 M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先级：
 
@@ -9,9 +9,18 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - `[验收]`：accept-module、阶段验收、明确的模块完成状态。
 - `[小修]`：文档措辞、口径同步、注释补充、轻量整理；只需简写，不要求完整模板。
 
-未来新增记录优先使用这些标签；小修可以只写一段话，模块任务建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
+「变更记录」：小修可以只写一段话；较大的任务建议包含：改动范围、关键记录（比如关键决策、决策原因、实验结果、新发现、用户做出的选择等）、参考资料、验证快照、遗留/后续。
 
 ## 变更记录（新的在上）
+
+### [小修] 主模型切换 deepseek-v4-pro → deepseek-v4-flash（2026-07-31）
+
+- 改动范围：`.env`（新增 `LLM_PROVIDER=deepseek` / `LLM_MODEL=deepseek-v4-flash`，此前未显式设置，一直靠代码兜底）、`engine/nl2sql/generator.py` 两处兜底默认值、`.env.example`、`README.md` LLM 配置示例、`docs/AI_CONTEXT.md` 技术默认值快照。
+- 关键记录：模型名配置本来就是"`.env` 的 `LLM_MODEL` 优先、代码 `deepseek-v4-pro` 兜底"结构（见 M12 修复），本次切换只是补上 `.env` 显式配置 + 把兜底值同步为 flash，零逻辑改动。L3 judge 独立走 `EVAL_JUDGE_MODEL`，不受影响；`scripts/run_qwen_ab_experiments.py` 的 A/B 实验模型硬编码是刻意设计，未改。
+- 验证快照：
+  - `get_default_llm_client()` 解析结果 `resolved model: deepseek-v4-flash`；真实 DeepSeek API 调用返回 `{"ok": true}`（HTTP 200，flash 模型名被 API 接受）。
+  - `python -m pytest tests\test_m4_nl2sql.py tests\test_config.py --basetemp=.agent_work\temp\pytest-model-switch`：11 passed，1 个既有 Starlette/httpx deprecation warning。
+- 遗留/后续：flash 是更快更便宜的非推理模型（archive 文档曾记为"JSON 模式失败的方案 B"），切换后未重跑 formal / challenge / diagnostic 基线，真实 LLM 效果待 Phase 3 RAG / Hybrid 评估时验证；若准确率下降再考虑按阶段分模型（规划用强模型、生成用 flash）。
 
 ### [小修] Phase 3B code review findings 修复（2026-07-30）
 
