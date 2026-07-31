@@ -19,13 +19,6 @@ DataPilot 最终要做"用自然语言问数据"的 Agent 系统，但第一天*
 - **FastAPI**：Python 的 Web 框架，把函数变成 HTTP 接口。类比 SpringBoot 的 `@RestController`
 - **Pydantic Settings**：把 `.env` 里的配置自动读成带类型检查的 Python 对象，避免代码里到处手写 `os.getenv()`
 
-### 关键文件：
-
-- `app/main.py`：FastAPI 应用入口，负责创建服务和注册 `/health`。
-- `app/core/config.py`：配置入口，负责读取 `.env`。
-- `pyproject.toml`：项目依赖清单，类似 Java 项目的 `pom.xml` / `build.gradle`。
-- `tests/test_config.py`、`tests/test_health.py`：第一批自动化测试，负责守住配置和健康检查。
-
 ### 代码阅读路线
 
 1. **应用入口**：`app/main.py`
@@ -85,14 +78,6 @@ python -m pytest
 - **SQLAlchemy**：Python 操作数据库的工具包，两层——**ORM**（类↔表，类比 JPA/Hibernate）和 **Core**（用 Python 表达式构建 SQL，防注入，类比 MyBatis）。项目里 `app/models/` 走 ORM，后面 `engine/nl2sql/` 动态拼 SQL 走 Core
 - **Alembic**：数据库结构的版本控制（类比 Flyway/Liquibase）。改 Model → 自动生成迁移脚本 → `upgrade` 应用到库，可 `downgrade` 回滚，和 git 一样可追溯
 - **维度表 / 事实表**：维度表回答"是谁 / 是什么"，事实表回答"发生了什么"——查询时先定位维度，再查事实，性能更好
-
-### 关键文件：
-
-- `app/models/`：7 张业务表的 ORM 模型，负责描述数据库长什么样。
-- `app/db/base.py`：统一收集所有 ORM 表，让 Alembic 能看到完整表结构。
-- `alembic/versions/20260717_0001_create_m1_business_tables.py`：第一版建表迁移，负责真正把表建到 MySQL。
-- `scripts/seed_data.py`：确定性模拟数据脚本，负责写入 7 张表的数据和固定业务事实。
-- `domain_pack/schema_desc/`：给后续 NL2SQL / SQL Guard 看的业务字段说明和敏感字段标记。
 
 ### 代码阅读路线
 
@@ -161,14 +146,6 @@ M1 已经把 **7 张表和确定性数据**准备好了，但后续 Agent、评�
 - **请求级 Session**：每个 HTTP 请求拿一个数据库会话，请求结束就关闭。类比 SpringBoot 里一次请求进 Service / Repository 使用同一个事务上下文，不在 Controller 里到处手写连接。
 - **分页响应**：列表接口不只返回数据，还返回 `total / page / page_size`。前端或评测脚本才知道总共有多少条、当前是哪一页。
 - **trace_id**：一次请求的追踪编号。出错时用户拿到 trace_id，服务端也用同一个 trace_id 查日志，排查链路会快很多。
-
-### 关键文件：
-
-- `app/db/session.py`：数据库 engine 和请求级 Session 依赖。
-- `app/api/resources.py`：4 类资源列表接口。
-- `app/schemas/common.py`、`app/schemas/resources.py`：分页响应、错误响应和资源读取模型。
-- `app/core/logging.py`、`app/core/exceptions.py`：请求日志中间件和全局异常处理。
-- `app/core/cache.py`：Redis wrapper 骨架，目前是 `NullCache`，不宣传为真实缓存能力。
 
 ### 代码阅读路线
 
@@ -250,17 +227,6 @@ M1 准备了数据，M2 准备了 API 出入口。M3 做的是 DataPilot v0 的�
 - **SQL Guard**：SQL 执行前的安全门。M3 使用 sqlglot 把 SQL 解析成 AST，再判断它是不是单条 `SELECT`。这比只靠字符串里有没有 `drop` 更可靠。
 - **AgentResponse**：Agent **对外输出**的结构化合同。前端、评测脚本、演示页都按这份合同读取答案、SQL、表格、安全状态和 trace_id。
 - **few-shot 示例**：M3 的模板 SQL 同步沉淀到 `domain_pack/sql_examples/basic.yaml`，后续 M4 给 LLM 看这些“标准问法 + 标准 SQL”，帮助它按项目口径生成 SQL。
-
-### 关键文件
-
-- `engine/nl2sql/templates.py`：5 条 v0 模板 SQL 和自然语言关键词匹配逻辑。
-- `engine/sql_guard/guard.py`：sqlglot 只读检查，只允许单条 `SELECT`。
-- `app/schemas/agent.py`：M3 简化版 `QueryRequest` 和 `AgentResponse`。
-- `app/api/query.py`：`POST /api/query` 主链路：模板匹配 → Guard → 执行 SQL → 组装响应。
-- `domain_pack/metrics.yaml`：退款率、GMV、订单量、退款量、待处理高优先级工单数的业务口径。
-- `domain_pack/sql_examples/basic.yaml`：模板 SQL 沉淀为 M4 few-shot 示例。
-- `eval/cases_plan.md`：32 条评测问题和 YAML 字段草案。
-- `scripts/smoke_v0.py`：M3 smoke 脚本，输出摘要到 `.agent_work/temp/v0-smoke.md`。
 
 ### 代码阅读路线
 
@@ -367,17 +333,6 @@ M3 已经跑通了 **模板 SQL 闭环**：自然语言问题命中白名单模�
 - **LLM Provider Adapter**：把 DeepSeek 的 HTTP 调用包成一个小客户端。M4 只接一个实际可用 provider，不提前做复杂多厂商抽象。
 - **RBAC allowlist**：角色权限白名单。`admin` 可以看全量；`ops` 不能看敏感字段；`customer_service` 只看工单和政策；`demo_user` 只看脱敏样例表。
 - **字段级安全策略**：不只判断能不能访问表，还判断 SQL 是否碰到 `users.email`、`users.phone` 这类敏感字段。`SELECT * FROM users` 也会被展开检查。
-
-### 关键文件
-
-- `engine/nl2sql/schema_loader.py`：读取 `domain_pack/schema_desc`、`metrics.yaml` 和 few-shot 示例。
-- `engine/nl2sql/prompt.py`：构造 NL2SQL prompt。
-- `engine/nl2sql/generator.py`：DeepSeek 调用、模型输出解析和 `GeneratedSQL`。
-- `engine/sql_guard/rbac.py`：角色权限矩阵。
-- `engine/sql_guard/policy.py`：只读检查、表级 RBAC、敏感字段拦截。
-- `app/api/query.py`：模板优先、LLM 兜底、policy 校验、SQL 执行和 AgentResponse 返回。
-- `scripts/smoke_m4_nl2sql.py`：M4 smoke 和 prompt 快照生成。
-- `tests/test_m4_nl2sql.py`：M4 行为契约测试。
 
 ### 代码阅读路线
 
@@ -543,17 +498,6 @@ M4 已经解决了 SQL 从哪里来、怎么安全执行的问题：模板优先
 - **JSONL Trace**：一行一个 JSON 对象。好处是追加写入简单，M6 可以按行读取，不需要现在就设计数据库表和查询接口。
 - **Vega-Lite chart_spec**：一种前端可视化描述格式。后端不直接画图，而是告诉前端“用什么 mark、什么字段做 x/y 轴、数据是什么”，演示页可以直接渲染。
 
-### 关键文件
-
-- `app/schemas/agent.py`：M5 扩展版 AgentResponse、CostInfo、ToolCallTrace。
-- `engine/tools/sql_tool.py`：SQL Tool，统一执行 Guard、SQL 查询、耗时和工具调用记录。
-- `engine/tools/chart_tool.py`：Chart Tool，把聚合结果转成 Vega-Lite 兼容 spec。
-- `engine/trace/recorder.py`：JSONL Trace 写入器。
-- `domain_pack/chart_templates/basic.yaml`：bar / line / horizontal_bar 三类基础图表模板。
-- `app/api/query.py`：查询编排层，调用 SQL Tool、Chart Tool，并写 Trace。
-- `tests/test_m5_agent_response.py`：M5 响应契约、trace 和图表规则测试。
-- `scripts/smoke_m5_agent_response.py`：M5 smoke，输出人工验收摘要。
-
 ### 代码阅读路线
 
 1. **响应合同**：`app/schemas/agent.py`
@@ -703,15 +647,6 @@ M6 做的是“收口”：前面 M3-M5 已经能把自然语言变成安全 SQL
 - **Smoke case**：少量**高价值用例**，用来快速确认主链路还活着。它不是全量回归，但适合作为每次开发后的**第一道健康检查**。
 - **阶段验收报告**：把“**当前到底完成了什么、没完成什么、下一阶段接哪里**”写成持久文档，避免 README、简历和复盘时凭记忆拼。
 
-### 关键文件
-
-- `eval/cases/smoke.yaml`：M6 的 6 条 smoke 用例，字段沿用 `eval/cases_plan.md` 草案。
-- `eval/run_eval.py`：EvalOps-lite 执行入口，负责加载 YAML、调用 `/api/query`、评分、写报告。
-- `eval/reports/latest.md`：最近一次 smoke 评测报告，记录 pass/fail/error_type/trace_id。
-- `eval/reports/phase2-v1-acceptance.md`：阶段二 v1 收尾记录。
-- `demo/streamlit_app.py`：Streamlit 最小演示控制台。
-- `README.md`：补充 M6 评测命令、演示页启动方式、v1 能力边界。
-
 ### 代码阅读路线
 
 1. **用例入口**：`eval/cases/smoke.yaml`
@@ -816,17 +751,6 @@ python -m streamlit run demo\streamlit_app.py
 - **宽表 `orders_wide`**：把订单、用户、商品、渠道常用字段冗余到一张表，适合看板汇总，但不适合明细追溯和强一致校验。它用来训练 Agent 判断“这题用宽表快，还是用规范化星型模型更准”。
 - **数据质量彩蛋**：新 seed 故意加入少量真实业务常见问题，例如未支付订单 `paid_at IS NULL`、`canceled/cancelled` 状态拼写差异、源系统单号重复、少量金额不一致、负数退款冲销。这不是把数据库做脏，而是在不破坏主键 / 外键 / 唯一约束的前提下模拟真实数据挑战。
 
-### 关键文件
-
-- `app/models/`：新增和改造 ORM 模型，描述 14 张物理表。
-- `alembic/versions/20260722_0002_database_upgrade_14_tables.py`：Phase 2.7 数据库迁移，负责把旧 7 表升级到 14 表。
-- `scripts/seed_data.py`：确定性 seed 数据工厂，生成 1 万级订单、固定事实和 seed summary。
-- `domain_pack/schema_desc/relations.yaml`：结构化关系事实源，后续 M9 生成 relation_doc / JoinPath 会优先读它。
-- `domain_pack/metrics.yaml`：指标口径单一事实源，明确订单级 GMV、商品维度 GMV、净收入等默认口径。
-- `eval/cases/database-upgrade-challenge.yaml`：16 条数据库挑战集，验证新库复杂度和固定事实。
-- `eval/cases/phase3a-regression.yaml`：10 条 Phase 3A 正式回归输入，给 M8 baseline 使用。
-- `tests/test_database_upgrade.py`：数据库升级专用测试，验证 challenge case 结构、expected SQL 基础稳定和安全拦截。
-
 ### 代码阅读路线
 
 1. **表结构入口**：`app/models/`
@@ -929,6 +853,148 @@ python -m uvicorn app.main:app --reload
 
 打开 `http://127.0.0.1:8000/docs` 后，可以继续用 `POST /api/query` 测阶段二旧问题，例如”2026年6月本月GMV是多少？”。大致结果：`safety_status=passed`，`chart_spec` 是单指标柱图，GMV 会变成新库的 **11285752.0**。如果测”各渠道订单量是多少？”，仍会返回 Mobile App 等渠道结果，说明旧链路在新库上保持兼容。
 
+## ★ ★ ★ Phase 2 阶段总结：SQL Agent v1 闭环
+
+（2026-07-31）
+
+**简述**：Phase 2 是 DataPilot 的"从 0 到 1"：M0-M3 先跑通 **v0 模板 SQL 端到端闭环**（工程骨架 → 7 表数据底座 → API 基础 → 模板查询 + sqlglot 只读检查），M4-M6 升级成 **v1**（LLM 生成 SQL + RBAC/敏感字段安全 + 结构化输出 + Trace / Tool / 图表 + EvalOps-lite 评测 + Streamlit 演示），最后 Phase 2.7 把数据底座升级为 **14 张物理表 + 1 万级订单**。整个阶段的定位是：**先跑通、再变强、然后给它装上尺子和眼睛**——v1 交付时可投递：NL2SQL + SQL 安全 + 图表 + 演示页 + 6 条 smoke 全绿。
+
+### 先用大白话讲
+
+阶段二讲的是一个"**从 0 到 1 开面馆**"的故事，可以拆成四幕：
+
+第一幕是**把店开起来**（M0-M3，v0）：先定厨房设备（工程骨架，MySQL 主路径）、备齐 7 种食材（数据底座：用户/商品/渠道/订单/退款/工单/知识库 7 张表 + 确定性假数据）、装好窗口（FastAPI + 统一日志/异常/分页）、然后只卖三样固定菜（5 条模板 SQL）。关键决策是：**先端到端跑通，不急着请大厨**——模板没命中的问题先结构化地告诉用户"我不会"，而不是假装会。同时把"卫生检查"前置：所有 SQL 执行前必须过 **sqlglot AST 只读检查**（只允许单条 SELECT），这个安全入口从 v0 就固定下来。
+
+第二幕是**请大厨，但卫生检查不变**（M4，v1 起点）：模板没命中时改调 **DeepSeek LLM 生成 SQL**，但模型生成的 SQL 和模板 SQL 走**同一个安全闸门**——sqlglot AST 只读 + 表级 RBAC + 字段级敏感字段拦截（`users.email / users.phone` 从建表第一天就标了敏感）。安全不是靠 prompt 求模型"别做坏事"，而是执行前的硬拦截。
+
+第三幕是**上标准摆盘 + 记台账**（M5-M6）：把返回结果整理成 **AgentResponse 结构化契约**（答案/SQL/表格/图表/用了哪些表/工具调用/trace_id），SQL 执行统一收进 **SQL Tool**，每次查询写 **JSONL Trace** 证据链，聚合结果自动给 **Vega-Lite 图表 spec**；然后补上 **EvalOps-lite**（6 条 smoke 用例走真实 API 评测）+ **Streamlit 演示页**。至此 v1 闭环：能查、能拦、能画、能测、能演示。
+
+第四幕是**扩充食材**（Phase 2.7）：7 表对真实企业分析太"教学版"了，一次性升级成 **14 张物理表 + 1 万级订单**（订单明细、类目树、优惠券多对多、行为日志、价格历史、宽表），数据里还**刻意埋了真实业务彩蛋**（未支付订单、canceled/cancelled 拼写差异、金额不一致、负数退款）——不是为了把库做脏，而是让 Agent 从"在干净玩具库里答对题"走向"面对真实数据挑战"。
+
+所以 Phase 2 的核心价值是：**用最小的闭环先证明"自然语言 → 安全查库 → 结构化输出"跑得通，再一层层加上智能、可观测和真实数据复杂度**，为阶段三的 Text2SQL 深化和 RAG / Hybrid 提供可评测的 v1 底座。
+
+### 这次做了什么
+
+按阶段主线写，不按模块流水账：
+
+1. **v0：先把端到端跑通**（M0-M3）——M0 搭工程骨架（FastAPI + MySQL `datapilot_dev` 主路径 + `.env` 配置），M1 建 **7 表数据底座**（Alembic 迁移 + 确定性 seed + 4 个固定业务事实 + 敏感字段从模型层标记），M2 做 API 基础（共享数据库 session、统一分页/日志/异常、Redis 只落 NullCache 骨架），M3 用 **5 条白名单模板 SQL** 跑通 `/api/query` 闭环：命中模板 → sqlglot 只读检查 → 执行 → 返回简化版 `AgentResponse`。同时先写好 `eval/cases_plan.md` 的 **32 条评测问题规划**——评测前置，不给功能写飞留空间。
+
+2. **v1 上半场：让 LLM 来生成 SQL，但不放松安全**（M4）——模板未命中时调 **DeepSeek** 生成 SQL，prompt 里带 schema 描述、KPI 口径（GMV/退款率来自 `metrics.yaml`）和 few-shot；执行前统一过增强版 **SQL Guard**：sqlglot AST 只读 + **表级 RBAC**（admin/ops/customer_service/demo_user 四角色）+ **字段级敏感字段拦截**。API key 缺失或 LLM 失败时返回结构化拦截，**不降级成假 LLM 糊弄答案**。
+
+3. **v1 下半场：结构化输出 + Trace + Tool + 图表**（M5）——`AgentResponse` **增量扩展**（保留旧字段含义，新增 `tables_used / docs_used / chart_spec / cost / tool_calls / error_type`）；SQL 执行从 API 层抽成 **SQL Tool** 统一入口（Guard → 表名提取 → 执行 → 耗时 → tool call 记录）；每次查询写 **JSONL Trace**；Chart Tool 按结果形状生成 Vega-Lite 兼容 spec（bar / line / horizontal_bar）。
+
+4. **评测与演示收尾**（M6）——EvalOps-lite 用 **API seam 评测**（TestClient + 内存 SQLite 调真实 `/api/query` 路由，不绕过 API 契约、不写主库），6 条 smoke 全绿（2 简单 + 2 聚合 + 1 多表 join + 1 安全拦截）；Streamlit 演示页展示 answer / SQL / table / chart / safety / trace；产出 v1 验收报告（只写已实现能力，不把 RAG/hybrid 写成已完成）。
+
+5. **数据库底座升级**（Phase 2.7 / 2.7.1）——7 表升级为 **14 张物理表**（新增订单明细、类目树、优惠券 + 桥接表、行为日志、价格历史、订单宽表），**1 万级确定性数据**（10000 订单 / 18000 明细 / 1000 退款 / 3000 用券 / 10000 行为日志）+ 固定业务事实（GMV `11285752.00`、Aurora 退款率最高、Mobile App 渠道 GMV Top 等）；**兼容旧链路**（保留 `orders.product_id`、`products.category`，旧 API / 模板 / smoke 照跑）；`relations.yaml` 结构化关系源 + `metrics.yaml` 指标口径就位，16 条 challenge + 10 条正式回归 case 预置给 Phase 3A 用。2.7.1 再按外部审查补宽表字段、价格历史 `change_reason`、优惠券有效期索引等 polish。
+
+### 阶段主线图
+
+`自然语言问题`
+→ `/api/query`（M3 起：模板优先 → M4 起：未命中走 DeepSeek LLM）
+→ `SQL Guard`（sqlglot AST 只读 → M4 起 + RBAC + 敏感字段拦截）
+→ `SQL Tool`（M5 起统一执行入口：Guard → 执行 → 耗时 → tool call）
+→ `AgentResponse`（M3 简化版 → M5 扩展版：answer / sql / rows / chart_spec / tables_used / trace_id / ...）
+→ `JSONL Trace`（证据链）+ `chart_spec`（Vega-Lite）→ Streamlit 演示页
+
+数据与评测侧：`M1 7 表确定性 seed` → `Phase 2.7 14 表 + 1 万级订单 + 固定事实 + 数据质量彩蛋` → `M6 EvalOps-lite 6 条 smoke`（API seam）→ `cases_plan 32 条规划` → `Phase 3A 三层评测基座（后续）`
+
+### 关键知识点串联
+
+这里不再列每个模块所有概念，而是列阶段级概念：
+
+- **v0 → v1 的演进顺序**：先模板闭环、再加 LLM。v0 的"菜谱之外先诚实说不会"让端到端链路先稳定，v1 加 LLM 时才不会和安全、契约问题搅在一起——**先跑通，再变强**。
+- **安全闸门不变原则**：SQL 从哪来可以变（模板 → LLM → 后续新 pipeline），但**执行前的安全入口永远不变**（M3 只读检查 → M4 叠加 RBAC / 敏感字段 → 后续一直在同一入口演进）。这是后面所有阶段安全讨论的地基，也是面试里最好讲的一条主线。
+- **敏感字段从建表第一天就标记**：`users.email / users.phone` 在 M1 的 ORM 模型和 schema_desc 就标了敏感，M4 才有据可拦——安全是"进 schema → 全链路"的设计，不是事后补文档。
+- **契约先行与增量扩展**：`AgentResponse` 从 M3 固定简化版起步，M5 只增量扩展不改变旧字段含义；`PageResponse / ErrorResponse` 从 M2 固定形状，演示页、EvalOps、Agent 错误路径全部复用——**契约稳定是前后端和评测系统协作的前提**。
+- **确定性 seed + 固定业务事实**：评测标准答案的基础。seed 不依赖自增 ID，固定事实用业务键（sku / channel_code 等）定位，M3 模板和 M6 smoke 复用同一批稳定数据；这条原则一路延续到 14 表（GMV `11285752.00` 从 Phase 2.7 起成为标准答案）。
+- **评测前置思想**：`eval/cases_plan.md` 的 32 条问题在 M3 就设计好，M6 才抽 6 条 smoke 落地——先想清楚"要测什么"，开发才有方向，不给"功能很多但没业务问题支撑"留空间。
+- **API seam 评测**：EvalOps-lite 用 TestClient + 内存 SQLite 调真实路由，而不是直接调内部函数——同时验证 API 契约、Trace、SQL Tool 和 chart_spec，不会因为绕过路由而漏掉真实调用链问题。
+- **数据库升级的兼容策略**：升级 14 表时保留旧字段（`orders.product_id`、`products.category`），旧 API / 模板 / smoke 照跑，新口径在 `metrics.yaml` 声明——**升级不破坏 v1**，这条策略让 Phase 3A 的 M8 baseline 能直接在 14 表新库上跑。
+- **数据质量彩蛋**：在**不破坏主键 / 外键 / 唯一约束**的前提下刻意埋入真实业务问题（未支付 `paid_at IS NULL`、`canceled/cancelled` 拼写差异、源单号重复、金额不一致、负数退款）——让评测集从"干净玩具"走向"真实数据挑战"，也是后面 Phase 3A 修 `order_status` 口径的素材。
+- **最小实现原则**：Redis 只落 `NullCache` 骨架、JSONL 而非 SQLite 存 trace、LLM 只实现 DeepSeek 一个 provider——每个都是"够用就停"，把复杂度留给真正需要它的阶段。
+
+### 阶段设计取舍
+
+- **先 v0 模板闭环，再 v1 LLM 化**：没有让 M3 直接接 LLM。模板未命中先"诚实说不会"，换来端到端链路、安全入口和契约先稳定；LLM 是叠加在稳定地基上的能力，而不是一开始就依赖的变数。
+- **安全不靠 prompt，靠执行前硬拦截**：sqlglot AST 只读 → RBAC → 敏感字段，层层都是代码判断不是模型自觉；LLM 失败也结构化拦截、**不降级假 LLM**——"宁可不答，不答错"。
+- **AgentResponse 契约增量扩展**：M5 不推倒 M3 的响应结构，旧字段含义不变、只加新字段——避免破坏已通过的模板链路和即将接入的评测、演示，也符合"公开契约只加不改"的后端习惯。
+- **EvalOps-lite 选 API seam 而非直接调 pipeline**：多花一层 TestClient 成本，换来验证的是"用户真正走的路"，同时用内存 SQLite 不污染 MySQL 主库。
+- **Redis 只落 NullCache 骨架**：M2 不接真实 Redis client，避免把缓存逻辑散进业务 API；这是计划允许的降级边界，接口形状留好，后续可替换实现。
+- **数据底座一次升级到位（7 → 14 表）**：与其在 Phase 3A 边做边加表，不如先把"接近真实企业分析系统"的库一次建好——让后续 Schema Retrieval、JoinPath、QueryPlanStep 面对的是真实复杂度；代价是迁移和 seed 工作量大，但换来后面所有模块的高可信度评测。
+- **刻意不做的事**：行级权限与脱敏样例（M4 只做表级 / 字段级）、真实 Redis 缓存、完整 32 条评测（M6 只落 6 条 smoke）、RAG / Hybrid 检索（知识库语料就位但链路未实现）、真实 LLM usage 统计（CostInfo 字段预留）——每件都明确记录"留给哪个阶段"，不为凑能力写已完成。
+
+### 面试怎么讲
+
+本阶段完整叙述，可以直接背/改写到面试或简历中：
+
+> 我的 DataPilot 项目从 0 到 1 搭建了一个 **SQL Agent v1**，核心方法是"先跑通、再变强、然后给它装上尺子和眼睛"。v0 阶段先用 5 条模板 SQL 跑通端到端闭环，并把 **sqlglot AST 只读检查**固定为所有 SQL 执行前唯一入口；v1 阶段接入 DeepSeek LLM 生成 SQL，但模型生成的 SQL 与模板 SQL 走**同一个安全闸门**——AST 只读 + 表级 RBAC + 字段级敏感字段拦截，安全不靠 prompt 靠硬拦截。随后把响应扩展成结构化 AgentResponse 契约（答案/SQL/表格/图表/工具调用/trace），SQL 执行收进统一 SQL Tool，每次查询写 JSONL Trace，并搭了 EvalOps-lite（6 条 smoke 走真实 API 评测）和 Streamlit 演示页，形成可评测、可演示的 v1 闭环。最后把数据底座从 7 张表升级为 **14 张物理表 + 1 万级确定性订单数据**，内置固定业务事实（如 GMV 11285752.00）和数据质量彩蛋，为阶段三的 Text2SQL 深化评测提供真实复杂度。
+
+1. **[基础追问] v0 为什么要先用模板 SQL 跑通，而不是直接上 LLM？**
+
+   因为"端到端跑通"和"LLM 生成"是两个不同复杂度的问题，混在一起任何一个出错都难归因。v0 先把链路、安全入口和响应契约稳定下来——模板 SQL 是我们自己写的，出错只可能是链路问题；模板未命中先结构化返回"我不会"，不让系统假装会。v1 再叠加 LLM 时，安全（同一个 SQL Guard 入口）、契约（AgentResponse）和评测（trace）都是稳定的，LLM 的波动被隔离在"SQL 从哪来"这一个变量里。
+
+2. **[基础追问] 安全链路从 M1 到 M4 是怎么层层叠加的？**
+
+   三层递进：**M1 在模型层标记敏感字段**（`users.email / users.phone` 建表时就标敏感，给拦截留依据）；**M3 固定执行入口**——所有 SQL 先过 sqlglot AST 只读检查，只允许单条 SELECT，DROP/DELETE 等直接 blocked；**M4 叠加表级 RBAC + 字段级敏感字段拦截**——按角色矩阵判断能否访问某表，`SELECT * FROM users` 也会被展开检查是否碰到敏感列。核心是"SQL 来源可以变（模板 → LLM → 后来的新 pipeline），执行前的安全入口不变"，这条原则从 v0 一路延续到现在。
+
+3. **[工程/深挖追问] AgentResponse 为什么用"增量扩展"而不是推倒重来？**
+
+   因为它是前后端和评测系统之间的"固定合同"。M3 的简化版字段（route/answer/sql/columns/rows/safety_status/trace_id）已经被模板链路、后续的 LLM 链路和评测脚本依赖；如果 M5 推倒重来，所有下游都要跟着改，还容易在改的过程中悄悄改变字段含义。增量扩展（保留旧字段语义不变，只新增 tables_used / chart_spec / tool_calls 等）让旧链路零改动通过回归，新能力也能被评测直接消费。这和 Java 后端"公开 API 只加字段不改字段"的兼容性原则一致。
+
+4. **[工程/深挖追问] EvalOps-lite 为什么选 API seam（TestClient + 内存 SQLite），而不是直接调内部函数？**
+
+   因为评测要验证的是"用户真正走的路"——HTTP 请求进来、经过路由、Schema 校验、编排、SQL Guard、执行、返回响应整条链路，而不只是某个函数的正确性。直接调 pipeline 会绕过路由和契约，可能漏掉真实调用链问题（比如字段没进响应、Guard 没被调用）。API seam 用 TestClient + 内存 SQLite 调真实路由，同时覆盖 AgentResponse、Trace、SQL Tool、chart_spec 和安全拦截，且不污染 MySQL 主库——成本是包装一层测试客户端，收益是评测可信。
+
+5. **[工程/深挖追问] 为什么要把数据从 7 表升级到 14 表 + 1 万级订单？数据质量彩蛋的意义是什么？**
+
+   7 表是"教学版"：订单一单一商品、类目只是字符串、没有优惠券多对多、价格历史、宽表。这样的库能证明链路能跑，但撑不起后续 Schema Retrieval、JoinPath、QueryPlan 的评测——问题太简单，任何方案都显得好用。14 表引入订单明细（一单多品）、桥接表（多对多）、递归类目树、SCD 价格历史、宽表 vs 星型模型选择这些**真实 SQL 难题**；1 万级数据让聚合、join、性能问题真实起来。数据质量彩蛋（未支付订单、canceled/cancelled 拼写差异、金额不一致、负数退款）是**在不破坏约束的前提下模拟真实脏数据**，让 Agent 从"在干净玩具库答对题"走向"面对真实数据挑战"——这些彩蛋后来确实成了 Phase 3A 修口径的素材。
+
+6. **[工程/深挖追问] JSONL Trace 为什么够用？什么时候需要换？**
+
+   M5-M6 阶段 trace 的消费者只有一个评测脚本：按行读取、判断 pass/fail、记录 error_type。JSONL"追加写入、按行读"正好满足，不需要 SQLite 表或查询接口——这是最小实现。什么时候需要换？**当 trace 需要被多路并发查询、需要按条件聚合、或者演示页/平台要在线展示时**（后来 M16 接 TraceRouter、Phase 3B 接 LangFuse 就是这两个触发点）。当时的取舍是"为现在够用的需求做最小实现，把扩展点留给真正需要的阶段"。
+
+7. **[压力追问] 阶段二只有 6 条 smoke 评测，这么少，怎么证明系统可用？**
+
+   承认 6 条确实少，这正是我们"评测前置"设计要解决的事：**32 条问题清单在 M3 就设计好了**（`eval/cases_plan.md`），M6 只落地了其中 6 条 smoke（2 简单 + 2 聚合 + 1 多表 join + 1 安全拦截）是因为当时只有这些能力可测——模板和 LLM 链路都没覆盖 RAG、复杂 join 场景，测了也过不了，反而失真。6 条 smoke 的价值是**证明主链路可跑、评测体系可运转**；完整评测是阶段三的事（后来 M8 起扩展到 10 formal + 16 challenge + 32 diagnostic）。另外一个佐证：每条 smoke 都有 JSONL trace 证据链，失败能归因，不是"看着过了"。
+
+8. **[压力追问] 数据里埋了彩蛋（金额不一致、负数退款），评测标准答案怎么确定？会不会模型查对了但被标准答案冤枉？**
+
+   这正是固定事实 + 确定性 seed 的意义：标准答案不是"模型输出什么就信什么"，而是**先用参考 SQL 在确定性数据上执行得到基准值**，再把它固化成语义明确的固定事实（比如 GMV = 11285752.00，Aurora 退款率最高）。彩蛋本身是数据事实，不是评测陷阱——比如金额不一致的 5 条订单是刻意设计的可解释样例，负数退款是合法的冲销记录，它们的口径都写进了 `database-current-state.md` 和 metrics.yaml。只要问题语义和口径定义一致，标准答案不会冤枉模型；真正会冤枉的是口径定义不清（比如 `paid_at` vs `created_at`），而这类问题在 Phase 3A 修口径时被逐一暴露和校准——数据彩蛋反而帮我们把口径磨清楚了。
+
+### 阶段成果与边界
+
+- 完成：
+  - **v0 端到端闭环**：工程骨架 + 7 表数据底座（Alembic + 确定性 seed + 固定事实）+ API 基础 + 模板 SQL 查询 + sqlglot 只读检查
+  - **v1 LLM 化不放松安全**：DeepSeek 生成 SQL（模板优先、未命中才调）、RBAC 表级 + 字段级、敏感字段拦截、LLM 失败结构化拦截不降级
+  - **结构化 Agent 输出**：AgentResponse 增量扩展（tables_used / docs_used / chart_spec / cost / tool_calls / error_type）、SQL Tool 统一执行入口、JSONL Trace、Chart Tool（bar / line / horizontal_bar）
+  - **评测与演示**：EvalOps-lite 6 条 smoke 全绿（API seam）、Streamlit 演示页、v1 验收报告（只写已实现能力）
+  - **Phase 2.7 数据库升级**：14 张物理表 + 1 万级订单 + 固定业务事实 + 数据质量彩蛋 + relations.yaml / metrics.yaml 口径 + 16 条 challenge / 10 条正式回归 case 预置，旧链路完全兼容
+  - **全量 pytest 演进**：5 → 9 → 15 → 19 → 24 → 27 → **31 passed**（M0 → Phase 2.7.1）
+- 没完成 / 刻意不做：
+  - **真实 Redis 缓存**——只落 `NullCache` 骨架，接口形状留好
+  - **行级权限与脱敏样例**——M4 只做表级 / 字段级核心边界
+  - **完整 32 条评测**——M6 只落地 6 条 smoke，32 条清单在 `eval/cases_plan.md` 规划
+  - **RAG / Hybrid 检索**——`knowledge_docs` 语料和 `kb_docs/` 就位，链路未实现
+  - **真实 LLM usage 统计**——CostInfo 字段预留，token 先留空
+  - **复杂图表推荐**——只覆盖基础 bar / line / horizontal_bar 和单指标柱图
+
+### 口径说明（以 2026-07-31 为准）
+
+> 早期模块记录是**时间切片**，记录的是当时状态，未回溯修改；以下为后续阶段校准后的最新口径，读早期记录时以本节为准。
+
+- **数据库**：本总结正文中的"7 表"是 Phase 2.7 之前的状态；当前是 **14 张物理表 + 1 万级数据**，固定事实与口径速查见 [database-current-state.md](docs/database-current-state.md)。
+- **安全口径**：M4 记录中"`admin` 可以看全量"是当时状态；M14-lite 定案后**敏感字段优先于 admin 角色**，`users.email / users.phone` 在任何角色下都不能通过 Text2SQL 直出。
+- **评测体系**：M6 的"6 条 smoke"是当时全部；M8 起扩展为三层（10 formal + 16 challenge + 32 diagnostic），M17 起 scorer 分层（L1/L2/L3）。
+- **Trace**：M5 的 JSONL 是当时唯一入口；M16 起为 TraceRouter + 可选 LangFuse 双写，JSONL 仍是默认路径。
+- **指标口径**：GMV / 退款率等口径在 Phase 2.7.1 和 Phase 3A 过程中实地查库校准（如 `order_status` 共 6 种状态、整单退款占 10% 需 LEFT JOIN、`refunds.source_order_no` 与 `orders.order_no` 命名空间不兼容不可 join），以 `database-current-state.md` 为准。
+
+### 下一阶段怎么接
+
+- **Phase 3A Text2SQL 深化（M8-M14）**：直接基于 14 表新库跑三层评测——M8 冻结旧链路 baseline、M9-M11 建设 Schema Retrieval / QueryPlan / 新 pipeline、M13 质量修复到 formal 10/10。完整衔接见后文 **Phase 3A 阶段总结**。
+- **Phase 2 的资产复用**：固定业务事实和口径是 Phase 3A 评测标准答案的底料；`relations.yaml` 是 M9 JoinPath 的单一事实源；AgentResponse 契约一路沿用（后续只增不改）。
+- **独立 EvalBench 项目**：EvalOps-lite 的 6 条 smoke 和 cases_plan 的 32 条规划是平台化的起点。
+- **可复用的阶段级验证命令**：阶段收口时全量 pytest 预期 **31 passed, 1 warning**；EvalOps-lite 入口 `python -m eval.run_eval --cases eval/cases/smoke.yaml`（预期 6/6 passed）；数据库迁移检查 `alembic check`（预期 No new upgrade operations detected）。
+
 ## ★ Phase 3A M8 回归基线冻结
 
 （2026-07-22）
@@ -951,16 +1017,6 @@ Phase 3A 的目标不是立刻让 Text2SQL 变聪明，而是先回答一个很�
 - **Issue Tag**：把失败原因变成稳定标签，而不是只写一句人类描述。`missing_column` 这样的标签后续可以直接被 Markdown 对照报告、失败统计或 EvalOps 平台消费。
 - **Manual Review**：困难诊断题可能不是早期硬门，但报告必须告诉读者“这里需要人工复核”。这比简单写 pass/fail 更诚实，也为 M11/M12 的 trace_steps 诊断留位置。
 - **Pipeline Mode**：评测入口预留的链路选择字段。M8 默认都是 `baseline`，后续 M11/M12 才会用类似 `force_new_pipeline` 的方式强制走新 Text2SQL pipeline。
-
-### 关键文件
-
-- `eval/cases/phase3a-regression.yaml`：Phase 3A 10 条正式 regression 输入，M8 只校验和运行，不重选题。
-- `eval/cases/database-upgrade-challenge.yaml`：Phase 3A 16 条 challenge superset，每模块同步运行，用来观察困难诊断和扩展场景。
-- `eval/run_eval.py`：评测执行入口，负责加载 YAML、调用真实 `/api/query`、评分并生成 Markdown 报告。
-- `tests/test_phase3a_eval.py`：M8 新增测试，守住 case 比例、新字段默认值、issue tags 和报告字段。
-- `eval/reports/phase3a-baseline.md`：旧链路 baseline 报告，记录 10 条 case 的 pass/fail、SQL、trace_id 和 issue tag。
-- `eval/reports/phase3a-challenge-baseline.md`：旧链路 challenge baseline 报告，记录 16 条 case 的 pass/fail、review_required、SQL、trace_id 和 issue tag。
-- `.agent_work/temp/m8-notes.md`：M8 开工 checklist、TDD 红绿灯、baseline 失败明细和用户确认记录。
 
 ### 代码阅读路线
 
@@ -1073,14 +1129,6 @@ runner 也做了最小扩展：每条结果记录 `source_file`、`configured_pi
 - **configured_pipeline_mode / actual_pipeline_mode**：case 自己推荐用什么链路是一回事，runner 实际用什么链路是另一回事。M8.5 用旧链路跑 baseline，所以很多 extra case 的 configured 是 `new_text2sql`，actual 是 `baseline`。
 - **skipped_due_to_pipeline_mode**：旧链路没有 QueryPlan、局部 Schema 和 trace_steps，不能假装这些检查通过，也不应该把它们当失败。skip 是一种更诚实的诊断状态。
 
-### 关键文件
-
-- `eval/cases/phase3a-diagnostic-benchmark.yaml`：新增 16 条 extra case，只维护 proposal v5 的 capability-focused 题。
-- `eval/cases/database-upgrade-challenge.yaml`：16 条 challenge 唯一源，本次只补 capability / blocking 等诊断元数据。
-- `eval/run_eval.py`：支持 `--extra-cases`、pipeline mode 覆盖、skip 评分和 diagnostic Markdown 摘要。
-- `tests/test_phase3a_eval.py`：守住 32 条合并、case id 唯一、linked case、多答案 case、skip 规则和报告字段。
-- `eval/reports/phase3a-diagnostic-baseline.md`：旧链路跑 32 条 diagnostic 的真实 baseline。
-
 ### 代码阅读路线
 
 1. **先看题本分层**：`eval/cases/database-upgrade-challenge.yaml` 和 `eval/cases/phase3a-diagnostic-benchmark.yaml`
@@ -1183,16 +1231,6 @@ M8/M8.5 已经冻结了旧链路 baseline，M9 开始真正搭 Text2SQL 中间�
 - **VectorIndex 协议**：M9 先用内存索引跑通接口，后续真实 Milvus 只要实现同样的 `search()` 契约即可。它类似 Java 里先定义 interface，再换不同实现。
 - **SchemaGraph**：当前问题的小型 Schema 视图。它不是全局图数据库，只是把本次问题需要的表、字段、指标和关系收在一起。
 - **JoinPath**：从一张表走到另一张表的连接路径。例如优惠券渠道题需要 `orders -> order_coupons -> coupons` 和 `orders -> channels`。M9 的原则是 **Join 条件只能来自 relations.yaml**。
-
-### 关键文件
-
-- `engine/schema_retrieval/objects.py`：定义 `SchemaDocument`、`SchemaHit`、`SchemaGraph`、`JoinPath` 等核心结构。
-- `engine/schema_retrieval/document_builder.py`：把 `DomainSchema`、`metrics.yaml`、`relations.yaml` 构造成三类检索文档。
-- `engine/schema_retrieval/vector_index.py`：提供 `EmbeddingProvider`、deterministic in-memory vector index 和 Milvus adapter 占位。
-- `engine/schema_retrieval/retriever.py`：实现 keyword + vector 两路召回和简单融合。
-- `engine/schema_retrieval/graph.py`：把命中文档转成局部 SchemaGraph，并从 relations 图里找 JoinPath。
-- `tests/test_phase3a_schema_retrieval.py`：M9 的验收测试，覆盖文档类型、召回结构、formal 命中率和 diagnostic JoinPath。
-- `domain_pack/schema_desc/relations.yaml`：集中关系源，本次补齐退款相关关系。
 
 ### 代码阅读路线
 
@@ -1319,16 +1357,6 @@ M9.2 的结论更有价值：**真实 embedding 的向量排序能力更好，�
 - **vector_only_top12**：只看向量召回能力。它更适合判断 embedding 模型本身强不强。
 - **Dense Vector**：Milvus 的 `FLOAT_VECTOR` 需要固定长度数字数组。fake embedding 会用 SHA1 稳定 hash 映射成 dense vector；真实 embedding 则直接返回 dense vector。
 
-### 关键文件
-
-- `engine/schema_retrieval/vector_index.py`：定义 `VectorIndex` 协议、in-memory index、Milvus adapter 和 dense vector 处理。
-- `engine/schema_retrieval/embedding_provider.py`：SiliconFlow embedding provider，支持 batch、cache、Qwen3 `dimensions`。
-- `engine/schema_retrieval/retriever.py`：`retrieve_schema()` 支持显式注入 vector index；不注入时默认 in-memory。
-- `tests/test_m9_1_milvus_schema_retrieval.py`：Milvus 可用时验证 adapter 和 retriever 集成。
-- `tests/test_m9_2_siliconflow_embedding.py`：用 fake transport 测 provider，不联网、不消耗 API 额度。
-- `scripts/smoke_m9_1_milvus.py`：in-memory vs Milvus fake embedding 对比。
-- `scripts/smoke_m9_2_real_embedding.py`：in-memory / Milvus fake / Milvus SiliconFlow 对比。
-
 ### 代码阅读路线
 
 1. **先看默认仍不变**：`engine/schema_retrieval/retriever.py`
@@ -1441,13 +1469,6 @@ M10 做的就是在这个位置加一道 **QueryPlan 自检门**。模型后续�
 - **Join relation id**：Join 不靠自然语言猜，而是使用 `relations.yaml` 里的关系 ID，例如 `order_items_order`。这让“能不能这么连表”变成可校验事实。
 - **unsupported_multi_step_plan**：当前阶段的边界标签。系统知道未来可能有多 SQL、多步骤分析，但 M10-M12 不执行这种计划。
 
-### 关键文件
-
-- `engine/nl2sql/planner.py`：M10 主角文件，定义 `QueryPlanStep`、`QueryPlan`、`PlanValidationResult` 和 `validate_query_plan()`。
-- `engine/nl2sql/prompt.py`：新增 `build_query_plan_prompt()`，把局部 Schema、指标、JoinPath 和 Pydantic JSON Schema 组装给 LLM。
-- `engine/nl2sql/generator.py`：新增 `extract_query_plan()`，从 LLM 原始输出中解析 JSON / fenced JSON。
-- `tests/test_phase3a_planner.py`：M10 的行为规格，覆盖合法计划、缺表缺字段、非法 Join、敏感字段和多 SQL step。
-
 ### 代码阅读路线
 
 1. **计划结构**：`engine/nl2sql/planner.py`
@@ -1558,16 +1579,6 @@ M10 做完后，DataPilot 已经能把“准备查什么”变成 QueryPlan，�
 - **TraceStep**：一次请求里的分步骤日志。它比 `tool_calls` 更细：`tool_calls` 只记录工具调用，`trace_steps` 会记录 schema 检索、计划生成、自检、SQL 生成、SQL Guard、SQL 执行和图表决策。
 - **局部 Schema SQL prompt**：M11 不再把全库表字段都塞给 SQL 生成器，而是只给 QueryPlanStep 和 SchemaGraph 里出现的上下文。这样可以减少 prompt 噪音，也方便失败归因。
 - **结构化 blocked**：新链路失败时不偷偷回到旧模板，也不自动修 SQL，而是返回 blocked 响应和 issue tag。这样对照报告会诚实暴露新链路质量。
-
-### 关键文件
-
-- `engine/nl2sql/pipeline.py`：M11 主角文件，负责编排新 Text2SQL pipeline 和生成 trace_steps。
-- `engine/trace/recorder.py`：新增 `TraceStep`，并让 `TraceRecord` 支持 `trace_steps`。
-- `app/schemas/agent.py`：给 `QueryRequest` 增加 `force_new_pipeline`。
-- `app/api/query.py`：接入新 pipeline，同时保留默认模板优先旧路径。
-- `engine/nl2sql/prompt.py`：新增 `build_local_schema_sql_prompt()`。
-- `engine/nl2sql/generator.py`：新增 QueryPlan 生成和基于计划的 SQL 生成入口。
-- `tests/test_phase3a_pipeline.py`：M11 的 API seam / trace seam / SQL Guard 回归测试。
 
 ### 代码阅读路线
 
@@ -1710,14 +1721,6 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:ap
 - **Schema 精简度（schema compaction）**：新 pipeline 的 `schema_context` trace step 记录了给 LLM 看的局部表/字段/指标数量；旧链路没有这个 trace step，只能用 `tables_used` + `columns` 做保守估算。这个对比是 Phase 3A 最核心的价值证明——新链路**不给 LLM 塞无关表字段**。
 - **别名漂移（alias drift）**：LLM 生成的列名和 eval case 期望的列名不一致，例如 case 期望 `category` 但 LLM 输出 `category_name`；case 期望 `coupon_order_count` 但 LLM 输出 `order_count`。这不是 SQL 错误，而是命名偏好不同。类比：同一个 SQL 查询结果，Java 里叫 `getCategory()`，Python 里叫 `category_name`——业务含义对，但字段名对不上自动评分。
 
-### 关键文件
-
-- `eval/compare_phase3a.py`：对照报告生成器。读取两份 trace JSONL → 按 question 匹配 → 输出并排对比 Markdown
-- `scripts/smoke_phase3a_text2sql.py`：一键跑完 6 个报告 + 3 个对照的编排脚本
-- `eval/reports/phase3a-comparison.md`：formal 新旧对照报告（最核心的交付物）
-- `engine/nl2sql/planner.py`：plan validation 聚合表达式误判修复
-- `app/api/query.py`：新 pipeline 安全预检补丁
-
 ### 代码阅读路线
 
 1. **入门口**：`scripts/smoke_phase3a_text2sql.py`
@@ -1811,14 +1814,6 @@ M12 本身没有新的 API 端点——它的体验入口是**批量评测报告
 - **固定事实检查（expected_value）**：对 seed 数据里确定的业务事实直接做数值比较，例如 GMV 必须等于 `11285752.00`。这比 `contains: gmv` 更像数据库里的精确断言：不是看列名长得像，而是看结果值对不对。
 - **单指标别名兜底**：单指标题只有一列结果时，LLM 可能把列名写成 `"2026年6月GMV"`。M13 的 scorer 会先尝试期望列名和显式 alias；如果仍没命中且只有一列，就用数值判断。这不是放水，因为多列结果仍然严格要求列名。
 - **口径漂移**：模型看到“销售额”可能从 `orders.order_amount` 算，也可能从 `order_items.line_amount` 算。业务上商品/类目销售额必须从订单明细算，这就是口径；口径漂了，SQL 能跑也不代表答案对。
-
-### 关键文件
-
-- `eval/run_eval.py`：新增 `expected_value`、列别名评分、单指标数值兜底。
-- `engine/nl2sql/prompt.py`：补 metrics filter/time field、item_gmv 商品/类目约束、转化率浮点除法约束。
-- `engine/nl2sql/generator.py`：让 QueryPlan 和 SQL 生成使用不同 system prompt，并保持旧 fake client 兼容。
-- `engine/nl2sql/pipeline.py`：trace metadata 增加 `metric_doc_hits` 和 plan_step 关键字段，方便定位失败层。
-- `eval/cases/*.yaml`：补固定事实、语义等价 alias、当前 seed 下的类目 Top1 预期。
 
 ### 代码阅读路线
 
@@ -1930,14 +1925,6 @@ M13 没有新增 API 端点，体验入口仍是批量评测报告。想看效�
 - **安全口径**：先定清“什么情况一定不能放行”。这次定的是 **敏感字段优先**，避免 admin 角色在 Text2SQL 里变成“万能通行证”。
 - **显式后端开关**：工程上支持 Milvus / SiliconFlow，但默认不启用。这样 README 和面试里可以诚实讲“能力已接入，可显式开启；默认路径仍稳定可测”。
 
-### 关键文件
-
-- `eval/run_eval.py`：新增最小 result_match scorer。
-- `engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`：LLM 解析失败时补 trace metadata。
-- `engine/sql_guard/rbac.py`：admin 不再直通敏感字段。
-- `engine/schema_retrieval/retriever.py`、`app/core/config.py`：新增 Schema Retrieval 后端配置入口。
-- `eval/cases/*.yaml`：只做核心 case 的 result_match 和 diagnostic 边界标注清理。
-
 ### 设计要点
 
 - **不刷 diagnostic**：递归类目、知识库归因、完整 EvalOps、JSON mode 大实验都没有做；`db_plan_003` 被标成 non_blocking/manual_review，是因为它属于后续 Hybrid 语义层，不适合硬塞进 Text2SQL。
@@ -1997,15 +1984,6 @@ M14-lite 没有新增 API 端点，体验入口仍是批量评测和 trace。想
 - **错误严重性对比**：不只比较谁错得少，还要比较错在哪里。DeepSeek 独有错误更多在非阻塞生成失败；`qwen3.7-max` 独有错误包含 blocking 的核心生成失败、多表缺列、plan validation 和 trace 证据缺失，所以即使分数只差 2 分，也更不适合当默认。
 - **Context / Changelog 拆分**：`AI_CONTEXT.md` 只保留当前快照，`AI_CONTEXT_CHANGELOG.md` 保存完整历史。这样 AI 续接时先读短上下文，需要查原因时再追溯历史，减少“每次都把几百行旧记录塞进上下文”的负担。
 
-### 关键文件
-
-- `engine/nl2sql/generator.py`：新增 Qwen / DashScope OpenAI-compatible 主模型客户端，默认 Qwen 模型改为 `qwen3.7-plus`。
-- `engine/schema_retrieval/embedding_provider.py`：新增 DashScope `qwen3.7-text-embedding` provider。
-- `engine/schema_retrieval/retriever.py`：支持显式选择 `Milvus + qwen3.7-text-embedding`。
-- `demo/streamlit_app.py`：侧边栏新增 Schema Retrieval 选择项，方便以后手动切本地 / Milvus Qwen embedding。
-- `scripts/run_qwen_ab_experiments.py`：集中跑 DeepSeek、Qwen、SiliconFlow / Qwen embedding 的 A/B 实验。
-- `docs/AI_CONTEXT.md`、`docs/AI_CONTEXT_CHANGELOG.md`：一个保留当前状态，一个保存完整历史。
-
 ### 设计要点
 
 - **不因为 Qwen challenge 多 1 条或 max 稍高于 plus 就切默认**：diagnostic 补测后，Qwen 在漏表、漏列、证据字段完整性上更不稳；`qwen3.7-max` 虽然比 plus 多过 1 条，但独有失败更影响主线，所以默认仍保留 DeepSeek。
@@ -2035,6 +2013,147 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_ex
 # Qwen max 单独 diagnostic，结果本轮为 22/32。
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_experiments.py --group main --experiment main-qwen37-max --suite diagnostic
 ```
+
+## ★ ★ ★ Phase 3A 阶段总结：Text2SQL 分层推理与评测闭环
+
+（2026-07-31）
+
+**简述**：Phase 3A 把 DataPilot 从阶段二"模板优先 + LLM 兜底"的简单 SQL Agent，升级成 **Schema Retrieval → QueryPlan 自检 → 局部 Schema SQL 生成 → SQL Guard 收尾** 的分层 Text2SQL 新链路，并用 **10 条 formal + 16 条 challenge + 32 条 diagnostic** 三层评测基座冻结基线、度量改进、闭环修复。最终新链路 formal **10/10**、challenge **14/16**、diagnostic **23/32**，同时回答了"Milvus / 真实 embedding / Qwen 主模型值不值得切"三个技术路线问题。这个阶段的定位是：**把"会查库"升级成"能证明自己会查库"**。
+
+### 先用大白话讲
+
+阶段二结束时，DataPilot 查库的方式像一家**小面馆只招了一个全能厨师**：问题来了，先翻固定的几本菜谱（模板 SQL），菜谱里没有的，就让厨师凭感觉做（直接让 LLM 写 SQL）。出餐快，但问题也明显：**厨师可能用错食材**——编造不存在的字段、乱连 Join、甚至偷偷查用户手机号；而且**好不好吃没有统一标准**——之前只有 6 条 smoke 用例，没法量化"这碗面到底进步了没有"。
+
+Phase 3A 做的事情，可以概括成两件：
+
+1. **把单兵作战改成流水线**：先查"食材清单和仓库布局"（**Schema Retrieval**，只召回和问题相关的表、字段、指标、Join 关系），再让厨师**先填一张申请单**（**QueryPlanStep**，写明查哪些表、用什么字段、按什么条件 Join），系统逐项核对申请单是否都在合法清单里（**plan 自检**，相当于后端接口的 DTO + Validator），核对通过后才基于**局部菜单**（局部 Schema prompt）写 SQL，最后仍然统一过 **SQL Guard** 这道最终安全闸门。任何一步失败都**结构化地停下**，绝不悄悄退回模板或自己修 SQL——问题暴露得越诚实，才越可评测。
+
+2. **把"感觉好吃"变成"有台账的盲评"**：先做**三层测试集**——10 条 formal（主硬门）、16 条 challenge（更复杂的 superset）、32 条 diagnostic（能力体检，带 capability 标签），在改任何东西之前先把旧链路跑出 **baseline 冻结**下来（像优化前先量旧机器速度）；每跑一次都留下**分步骤 trace_steps** 台账；M12 生成新旧链路对照报告；M13 发现通过率低后**先修评测尺子再修系统**（`expected_value` 数值校验，堵住"GMV=NULL 也算对"的伪通过），再沿着 trace 一层层定位修复。
+
+过程中还做了几次**技术路线体检**：Milvus + SiliconFlow / Qwen 真实 embedding 能不能替掉轻量 in-memory 检索、Qwen 能不能当主模型——结论都是**"能用，但当前不切默认"**，并且留下了可复用的显式开关和 A/B 证据。
+
+所以 Phase 3A 的核心价值是：**把 Text2SQL 从"能答对几条题"推进到"有分层推理、有评测闭环、能证明改进来源"**，为后面的 RAG / Hybrid 和独立评测平台打地基。
+
+### 这次做了什么
+
+按阶段主线写，不按模块流水账：
+
+1. **先立评测基座，再动推理链路**（M8 / M8.5）：把 EvalOps-lite 升级成三层评测。`EvalCase` 前向兼容新增 `expected_metrics / pipeline_mode` 等字段，`_score_case()` 改为 `EvalScore` 并带最小 **issue_tags**（missing_table / missing_column / safety_mismatch / unexpected_error）和 `manual / review_required` 标记；冻结旧链路 baseline：formal **8/10**、challenge **11/16**（2/2 安全拦截全过）。M8.5 再扩出 32 条 **diagnostic benchmark**：16 条 challenge + 16 条新增 extra case 通过 `--cases + --extra-cases` 组合，每条带 **capability 标签**（schema_retrieval / join_path / query_plan / local_schema_prompt / trace_steps / security_guard）；旧链路下新能力专属 check 记为 `skipped_due_to_pipeline_mode`，**不算过也不算挂**——不伪装没实现的能力。
+
+2. **给新链路装上"食材清单"**（M9 / M9.1 / M9.2）：M9 实现 **Schema Retrieval 与 JoinPath**——从 `domain_pack` 构建字段 / 指标 / 关系三类检索文档，`relations.yaml` 作为 **Join 唯一事实源**（补上原来缺的 refunds 三条关系），用 deterministic in-memory 向量索引完成轻量召回，recall 硬门达标（formal 15/15 表、16/18 字段指标、3/3 Join）。M9.1 / M9.2 在实验分支验证 **Milvus adapter + SiliconFlow BGE-M3 / Qwen3 真实中文 embedding**：单点召回持平、vector-only 下 Qwen 略好，但**不合并主线先问用户**，最终作为可选注入合回 main，默认仍走 in-memory。
+
+3. **给 LLM 加"申请单 + 校验"**（M10 / M11）：M10 新增 **QueryPlanStep 与自检**——LLM 写 SQL 前先输出结构化计划，系统核对表、字段、Join 是否都来自合法 SchemaGraph / relations.yaml（Join 不接受自由文本编造），敏感字段在生成前预检为 `sensitive_field_access`。M11 把 M9 + M10 + M5 的 SQL Tool / Trace 串成一条 **新 Text2SQL pipeline**：`run_text2sql_pipeline()` 依次走 schema_retrieval → schema_context → join_path → query_plan → plan_validation → sql_generation → sql_guard → sql_execution → chart_decision，任一步失败都**结构化 blocked**（不降级到模板、不自动修 SQL），并通过 API 侧 `force_new_pipeline` 开关让评测可以显式走新链路，同时每步写 `trace_steps` 到 JSONL（含 step_type / status / error_type / latency_ms）。
+
+4. **量出差距，如实记录**（M12）：跑新链路全套报告并生成**新旧对照**（`compare_phase3a.py` 直接读 trace JSONL 而不是解析 Markdown）：formal **6/10**、challenge **8/16**、diagnostic **15/32**，安全 2/2 全拦。如实暴露瓶颈是 **LLM 输出列名不稳定**（`category` vs `category_name`、`coupon_order_count` 别名漂移）；同时顺手修掉三个真问题：DeepSeek 废弃模型名 `deepseek-chat` → `deepseek-v4-pro`、新链路绕过的危险 SQL 预检补丁、plan validation 对 `COUNT(DISTINCT ...)` 的聚合表达式误判。
+
+5. **先修尺子，再沿 trace 修复**（M13 两批）：第一步先加 **`expected_value` 数值校验**——GMV 必须和固定事实 `11285752.00` 对得上，堵住"M12 里 GMV=NULL 但因 `contains: gmv` 伪通过"的测不准；再修 **metrics prompt 管道**（`_format_plan_metrics()` 把 `filter / default_time_field` 注入新链路 prompt）、补系统提示词与 SQL 约束（item_gmv 口径、转化率浮点除法防整数截断）。最终新链路 formal **4/10 → 10/10**、challenge **6/16 → 14/16**、diagnostic **12/32 → 23/32**。
+
+6. **收口卫生与路线体检**（M14-lite + Qwen / Milvus 实验）：M14-lite 执行用户确认的 5 项小收口——`result_match` 最小结果集对比（5 条核心 challenge 加严）、LLM 失败 trace 增强、**安全口径定案（敏感字段优先于 admin 角色，`users.email/phone` 不直出）**、Schema Retrieval 后端配置开关（milvus / siliconflow 必须显式开启）、诊断口径清理（知识库归因题标 `manual_review + hybrid_attribution` 留给后续 Hybrid）；刻意不做递归类目、知识库归因、完整 EvalOps、JSON mode 大实验。最后的 A/B 实验回答技术路线：DeepSeek vs Qwen 主模型（formal 9/10 持平，看**失败形态**——Qwen max 独有 blocking 错误更多，默认仍 DeepSeek）、in-memory vs BGE-M3 vs Qwen embedding（8/10 / 8/10 / 9/10，差 1 题且受 LLM 波动影响，Phase 3A 不切，留给 RAG 再测）。
+
+### 阶段主线图
+
+`自然语言问题`
+→ `/api/query`（`force_new_pipeline` 显式开关）
+→ `Schema Retrieval`（字段 / 指标 / 关系三类文档；in-memory 默认，Milvus + 真实 embedding 可选）
+→ `SchemaGraph / JoinPath`（`relations.yaml` 单一 Join 事实源）
+→ `QueryPlan` + 自检（plan_validation / 敏感字段预检）
+→ `SQL 生成`（基于局部 Schema 的 prompt）
+→ `SQL Guard`（危险预检 / RBAC / 敏感字段，最终安全门）
+→ `SQL 执行` → `chart_decision` → `AgentResponse`
+
+评测侧：`10 formal + 16 challenge + 32 diagnostic` → `eval/run_eval`（expected_value / result_match / safety / trace check）→ `trace_steps JSONL` → 新旧对照报告 → 下一轮修复
+
+### 关键知识点串联
+
+这里不再列每个模块所有概念，而是列阶段级概念：
+
+- **三层评测基座（formal / challenge / diagnostic）**：10 条 formal 是**主硬门**，16 条 challenge 是 superset（多表、窗口、困难诊断），32 条 diagnostic 是带 capability 标签的**能力体检**。三层各有定位：硬门保验收、superset 扩复杂度、diagnostic 定位边界和下一步问题（**不追满分**）。
+- **baseline 冻结与对照**：改造前先把旧链路量化成 baseline，改造后用 `compare_phase3a.py` 生成并排对照。没有基线，任何"提升了"的说法都是自说自话——这也是"先测量、后优化"的工程习惯。
+- **Schema Retrieval 三类文档 + JoinPath 单一事实源**：字段 / 指标 / 关系分别来自 `schema_desc/*.md`、`metrics.yaml`、`relations.yaml`；Join 条件**只认结构化关系文件，不接受 LLM 自由编造**，防止模型"发明"连接方式。
+- **deterministic in-memory vs Milvus + 真实 embedding**：两种证据层次——M9.1/M9.2 的 **recall smoke** 证明 adapter 可用；M14-lite 的**端到端 A/B eval**（formal 10/10 持平、diagnostic 23/32 → 20/32）证明不值得切默认。"能用"和"该用"是两件事。
+- **QueryPlanStep = DTO + Validator**：像 Java 后端接口先接 DTO、校验、再进 service——LLM 先填结构化"申请单"，系统逐项核对来源，防幻觉从"生成后检查"提前到"生成前约束"。
+- **双层安全**：plan 层敏感字段预检（生成前拦住）+ SQL Guard（执行前最终闸门，RBAC / 危险语句 / 敏感字段）。安全能力不只靠 prompt，拦截点彼此独立。
+- **trace_steps 分层归因**：M13 的修复顺序证明了这个方法——先看 trace 判断失败在**评测误杀、指标口径没进 prompt、QueryPlan 选错口径、SQL 生成**哪一层，再动手，而不是盲调 prompt。
+- **先修评测尺子再修系统**：`expected_value` 数值校验让"GMV=NULL 但 contains: gmv 误判通过"无处遁形。**测不准的系统没法优化**——这是 M13 的第一课。
+- **失败形态分析（主模型 A/B）**：Qwen 与 DeepSeek 分数接近，但看失败形态——Qwen max 独有失败里 blocking 类更多，稳定性不如 DeepSeek，所以不切默认。**别只看总分，要看错在哪里、错得多严重**。
+- **前向兼容与显式开关**：`EvalCase` 新增字段不破坏旧 smoke；`pipeline_mode`、`force_new_pipeline`、`SCHEMA_VECTOR_BACKEND` 都是显式开关，默认行为不变，评测和实验可以自由走新路径——这保证了 Phase 3A 全程旧链路可回归、pytest 不依赖外部服务。
+
+### 阶段设计取舍
+
+- **先冻结 baseline 再改造（M8）**：把旧链路 8/10 的真实水平如实记录，而不是修好旧链路再比。用户确认保留这份"旧机器真实速度"的基线，宁可难看也不造假。
+- **轻量 in-memory 为主，Milvus / 真实 embedding 只作实验开关**：M9 不被 Docker / 网络 / 额度阻塞，pytest 不依赖外部服务；Milvus 和 SiliconFlow / Qwen embedding 作为可选注入合并回 main，但切默认必须过**端到端 A/B** 证据关。结论：能用、recall 持平、diagnostic 略降，所以不切。
+- **计划层自检而不是让 LLM 直接写 SQL**：多一层 QueryPlan 的代价（结构化输出、校验代码）换来的是幻觉被提前拦住、失败可归因；同时用"失败结构化 blocked 不降级"保证问题暴露，而不是悄悄退回模板掩盖错误。
+- **先修评测尺子再修系统（M13 顺序）**：如果不先加 `expected_value`，后续任何 prompt 修复都可能被"伪通过"掩盖或误判，修完也不知道有没有用。
+- **主模型默认不切 Qwen**：虽然 formal 打平、challenge 略高，但诊断失败形态（漏表漏列、blocking 错误）和稳定性不占优；Qwen 保留为显式候选和 A/B 对照，后续 RAG / Hybrid 再评估。**技术选型跟随证据，不跟随新鲜感**。
+- **安全口径：敏感字段优先于 admin 角色**：`users.email / users.phone` 在 Text2SQL 路径不直出，后续查看走脱敏 / 审计 / 专门接口——把"能查"和"该查"分开。
+- **刻意不做的事**：递归类目题（留 manual review）、知识库归因（标 `hybrid_attribution` 留给 Phase 3）、完整 EvalOps 平台（留给独立 EvalBench 项目）、JSON mode 大实验（现有 JSON 解析 + 校验 + 拦截已够稳定，不做一票否决式改造）。
+
+### 面试怎么讲
+
+本阶段完整叙述，可以直接背/改写到面试或简历中：
+
+> 我的 DataPilot 项目在 Phase 3A 完成了一次 Text2SQL 的体系化升级：从"模板优先 + LLM 兜底"的简单链路，重构为**"Schema Retrieval → QueryPlan 自检 → 局部 Schema SQL 生成 → SQL Guard"**的分层推理链路。核心方法论是**评测驱动**：先建 10/16/32 三层评测基座、冻结旧链路 baseline，再改系统；每步改进都先修评测尺子（`expected_value` 数值校验，堵住"GMV=NULL 也算对"的伪通过），再沿 trace_steps 分步归因修复，最终新链路 formal 从 4/10 提升到 **10/10**、challenge 6/16 → **14/16**、diagnostic 12/32 → **23/32**，全程不改测试题、不过拟合。过程中用端到端 A/B 回答了三个技术路线问题：Milvus + 真实 embedding **可用但不切默认**（单点 recall 持平、端到端 diagnostic 略降）、Qwen 主模型**不切默认**（失败形态分析：独有 blocking 错误更多）、in-memory 检索保持默认但保留显式开关。安全侧把"敏感字段优先于 admin 角色"定为口径，防幻觉靠 plan 层预检 + SQL Guard 双层独立拦截，不靠 prompt 承诺。
+
+1. **[基础追问] 旧链路有什么具体问题，值得你重构一遍？**
+
+   旧链路的问题有三个层面：**召回层面**，LLM 直接面对全量 schema prompt，容易编造不存在的字段、乱连 Join（比如把退款表和订单表错误 join）；**安全层面**，模型可能计划查询 `users.email` 这类敏感字段，只能在 SQL 执行前靠字符串特征拦截；**评测层面**，只有 6 条 smoke 用例，无法量化"改进了没有"。Phase 3A 分别用 Schema Retrieval（只给局部 schema）、QueryPlan 自检 + SQL Guard 双层拦截、三层评测基座解决。一句话：**旧链路不可测、不可控，重构是为了让问题可归因、改进可证明**。
+
+2. **[基础追问] 三层评测为什么这么设计？它们各自解决什么问题？**
+
+   一层测试集的毛病是**分不清"验收没过"和"哪里不行"**。formal 10 条是主硬门，验收用；challenge 16 条是 superset，覆盖多表、窗口函数、困难诊断，测试数据库复杂度扩展能力；diagnostic 32 条是带 capability 标签的能力体检，每条标注测的是 schema_retrieval / join_path / query_plan / local_schema_prompt / trace_steps / security_guard 中哪项能力，跑完直接看 capability summary，就知道下一步该修哪块。而且 diagnostic **不追满分**——它的职责是定位边界，不是刷数字。
+
+3. **[工程/深挖追问] 为什么默认不切 Milvus + 真实 embedding？你用什么证据下这个结论？**
+
+   因为"能用"和"该用"是两个证据层次。M9.1 / M9.2 的 recall smoke 只证明 adapter 可用、单点召回和 in-memory 持平；真正决定默认与否的是 **M13 后的端到端 A/B eval**：Milvus + SiliconFlow 跑正式回归 formal 10/10 持平、challenge 14/16 持平，但 diagnostic 从 23/32 降到 20/32。端到端没有收益甚至略降，却引入 Docker 服务依赖、网络和费用——所以不切。这也说明我们的默认选择跟着**端到端证据**走，而不是跟着"用了更重的技术"走。Qwen embedding formal 9/10 比本地 8/10 好 1 题，但差距受真实 LLM 波动影响，结论是保留为 Phase 3 RAG / Hybrid 的候选，不急着切。
+
+4. **[工程/深挖追问] M13 从 4/10 提到 10/10，具体怎么定位问题的？怎么证明不是刷评测？**
+
+   定位方法是**沿 trace 分层归因**：trace_steps 记录每步 input / output / status / error_type，先看失败落在 eval 评分、QueryPlan prompt、SQL prompt 还是数据预期哪一层。M13 第一批发现的最大问题其实是**评测尺子坏了**：`gmv` 字段是 NULL 时旧检查只做 `contains: gmv` 字符串匹配，仍然判 pass，所以测不准。先加 `expected_value` 数值校验（GMV 必须等于固定事实 `11285752.00`），再修 metrics prompt 管道（`filter / default_time_field` 没注入新链路），之后才做 SQL 约束（item_gmv 口径、转化率浮点除法）。证明没刷评测的证据是：**测试题一行没改**，改的是 scorer 严格度和 prompt 管道；而且对照报告如实展示失败明细和 issue tags，剩余 2 条 challenge、9 条 diagnostic 失败原因都写得出来。
+
+5. **[工程/深挖追问] JoinPath 为什么必须来自 relations.yaml，而不是让 LLM 自己推理？**
+
+   因为 Join 是 SQL 正确性的地基，一旦 LLM 编造 Join 条件（比如拿订单号 join 退款单号），生成出的 SQL 要么报错要么出错误数据，而且**错误不可归因**——你不知道是模型不会还是 schema 没给全。relations.yaml 作为单一事实源，把"系统允许哪些连接方式"显式化：M9 补齐了 refunds 三条缺失关系，说明结构化的文档确实会被漏写，但漏写是**可发现、可补的**；而 LLM 自由编造是无法控制的。这个取舍像后端里"枚举值只从配置读，不接受请求体里传任意字符串"。
+
+6. **[工程/深挖追问] plan 自检和 SQL Guard 双层安全，会不会重复？边界怎么划？**
+
+   不重复，职责不同：**plan 自检管"计划是否合法"**——表、字段、Join 是否来自 SchemaGraph / relations.yaml，敏感字段是否在生成前就拦截（`sensitive_field_access`）；**SQL Guard 管"执行的 SQL 是否可执行"**——危险语句、表级 RBAC、敏感字段最终门。一个是生成前约束，一个是执行前兜底，任一层的绕过都拦不住另一层。而且这是**刻意设计的两道独立防线**：prompt 和计划都可能被模型不遵守，所以执行前的 SQL Guard 永远存在——安全能力不只靠 prompt，这个原则从 M4 一直贯穿到 Phase 3B。
+
+7. **[压力追问] 你又是加数值校验、又是加 result_match，会不会只是把评测改严了，让系统显得"提升"了？**
+
+   这个问题问得很到位，要分开看：加严评测确实会改变分数，但方向是**让分数更难通过**，而不是更宽松——M13 前 GMV=NULL 能伪通过，加 `expected_value` 后这类错误立刻暴露为失败。而且顺序是先修尺子、再修系统，formal 从 4/10 到 10/10 的提升是在更严的尺子下取得的，所以是"系统真的变好了"。另外我们保留了三个交叉验证：**测试题不改**（改动都在 scorer 和 pipeline）、**新旧对照报告**（同套 case 新旧链路并排）、**失败明细全量公开**（剩余失败都有 issue tags 和原因）。如果只为了数字好看，直接改 case 或放松校验最快，我们反而在收紧。
+
+8. **[压力追问] 10/10 只是 10 条固定题，真实场景泛化怎么证明？**
+
+   固定题确实不能证明泛化，这正是我们设计三层评测的原因：**formal 证明验收口径，diagnostic 证明边界**。diagnostic 23/32 的 9 条失败里，5 条是输出列 / 评分严格性问题、2 条 plan validation / guard blocked、1 条非阻塞递归类目题、1 条安全诊断 mismatch——这组数字本身就是诚实的边界声明，我们从没宣称全对。真实场景的差距主要来自 **LLM 列名不稳定**（category vs category_name 这类别名漂移），这是 M12 对照报告如实记录的瓶颈，M13 用语义等价别名缓解但没有根治。所以泛化问题是真实存在的技术债，下一阶段（RAG / Hybrid 和独立评测平台）要解决的是：更多样化的 case、文档知识补充、更稳的 schema 表示。
+
+9. **[压力追问] 这个阶段修了很多评测和 prompt 的"内功"，但业务能力提升有限，是不是偏工程自嗨？**
+
+   承认一部分：Phase 3A 确实没有增加新业务能力（比如知识库问答、多步骤 Agent），产出集中在**让已有能力可测、可控、可归因**。但我认为这不是自嗨，理由有三：一是**地基性质**——SQL Agent 的核心风险就是"答错但显得很自信"，不解决测不准问题，后续任何功能叠加都是空中楼阁，M13 的伪通过就是例子；二是**每个技术路线问题都给了明确结论**——Milvus / Qwen / embedding 该不该切，都有端到端证据和结论，避免团队在错误路线上投入；三是**直接服务后续阶段**——评测基座、trace_steps、安全口径现在被 Phase 3B 的 LangFuse 观测和独立 EvalBench 项目直接复用。如果面试官觉得偏工程，可以反问：一个没有评测闭环的 SQL Agent，怎么证明它"变好了"？
+
+### 阶段成果与边界
+
+- 完成：
+  - **三层评测基座**：10 formal + 16 challenge + 32 diagnostic，`EvalScore / issue_tags / manual / review_required`，capability 标签与 `skipped_due_to_pipeline_mode` 口径
+  - **Schema Retrieval 与 JoinPath**：字段 / 指标 / 关系三类文档，`relations.yaml` 单一 Join 源，deterministic in-memory 索引，recall 硬门（formal 15/15 表、16/18 项、3/3 Join）
+  - **QueryPlan 自检层**：结构化计划 + 表 / 字段 / Join 来源校验 + 敏感字段预检
+  - **新 Text2SQL pipeline 与 trace_steps**：`force_new_pipeline` 显式开关，失败结构化 blocked 不降级
+  - **质量闭环**：formal **4/10 → 10/10**、challenge **6/16 → 14/16**、diagnostic **12/32 → 23/32**（测试题未改）
+  - **技术路线结论**：Milvus + SiliconFlow / Qwen embedding 可用不切默认（保留可选注入）；Qwen 主模型不切默认（失败形态分析）；DeepSeek 模型名修复
+  - **安全与收口**：敏感字段优先于 admin 角色定案；`result_match` 加严 5 条核心 challenge；LLM 失败 trace 增强；Schema Retrieval 后端显式开关
+- 没完成 / 刻意不做：
+  - **LLM 列名别名漂移**（`category` vs `category_name` 等）是真实瓶颈，M13 只缓解未根治，留给后续阶段
+  - **递归类目题**（db_hard_001）标 `manual_review` 非阻塞处理，不强行支持
+  - **知识库归因**（db_plan_003）标 `manual_review + hybrid_attribution`，留给 Phase 3 RAG / Hybrid
+  - **diagnostic 不追满分**：23/32 是边界定位结果，不是失败
+  - **完整 EvalOps 平台**（case 管理、历史结果库、HTML dashboard）——定位在独立项目 EvalBench
+  - **JSON mode 大实验**——现有"JSON object + prompt 约束 + 解析校验 + 失败拦截"已够稳定，不做一票否决式改造
+
+### 下一阶段怎么接
+
+- **实际执行的下一阶段是 Phase 3B 可观测性（M15-M18）**：进入 RAG / Hybrid 之前，先把"业务 Agent 可被观测、可被评测"补上——**评测基座和 trace_steps 正好是 Phase 3B 的输入**：eval scorer 演化为 L1/L2/L3 分层（M17）、trace_steps 演化为 LangFuse live lifecycle spans（M16B）、实验与对照报告演化为 LangFuse Dataset / Experiment 工作流（M18）。下一阶段的衔接已在 Phase 3B 阶段总结中完整记录。
+- **Phase 3 RAG / Hybrid（计划中的下一模块）**：M14-lite 已把知识库归因题标为 `hybrid_attribution` 预埋；Schema Retrieval 的 Milvus / SiliconFlow / Qwen embedding 可选能力可直接复用（Qwen embedding formal 9/10 略好于 8/10，值得在文档检索上继续验证）；别名漂移问题在更多样化 schema 表示下继续处理。
+- **独立 EvalBench 项目**：Phase 3A 的三层评测基座、对照报告和 eval 口径（expected_value / result_match / issue_tags）是平台化的基础素材。
+- **可复用的阶段级验证命令**：各模块记录里都有完整验证命令；阶段收口时全量 pytest 预期 **84 passed**；真实 LLM 基线入口是 `python -m eval.run_eval --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-new-pipeline.md --trace .agent_work/temp/xxx.jsonl`（预期 formal 10/10，需 DeepSeek key）和 `scripts/run_qwen_ab_experiments.py`（A/B 对照）。
 
 ## ★ [Phase3B] M15 LangFuse Cloud 接入基线
 

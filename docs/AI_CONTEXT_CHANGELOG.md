@@ -257,12 +257,12 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
   - 已确认正确 `paid_at` 口径 2026 年 6 月 GMV = `11285752.00`；M12 报告中 `created_at` + `unpaid/cancelled` 口径会得到 NULL，但旧 eval 仍可因 `contains: gmv` 判 pass。
   - 当前源码现跑"2026 年 6 月商品销售额 Top 5"时，SchemaGraph 包含 `products`，支持 v5 的归因修正。
 
-### AI_CONTEXT M9.1/M9.2 合并状态修正（2026-07-25）
+### [小修] AI_CONTEXT M9.1/M9.2 合并状态修正（2026-07-25）
 
 - 改动范围：`docs/AI_CONTEXT.md`（仅文档）
 - 关键决策：M9.1/M9.2 的遗留说明"未合并回 main"已过时——`9fa9368` 已将 Milvus 和 SiliconFlow embedding 可选支持合入 main。默认检索路径仍为 `InMemoryVectorIndex`，不影响 M12 结果（和 Milvus 没启动无关）。修正 M9.1 遗留第 3 条、M9.2 遗留第 2 条。
 
-### 数据库状态文档补充 + Phase 3A 问题分析 v3 修订（2026-07-25）
+### [小修] 数据库状态文档补充 + Phase 3A 问题分析 v3 修订（2026-07-25）
 
 - 改动范围：`docs/database-current-state.md`、`docs/phase3a-issues-and-fixes-v3.md`（仅文档，无代码改动）
 - 关键决策：
@@ -281,7 +281,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
   - 2026 年 6 月 GMV（`paid_at` 口径+filter）= `11285752.00`，与固定事实一致
 - 遗留：`orders.md` schema_desc 的 `order_status` 字段行仍未补 `pending_payment` 和 `canceled`，属于问题九的范围，等主线修复完成后处理。
 
-### Phase 3A M12 对照报告与阶段收尾（2026-07-25）
+### [模块任务] Phase 3A M12 对照报告与阶段收尾（2026-07-25）
 
 - 改动范围：新增 `eval/compare_phase3a.py`、`scripts/smoke_phase3a_text2sql.py`；修改 `engine/nl2sql/generator.py`、`engine/nl2sql/planner.py`、`app/api/query.py`、`README.md`、`docs/AI_CONTEXT.md`
 - 关键决策：
@@ -304,7 +304,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
   - M12 未解决 LLM 列名别名漂移问题（category/category_name、coupon_order_count 等），属于 P0 schema/plan/prompt 优化范畴，留给后续阶段。
   - 阶段三A 全部 5 个模块（M8-M12）代码已就绪；M12 收工整理后等待人工检查和 accept-module。
 
-### Phase 3A M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
+### [模块任务] Phase 3A M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
 
 - 改动范围：未提供模块起始 commit，本次按 `git status --short`、`git diff --name-only` 和未跟踪文件检查；`engine/nl2sql/pipeline.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/trace/recorder.py`、`app/schemas/agent.py`、`app/api/query.py`、`tests/test_phase3a_pipeline.py`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m11-notes.md`
 - 关键决策：
