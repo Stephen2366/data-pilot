@@ -4,7 +4,7 @@
 >
 > **核心目标**：在不改动 `/api/query` 响应契约、不替代 JSONL 和现有 eval 报告的前提下，新增可选 LangFuse Cloud 写入，并补齐 **L1/L2 规则评分器 + 最小 L3 LLM-as-Judge** 评分能力，最后跑通一次最小 Experiment 验证全链路闭环。LangFuse 自部署不再作为 DataPilot Phase 3B 的默认目标，改为 EvalBench 阶段重点探索。
 >
-> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。
+> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。
 
 ## 灵感来源：一线开发者的 LangFuse 评测实战经验
 
@@ -118,6 +118,7 @@
 7. **评测链路打通**：`eval/run_eval.py` 跑完 cases 后，trace 自动提交到 LangFuse；L1/L2/L3 评分结果统一通过 LangFuse Score API 按 `langfuse_trace_id` 回写。Score 回写不等待 trace 可查询，trace 可见性检查只用于 smoke 和调试
 8. **最小 Experiment 验证**：在 LangFuse Web UI 中手动从已收集的 trace 创建 Dataset，先用 5 条代表性 case 跑通 A/B workflow smoke（如 DeepSeek vs Qwen），确认 trace → dataset → experiment → score 对比这条流程可用；流程稳定后再扩展到 formal 全量 case，不把 5 条误认为完整 benchmark
 9. **为 EvalBench 探路**：本阶段验证 LangFuse 的 trace/score/experiment 全链路能力，确认可以作为独立评测项目的基座；自部署、私有化、多项目接入和平台化能力留给 EvalBench
+10. **LangFuse 价值闭环**：M18 证明“能上传、能看见、能回写分数”之后，还必须进入 M19，把 trace/span/score 转成失败归因、失败样本沉淀和 A/B 改进证据。否则 LangFuse 只是在网页里复刻本地 JSONL，无法带来本地 eval 之外的能力提升。
 
 ### 阶段完成标准（总览）
 
@@ -127,8 +128,9 @@
 - [ ] L1/L2 规则评分器可用：`table_hit`、`column_recall`、`safety`、`expected_value`、`result_match`、`contains`、`equals` 等结果能进入 Markdown 报告和 LangFuse Score
 - [ ] L3 最小评分器可用：`llm:correctness` 只在 `--judge-model` 或 `EVAL_JUDGE_MODEL` 明确配置时运行，失败不阻断 eval
 - [ ] 手动 Experiment workflow smoke 走通：5 条代表性 case 能完成 dataset / experiment / score 对比；是否扩展 formal 全量 case 有记录
+- [ ] 失败归因闭环可用：至少能从本地 eval report + JSONL trace 生成 `failure_stage / failure_reason / needs_action`，并在 LangFuse 启用时把 triage 结果回写为可筛选的 score / metadata
 - [ ] 原链路兜底通过：`LANGFUSE_ENABLED=false`、key 缺失、Cloud 不可达、Score 写入失败时，`/api/query`、JSONL、规则评分和 Markdown 报告仍可用
-- [ ] 文档同步完成：`AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md`、`.agent_work/temp/m15-notes.md` 至 `.agent_work/temp/m18-notes.md` 记录关键结论、验证结果和遗留风险
+- [ ] 文档同步完成：`AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md`、`.agent_work/temp/m15-notes.md` 至 `.agent_work/temp/m19-notes.md` 记录关键结论、验证结果和遗留风险
 - [ ] Smoke 脚本一键可跑：`scripts/smoke_phase3b_langfuse.py` 输出每个检查点的 PASS / FAIL / PENDING
 
 ### 项目边界一句话
@@ -323,6 +325,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 - 2026-07-29 执行路线补充：用户决定在 `M16B` 分支上继续完成 M17 / M18，完成后再整体合并回 `main`。因此本文后续 M17 / M18 不新增 `M17B` / `M18B` 双章节；现有 M17 / M18 目标保持不变，只把执行底座从 M16 post-hoc flat spans 调整为 M16B live lifecycle spans。M16 post-hoc 路线保留为 fallback / 对照，不再作为当前执行分支的默认前提。
 - M17 合并 L1/L2/L3 scorer 和 Score 回写，因为它们共同回答“怎么评测、怎么把分数送到 LangFuse”。
 - M18 合并 smoke、手动 Experiment 和文档收尾，因为这些都是阶段闭环材料，不单独拆模块。
+- M19 不再继续验证“LangFuse 能不能记录”，而是专门回答“LangFuse 比本地 eval 多带来了什么”：把失败 trace 归因成可行动的问题清单，并支持后续跨模型 / 跨版本对比失败分布。
 
 ## 模块总览
 
@@ -333,6 +336,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 | M16B Trace Lifecycle 下沉预备分支 | 2B（已作为当前执行底座） | M16 | 在独立 `M16B` 分支上把 trace start/end/fail lifecycle 下沉到 Text2SQL pipeline，验证是否适合作为 RAG/Hybrid 观测底座 | `engine/trace/lifecycle.py`、`engine/nl2sql/pipeline.py`、lifecycle 测试、A/B 观测对照记录 |
 | M17 Scorer 分层与 Score 回写 | 3 | M16B（当前分支） | 把现有规则评分迁移为单一事实源，补最小 L3 judge，并按 `langfuse_trace_id` 写回 LangFuse Score | `eval/scorers/*`、`eval/run_eval.py`、score 回写测试 |
 | M18 Smoke / Experiment / 阶段收尾 | 4 | M17（基于 M16B） | 一键 smoke、5 条代表性 case 手动 Experiment、阶段档案和学习复盘收尾 | `scripts/smoke_phase3b_langfuse.py`、Experiment 记录、`AI_CONTEXT.md` / CHANGELOG / dev-log |
+| M19 Trace Failure Triage / LangFuse-driven Eval Analysis | 5 | M18 | 把 trace/span/score 转成失败阶段、失败原因和下一步动作，形成本地报告 + 可选 LangFuse triage score 的改进闭环 | failure triage summary、triage scorer/heuristics、A/B failure distribution、`.agent_work/temp/m19-notes.md` |
 
 ## 模块实施明细
 
@@ -808,6 +812,101 @@ eval/scorers/
 
 ---
 
+## M19：Trace Failure Triage / LangFuse-driven Eval Analysis
+
+**目标**：把 M15-M18 已经接好的 trace / span / score 变成真正能推动 DataPilot 改进的评测分析能力。M19 不再证明“LangFuse 能不能上传记录”，而是要回答：某条 case 失败了，到底更像是 schema retrieval、query plan、SQL 生成、安全拦截、SQL 执行、结果比对，还是 scorer 本身的问题；下一步应该改代码、改 case、改 scorer，还是只标记人工复核。
+
+> ★ 关键定位：LangFuse 的价值不能停在“网页里能看 trace”。真正有用的是：失败 case 能按阶段聚合，A/B 实验能看出“新 pipeline 主要减少了哪类失败 / 又新增了哪类失败”，后续 RAG/Hybrid 能把失败样本沉淀成回归集。M19 就是补这条价值闭环。
+
+### M19-1：Failure Stage Taxonomy（失败阶段分类）
+
+先定义一套稳定、可复用、不过度复杂的失败阶段枚举。它不要求 100% 判断真因，但必须比单纯 pass/fail 更能指导下一步。
+
+建议第一版分类：
+
+| failure_stage | 含义 | 常见证据 |
+|----------------|------|----------|
+| `schema_retrieval` | 没召回该问题需要的表 / 字段 / 指标 | trace 中 schema retrieval 命中为空、缺 expected_tables / expected_columns |
+| `schema_context` | schema 召回到了，但传给后续步骤的上下文不够或结构不清 | retrieval 有结果，但 query_plan / sql_generation 仍找错字段 |
+| `query_plan` | 自然语言到结构化 QueryPlan 的理解错了 | QueryPlan 缺表、缺筛选条件、指标或时间范围错 |
+| `plan_validation` | QueryPlan 校验发现非法或不完整 | plan validator 报 required field / invalid metric / invalid table |
+| `sql_generation` | QueryPlan 到 SQL 的生成错了 | SQL 语法错、字段错、join 错、where 条件错 |
+| `sql_guard` | 安全策略拦截相关问题 | 危险 SQL、越权、误拦截、应拦未拦 |
+| `sql_execution` | SQL 执行层失败 | database error、timeout、no such column/table、类型转换错误 |
+| `result_match` | SQL 跑通但结果不符合 expected_sql / expected_value | rows 对不上、数值超 tolerance、排序/列名问题 |
+| `answer_synthesis` | 结构化结果正确，但最终自然语言回答错误 | rows 正确，answer 漏报、误报、解释错 |
+| `scorer_issue` | 被测链路可能没错，评分器或测试用例有问题 | scorer 规则过窄、expected 写错、case 本身歧义 |
+| `judge_unavailable` | LLM-as-Judge 自身不可用 | judge timeout、限流、provider 配置错误 |
+| `unknown` | 证据不足，不能安全判断 | trace 缺关键步骤或多个阶段同时异常 |
+
+### M19-2：本地 Failure Triage 输出
+
+M19 的第一交付必须先在本地闭环，避免把 LangFuse 变成强依赖：
+
+- 读取 `eval/run_eval.py` 已有的 case result、score details、issue_tags、HTTP 状态、response body 和 JSONL trace。
+- 为每个 failed / skipped / errored case 生成：
+  - `failure_stage`：上面的枚举之一
+  - `failure_reason`：一句可读解释，说明为什么判断为这个阶段
+  - `needs_action`：建议动作，如 `fix_pipeline`、`fix_schema_desc`、`fix_scorer`、`fix_case`、`manual_review`、`infra_retry`
+  - `evidence_step`：关联到 trace step 名称、score 名称或 error_type，方便回看证据
+- 在 Markdown report 增加 `Failure Triage Summary`：
+  - 按 `failure_stage` 聚合数量
+  - 按 `needs_action` 聚合数量
+  - 列出最值得优先修的 Top cases
+- 输出仍兼容 `LANGFUSE_ENABLED=false`，不要求网页 UI、Dataset 或 Experiment。
+
+### M19-3：LangFuse Triage Score / Metadata 回写
+
+LangFuse 启用且 JSONL 里存在有效 `langfuse_trace_id` 时，M19 再把 triage 结果写回 LangFuse，形成 UI 可筛选、可对比的记录。
+
+建议 score / metadata 口径：
+
+- `triage:failed`：BOOLEAN 或 NUMERIC，标记该 case 是否失败
+- `triage:failure_stage`：CATEGORICAL / TEXT，值来自 failure stage taxonomy
+- `triage:needs_action`：CATEGORICAL / TEXT，值来自 action taxonomy
+- `triage:confidence`：NUMERIC，可选，第一版可只用 `1.0 / 0.5 / 0.0` 表示规则证据强弱
+
+注意：LangFuse score 回写失败不能影响本地 report；如果 `langfuse_write_status != "ok"`，M19 只能写本地 triage，不得把 score 写到缺失或失败的 trace id 上。
+
+### M19-4：A/B Failure Distribution（失败分布对比）
+
+M19 要把 A/B 从“整体分数谁高”推进到“失败结构哪里变了”：
+
+- 比较两个 eval run 的 `failure_stage` 分布，例如：
+  - 新 pipeline 的 `schema_retrieval` 失败减少，但 `sql_generation` 失败增加
+  - 新 judge prompt 的 `scorer_issue` 减少，但 `judge_unavailable` 增加
+  - 安全策略调整后 `sql_guard` 误拦截下降
+- 报告中输出 A/B 对比摘要，优先用表格而不是长篇解释。
+- 这一步只做本地 Markdown / JSON 汇总即可；是否自动创建 LangFuse Dataset / Experiment 不在 M19 默认范围内。
+
+### M19-5：失败样本沉淀边界
+
+M19 可以生成“建议沉淀为回归集”的 candidate list，但不要默认自动改写正式 case 集：
+
+- 输出 candidate：case_id、question、failure_stage、needs_action、是否适合加入 regression。
+- 如果要自动创建 LangFuse Dataset、自动导入 eval/cases、或调整正式 benchmark，需要单独确认，因为这会影响评测结构和长期基线。
+
+### M19 非目标
+
+- ❌ 不实现 LangFuse Webhook / remote experiment runner
+- ❌ 不要求用户在网页 UI 中手动 Run Experiment
+- ❌ 不新增平台级数据库或评测历史表
+- ❌ 不默认引入 LLM-as-Judge 来读完整 trace 并“自由发挥判断真因”
+- ❌ 不把 heuristic triage 当成绝对真相；它只是工程排障建议，必须保留 `unknown` 和 `manual_review`
+- ❌ 不自动修改 formal / challenge / diagnostic case 集
+
+### M19 验收
+
+- 本地 eval report 增加 `Failure Triage Summary`，至少包含 `failure_stage` 聚合、`needs_action` 聚合和 case 明细
+- 至少覆盖 3 类可验证失败：SQL guard / SQL execution / result_match 或 scorer_issue
+- `LANGFUSE_ENABLED=false` 时完整可运行，报告仍有 triage
+- `LANGFUSE_ENABLED=true` 且 trace 写入成功时，能把 triage score / metadata 回写到对应 LangFuse trace
+- LangFuse 写入失败、SDK 未安装、trace id 缺失时，triage 不丢失，只记录 score-write skipped / failed
+- `.agent_work/temp/m19-notes.md` 记录 taxonomy 取舍、验证命令、样例报告路径、LangFuse 回写结果和已知误判边界
+- M19 最终验证不只跑最小 case，还要跑 `formal + challenge + diagnostic`，其中 diagnostic 是 failure triage 的主展示集。验证完后给用户报告说明切换 deepseek-v4-flash 后的效果以及 M19 的效果。
+
+---
+
 ## 与独立评测项目（EvalBench）的关系
 
 Phase 3B 是 EvalBench 的**前置探路阶段**，但不是 EvalBench 本身。最通俗的分工：
@@ -972,6 +1071,7 @@ EvalBench 不应该直接照搬 DataPilot 内部业务代码，而应复用本�
 
 Phase 3B 完成后，后续阶段的受益：
 
+- **M19 Trace Failure Triage（Phase 3B 价值闭环）**：在 M18 证明 trace / score / smoke 可用之后，优先补 failure triage，把本地 eval + LangFuse trace 变成失败阶段分布、下一步动作和 A/B 改进证据。它比继续手动点 Web UI 更直接服务项目进步，也能为后续 RAG/Hybrid 建立可复用的失败归因口径。
 - **Phase 3B.1 工具调用容错与重试（可选轻量阶段）**：基于 Phase 3B 的 LangFuse trace 数据，分析当前工具调用失败模式，实现或整理 `ToolResult` 统一结构（status 分类、error_type、是否可重试、重试次数、降级原因），成为面试中回答“工具调用失败怎么办”的直接素材。它不是 Phase 3B 主验收项，只在 trace 暴露出足够失败样本时执行。
 - **M16B Trace Lifecycle 下沉预备分支（并行对照）**：如果用户要验证 LangFuse 的真实排障观测价值，先在独立 M16B 分支做 lifecycle 下沉，而不是等 RAG/Hybrid 一口气叠加检索、生成、工具、judge 等复杂度。M16B 不阻塞 M17/M18 主线；它的产出用于决定后续 RAG/Hybrid 是否采用 lifecycle 底座。
 - **Phase 3 RAG（检索增强生成）**：LangFuse 上看 retrieval span → generation span 的全链路；L1/L2/L3 评分器已就绪，RAG 专用评分器（faithfulness、context_relevancy）可直接启用。⚠️ 同行踩坑预警：retrieval recall 评测时，开源数据集的 reference text 和自己切片后的 chunk 粒度不一致，容易误判 miss。Phase 3 RAG 应设计 **coverage 指标**（将 reference 按句子拆分，计算 chunk 对 reference 的覆盖度）作为 L1 规则评分器，不做 LLM judge
@@ -981,6 +1081,19 @@ Phase 3B 完成后，后续阶段的受益：
 ---
 
 ## 修订记录
+
+### v6.2（2026-08-02）—— LangFuse 价值闭环补充：M19 Failure Triage
+
+依据：M15-M18 已经证明 DataPilot 可以把流程 trace、score 和 smoke 结果写到 LangFuse，但如果 LangFuse 只是把本地 JSONL 换个网页展示，对项目改进帮助有限。Phase 3B 需要补一层“基于 trace 的失败归因和 A/B 失败分布分析”，让 LangFuse 观察数据真正服务评测闭环。
+
+| 改动 | 说明 |
+|------|------|
+| 新增 M19 模块 | `Trace Failure Triage / LangFuse-driven Eval Analysis`，目标是把 trace/span/score 转成 `failure_stage`、`failure_reason`、`needs_action` |
+| 新增 failure stage taxonomy | 覆盖 `schema_retrieval`、`query_plan`、`sql_generation`、`sql_guard`、`sql_execution`、`result_match`、`scorer_issue`、`unknown` 等阶段 |
+| 明确本地优先 | M19 必须在 `LANGFUSE_ENABLED=false` 时也能输出本地 failure triage report，LangFuse 只做增强回写和筛选对比 |
+| 补充 LangFuse triage score 口径 | 规划 `triage:failed`、`triage:failure_stage`、`triage:needs_action`、`triage:confidence` 等可筛选 score / metadata |
+| 补充 A/B failure distribution | A/B 不只比较总分，还要比较失败结构变化，例如 schema 失败减少但 SQL 生成失败增加 |
+| 收紧边界 | 不默认实现 Webhook runner、不自动创建 Dataset、不自动改正式 case 集、不把启发式归因当作绝对真因 |
 
 ### v6.1（2026-07-29）—— M16B Trace Lifecycle 下沉预备分支
 

@@ -183,8 +183,8 @@ Plan Validation 的 5 项子检查：
 
 | | DeepSeekChatClient | Mock |
 |---|---|---|
-| **模型** | deepseek-v4-pro | 无，测试用 |
-| **代码** | [engine/nl2sql/generator.py:50](engine/nl2sql/generator.py#L50) | [engine/nl2sql/generator.py:103](engine/nl2sql/generator.py#L103) `get_default_llm_client()` |
+| **模型** | deepseek-v4-flash（.env LLM_MODEL 唯一入口，代码仅兜底） | 无，测试用 |
+| **代码** | [engine/nl2sql/generator.py:152](engine/nl2sql/generator.py#L152) | [engine/nl2sql/generator.py:103](engine/nl2sql/generator.py#L103) `get_default_llm_client()` |
 
 两者实现同一个 `LLMClient` Protocol（`complete(prompt) → str`）。
 

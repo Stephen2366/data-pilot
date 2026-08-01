@@ -251,7 +251,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
   - v4 主线判断保持：M12 新 pipeline 低通过率的确定性根因优先看 `_format_plan_metrics()` 漏传 `metrics.yaml` 的 `filter/default_time_field`，以及 eval 只做列名 / contains 检查导致 GMV=NULL 也 pass。
   - v5 收紧优先级：第一批执行顺序改为先做 `expected_value` 最小 eval，让固定事实数值错误能被测出来；再修 metrics prompt 管道和 system prompt；之后重跑 formal / challenge / diagnostic。
   - JSON mode 影响从"可能根因"降级为"待验证假设"，仅保留三组对照实验（当前 / SQL 层放开 / 全部放开），不在第一批直接改。
-  - `p3a_multi_002` 的 `products` 问题不再直接归因为 Schema Retrieval 没召回；当前复核显示同题 SchemaGraph 可包含 `products`，M12 formal 报告里的 `missing_tables=['products']` 更可能是 SQL 生成阶段选择 `order_items.product_name_snapshot`。后续需通过 trace 区分召回、QueryPlan、SQL 生成三层。
+  - `p3a_multi_002` 的 `products` 问题不再直接归因为 Schema Retrieval 没召回；当前复核显示同题 SchemaGraph 可包含 `products`，M12 formal 报告里的 `missing_tables=['products']` 更可能是 SQL 生成阶段选择 `order_items.product_name_snapshot`。后续需通过 trace 区分召回、QueryPlan、SQL 生成三层。（结论：不能凭 `missing_tables` 直接判检索漏召回，先看 trace 定位到层。）
   - `orders.md` 的 `order_status` 字段说明后续应同时补 `canceled` 和 `pending_payment`，避免模型继续幻想不存在的 `unpaid` 状态。
 - 验证快照：
   - 已确认正确 `paid_at` 口径 2026 年 6 月 GMV = `11285752.00`；M12 报告中 `created_at` + `unpaid/cancelled` 口径会得到 NULL，但旧 eval 仍可因 `contains: gmv` 判 pass。
@@ -303,6 +303,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 遗留：
   - M12 未解决 LLM 列名别名漂移问题（category/category_name、coupon_order_count 等），属于 P0 schema/plan/prompt 优化范畴，留给后续阶段。
   - 阶段三A 全部 5 个模块（M8-M12）代码已就绪；M12 收工整理后等待人工检查和 accept-module。
+  - ⚠️ 注：本条「主要瓶颈是 LLM 输出列名不稳定（别名漂移）」的判断后经 M13 复核推翻——主因是 metrics → prompt 管道断裂（`_format_plan_metrics()` 漏字段）+ 数据质量彩蛋，别名漂移只是症状；部分「失败」还是 eval 误判（假漂移）。详见下方 M13 第一批条目。
 
 ### [模块任务] Phase 3A M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
 

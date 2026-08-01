@@ -7,7 +7,7 @@
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
 - 当前模块：M18 Smoke / Experiment / 阶段收尾（已完成，待 accept-module）
 - 下一模块：Phase 3 RAG / Hybrid（基于 M16B live lifecycle 底座继续评估）
-- 上一模块验收：M18 未验收（待 accept-module）
+- 上一模块验收：M18 已验收（2026-08-02，报告 .agent_work/temp/accept-M18-20260802.md）
 - 阻塞项：无
 - 更新时间：2026-07-31
 

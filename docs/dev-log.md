@@ -312,7 +312,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 ```
 
-## ★ ★ M4 NL2SQL 最小链路与安全
+## ★ M4 NL2SQL 最小链路与安全
 
 （2026-07-20）
 
@@ -472,7 +472,7 @@ M3 模板问题 —— 大致结果：`safety_status=passed`，`answer` 会提�
 }
 ```
 
-## ★ ★ M5 AgentResponse 扩展、Trace、Tool 与图表
+## ★ M5 AgentResponse 扩展、Trace、Tool 与图表
 
 （2026-07-20）
 
@@ -863,7 +863,7 @@ python -m uvicorn app.main:app --reload
 
 阶段二讲的是一个"**从 0 到 1 开面馆**"的故事，可以拆成四幕：
 
-第一幕是**把店开起来**（M0-M3，v0）：先定厨房设备（工程骨架，MySQL 主路径）、备齐 7 种食材（数据底座：用户/商品/渠道/订单/退款/工单/知识库 7 张表 + 确定性假数据）、装好窗口（FastAPI + 统一日志/异常/分页）、然后只卖三样固定菜（5 条模板 SQL）。关键决策是：**先端到端跑通，不急着请大厨**——模板没命中的问题先结构化地告诉用户"我不会"，而不是假装会。同时把"卫生检查"前置：所有 SQL 执行前必须过 **sqlglot AST 只读检查**（只允许单条 SELECT），这个安全入口从 v0 就固定下来。
+第一幕是**把店开起来**（M0-M3，v0）：先定厨房设备（工程骨架，MySQL 主路径）、备齐 7 种食材（数据底座：用户/商品/渠道/订单/退款/工单/知识库 7 张表 + 确定性假数据）、装好窗口（FastAPI + 统一日志/异常/分页）、然后只卖三样固定菜（5 条模板 SQL）。关键决策是：**先端到端跑通，不急着请大厨**——模板没命中的问题先结构化地告诉用户"我不会"。同时把"卫生检查"前置：所有 SQL 执行前必须过 **sqlglot AST 只读检查**（只允许单条 SELECT）。
 
 第二幕是**请大厨，但卫生检查不变**（M4，v1 起点）：模板没命中时改调 **DeepSeek LLM 生成 SQL**，但模型生成的 SQL 和模板 SQL 走**同一个安全闸门**——sqlglot AST 只读 + 表级 RBAC + 字段级敏感字段拦截（`users.email / users.phone` 从建表第一天就标了敏感）。安全不是靠 prompt 求模型"别做坏事"，而是执行前的硬拦截。
 
@@ -925,39 +925,25 @@ python -m uvicorn app.main:app --reload
 
 ### 面试怎么讲
 
-本阶段完整叙述，可以直接背/改写到面试或简历中：
+我的 DataPilot 项目从 0 到 1 搭建了一个 **SQL Agent v1**，核心方法是"先跑通、再变强、然后给它装上尺子和眼睛"。v0 阶段先用 5 条模板 SQL 跑通端到端闭环，并把 **sqlglot AST 只读检查**固定为所有 SQL 执行前唯一入口；v1 阶段接入 DeepSeek LLM 生成 SQL，但模型生成的 SQL 与模板 SQL 走**同一个安全闸门**——AST 只读 + 表级 RBAC + 字段级敏感字段拦截，安全不靠 prompt 靠硬拦截。随后把响应扩展成结构化 AgentResponse 契约（答案/SQL/表格/图表/工具调用/trace），SQL 执行收进统一 SQL Tool，每次查询写 JSONL Trace，并搭了 EvalOps-lite（6 条 smoke 走真实 API 评测）和 Streamlit 演示页，形成可评测、可演示的 v1 闭环。最后把数据底座从 7 张表升级为 **14 张物理表 + 1 万级确定性订单数据**，内置固定业务事实（如 GMV 11285752.00）和数据质量彩蛋，为阶段三的 Text2SQL 深化评测提供真实复杂度。
 
-> 我的 DataPilot 项目从 0 到 1 搭建了一个 **SQL Agent v1**，核心方法是"先跑通、再变强、然后给它装上尺子和眼睛"。v0 阶段先用 5 条模板 SQL 跑通端到端闭环，并把 **sqlglot AST 只读检查**固定为所有 SQL 执行前唯一入口；v1 阶段接入 DeepSeek LLM 生成 SQL，但模型生成的 SQL 与模板 SQL 走**同一个安全闸门**——AST 只读 + 表级 RBAC + 字段级敏感字段拦截，安全不靠 prompt 靠硬拦截。随后把响应扩展成结构化 AgentResponse 契约（答案/SQL/表格/图表/工具调用/trace），SQL 执行收进统一 SQL Tool，每次查询写 JSONL Trace，并搭了 EvalOps-lite（6 条 smoke 走真实 API 评测）和 Streamlit 演示页，形成可评测、可演示的 v1 闭环。最后把数据底座从 7 张表升级为 **14 张物理表 + 1 万级确定性订单数据**，内置固定业务事实（如 GMV 11285752.00）和数据质量彩蛋，为阶段三的 Text2SQL 深化评测提供真实复杂度。
+1. **[基础追问] 安全链路从 M1 到 M4 是怎么层层叠加的？**
 
-1. **[基础追问] v0 为什么要先用模板 SQL 跑通，而不是直接上 LLM？**
+   三层递进：M1 在**模型层标记敏感字段**（`users.email / users.phone` 建表时就标敏感，给拦截留依据）；M3 固定执行入口——所有 SQL 先过 **sqlglot AST 只读检查**，只允许单条 SELECT，DROP/DELETE 等直接 blocked；M4 叠加**表级 RBAC + 字段级敏感字段拦截**——按角色矩阵判断能否访问某表，`SELECT * FROM users` 也会被展开检查是否碰到敏感列。核心是"SQL 来源可以变（模板 → LLM → 后来的新 pipeline），执行前的安全入口不变"，这条原则从 v0 一路延续到现在。
 
-   因为"端到端跑通"和"LLM 生成"是两个不同复杂度的问题，混在一起任何一个出错都难归因。v0 先把链路、安全入口和响应契约稳定下来——模板 SQL 是我们自己写的，出错只可能是链路问题；模板未命中先结构化返回"我不会"，不让系统假装会。v1 再叠加 LLM 时，安全（同一个 SQL Guard 入口）、契约（AgentResponse）和评测（trace）都是稳定的，LLM 的波动被隔离在"SQL 从哪来"这一个变量里。
+2. **[工程/深挖追问] EvalOps-lite 为什么选 API seam（TestClient + 内存 SQLite），而不是直接调内部函数？**
 
-2. **[基础追问] 安全链路从 M1 到 M4 是怎么层层叠加的？**
+   因为评测要验证的是"用户真正走的路"——**HTTP** 请求进来、经过路由、Schema 校验、编排、SQL Guard、执行、返回响应整条链路，而不只是某个函数的正确性。直接调 pipeline 会绕过路由和契约，可能漏掉真实调用链问题（比如字段没进响应、Guard 没被调用）。API seam 用 TestClient + 内存 SQLite 调真实路由，同时覆盖 AgentResponse、Trace、SQL Tool、chart_spec 和安全拦截，且不污染 MySQL 主库——成本是包装一层测试客户端，收益是评测可信。
 
-   三层递进：**M1 在模型层标记敏感字段**（`users.email / users.phone` 建表时就标敏感，给拦截留依据）；**M3 固定执行入口**——所有 SQL 先过 sqlglot AST 只读检查，只允许单条 SELECT，DROP/DELETE 等直接 blocked；**M4 叠加表级 RBAC + 字段级敏感字段拦截**——按角色矩阵判断能否访问某表，`SELECT * FROM users` 也会被展开检查是否碰到敏感列。核心是"SQL 来源可以变（模板 → LLM → 后来的新 pipeline），执行前的安全入口不变"，这条原则从 v0 一路延续到现在。
-
-3. **[工程/深挖追问] AgentResponse 为什么用"增量扩展"而不是推倒重来？**
-
-   因为它是前后端和评测系统之间的"固定合同"。M3 的简化版字段（route/answer/sql/columns/rows/safety_status/trace_id）已经被模板链路、后续的 LLM 链路和评测脚本依赖；如果 M5 推倒重来，所有下游都要跟着改，还容易在改的过程中悄悄改变字段含义。增量扩展（保留旧字段语义不变，只新增 tables_used / chart_spec / tool_calls 等）让旧链路零改动通过回归，新能力也能被评测直接消费。这和 Java 后端"公开 API 只加字段不改字段"的兼容性原则一致。
-
-4. **[工程/深挖追问] EvalOps-lite 为什么选 API seam（TestClient + 内存 SQLite），而不是直接调内部函数？**
-
-   因为评测要验证的是"用户真正走的路"——HTTP 请求进来、经过路由、Schema 校验、编排、SQL Guard、执行、返回响应整条链路，而不只是某个函数的正确性。直接调 pipeline 会绕过路由和契约，可能漏掉真实调用链问题（比如字段没进响应、Guard 没被调用）。API seam 用 TestClient + 内存 SQLite 调真实路由，同时覆盖 AgentResponse、Trace、SQL Tool、chart_spec 和安全拦截，且不污染 MySQL 主库——成本是包装一层测试客户端，收益是评测可信。
-
-5. **[工程/深挖追问] 为什么要把数据从 7 表升级到 14 表 + 1 万级订单？数据质量彩蛋的意义是什么？**
+3. **[工程/深挖追问] 为什么要把数据从 7 表升级到 14 表 + 1 万级订单？数据质量彩蛋的意义是什么？**
 
    7 表是"教学版"：订单一单一商品、类目只是字符串、没有优惠券多对多、价格历史、宽表。这样的库能证明链路能跑，但撑不起后续 Schema Retrieval、JoinPath、QueryPlan 的评测——问题太简单，任何方案都显得好用。14 表引入订单明细（一单多品）、桥接表（多对多）、递归类目树、SCD 价格历史、宽表 vs 星型模型选择这些**真实 SQL 难题**；1 万级数据让聚合、join、性能问题真实起来。数据质量彩蛋（未支付订单、canceled/cancelled 拼写差异、金额不一致、负数退款）是**在不破坏约束的前提下模拟真实脏数据**，让 Agent 从"在干净玩具库答对题"走向"面对真实数据挑战"——这些彩蛋后来确实成了 Phase 3A 修口径的素材。
 
-6. **[工程/深挖追问] JSONL Trace 为什么够用？什么时候需要换？**
+4. **[工程/深挖追问] JSONL Trace 为什么够用？什么时候需要换？**
 
    M5-M6 阶段 trace 的消费者只有一个评测脚本：按行读取、判断 pass/fail、记录 error_type。JSONL"追加写入、按行读"正好满足，不需要 SQLite 表或查询接口——这是最小实现。什么时候需要换？**当 trace 需要被多路并发查询、需要按条件聚合、或者演示页/平台要在线展示时**（后来 M16 接 TraceRouter、Phase 3B 接 LangFuse 就是这两个触发点）。当时的取舍是"为现在够用的需求做最小实现，把扩展点留给真正需要的阶段"。
 
-7. **[压力追问] 阶段二只有 6 条 smoke 评测，这么少，怎么证明系统可用？**
-
-   承认 6 条确实少，这正是我们"评测前置"设计要解决的事：**32 条问题清单在 M3 就设计好了**（`eval/cases_plan.md`），M6 只落地了其中 6 条 smoke（2 简单 + 2 聚合 + 1 多表 join + 1 安全拦截）是因为当时只有这些能力可测——模板和 LLM 链路都没覆盖 RAG、复杂 join 场景，测了也过不了，反而失真。6 条 smoke 的价值是**证明主链路可跑、评测体系可运转**；完整评测是阶段三的事（后来 M8 起扩展到 10 formal + 16 challenge + 32 diagnostic）。另外一个佐证：每条 smoke 都有 JSONL trace 证据链，失败能归因，不是"看着过了"。
-
-8. **[压力追问] 数据里埋了彩蛋（金额不一致、负数退款），评测标准答案怎么确定？会不会模型查对了但被标准答案冤枉？**
+5. **[压力追问] 数据里埋了彩蛋（金额不一致、负数退款），评测标准答案怎么确定？会不会模型查对了但被标准答案冤枉？**
 
    这正是固定事实 + 确定性 seed 的意义：标准答案不是"模型输出什么就信什么"，而是**先用参考 SQL 在确定性数据上执行得到基准值**，再把它固化成语义明确的固定事实（比如 GMV = 11285752.00，Aurora 退款率最高）。彩蛋本身是数据事实，不是评测陷阱——比如金额不一致的 5 条订单是刻意设计的可解释样例，负数退款是合法的冲销记录，它们的口径都写进了 `database-current-state.md` 和 metrics.yaml。只要问题语义和口径定义一致，标准答案不会冤枉模型；真正会冤枉的是口径定义不清（比如 `paid_at` vs `created_at`），而这类问题在 Phase 3A 修口径时被逐一暴露和校准——数据彩蛋反而帮我们把口径磨清楚了。
 
@@ -1108,7 +1094,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cas
 
 本模块暂无新的交互页面；它的交互方式是评测报告。运行上面的 baseline 命令后，打开 `eval/reports/phase3a-baseline.md` 和 `eval/reports/phase3a-challenge-baseline.md`，可以看到每条 case 的 pass/fail、review_required、issue tag、trace_id 和实际 SQL。这两个报告就是后续 M12 新旧链路对照的旧链路输入。
 
-## ★ M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线
+## ★ M8.5 扩展为 32 条 diagnostic
 
 （2026-07-23）
 
@@ -1270,29 +1256,18 @@ M9 的数据流向：
 
 ### 面试怎么讲
 
-“M9 我给 Text2SQL 加了一层**字段级 Schema Retrieval 和结构化 JoinPath**。用户问题进来后，系统不再把全库 schema 一股脑塞给 LLM，而是先从 domain pack 生成 field_doc、metric_doc、relation_doc，再用 keyword + vector 两路召回当前问题相关的表、字段、指标和关系。多表查询不让模型自由猜 Join，而是从 `relations.yaml` 里找结构化 JoinPath。”
+“我给 Text2SQL 加了一层**字段级 Schema Retrieval **和 **结构化 JoinPath**。用户问题进来后，系统不再把全库 schema 一股脑塞给 LLM，而是先从 domain pack 生成 **field_doc、metric_doc、relation_doc**，再用 keyword + vector 两路召回当前问题相关的表、字段、指标和关系。多表查询不让模型自由猜 Join，而是从 `relations.yaml` 里找结构化 **JoinPath**。”
 
 “这一步的价值是把 Text2SQL 的第一层不确定性拆出来：到底有没有召回正确表字段、有没有找到合法 Join、指标文档有没有命中，都可以在 M9 单独测试。自动化结果证明 formal 允许类 SQL 的表召回、字段指标召回和多表 JoinPath 达到阶段目标，为后续 M10 QueryPlan 和 M11 局部 Schema SQL prompt 打了可验证基础。”
 
-> 现在口径：M9 当时默认只接 `InMemory + Deterministic`，Milvus 先保留边界；M9.1/M9.2 后已合入可选 Milvus 和 SiliconFlow；M14-lite 后新增正式环境变量开关。默认仍是 `SCHEMA_VECTOR_BACKEND=inmemory` + `SCHEMA_EMBEDDING_PROVIDER=deterministic`，显式设置才走 Milvus/SiliconFlow。
-
 1. **面试官问“为什么不直接把全库 schema 给 LLM？”**
 
-   可以答：“全库 schema 会让 prompt 很长，而且模型容易在不相关表字段里漂移。M9 先做 schema retrieval，只给当前问题相关的字段、指标和关系，既减少噪音，也让失败可以归因到召回层。”
-
-   这段突出的是 **局部上下文** 和 **可诊断性**。
+   可以答：“全库 schema 会让 **prompt 很长**，而且模型容易在**不相关表字段里漂移**。M9 先做 schema retrieval，只给当前问题相关的字段、指标和关系，既减少噪音，也让失败可以归因到召回层。”这段突出的是 **局部上下文** 和 **可诊断性**。
 
 2. **面试官问“JoinPath 怎么避免模型乱连表？”**
 
-   可以答：“Join 关系不靠模型自由发挥，而是来自 `relations.yaml`。SchemaGraph 根据召回到的表和结构化关系找 JoinPath，后续 QueryPlan 只允许引用这些 relation id。这样 Join 从自然语言猜测变成了可校验的关系事实。”
+   可以答：“Join 关系不靠模型自由发挥，而是来自 `relations.yaml`。SchemaGraph 根据召回到的表和结构化关系找 JoinPath，后续 QueryPlan 只允许引用这些 relation id。这样 Join 从自然语言猜测变成了可校验的关系事实。”这段突出的是 **关系单一事实源**。
 
-   这段突出的是 **关系单一事实源**。
-
-3. **面试官问“向量检索是不是必须依赖 Milvus？”**
-
-   可以答：“不是。默认路径用 deterministic in-memory，保证 pytest、CI 和本地开发离线稳定；Milvus/SiliconFlow 是可选后端，适合后续 RAG 或更大 schema 规模时显式开启。这个取舍避免项目被外部服务环境绑住。”
-
-   这段突出的是 **工程稳定性优先，外部能力显式启用**。
 
 ### 验证与下一步
 
@@ -1320,7 +1295,7 @@ git diff --check
 
 本模块暂无新的 Swagger 或前端页面；它是后端 Text2SQL 中间层能力。学习时可以先跑上面的 M9 测试，再打开 `tests/test_phase3a_schema_retrieval.py` 看每个断言：它会告诉你哪些中文问题召回了哪些表、字段、指标和 JoinPath。后续 M10/M11 会把这块能力接到 QueryPlan 和新 pipeline 里。
 
-## ★ M9.1 / M9.2 分支试验 Milvus + SiliconFlow Embedding
+## ★ M9.1 / M9.2 试验 embedding
 
 （2026-07-23 ~ 2026-07-24）
 
@@ -1328,9 +1303,9 @@ git diff --check
 
 ### 这次做了什么
 
-M9 验收后，我们先做了 M9.1：验证 **Milvus 作为 Schema Retriever 的向量存储** 是否能跑通。它做的事情很单纯：把 M9 的 `VectorIndex` 接口换一个实现，默认链路不变，显式传入 `MilvusVectorIndex` 时才会连接 Docker Milvus。实验结果证明 Milvus adapter 能正常建 collection、写入 schema document 向量、flush、load、search。
+M9.1：验证 **Milvus 作为 Schema Retriever 的向量存储** 是否能跑通。它做的事情很单纯：把 M9 的 `VectorIndex` 接口换一个实现，默认链路不变，显式传入 `MilvusVectorIndex` 时才会连接 Docker Milvus。实验结果证明 Milvus adapter 能正常建 collection、写入 schema document 向量、flush、load、search。
 
-随后做 M9.2：把 M9.1 里的 fake embedding 换成 **SiliconFlow 真实中文 embedding**。这次测试了 **BAAI/bge-m3** 和 **Qwen/Qwen3-Embedding-0.6B**，并把报告拆成两个视角：**merged_top30** 看当前系统最终召回效果，**vector_only_top12** 看 embedding 模型自己的排序能力。
+M9.2：把 M9.1 里的 fake embedding 换成 **SiliconFlow 真实中文 embedding**。这次测试了 **BAAI/bge-m3** 和 **Qwen/Qwen3-Embedding-0.6B**，并把报告拆成两个视角：**merged_top30** 看当前系统最终召回效果，**vector_only_top12** 看 embedding 模型自己的排序能力。
 
 最后用户确认把这套能力合入主线，但合入方式是 **optional capability**：主线代码里有 Milvus adapter、SiliconFlow provider 和 smoke 脚本；默认 `retrieve_schema()` 仍然走 in-memory，不要求 Docker Milvus、不要求联网 API、不消耗余额。
 
@@ -1398,25 +1373,18 @@ M9.2 的结论更有价值：**真实 embedding 的向量排序能力更好，�
 
 “这个取舍很适合面试讲：我不是为了简历技术栈强行上 Milvus，而是先把 adapter、provider、smoke 和对比报告做好，让它成为可选能力。等后续进入 RAG 或 schema 规模变大，再通过配置显式开启；平时 pytest 和本地启动仍然稳定、可重复。”
 
-> 现在口径：M14-lite 后已经把这套可选能力接入 Settings：`SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=siliconflow` 等环境变量可以显式启用。默认仍不变；M14-lite 的临时 A/B 记录显示 Milvus + SiliconFlow 没提升 M13 eval 分数，所以不应把它当成刷分主线。
-
 1. **面试官问“你为什么接 Milvus 但不设为默认？”**
 
-   可以答：“因为默认链路要服务 pytest、CI、本地开发和新同学启动，不能依赖 Docker Milvus 或联网 embedding。Milvus 是生产候选能力，应该显式开启；默认路径保持 deterministic in-memory，保证工程稳定。”
-
-   这段突出的是 **默认稳定，能力可选**。
+   可以答：“因为默认链路要服务 pytest、CI、本地开发和新同学启动，不能依赖 Docker Milvus 或联网 embedding。Milvus 是生产候选能力，应该显式开启；默认路径保持 deterministic in-memory，保证工程稳定。”这段突出的是 **默认稳定，能力可选**。
 
 2. **面试官问“真实 embedding 实验有什么结论？”**
 
    可以答：“Qwen3 embedding 在 vector-only 召回上优于 fake embedding，说明真实中文 embedding 有价值。但最终 merged 结果还受 keyword 和 relations.yaml 影响，当前 eval 没明显收益，所以我没有盲目切默认，而是保留为后续 RAG / 大规模 schema 的配置能力。”
 
-   这段突出的是 **实验结论不等于立刻改默认**。
-
 3. **面试官问“可插拔设计体现在哪里？”**
 
-   可以答：“上层 retriever 只依赖 `VectorIndex.search()` 和 `EmbeddingProvider.embed()` 这两个协议。InMemory、Milvus、Deterministic、SiliconFlow 都实现这些边界，后续换 Qdrant 或其他 embedding provider，不需要改 Schema Retrieval 主流程。”
+   可以答：“上层 retriever 只依赖 `VectorIndex.search()` 和 `EmbeddingProvider.embed()` 这两个协议。InMemory、Milvus、Deterministic、SiliconFlow 都实现这些边界，后续换 Qdrant 或其他 embedding provider，不需要改 Schema Retrieval 主流程。”这段突出的是 **接口隔离**。
 
-   这段突出的是 **接口隔离**。
 
 ### 验证与下一步
 
@@ -1451,19 +1419,21 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m9_2_rea
 
 （2026-07-24）
 
-**简述**：M10 给 Text2SQL 加了一个 **SQL 生成前的结构化计划层**，像后端接口里的 DTO + Validator，先检查“准备查什么”是否合法，再交给后续 SQL 生成。M9 已经把问题相关的表、字段、Join 召回出来了，但如果让 LLM 直接拿着这些信息写 SQL，它仍可能编造不存在的字段、乱连表、或者在 SQL 里偷查敏感数据——这在代码里叫"幻觉"，在企业里叫"事故"。M10 的做法是：在 LLM 写 SQL 之前，先让它填一张"申请表"（QueryPlanStep），写明要查哪些表、用哪些字段、按什么 Join 条件、输出什么列；填完后系统逐项核对这张申请表是否都在 M9 的合法"菜单"里。整个过程相当于后端接口收到请求后先做参数校验——没通过就不往下走，通过了才交给 M11 生成 SQL。
+**简述**：M10 给 Text2SQL 加了一个 **SQL 生成前的结构化计划层**，像后端接口里的 DTO + Validator，先检查“准备查什么”是否合法，再交给后续 SQL 生成。
+
+M9 已经把问题相关的表、字段、Join 召回出来了，但如果让 LLM 直接拿着这些信息写 SQL，它仍可能**编造**不存在的字段、乱连表、或者在 SQL 里偷查**敏感数据**——这在代码里叫"幻觉"，在企业里叫"事故"。M10 的做法是：在 LLM 写 SQL 之前，先让它填一张**"申请表"（QueryPlanStep）**，写明要查哪些表、用哪些字段、按什么 Join 条件、输出什么列；填完后系统逐项核对这张申请表是否都在 M9 的合法"菜单"里。整个过程相当于后端接口收到请求后先做参数校验——没通过就不往下走，通过了才交给 M11 生成 SQL。
 
 ### 这次做了什么
 
-M9 已经能把问题相关的表、字段、指标和 JoinPath 召回出来，但如果直接让模型拿这些上下文生成 SQL，中间仍有一个黑盒风险：模型可能编造不存在字段、乱连 Join、或者在 SQL 生成前就计划查询敏感字段。
+M9 已经能把问题相关的表、字段、指标和 JoinPath 召回出来，但如果直接让模型拿这些上下文生成 SQL，中间仍有一个黑盒风险：**模型可能编造不存在字段、乱连 Join、或者在 SQL 生成前就计划查询敏感字段。**
 
 M10 做的就是在这个位置加一道 **QueryPlan 自检门**。模型后续会先输出 `QueryPlan(steps=[QueryPlanStep])`，每个 step 必须写清楚要用哪些表、字段、指标、过滤条件、Join relation id 和输出列。`validate_query_plan()` 会把这些内容逐项对照 M9 的 `SchemaGraph` 和 `DomainSchema`：不存在的表字段会被打 `missing_table / missing_column`，非法 Join 会被打 `invalid_join_path`，多个可执行 SQL step 会被打 `unsupported_multi_step_plan`，普通角色查询 `users.email` 这类敏感字段会提前打 `sensitive_field_access`。
 
-这层还刻意保留了未来扩展空间：`QueryPlan.steps` 是列表，`step_id / step_index / depends_on` 可以接后续 Plan-and-Execute；但 **Phase 3A 只允许一个 `sql_query` step**。也就是说，结构可以长远，执行边界仍然收紧。
+这层还刻意保留了未来扩展空间：**`QueryPlan.steps` 是列表**，`step_id / step_index / depends_on` 可以接后续 Plan-and-Execute；但 **Phase 3A 只允许一个 `sql_query` step**。也就是说，结构可以长远，执行边界仍然收紧。
 
 ### 新概念
 
-- **QueryPlanStep**：一次查询计划里的一个步骤。可以理解成 SQL 生成前的“施工单”：写明要查哪些表、用哪些字段、按什么指标聚合、需要哪些 Join。
+- **QueryPlanStep**：一次查询计划里的一个步骤。可以理解成 SQL 生成前的“施工单”：**写明要查哪些表、用哪些字段、按什么指标聚合、需要哪些 Join。**
 - **Plan Validation**：计划自检。它不是执行 SQL，而是检查计划引用的东西是否都在可信 Schema 里，类似 SpringBoot Controller 收到请求后先做参数校验。
 - **CoT 不外露**：M10 不保存 `thoughts` 或原始推理过程，只保留 `purpose` 这种一句话意图摘要。这样既能调试，又不会把模型自由推理塞进公开响应。
 - **Join relation id**：Join 不靠自然语言猜，而是使用 `relations.yaml` 里的关系 ID，例如 `order_items_order`。这让“能不能这么连表”变成可校验事实。
@@ -1500,33 +1470,25 @@ M10 做的就是在这个位置加一道 **QueryPlan 自检门**。模型后续�
 
 ### 面试怎么讲
 
-“M10 我在 Text2SQL 里加了一层**可校验的中间表示 QueryPlanStep**。普通 NL2SQL 是直接从问题到 SQL，失败时只能看最终 SQL；M10 让模型先声明准备查哪些表、哪些字段、哪些指标、用哪些 Join relation id，再由本地 validator 检查这些对象是否来自 M9 的局部 SchemaGraph。这样错误可以在 SQL 生成前暴露出来。”
+“M10 我在 Text2SQL 里加了一层**可校验的中间表示 QueryPlanStep**。普通 NL2SQL 是直接从问题到 SQL，失败时只能看最终 SQL；M10 让模型先声明准备查哪些表、哪些字段、哪些指标、用哪些 Join relation id，再由本地 validator 检查这些对象**是否来自 M9 的局部 SchemaGraph**。这样错误可以在 SQL 生成前暴露出来。”
 
 “这层中间表示的价值是把模型输出从自由文本变成结构化契约。评测和 trace 可以稳定打出 `missing_column`、`invalid_join_path`、`unsupported_multi_step_plan`、`sensitive_field_access` 这类 issue tag，后续排查就能知道问题发生在计划层，而不是等 SQL 执行报错后再猜。”
 
-> 现在口径：M10 当时的文档写的是“非 admin 角色访问敏感字段会拦截”；M14-lite 后安全口径已收紧为 **敏感字段优先于 admin 角色**。所以 `sensitive_field_access` 现在对 admin 也生效，最终仍由 SQL Guard 在执行前再兜底。
-
 1. **面试官问“QueryPlanStep 和直接生成 SQL 比有什么优势？”**
 
-   可以答：“直接 SQL 太难诊断，错了只能看一长串 SQL。QueryPlanStep 把模型意图拆成表、字段、指标、Join、过滤、聚合和输出列，本地 validator 可以逐项检查。这样错误更早暴露，也更容易告诉模型或开发者到底错在哪里。”
-
-   这段突出的是 **结构化意图表达**。
+   可以答：“直接 SQL 太难诊断，错了只能看一长串 SQL。QueryPlanStep 把模型意图拆成表、字段、指标、Join、过滤、聚合和输出列，本地 validator 可以逐项检查。这样错误更早暴露，也更容易告诉模型或开发者到底错在哪里。”这段突出的是 **结构化意图表达**。
 
 2. **面试官问“为什么用 relation id 表示 Join？”**
 
-   可以答：“Join 条件应该来自 `relations.yaml`，而不是模型现场编。M10 让 QueryPlan 引用 relation id，validator 再检查 id 是否存在于局部 SchemaGraph。这样 JoinPath 就是结构化事实，不是 prompt 里的建议。”
-
-   这段突出的是 **Join 可校验**。
+   可以答：“Join 条件应该来自 `relations.yaml`，而不是模型现场编。M10 让 QueryPlan 引用 relation id，validator 再检查 id 是否存在于局部 SchemaGraph。这样 JoinPath 就是结构化事实，不是 prompt 里的建议。”这段突出的是 **Join 可校验**。
 
 3. **面试官问“为什么预留多 step 但当前只允许单 SQL？”**
 
-   可以答：“Pydantic 结构上预留 `steps`，是为了后续 Plan-and-Execute 或 Hybrid；但 Phase 3A 当前执行器只支持单 SQL。如果此时放开多个 sql_query step，会把事务、安全、结果合并和 trace 都提前复杂化。所以 M10 先把多 SQL plan 拦成 `unsupported_multi_step_plan`。”
-
-   这段突出的是 **结构可扩展，执行边界收紧**。
+   可以答：“Pydantic 结构上预留 `steps`，是为了后续 Plan-and-Execute 或 Hybrid；但 Phase 3A 当前执行器只支持单 SQL。如果此时放开多个 sql_query step，会把事务、安全、结果合并和 trace 都提前复杂化。所以 M10 先把多 SQL plan 拦成 `unsupported_multi_step_plan`。”这段突出的是 **结构可扩展，执行边界收紧**。
 
 4. **面试官问“安全为什么还要 SQL Guard 兜底？”**
 
-   可以答：“Plan Validation 是生成 SQL 前的预检，它能提前发现计划层访问敏感字段或编造字段；但模型最后生成的 SQL 仍可能偏离计划，所以执行前必须再走 SQL Guard。两层分别在计划阶段和运行阶段拦截，形成纵深防御。”
+   可以答：“Plan Validation 是生成 SQL 前的预检，**它能提前发现计划层访问敏感字段或编造字段**；但模型最后生成的 SQL 仍可能偏离计划，所以执行前必须再走 SQL Guard。两层分别在计划阶段和运行阶段拦截，形成纵深防御。”
 
    这段突出的是 **预检不替代最终门禁**。
 
@@ -1562,13 +1524,13 @@ git diff --check
 
 **简述**：M11 把 M9 的 **Schema Retrieval / JoinPath**、M10 的 **QueryPlanStep 自检** 和 M5 的 **SQL Tool / Trace** 串成了一条真正能从 `/api/query` 触发的新 Text2SQL 链路。
 
-旧接口默认仍走模板优先，保证 M5/M6 演示不被破坏；评测或调试时传 `force_new_pipeline=true`，就会强制绕过模板，走 `schema_retrieval -> query_plan -> local_schema_sql -> sql_guard -> sql_execution`，并把每一步写进 JSONL 的 `trace_steps`。这一步的价值是让系统第一次具备“能证明自己走了新链路”的证据，而不只是报告里写了新链路。
+评测或调试时传 `force_new_pipeline=true`，就会强制绕过模板，走 `schema_retrieval -> query_plan -> local_schema_sql -> sql_guard -> sql_execution`，并把每一步写进 JSONL 的 `trace_steps`。
 
 ### 这次做了什么
 
-M10 做完后，DataPilot 已经能把“准备查什么”变成 QueryPlan，但还没有接到真实请求里。M11 做的就是把这条中间层真正串起来：API 收到请求后，如果 `force_new_pipeline=false`，旧模板链路照常工作；如果 `force_new_pipeline=true`，就进入 `run_text2sql_pipeline()`。
+M10 做完后，DataPilot 已经能把“准备查什么”变成 QueryPlan，但还没有接到真实请求里。M11 做的就是把这条中间层真正串起来：API 收到请求后，如果 `force_new_pipeline=true`，就进入 `run_text2sql_pipeline()`。
 
-新 pipeline 会先召回**局部 Schema**，再构建 `SchemaGraph / JoinPath`，然后让 LLM 生成 **`QueryPlan`**，通过本地 validator 后再用局部 Schema prompt 生成 SQL。生成出来的 SQL 不会直接执行，而是统一交给 `run_sql_tool()`，继续经过 SQL Guard、RBAC 和敏感字段策略。执行成功后，结果会尝试生成图表；无图表也不影响 SQL 答案。
+新 pipeline 会先召回**局部 Schema**，再构建 **`SchemaGraph / JoinPath`**，然后让 LLM 生成 **`QueryPlan`**，通过本地 validator 后再用局部 Schema prompt 生成 SQL。生成出来的 SQL 不会直接执行，而是统一交给 `run_sql_tool()`，继续经过 **SQL Guard、RBAC 和敏感字段策略**。执行成功后，结果会尝试生成图表；无图表也不影响 SQL 答案。
 
 最重要的是：这条链路会把每一步写成 **`TraceStep`**，包括步骤名、顺序、类型、状态、耗时、错误类型和 metadata。后续 M12 做对照报告时，就能从 trace 里看见“到底走了哪些步骤、在哪一步失败、局部 Schema 有多少表字段、SQL 执行返回了几行”。
 
@@ -1619,33 +1581,20 @@ M10 做完后，DataPilot 已经能把“准备查什么”变成 QueryPlan，�
 
 ### 面试怎么讲
 
-“M11 我把 Text2SQL 从一条黑盒 LLM 调用，升级成一条**可观测、可校验、可灰度的新 pipeline**。以前用户问一句话，系统直接给 SQL，失败时很难判断错在 schema 召回、查询计划、SQL 生成还是安全拦截。M11 后，请求会先走 Schema Retrieval 和 SchemaGraph，只把相关表字段交给模型；再让模型生成结构化 QueryPlan，本地校验表、字段、指标、Join 是否来自可信上下文；最后才基于局部 Schema 生成 SQL，并统一经过 SQL Guard 执行。每一步都会写成 `TraceStep`，所以后续 M12 能用报告证明新链路到底走了哪些步骤、在哪一层失败。”
-
-“这个模块的另一个重点是**不破坏旧链路**。普通 `/api/query` 默认仍走模板优先，M5/M6 的演示体验不变；只有显式传 `force_new_pipeline=true`，或者 eval 里设置 `pipeline_mode=new_text2sql`，才会强制进入新 pipeline。这样既能安全灰度，也能让评测脚本精准测新链路，不会出现报告说跑了新 pipeline、实际被模板兜底的情况。”
+“M11 我把 Text2SQL 从一条黑盒 LLM 调用，升级成一条**可观测、可校验、可灰度的新 pipeline**。以前用户问一句话，系统直接给 SQL，失败时很难判断错在 schema 召回、查询计划、SQL 生成还是安全拦截。M11 后，请求会先走 **Schema Retrieval 和 SchemaGraph**，只把相关表字段交给模型；再让模型生成结构化 **QueryPlan**，本地**校验**表、字段、指标、Join 是否来自可信上下文；最后才基于局部 Schema 生成 SQL，并统一经过 **SQL Guard** 执行。每一步都会写成 `TraceStep`，所以后续 M12 能用报告证明新链路到底走了哪些步骤、在哪一层失败。”
 
 1. **面试官问“你为什么要在 Text2SQL 前加 QueryPlan？”**
 
-   可以答：“直接让 LLM 生成 SQL 太黑盒，失败时只能看到最终 SQL。QueryPlan 相当于先让模型说清楚‘准备查哪些表、用哪些字段、按什么指标和 Join 查’，再由本地 validator 校验它有没有编造表字段或越权访问。这样可以把错误提前挡在 SQL 生成前，也能把失败归因拆清楚。”
-
-   这段突出的是 **结构化中间层** 和 **本地校验**，比单纯说“优化 prompt”更有工程含量。
-
-2. **面试官问“新 pipeline 会不会影响已有线上功能？”**
-
-   可以答：“不会。M11 用 `force_new_pipeline` 做显式灰度开关，默认请求仍走旧的模板优先链路。评测脚本通过 `pipeline_mode=new_text2sql` 自动带上这个开关，所以测试新链路时不会被模板误兜底。这个设计类似后端服务里的 feature flag：新能力可测、可灰度，但不直接冲击旧路径。”
-
-   这段突出的是 **兼容性意识** 和 **灰度发布思维**。
+   可以答：“直接让 LLM 生成 SQL 太黑盒，失败时只能看到最终 SQL。QueryPlan 相当于先让模型说清楚‘准备查哪些表、用哪些字段、按什么指标和 Join 查’，再由本地 validator 校验它有没有编造表字段或越权访问。这样可以把错误提前挡在 SQL 生成前，也能把失败归因拆清楚。”这段突出的是 **结构化中间层** 和 **本地校验**，比单纯说“优化 prompt”更有工程含量。
 
 3. **面试官问“你怎么保证 LLM 生成的 SQL 安全？”**
 
-   可以答：“M11 不把安全押在 prompt 上。QueryPlan 阶段会预检表、字段、Join 和敏感字段，但最终 SQL 仍统一交给 `run_sql_tool()`，走 SQL Guard 的 AST 只读检查、表级 RBAC 和敏感字段策略。测试里 fake LLM 故意返回 `DELETE FROM orders`，仍会被 SQL Guard 拦住。这说明安全边界在工具层，而不是靠模型自觉。”
-
-   这段突出的是 **纵深防御**：prompt / plan 可以减少错误，但最终门禁必须在确定性代码里。
+   可以答：“M11 不把安全押在 prompt 上。QueryPlan 阶段会预检表、字段、Join 和敏感字段，但最终 SQL 仍统一交给 `run_sql_tool()`，走 SQL Guard 的 AST 只读检查、表级 RBAC 和敏感字段策略。测试里 fake LLM 故意返回 `DELETE FROM orders`，仍会被 SQL Guard 拦住。这说明安全边界在工具层，而不是靠模型自觉。”这段突出的是 **纵深防御**：prompt / plan 可以减少错误，但最终门禁必须在确定性代码里。
 
 4. **面试官问“TraceStep 有什么价值？”**
 
-   可以答：“TraceStep 让一次 Text2SQL 请求从黑盒变成分步骤证据。它记录 schema retrieval、schema context、join path、query plan、plan validation、sql generation、sql guard、sql execution 等步骤，每步都有状态、耗时、错误类型和 metadata。后续做 eval 报告时，不只是知道 case 失败了，还能判断是 schema 没召回、plan 没通过，还是 SQL 执行被 guard 拦截。”
+   可以答：“TraceStep 让一次 Text2SQL 请求从黑盒变成分步骤证据。它记录 schema retrieval、schema context、join path、query plan、plan validation、sql generation、sql guard、sql execution 等步骤，每步都有状态、耗时、错误类型和 metadata。后续做 eval 报告时，不只是知道 case 失败了，还能判断是 schema 没召回、plan 没通过，还是 SQL 执行被 guard 拦截。”这段突出的是 **Agent 可观测性** 和 **失败归因能力**。
 
-   这段突出的是 **Agent 可观测性** 和 **失败归因能力**。
 
 ### 验证与下一步
 
@@ -1690,7 +1639,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:ap
 
 点 Execute 后，响应体仍是原来的 `AgentResponse` 形状；分步骤证据写在 JSONL trace 里。真实 LLM 的 SQL 质量留到 M12 用批量报告评估，不建议只凭一次 Swagger 结果判断新链路效果。
 
-## ★ M12 对照报告与阶段收尾
+## ★ M12 对新 pipeline 进行三类测评
 
 （2026-07-25）
 
@@ -1784,7 +1733,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 M12 本身没有新的 API 端点——它的体验入口是**批量评测报告**而非 Swagger。建议先看 `eval/reports/phase3a-comparison.md` 了解新旧链路差异的全貌，再用 `scripts/smoke_phase3a_text2sql.py` 一键复现（需要 DeepSeek API key）。
 
-## ★ ★ M13 Phase 3A 新 pipeline 质量修复
+## ★ ★ M13 pipeline 大修
 
 （2026-07-26）
 
@@ -1800,11 +1749,11 @@ M12 本身没有新的 API 端点——它的体验入口是**批量评测报告
 
 制定 fix 计划时，M13 把问题按证据强弱分层。第一层是确定性 bug：**eval 不看数值、`_format_plan_metrics()` 漏传 `filter/default_time_field`**，这两项必须先修。第二层是低风险工程修复：**QueryPlan / SQL generation 用不同 system prompt，trace 补 `metric_doc_hits` 和 plan step metadata**。第三层是待验证假设：JSON mode 是否压制推理、Schema Retrieval 是否真的漏表。这些没有证据前不动，避免把修复做成“大杂烩”。
 
-**第一步** 先修 eval。原来的 GMV case 只检查响应里有没有 `gmv` 这个词，所以就算 SQL 算出 `NULL` 也可能通过。M13 新增了 **`expected_value` 固定事实检查**：像 2026 年 6 月 GMV、净收入这种 seed 已知答案的题，必须把结果数值和固定答案比上，不能靠列名混过去。
+**第一步：修 eval**。原 GMV case 只检查响应有没有 `gmv` 这个词，所以就算 SQL 算出 `NULL` 也能过。M13 新增了 **`expected_value` 固定事实检查**：像 2026 年 6 月 GMV、净收入这种 seed 已知答案的题，必须把结果数值和固定答案比上，不能靠列名混过去。
 
-**第二步** 修 prompt 管道。`metrics.yaml` 里其实早就写了 GMV / 净收入的过滤条件和默认时间字段，但新 pipeline 的 `_format_plan_metrics()` 没把 `filter/default_time_field` 带进 QueryPlan 和局部 SQL prompt。修完后，模型才明确知道 GMV 要按 `orders.paid_at`，排除取消和未支付订单。
+**第二步：修 prompt 管道。**`metrics.yaml` 里其实早就写了 GMV / 净收入的过滤条件和默认时间字段，但新 pipeline 的 `_format_plan_metrics()` 没把 `filter/default_time_field` 带进 QueryPlan 和局部 SQL prompt。修完后，模型才明确知道 GMV 要按 `orders.paid_at`，排除取消和未支付订单。
 
-**第三步** 按 trace 修多表残留。trace 证明商品/类目销售额不是单纯“没召回 products”，而是计划层和 SQL 层容易把“销售额”理解成订单头 GMV。M13 给 QueryPlan prompt 补了 **item_gmv 口径约束**：商品/类目销售额必须聚合 `order_items.line_amount`，商品维度通过 `order_items.product_id = products.id` 关联。还给转化率补了 **浮点除法约束**，避免 SQLite 把 `7/10` 算成 0。
+**第三步**：按 trace 修多表残留。trace 证明商品/类目销售额不是单纯“没召回 products”，而是计划层和 SQL 层容易把“销售额”理解成订单头 GMV。M13 给 QueryPlan prompt 补了 **item_gmv 口径约束**：商品/类目销售额必须聚合 `order_items.line_amount`，商品维度通过 `order_items.product_id = products.id` 关联。还给转化率补了 **浮点除法约束**，避免 SQLite 把 `7/10` 算成 0。
 
 最后校准评测中的别名和数据预期。列名 `total_gmv`、`category_gmv`、`usage_count` 这类属于语义等价别名，应该被接受；但缺表、错表不能靠 alias 掩盖。另一个关键发现是当前 seed 下“一级类目销售额排名”第一名实际是 **SaaS 软件**，不是旧 case 写的“数码电子”，所以按实查结果修正了 case。整轮执行保持“小步改、小步测”：先 TDD 证明旧行为错，再改代码，再跑局部 pytest，最后才跑真实 LLM eval。
 
@@ -1840,9 +1789,9 @@ M12 本身没有新的 API 端点——它的体验入口是**批量评测报告
 
 ### 面试怎么讲
 
-“我做过一次 Text2SQL 新 pipeline 的质量修复。先发现通过率不可信：GMV=NULL 也会被旧 eval 判过，所以先加固定事实数值校验；再定位到新 pipeline 重写时漏传 `metrics.yaml` 的 filter 和默认时间字段，导致模型用 `created_at` 代替 `paid_at`；然后通过 trace 区分召回、计划和 SQL 生成问题，补了 item_gmv、商品表 join、转化率浮点除法等通用约束。按“真实通过”口径重新校准后，最终 formal 新 pipeline 从 **4/10** 提升到 **10/10**，challenge 从 **6/16** 到 **14/16**，diagnostic 从 **12/32** 到 **23/32**。（40%→100%，37.5%→87.5%，37.5%→71.9%）整个过程重点不是调 prompt，而是 eval 校准、语义口径注入、trace 分层诊断和小步验证。”
+“我做过一次 Text2SQL 新 pipeline 的质量修复。通过率很低，然后排查原因AI说是语义漂移。但我仔细检查了一下，先发现通过率不可信：GMV=NULL 也会被旧 **eval** 判过，所以先加**固定事实数值校验**；
 
-不要只说“我优化了 prompt”。这次最值钱的点是：你能把一个低通过率的 Agent pipeline，当成工程系统来排查。
+然后以为是因为 `metrics.yaml` 里没有定义 GMV 的 filter 和默认时间字段导致的有问题，但实测发现：再定位到新 pipeline 重写时**漏传** `metrics.yaml` 的 filter 和默认时间字段，导致模型用 `created_at` 代替 `paid_at`；然后通过 trace 区分召回、计划和 SQL 生成问题，补了 item_gmv、商品表 join、转化率浮点除法等通用约束。按“真实通过”口径重新校准后，最终 formal 新 pipeline 从 **4/10** 提升到 **10/10**，challenge 从 **6/16** 到 **14/16**，diagnostic 从 **12/32** 到 **23/32**。（40%→100%，37.5%→87.5%，37.5%→71.9%）整个过程重点不是调 prompt，而是 eval 校准、语义口径注入、trace 分层诊断和小步验证。”
 
 1. **面试官问“你怎么排查 Agent 效果差？”**
 
@@ -1852,7 +1801,7 @@ M12 本身没有新的 API 端点——它的体验入口是**批量评测报告
 
 2. **面试官问“你修复的核心 bug 是什么？”**
 
-   “核心 bug 是 metrics 到 prompt 的管道断了。`metrics.yaml` 里已经定义了 GMV 的 filter 和默认时间字段：排除取消订单、`paid_at IS NOT NULL`、默认用 `orders.paid_at`。但新 pipeline 重写 `_format_plan_metrics()` 时只输出了 name/formula/description，没有把 `filter/default_time_field` 传给 LLM。模型看到 `created_at` 和 `paid_at` 两个字段只能猜，所以经常用错时间口径。修复后，QueryPlan 和局部 SQL prompt 都能看到结构化指标口径。”
+   “核心 bug 是 metrics 到 prompt 的**管道断了**。`metrics.yaml` 里已经定义了 GMV 的 filter 和默认时间字段：排除取消订单、`paid_at IS NOT NULL`、默认用 `orders.paid_at`。但新 pipeline 重写 `_format_plan_metrics()` 时只输出了 name/formula/description，没有把 `filter/default_time_field` 传给 LLM。模型看到 `created_at` 和 `paid_at` 两个字段只能猜，所以经常用错时间口径。修复后，QueryPlan 和局部 SQL prompt 都能看到结构化指标口径。”
 
    这段突出的是 **不是靠自然语言补丁救火，而是把已有 semantic metadata 接回链路**。
 
@@ -1864,13 +1813,13 @@ M12 本身没有新的 API 端点——它的体验入口是**批量评测报告
 
 4. **面试官问“Text2SQL 里你怎么处理业务口径？”**
 
-   “我把业务指标看成 semantic layer 的雏形，而不是让模型自己猜。GMV、净收入、商品销售额、转化率这些指标都有明确公式、过滤条件和默认时间字段。M13 里我修了一个典型口径漂移：订单总 GMV 可以从 `orders.order_amount` 算，但商品/类目销售额要从 `order_items.line_amount` 聚合，否则会把订单头金额错误分摊到商品维度。这个问题 SQL 语法完全正确，但业务结果错，所以必须靠指标定义和 prompt 约束共同解决。”
+   “我把业务指标看成 semantic layer 的雏形，而不是让模型自己猜。GMV、净收入、商品销售额、转化率这些指标都有明确公式、过滤条件和默认时间字段。M13 里我修了一个典型**口径漂移**：订单总 GMV 可以从 `orders.order_amount` 算，但商品/类目销售额要从 `order_items.line_amount` 聚合，否则会把订单头金额错误分摊到商品维度。这个问题 SQL 语法完全正确，但业务结果错，所以必须靠指标定义和 prompt 约束共同解决。”
 
    这段突出的是 **SQL 正确不等于业务正确**，很适合讲给做数据产品或 Agent 应用的面试官。
 
 5. **面试官问“你怎么设计可观测性？”**
 
-   “我给 pipeline trace 补了能定位责任层的信息。Schema Retrieval 记录 `metric_doc_hits`，看指标文档有没有召回；SQL Generation 记录 `plan_step_tables/columns/filters/metrics/joins/output_columns`，看 QueryPlan 想做什么、SQL 最后有没有照做。这样一个失败 case 可以拆成三种：没召回、计划没写、SQL 没遵守计划。M13 后续判断 `products` 问题时，就是靠这个分层避免误判成单纯召回问题。”
+   “我给 pipeline trace 补了能定位责任层的信息。Schema Retrieval 记录 `metric_doc_hits`（检索（Schema Retrieval）命中的"指标文档"清单——记录这次查询召回了哪些指标定义，放进 trace 里做诊断用的），看指标文档有没有召回；SQL Generation 记录 `plan_step_tables/columns/filters/metrics/joins/output_columns`，看 QueryPlan 想做什么、SQL 最后有没有照做。这样一个失败 case 可以拆成三种：没召回、计划没写、SQL 没遵守计划。M13 后续判断 `products` 问题时，就是靠这个分层避免误判成单纯召回问题。”
 
    这段突出的是 **Agent 系统的黑盒变白盒**。
 
@@ -1903,7 +1852,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pip
 
 M13 没有新增 API 端点，体验入口仍是批量评测报告。想看效果，优先打开 `eval/reports/phase3a-new-pipeline.md`、`eval/reports/phase3a-challenge-new-pipeline.md`、`eval/reports/phase3a-diagnostic-new-pipeline.md`，再对照 `eval/reports/phase3a-*-comparison.md` 看 M12 → M13 后失败形态怎么变化。
 
-## ★ M14-lite 对小问题进行修复
+## ★ M14-lite 小修
 
 （2026-07-27）
 
@@ -1915,7 +1864,7 @@ M13 没有新增 API 端点，体验入口仍是批量评测报告。想看效�
 
 然后增强了 **LLM 失败 trace**。以前 `llm_generation_error` 只能看到一句“解析失败”，现在 trace 会记录 `raw_response_preview`、`parse_error`、`prompt_length` 和失败阶段，方便判断是 QueryPlan 解析坏了，还是 SQL generation 没按 JSON 返回。
 
-安全口径采用用户确认的 **方案 A**：敏感字段优先于 admin 角色。也就是说，`users.email / users.phone` 在 Text2SQL 路径里默认不直出；即使是 admin 查询，也会被 QueryPlan 预检和 SQL Guard 拦住。后续如果真的要给 admin 看联系方式，应该走脱敏、审计或专门接口，而不是让自然语言 SQL 直接吐敏感字段。
+安全口径采用用户确认的方案 A：敏感字段优先于 admin 角色。也就是说，`users.email / users.phone` 在 Text2SQL 路径里默认不直出；即使是 admin 查询，也会被 QueryPlan 预检和 SQL Guard 拦住。后续如果真的要给 admin 看联系方式，应该走脱敏、审计或专门接口，而不是让自然语言 SQL 直接吐敏感字段。
 
 最后补了 **Schema Retrieval 后端配置开关**：默认仍是 `inmemory + deterministic`，pytest 和本地开发不依赖 Milvus 或联网 embedding；只有显式设置 `SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=siliconflow` 等配置时，才会走外部后端。
 
@@ -2026,7 +1975,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\run_qwen_ab_ex
 
 Phase 3A 做的事情，可以概括成两件：
 
-1. **把单兵作战改成流水线**：先查"食材清单和仓库布局"（**Schema Retrieval**，只召回和问题相关的表、字段、指标、Join 关系），再让厨师**先填一张申请单**（**QueryPlanStep**，写明查哪些表、用什么字段、按什么条件 Join），系统逐项核对申请单是否都在合法清单里（**plan 自检**，相当于后端接口的 DTO + Validator），核对通过后才基于**局部菜单**（局部 Schema prompt）写 SQL，最后仍然统一过 **SQL Guard** 这道最终安全闸门。任何一步失败都**结构化地停下**，绝不悄悄退回模板或自己修 SQL——问题暴露得越诚实，才越可评测。
+1. **把单兵作战改成流水线**：先查"食材清单和仓库布局"（**Schema Retrieval**，只召回和问题相关的表、字段、指标、Join 关系），再让厨师**先填一张申请单**（**QueryPlanStep**，写明查哪些表、用什么字段、按什么条件 Join），系统逐项核对申请单是否都在合法清单里（**plan 自检**，相当于后端接口的 **DTO + Validator**），核对通过后才基于**局部菜单**（局部 Schema prompt）写 SQL，最后仍然统一过 **SQL Guard** 这道最终安全闸门。任何一步失败都**结构化地停下**，绝不悄悄退回模板或自己修 SQL——问题暴露得越诚实，才越可评测。
 
 2. **把"感觉好吃"变成"有台账的盲评"**：先做**三层测试集**——10 条 formal（主硬门）、16 条 challenge（更复杂的 superset）、32 条 diagnostic（能力体检，带 capability 标签），在改任何东西之前先把旧链路跑出 **baseline 冻结**下来（像优化前先量旧机器速度）；每跑一次都留下**分步骤 trace_steps** 台账；M12 生成新旧链路对照报告；M13 发现通过率低后**先修评测尺子再修系统**（`expected_value` 数值校验，堵住"GMV=NULL 也算对"的伪通过），再沿着 trace 一层层定位修复。
 
@@ -2040,13 +1989,38 @@ Phase 3A 做的事情，可以概括成两件：
 
 1. **先立评测基座，再动推理链路**（M8 / M8.5）：把 EvalOps-lite 升级成三层评测。`EvalCase` 前向兼容新增 `expected_metrics / pipeline_mode` 等字段，`_score_case()` 改为 `EvalScore` 并带最小 **issue_tags**（missing_table / missing_column / safety_mismatch / unexpected_error）和 `manual / review_required` 标记；冻结旧链路 baseline：formal **8/10**、challenge **11/16**（2/2 安全拦截全过）。M8.5 再扩出 32 条 **diagnostic benchmark**：16 条 challenge + 16 条新增 extra case 通过 `--cases + --extra-cases` 组合，每条带 **capability 标签**（schema_retrieval / join_path / query_plan / local_schema_prompt / trace_steps / security_guard）；旧链路下新能力专属 check 记为 `skipped_due_to_pipeline_mode`，**不算过也不算挂**——不伪装没实现的能力。
 
-2. **给新链路装上"食材清单"**（M9 / M9.1 / M9.2）：M9 实现 **Schema Retrieval 与 JoinPath**——从 `domain_pack` 构建字段 / 指标 / 关系三类检索文档，`relations.yaml` 作为 **Join 唯一事实源**（补上原来缺的 refunds 三条关系），用 deterministic in-memory 向量索引完成轻量召回，recall 硬门达标（formal 15/15 表、16/18 字段指标、3/3 Join）。M9.1 / M9.2 在实验分支验证 **Milvus adapter + SiliconFlow BGE-M3 / Qwen3 真实中文 embedding**：单点召回持平、vector-only 下 Qwen 略好，但**不合并主线先问用户**，最终作为可选注入合回 main，默认仍走 in-memory。
+2. **给新链路装上"食材清单"**（M9 / M9.1 / M9.2）：M9 实现 **Schema Retrieval 与 JoinPath**——从 `domain_pack` 构建字段 / 指标 / 关系三类检索文档，`relations.yaml` 作为 **Join 唯一事实源**（补上原来缺的 refunds 三条关系），用 deterministic in-memory 向量索引完成轻量召回，recall 硬门达标（formal 15/15 表、16/18 字段指标、3/3 Join）。M9.1 / M9.2 在实验分支验证 **Milvus adapter + SiliconFlow BGE-M3 / Qwen3 真实中文 embedding**：单点召回持平、vector-only 下 Qwen 略好，但不合并主线先问用户，最终作为可选注入合回 main，默认仍走 in-memory。
 
-3. **给 LLM 加"申请单 + 校验"**（M10 / M11）：M10 新增 **QueryPlanStep 与自检**——LLM 写 SQL 前先输出结构化计划，系统核对表、字段、Join 是否都来自合法 SchemaGraph / relations.yaml（Join 不接受自由文本编造），敏感字段在生成前预检为 `sensitive_field_access`。M11 把 M9 + M10 + M5 的 SQL Tool / Trace 串成一条 **新 Text2SQL pipeline**：`run_text2sql_pipeline()` 依次走 schema_retrieval → schema_context → join_path → query_plan → plan_validation → sql_generation → sql_guard → sql_execution → chart_decision，任一步失败都**结构化 blocked**（不降级到模板、不自动修 SQL），并通过 API 侧 `force_new_pipeline` 开关让评测可以显式走新链路，同时每步写 `trace_steps` 到 JSONL（含 step_type / status / error_type / latency_ms）。
+3. **给 LLM 加"申请单 + 校验"**（M10 / M11）
+
+   - **M10：先填申请单，再写 SQL。** M9 已经把问题相关的表、字段、指标和 Join 关系召回了，但如果直接把 SchemaGraph 塞给 LLM 让它写 SQL，中间仍是一个**黑盒**——模型可能编造不存在的字段、乱连 Join、甚至在计划里就打算查敏感字段。这在代码里叫"幻觉"，在企业里叫"事故"。M10 的解法是：让 LLM 写 SQL 之前，先输出一张**结构化"申请单"（QueryPlanStep）**——写明要查哪些表（`tables`）、用哪些字段（`columns`）、要哪个指标（`metrics`）、按什么条件 Join（`joins`）、怎么聚合排序（`aggregations / group_by / order_by / limit`）、最后输出什么列（`output_columns`）。填完后，系统拿这张申请单做**plan_validation 自检**，逐项核对三件事：表 / 字段是否都来自合法 SchemaGraph（模型编造的字段当场拦下）、Join 条件是否来自 `relations.yaml` 的 relation id（**不接受自由文本编造**，防止模型发明连接方式）、敏感字段是否在 SQL 生成前就预检为 `sensitive_field_access`（根本不进入生成环节）。这里的关键区分是：**SchemaGraph 是"业务里有什么"（系统检索出的客观事实，像一张地图），QueryPlanStep 是"模型想做什么"（LLM 输出的主观意图，像一条路线规划）**——地图是固定的，路线是模型现画的，自检就是核对"你画的路线是不是都在这张地图上"。整个机制相当于把"生成后检查"提前成了"生成前约束"。
+
+   - **M11：把零件串成一条新流水线。** M9 的检索、M10 的计划、M5 的 SQL Tool / Trace，各是一台机器；M11 的 `run_text2sql_pipeline()` 把它们串成一条**真正能从 `/api/query` 触发的新 Text2SQL pipeline**，九个环节依次走：**schema_retrieval**（召回相关文档）→ **schema_context**（组装局部 Schema 上下文）→ **join_path**（在 SchemaGraph 上找表间连通路径）→ **query_plan**（LLM 填申请单）→ **plan_validation**（系统核对申请单）→ **sql_generation**（基于局部 Schema 生成 SQL）→ **sql_guard**（SQL 安全最终门）→ **sql_execution**（执行）→ **chart_decision**（决定要不要配图、配什么图）。三个设计点：① **任一步失败都结构化 blocked**——不降级回模板、不让模型自动修 SQL 重试，问题暴露得越诚实，才越可评测；② **`force_new_pipeline` 显式开关**——评测可以从 API 侧强制走新链路，但默认请求仍模板优先，旧行为、响应契约都不变；③ **每步写 `trace_steps` 到 JSONL**——记录 `step_type / status / error_type / latency_ms`，失败能精确归因到"检索、计划、校验、生成、执行"具体哪一层，这是后面 M13 分层修复的基础设施。
 
 4. **量出差距，如实记录**（M12）：跑新链路全套报告并生成**新旧对照**（`compare_phase3a.py` 直接读 trace JSONL 而不是解析 Markdown）：formal **6/10**、challenge **8/16**、diagnostic **15/32**，安全 2/2 全拦。如实暴露瓶颈是 **LLM 输出列名不稳定**（`category` vs `category_name`、`coupon_order_count` 别名漂移）；同时顺手修掉三个真问题：DeepSeek 废弃模型名 `deepseek-chat` → `deepseek-v4-pro`、新链路绕过的危险 SQL 预检补丁、plan validation 对 `COUNT(DISTINCT ...)` 的聚合表达式误判。
 
-5. **先修尺子，再沿 trace 修复**（M13 两批）：第一步先加 **`expected_value` 数值校验**——GMV 必须和固定事实 `11285752.00` 对得上，堵住"M12 里 GMV=NULL 但因 `contains: gmv` 伪通过"的测不准；再修 **metrics prompt 管道**（`_format_plan_metrics()` 把 `filter / default_time_field` 注入新链路 prompt）、补系统提示词与 SQL 约束（item_gmv 口径、转化率浮点除法防整数截断）。最终新链路 formal **4/10 → 10/10**、challenge **6/16 → 14/16**、diagnostic **12/32 → 23/32**。
+5. **先修尺子，再沿 trace 修复**
+
+   **动系统之前，先检查尺子。** M12 已经把差距量出来了（formal 6/10、challenge 8/16、diagnostic 15/32），M13 的任务是修复。但拿到差距报告直接调 prompt 是错的——第一步是先问一个问题：**"评测本身测准了吗？"** 因为"测不准的系统没法优化"：如果 GMV=NULL 的结果也能被判对，那改对改错都看不出来，任何修复都是在黑灯里装修。M13 先做的不是调模型，是**修评测尺子、补断裂的管道**，把"系统在干什么"看清楚之后再动手。
+
+   **第一批（修尺子 + 补管道）：先让"对错"判断可靠。** 两件事：
+
+   - ① 新增 **`expected_value` 数值校验**——GMV 这类有固定事实的指标，必须和参考 SQL 在确定性数据上执行得到的基准值 **`11285752.00`** 对得上才算过，而不是"结果里 contains `gmv` 字样就算过"。M12 报告里就出现过 GMV=NULL 仍判 pass 的伪通过，这就是尺子坏了；
+   - ② 修 **metrics prompt 管道**——`_format_plan_metrics()` 漏传了 `metrics.yaml` 里的 `filter`（"GMV 用 `paid_at` 过滤"）和 `default_time_field`（默认时间字段），**口径信息根本没进新链路的 prompt**。这解释了一个之前很诡异的失败模式：模型自己编造 `unpaid` 状态、用 `created_at` 代替 `paid_at`——不是模型笨，是它压根没被告知正确口径。第一批的效果有一个反直觉的信号：**formal 重跑反而比 M12 更低（5/10）**，因为以前伪通过的现在真失败了——这正是"先修尺子"要暴露的东西，数字变难看说明尺子变准了；challenge 8/16 → **10/16**、diagnostic 15/32 → **20/32**。
+   - 这里有个**反转**：M12 阶段曾把这批失败归因为"LLM 语义漂移"（列名对不上），但后续结合数据质量彩蛋重新审视后发现，**别名漂移只是症状，不是根因**——formal 允许类失败里直接由管道/彩蛋导致的占 **4/5（80%）**，纯别名漂移只有 1 条；真正的主因是 **metrics → prompt 管道断裂**，`_format_plan_metrics()` 重写时漏字段，典型 rewrite regression（重写回归：重写代码时，把原来已经正常工作的功能弄丢了，导致行为比旧代码退化），管道在最后几行代码断了。一句话教训：**看到"模型答错"，先查"信息有没有送到模型手里"再怪模型**——说明书一直在，是管道把说明书丢了。
+   - 方向相反还有另一个反转：`p3a_agg_003` 转化率题，模型其实输出了 `conversion_rate`、数值也对（0.7），但 eval 的列名匹配没认出来照样判挂——以为模型错，可能是管道断（信息没送到，上面那条），也可能是评测错（尺子量错，这段的这个），最后才轮到模型自己错。
+
+   **第二批（沿 trace 归因 + 修 alias 与 SQL 约束）：定位到层，逐类修。** 第一批之后不再盲调 prompt，而是**每个失败 case 先翻 trace_steps**——看失败落在评测评分、QueryPlan 选择、SQL 生成哪一层，再决定改哪里。两轮修复：
+
+   - 为什么必须分层定位？具体例子：`p3a_multi_002` 报告里显示 `missing_tables=['products']`，意思是"该用的表没用到，判缺表"。第一印象是检索漏召回，但复核发现该题 SchemaGraph 里其实有 `products`（源码现跑可复现），检索没漏！——真实原因是模型生成 SQL 时，没去 join `products` 表，而是用了 `order_items` 宽表里的 `product_name_snapshot`（商品名快照）字段——宽表里已经存了一份商品名，模型觉得"我不用专门去查商品表，直接用快照就行了"。没有 trace 分层，就会误判成检索问题、白白去改检索。
+
+   - > 相当于餐厅出菜出了问题，第一反应是"采购（检索）漏买了土豆"。一查库房，土豆在。真相是：**厨师（SQL 生成）做菜时没去库房拿土豆，直接用了冰箱里预先切好的土豆丝半成品**。菜还是做出来了，但没用上"土豆"这个进货记录——所以采购记录里看起来"缺了土豆"。
+
+   - ① 补**语义等价 alias**（`usage_count`、`add_to_pay_conversion_rate`、`total_gmv`、`category_gmv`、中文"商品名称"等）——原则是只放语义等价的别名，**绝不用 alias 掩盖缺表或错表**；
+
+   - ② 修 **SQL 约束**——商品/类目销售额必须用 `item_gmv`（聚合 `order_items.line_amount`），不能用 `gmv` / `orders.order_amount` 替代（口径防止串维度）；转化率必须 `* 1.0` 或 `CAST(... AS REAL)`（防 SQLite 整数除法把小数截成 0）；"一级类目销售额 Top1"的固定检查值从"数码电子"改为 **"SaaS 软件"**（用当前 seed 直接执行参考 SQL，Top1 实际就是 SaaS 软件——检查值以数据事实为准）。最终新链路 **formal 4/10 → 10/10**、challenge **6/16 → 14/16**、diagnostic **12/32 → 23/32**。
+
+   整个过程**测试题一行没改**——改的是评测尺子（scorer 严格度）和系统（prompt 管道、SQL 约束），所以 4/10 → 10/10 的提升是"系统真的变好了"，不是"题变简单了"。
 
 6. **收口卫生与路线体检**（M14-lite + Qwen / Milvus 实验）：M14-lite 执行用户确认的 5 项小收口——`result_match` 最小结果集对比（5 条核心 challenge 加严）、LLM 失败 trace 增强、**安全口径定案（敏感字段优先于 admin 角色，`users.email/phone` 不直出）**、Schema Retrieval 后端配置开关（milvus / siliconflow 必须显式开启）、诊断口径清理（知识库归因题标 `manual_review + hybrid_attribution` 留给后续 Hybrid）；刻意不做递归类目、知识库归因、完整 EvalOps、JSON mode 大实验。最后的 A/B 实验回答技术路线：DeepSeek vs Qwen 主模型（formal 9/10 持平，看**失败形态**——Qwen max 独有 blocking 错误更多，默认仍 DeepSeek）、in-memory vs BGE-M3 vs Qwen embedding（8/10 / 8/10 / 9/10，差 1 题且受 LLM 波动影响，Phase 3A 不切，留给 RAG 再测）。
 
@@ -2090,9 +2064,7 @@ Phase 3A 做的事情，可以概括成两件：
 
 ### 面试怎么讲
 
-本阶段完整叙述，可以直接背/改写到面试或简历中：
-
-> 我的 DataPilot 项目在 Phase 3A 完成了一次 Text2SQL 的体系化升级：从"模板优先 + LLM 兜底"的简单链路，重构为**"Schema Retrieval → QueryPlan 自检 → 局部 Schema SQL 生成 → SQL Guard"**的分层推理链路。核心方法论是**评测驱动**：先建 10/16/32 三层评测基座、冻结旧链路 baseline，再改系统；每步改进都先修评测尺子（`expected_value` 数值校验，堵住"GMV=NULL 也算对"的伪通过），再沿 trace_steps 分步归因修复，最终新链路 formal 从 4/10 提升到 **10/10**、challenge 6/16 → **14/16**、diagnostic 12/32 → **23/32**，全程不改测试题、不过拟合。过程中用端到端 A/B 回答了三个技术路线问题：Milvus + 真实 embedding **可用但不切默认**（单点 recall 持平、端到端 diagnostic 略降）、Qwen 主模型**不切默认**（失败形态分析：独有 blocking 错误更多）、in-memory 检索保持默认但保留显式开关。安全侧把"敏感字段优先于 admin 角色"定为口径，防幻觉靠 plan 层预检 + SQL Guard 双层独立拦截，不靠 prompt 承诺。
+我的 DataPilot 项目在 Phase 3A 完成了一次 Text2SQL 的体系化升级：从"模板优先 + LLM 兜底"的简单链路，重构为**"Schema Retrieval → QueryPlan 自检 → 局部 Schema SQL 生成 → SQL Guard"**的分层推理链路。核心方法论是**评测驱动**：先建 10/16/32 三层评测基座、冻结旧链路 baseline，再改系统；每步改进都先修评测尺子（`expected_value` 数值校验，堵住"GMV=NULL 也算对"的伪通过），再沿 trace_steps 分步归因修复，最终新链路 formal 从 4/10 提升到 **10/10**、challenge 6/16 → **14/16**、diagnostic 12/32 → **23/32**，全程不改测试题、不过拟合。过程中用端到端 A/B 回答了三个技术路线问题：Milvus + 真实 embedding **可用但不切默认**（单点 recall 持平、端到端 diagnostic 略降）、Qwen 主模型**不切默认**（失败形态分析：独有 blocking 错误更多）、in-memory 检索保持默认但保留显式开关。安全侧把"敏感字段优先于 admin 角色"定为口径，防幻觉靠 plan 层预检 + SQL Guard 双层独立拦截，不靠 prompt 承诺。
 
 1. **[基础追问] 旧链路有什么具体问题，值得你重构一遍？**
 
@@ -2100,15 +2072,11 @@ Phase 3A 做的事情，可以概括成两件：
 
 2. **[基础追问] 三层评测为什么这么设计？它们各自解决什么问题？**
 
-   一层测试集的毛病是**分不清"验收没过"和"哪里不行"**。formal 10 条是主硬门，验收用；challenge 16 条是 superset，覆盖多表、窗口函数、困难诊断，测试数据库复杂度扩展能力；diagnostic 32 条是带 capability 标签的能力体检，每条标注测的是 schema_retrieval / join_path / query_plan / local_schema_prompt / trace_steps / security_guard 中哪项能力，跑完直接看 capability summary，就知道下一步该修哪块。而且 diagnostic **不追满分**——它的职责是定位边界，不是刷数字。
-
-3. **[工程/深挖追问] 为什么默认不切 Milvus + 真实 embedding？你用什么证据下这个结论？**
-
-   因为"能用"和"该用"是两个证据层次。M9.1 / M9.2 的 recall smoke 只证明 adapter 可用、单点召回和 in-memory 持平；真正决定默认与否的是 **M13 后的端到端 A/B eval**：Milvus + SiliconFlow 跑正式回归 formal 10/10 持平、challenge 14/16 持平，但 diagnostic 从 23/32 降到 20/32。端到端没有收益甚至略降，却引入 Docker 服务依赖、网络和费用——所以不切。这也说明我们的默认选择跟着**端到端证据**走，而不是跟着"用了更重的技术"走。Qwen embedding formal 9/10 比本地 8/10 好 1 题，但差距受真实 LLM 波动影响，结论是保留为 Phase 3 RAG / Hybrid 的候选，不急着切。
+   一层测试集的毛病是**分不清"验收没过"和"哪里不行"**。formal 10 条是主硬门，验收用；challenge 16 条是 superset，覆盖多表、窗口函数、困难诊断，测试数据库复杂度扩展能力；diagnostic 32 条是带 capability 标签的能力体检，每条标注测的是 schema_retrieval / join_path / query_plan / local_schema_prompt / trace_steps / security_guard 中哪项能力，跑完直接看 capability summary，就知道下一步该修哪块。而且 diagnostic 不追满分——它的职责是定位边界，不是刷数字。
 
 4. **[工程/深挖追问] M13 从 4/10 提到 10/10，具体怎么定位问题的？怎么证明不是刷评测？**
 
-   定位方法是**沿 trace 分层归因**：trace_steps 记录每步 input / output / status / error_type，先看失败落在 eval 评分、QueryPlan prompt、SQL prompt 还是数据预期哪一层。M13 第一批发现的最大问题其实是**评测尺子坏了**：`gmv` 字段是 NULL 时旧检查只做 `contains: gmv` 字符串匹配，仍然判 pass，所以测不准。先加 `expected_value` 数值校验（GMV 必须等于固定事实 `11285752.00`），再修 metrics prompt 管道（`filter / default_time_field` 没注入新链路），之后才做 SQL 约束（item_gmv 口径、转化率浮点除法）。证明没刷评测的证据是：**测试题一行没改**，改的是 scorer 严格度和 prompt 管道；而且对照报告如实展示失败明细和 issue tags，剩余 2 条 challenge、9 条 diagnostic 失败原因都写得出来。
+   定位方法是**沿 trace 分层归因**：trace_steps 记录每步 input / output / status / error_type，先看失败落在 eval 评分、QueryPlan prompt、SQL prompt 还是数据预期哪一层。第一批发现的最大问题其实是**评测尺子坏了**：`gmv` 字段是 NULL 时旧检查只做 `contains: gmv` 字符串匹配，仍然判 pass，所以测不准。先加 `expected_value` 数值校验（GMV 必须等于固定事实 `11285752.00`），再修 metrics prompt 管道（`filter / default_time_field` 没注入新链路），之后才做 SQL 约束（item_gmv 口径、转化率浮点除法）。证明没刷评测的证据是：**测试题一行没改**，改的是 scorer 严格度和 prompt 管道；而且对照报告如实展示失败明细和 issue tags，剩余 2 条 challenge、9 条 diagnostic 失败原因都写得出来。
 
 5. **[工程/深挖追问] JoinPath 为什么必须来自 relations.yaml，而不是让 LLM 自己推理？**
 
@@ -2578,23 +2546,29 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --b
 
 M17 仍然没有新增 API 端点，体验入口是 eval CLI 和 LangFuse Cloud UI。默认运行 `python -m eval.run_eval` 会生成 Markdown 报告；如果 `.env` 中启用 LangFuse，eval 会在 JSONL 里找到 `langfuse_trace_id` 并把规则分数写回对应 trace。要体验 L3 judge，则显式加 `--judge-model <模型名>`；不加时不会调用外部裁判模型。
 
-## ★ M18 Smoke / Experiment / 阶段收尾
+## ★ M18 Phase3B 收尾
 
 （2026-07-30）
 
-**简述**：M18 给 Phase 3B 做收口：新增 **一键 LangFuse smoke 脚本**，复核 API / JSONL / trace mapping / score / visibility；同时手动验证 LangFuse **trace → Dataset** 工作流，明确 Experiment run 当前需要 **LLM key 或 Webhook**，不在 DataPilot 里临时补远程实验服务。
+**简述**：简单说，M17 是“能打分”，M18 是“以后怎么一键确认整条链路还正常”。M18 给 Phase 3B 做收口：新增 **一键 LangFuse smoke 脚本**，复核 API / JSONL / trace mapping / score / visibility；同时手动验证 LangFuse **trace → Dataset** 工作流，明确 Experiment run 当前需要 **LLM key 或 Webhook**，不在 DataPilot 里临时补远程实验服务。
 
 ### 先用大白话讲
 
-M18 做的事情，可以理解成给 Phase 3B 做一次“交卷前总检查”。
+| 模块     | 证明了什么                                         |
+| -------- | -------------------------------------------------- |
+| M15      | LangFuse 云平台账号能连、能写数据（SDK/Cloud/key） |
+| M16/M16B | 业务请求的 trace 能自动写到 LangFuse（还能降级）   |
+| M17      | eval 评分能写回 LangFuse 的 trace 上               |
 
-前面 M15-M17 已经分别证明了：LangFuse Cloud 能连、DataPilot trace 能写到 LangFuse、eval 分数能回写到 trace。但这些能力如果分散在临时脚本和对话记录里，下一轮开发就很难复用。M18 把它们整理成一个正式 smoke：一条命令就能检查 **配置、API 请求、JSONL trace、LangFuse trace id、score 回写和 trace 可见性**。
+但这些都是散装的。M18 新增 `scripts/smoke_phase3b_langfuse.py`：发一个真实 `/api/query` 请求来检查一下整条链路是否正常。一条命令就能检查 **配置、API 请求、JSONL trace、LangFuse trace id、score 回写和 trace 可见性**。
 
 同时，M18 也验证了 LangFuse Experiment 的真实 UI 边界。Dataset 可以从 trace 创建，这部分是可用的；但 `Run experiment` 不是把已有 trace 手动编成两组 run，而是要么让 LangFuse 自己用 Prompt + LLM key 执行，要么通过 Webhook 调远程服务。DataPilot 当前没有这个 webhook runner，所以 M18 不临时扩展架构。
 
 所以本模块的核心价值是：把 Phase 3B 的 **trace → score → dataset** 能力收成可复用基线，并把 **Experiment run 需要 EvalBench 级 runner** 这件事提前验证清楚。
 
 ### 这次做了什么
+
+简单说，M17 是“能打分”，M18 是“以后怎么一键确认整条链路还正常”。
 
 这次先新增了 `scripts/smoke_phase3b_langfuse.py`。它不直接绕过业务函数，而是复用 eval 的 `seeded_api_client()`，用内存 SQLite seed 调真实 `/api/query`。这样既不污染 MySQL 开发库，也能验证 API 响应、JSONL trace 和 LangFuse 映射是不是连在一起。
 
@@ -2706,17 +2680,19 @@ M18 没有新增 API 端点，体验入口是 smoke CLI 和 LangFuse Cloud UI。
 
 Phase 3B 之前，DataPilot 已经能查数据、能评测，但它只回答了两个问题："答得对不对"（eval）和"刚才那次请求做了什么"（JSONL trace）。它还没有回答第三个问题：**系统跑起来以后，到底发生了什么、质量怎么样、能不能持续观察**。
 
+这里有个容易混的点，先分清**记录层和查看层**：M11 起 JSONL trace 里其实已经把每一步写成 **TraceStep**（记录层不缺数据，M12 对照报告就是程序读 trace 生成的）；但"记录在案"和"看得方便"是两回事——LangFuse 之前，eval 报告只给最终 pass/fail，要看单次请求的中间步骤只能自己打开 JSONL 文件翻 `trace_steps` 字段（查看层缺手段）。LangFuse 做的不是"从这一刻开始记录"，而是**把早已记录的中间过程变成可视化 span 视图**。
+
 你可以把 DataPilot 想象成一家餐厅。Phase 3A 之前做的是：**菜品**（Text2SQL 能力）和**菜谱验收**（eval）。Phase 3B 做的是给餐厅装 **后厨监控和顾客评分系统**：每做一道菜，监控系统记下"什么时候下单、谁洗的菜、谁炒的、炒到一半有没有糊锅"；每上一道菜，评分系统记下"菜名对不对、分量够不够、安全有没有违规、味道好不好（LLM judge）"。监控和评分都不影响做菜本身——**监控系统坏了，后厨照样出餐**。
 
 这个阶段最核心的设计思想可以总结成四个字：**旁路观测**。LangFuse 这个外部观测平台在 Phase 3B 里永远不是主链路：默认关闭、SDK 放在可选依赖里、Cloud 不通时 trace 只标记 `failed` 然后继续写本地 JSONL。项目自己的 `trace_id` 继续当主 ID，LangFuse 用独立的 32 位 hex id，两边靠 JSONL 字段建立映射——就像业务订单号和第三方支付流水号，两个都重要，但不能混成一个。
 
-- 所以 Phase 3B 的核心价值是：**在不绑架主链路的前提下，验证了"外部观测平台 + 本地评测"能组成一套可用的可观测与评测闭环，并把这条链路的真实边界（哪些能做、哪些留给 EvalBench）摸清楚**。
+所以 Phase 3B 的核心价值是：**在不绑架主链路的前提下，验证了"外部观测平台 + 本地评测"能组成一套可用的可观测与评测闭环，并把这条链路的真实边界（哪些能做、哪些留给 EvalBench）摸清楚**。
 
 ### 这次做了什么
 
 按阶段主线写，不按模块流水账：
 
-1. **先钉边界，再谈接入（M15）**。没有一上来就把 LangFuse 接进 `/api/query`，而是先单独验证 **Cloud key、SDK 4.14.1、span 写入、score 写入、flush 和查询可见性**（trace 约 0.6s 可查）。同时把配置纳入 `Settings`：默认 `LANGFUSE_ENABLED=false`，SDK 放进 `observability` optional extra——**观测系统不可用时，主链路照常跑**。这一步把"能不能安全接入"钉死，后续模块不再边查 SDK 行为边改主链路。
+1. **先钉边界，再谈接入（M15）**。先单独验证 Cloud key、SDK 4.14.1、span 写入、score 写入、flush 和查询可见性（trace 约 0.6s 可查）。同时把配置纳入 `Settings`：默认 `LANGFUSE_ENABLED=false`，SDK 放进 `observability` optional extra——**观测系统不可用时，主链路照常跑**。这一步把"能不能安全接入"钉死，后续模块不再边查 SDK 行为边改主链路。
 
 2. **再打通双写与降级（M16）**。把 trace recorder 升级成 **TraceRouter 架构**：业务代码只把 trace 交给 router，router 按顺序调用 `LangFuseBackend -> JSONLBackend`。LangFuse 失败会被捕获、标记 `langfuse_write_status=failed`，JSONL 仍然落盘。M16 的 spans 是 **post-hoc flat spans**：请求结束后把 `trace_steps` 一次性平铺上传，不伪造父子嵌套和真实时间线。
 
@@ -2749,6 +2725,7 @@ Phase 3B 之前，DataPilot 已经能查数据、能评测，但它只回答了�
 
 - **Trace / Span / Score / Dataset / Experiment**：LangFuse 世界里的五个核心对象。Trace 是一次请求的总记录，Span 是其中的一个步骤，Score 是评测结果，Dataset 是可复用的测试样本集，Experiment 是用 Dataset 跑一组对比实验。Phase 3B 把前四个都跑通了，第五个只验证到边界。
 - **post-hoc vs live lifecycle**：post-hoc 是"请求结束后补写日志"——简单但不真实；live 是"执行过程中实时记录 span"——更像真实调用链，但要处理 SDK 边界、span 去重和 flush 时机。Phase 3B 先用 post-hoc 跑通闭环，再用 M16B 验证 live 是否值得作为后续底座。
+- **记录层 vs 查看层**：TraceStep 写进 JSONL 是"记录"（M11 就有，M12 对照报告就是程序读 trace 生成的），LangFuse span 是"查看"（M16 起才有可视化）。"用 LangFuse 之前看不到中间 span"说的是查看层——**数据一直在，缺的是不翻文件就能看的手段**。读 M11 的记录时不要误以为它和 Phase 3B 矛盾。
 - **旁路观测与降级**：观测系统永远不是主链路。默认关闭、可选依赖、失败标记 + 继续写 JSONL，这三条保证了"监控坏了，业务照跑"。
 - **双 ID 策略**：DataPilot 自己的 `trace_id` 服务 API / JSONL / eval，LangFuse 用独立 32 位 hex id，JSONL 字段做映射。第三方平台不接管内部契约。
 - **L1/L2/L3 评分分层**：能用规则就不用 LLM。L1 结构安全、L2 结果匹配、L3 语义判断（默认关闭，显式传 `--judge-model` 才开）。
@@ -2773,7 +2750,7 @@ Phase 3B 之前，DataPilot 已经能查数据、能评测，但它只回答了�
 
 1. **[基础追问] 你为什么要专门做一个阶段做可观测性？之前的 JSONL trace 不够用吗？**
 
-   可以答：JSONL trace 够用，但它是"文件"，不是"系统"。JSONL 能回答"刚才那次请求发生了什么"，但很难回答"这周请求的质量趋势怎么样""失败集中在哪一步""评测分数和 trace 怎么关联"。Phase 3B 做的事情不是抛弃 JSONL，而是把 LangFuse 作为**旁路增强**：保留 JSONL 主链路，同时把 trace 可视化、score 回写、样本管理这些能力交给专门的观测平台。核心原则是**新增能力，不改契约**——`/api/query` 响应和本地 eval 完全不变。
+   可以答：JSONL trace 够用，但它是"文件"，不是"系统"。先说清楚一点：**中间过程的数据其实一直都有**——M11 起每次请求的每一步（schema_retrieval → chart_decision）就已经以 TraceStep 形式写在 JSONL 里，M12 的对照报告就是程序读这些 trace 生成的。但"记录在案"和"看得方便"是两回事：LangFuse 之前，eval 报告只给最终 pass/fail，要看单次请求的中间步骤只能自己打开 JSONL 翻字段。JSONL 能回答"刚才那次请求发生了什么"，但很难回答"这周请求的质量趋势怎么样""失败集中在哪一步""评测分数和 trace 怎么关联"。Phase 3B 做的事情不是抛弃 JSONL，而是把 LangFuse 作为**旁路增强**：保留 JSONL 主链路，同时把 trace 可视化、score 回写、样本管理这些能力交给专门的观测平台。核心原则是**新增能力，不改契约**——`/api/query` 响应和本地 eval 完全不变。
 
 2. **[基础追问] Trace、Span、Score、Dataset、Experiment 这几个概念在 LangFuse 里是什么关系？**
 

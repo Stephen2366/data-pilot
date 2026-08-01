@@ -60,7 +60,9 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
   AI_CONTEXT_CHANGELOG.md # 技术档案完整变更记录 / 实验历史
   dev-log.md            # 学习复盘（用户阅读）
   database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
-  phase3a-plan.md       # 阶段三A模块计划（参考设计文档；当前执行的阶段以 AI_CONTEXT.md「当前状态」为准）
+  phase3a-plan.md       # 阶段三A模块计划（历史；当前阶段计划见 AI_CONTEXT.md「当前状态」）
+  phase3b-langfuse-plan-v6.md # 当前阶段（Phase 3B）计划文件
+
 
 demo/                   # Streamlit 演示页
 scripts/                # 本地脚本，例如 seed 数据
@@ -77,8 +79,16 @@ tests/                  # pytest 测试
 - 所有 AI 工具共享同一个临时目录：`.agent_work/temp/`，用于存放脚本中间产物、一次性 JSON、缓存、临时 smoke 摘要等。
 - 可复用运行数据不要放临时目录：模块 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），Agent Trace 写入 `eval/traces/`；smoke 的一次性输出摘要仍放临时目录。
 - 路径、验收数字、Schema、命名只保留一个权威定义，优先登记在当前阶段计划文件的“单一事实源”章节。
-- 开始较完整的模块开发时，先在 `.agent_work/temp/<module>-notes.md` 写几条极短 implementation checklist；开发中在 `<module>-notes.md` 同步记录关键决策、踩坑和验证素材，供 finish-module 收工复用。
 - README 只在阶段结束时统一整理和更新。
+
+## 开发素材与收工
+
+- 开始较完整的模块开发时，先在 `.agent_work/temp/<module>-notes.md` 写几条 implementation checklist。
+- 开发中遇到关键决策/踩坑/验证素材/临时取舍/判断与修正/实验结论/新发现等，先把素材写入 `.agent_work/temp/<module>-notes.md`。提前记录素材是为了供收工流程复用，防止后面记录日志时只能根据代码来。
+- 模块开发完成后按两步收工：
+  1. `finish-module`：注释查漏 + 运行验证 + 把决策取舍/验证快照/注释小结固化到 `<module>-notes.md`（开发刚结束时调用，上下文最新鲜）。
+  2. `finish-docs`：基于固化的素材/对话记忆/代码，更新 `AI_CONTEXT_CHANGELOG.md` / `AI_CONTEXT.md` / `dev-log.md`（可稍后或跨会话执行）。
+- 收工完成后用户人工查看验收；最终由 `accept-module` 做验收门禁。
 
 ## 代码风格
 
@@ -96,12 +106,13 @@ tests/                  # pytest 测试
 ## 开发记录要求
 
 - `AI_CONTEXT.md` 是 AI 续接技术档案，记录 git 和代码查不到的信息：当前状态、默认配置、评测基线、关键结论和活跃坑；保持短小，优先服务快速续接。
+
 - `AI_CONTEXT_CHANGELOG.md` 保存完整变更记录、模块档案、真实 LLM eval、A/B 实验、smoke 结论和历史取舍。
   - 普通小修改如果会影响后续理解，就在 `AI_CONTEXT_CHANGELOG.md` 加一段简短记录；不记录文档整理、表达润色、无技术含义等修改。
   - 较完整模块开发、影响默认行为/安全口径/评测口径/架构边界的修改，才需要写结构化记录，建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
 
-- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须同步到 `AI_CONTEXT_CHANGELOG.md`，并把会影响当前路线的最新结论摘要同步到 `AI_CONTEXT.md`「最新事实快照」。
+- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须同步到 `AI_CONTEXT_CHANGELOG.md`，并把会影响当前路线的最新结论摘要同步到 `AI_CONTEXT.md`「最新事实快照」。若新结论推翻或修正旧条目的判断，在旧条目处加一行 `⚠️ 注` 指向新结论，防止过时判断被误读。
 
-- 开发中遇到关键决策/踩坑/验证命令/临时取舍，先把素材写入 `.agent_work/temp/<module>-notes.md`，收工或形成阶段性结论后再同步到 `AI_CONTEXT_CHANGELOG.md`。
 - `dev-log.md` 面向用户学习复盘。
-- `AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md` 和 `dev-log.md` 的详细模板和写作要求见 `finish-module` skill，模块完成后才调用该 skill 记录技术档案和学习复盘。
+
+  

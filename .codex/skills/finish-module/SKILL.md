@@ -1,6 +1,6 @@
 ---
 name: finish-module
-description: 项目模块代码完成后的收工整理。Use when the user says 收工、模块完成、补注释、写日志、写复盘、finish module.
+description: 模块开发完成后的收工整理前半程：注释查漏补缺 + 运行验证 + 素材固化到 <module>-notes.md。Use when the user says 收工、模块完成、补注释、跑验证、finish module.
 ---
 
 # Codex Wrapper
