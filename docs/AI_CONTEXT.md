@@ -5,11 +5,11 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M18 Smoke / Experiment / 阶段收尾（已完成，待 accept-module）
+- 当前模块：M19 Trace Failure Triage / LangFuse-driven Eval Analysis（已完成，待 accept-module）
 - 下一模块：Phase 3 RAG / Hybrid（基于 M16B live lifecycle 底座继续评估）
 - 上一模块验收：M18 已验收（2026-08-02，报告 .agent_work/temp/accept-M18-20260802.md）
 - 阻塞项：无
-- 更新时间：2026-07-31
+- 更新时间：2026-08-02
 
 ## 当前技术选型快照
 
@@ -20,7 +20,7 @@
 - NL2SQL：M3 模板 SQL 优先；M4 起模板未命中时走 DeepSeek，Schema / KPI / few-shot 从 `domain_pack/` 加载
 - SQL 安全：sqlglot AST 只读检查 + 表级 RBAC + `users.email/users.phone` 敏感字段策略；安全能力不只靠 prompt
 - Agent 编排：先用普通 Python pipeline，不上复杂 LangGraph；字段按未来 graph state 预留；后续进入多步骤 Agent / RAG 编排时，可在不改响应契约的前提下迁移到 LangGraph。
-- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M16 已接入 TraceRouter + 可选 LangFuseBackend，M16B 已验证 `force_new_pipeline` live lifecycle spans；M17 scorer 可按 JSONL `langfuse_trace_id` 回写 LangFuse Scores；M18 提供 `scripts/smoke_phase3b_langfuse.py` 验证 API / JSONL / trace mapping / score / visibility，JSONL 默认不提交；后续如需查询和聚合，可迁移到 SQLite 或独立 EvalBench 平台
+- Trace / Eval：Agent Trace 默认写 JSONL 到 `eval/traces/traces.jsonl`；M16 已接入 TraceRouter + 可选 LangFuseBackend，M16B 已验证 `force_new_pipeline` live lifecycle spans；M17 scorer 可按 JSONL `langfuse_trace_id` 回写 LangFuse Scores；M18 提供 `scripts/smoke_phase3b_langfuse.py` 验证 API / JSONL / trace mapping / score / visibility；M19 在 `eval/triage.py` 增加本地 failure triage，把 eval result + JSONL trace 归因为 `failure_stage / needs_action / evidence_step`，并可选回写 `triage:*` LangFuse Scores；JSONL 默认不提交，后续如需查询和聚合，可迁移到 SQLite 或独立 EvalBench 平台
 - M16B 分支方案：Trace lifecycle 下沉采用显式 `langfuse_span_mode` 去重；`force_new_pipeline` 主链路 live spans 运行中写 LangFuse，最终 JSONL 只保留映射字段，`LangFuseBackend.record()` 不再重复拆 post-hoc spans。SQL Guard / SQL Execution 的真实边界在 `run_sql_tool()` 内部，因此该函数增加可选 DataPilot `trace_context` 参数，由工具层内部记录 `sql_guard` / `sql_execution` spans，而不是 pipeline 事后补 span。
 - M17 评分：`eval/scorers/` 是 L1/L2/L3 评分单一事实源；`eval.run_eval._score_case()` 仅保留兼容薄壳。默认不启用 L3；`--judge-model` 或 `EVAL_JUDGE_MODEL` 非空时追加 `llm:correctness`。LangFuse Score 回写只按 JSONL `langfuse_trace_id`，不等待 trace 可查询；LangFuse 不可用时只跳过/失败计数，不影响 Markdown eval。
 - M18 Experiment 结论：LangFuse UI 的 trace -> Dataset item 工作流可用；`Run experiment` 的 UI 路径需要项目 LLM API key，Webhook 路径需要 remote experiment URL。DataPilot 当前不临时实现 webhook runner；后续 EvalBench 更适合通过 Webhook / SDK API 接入 dataset run。
@@ -40,12 +40,14 @@
 - M17 score smoke：真实 LangFuse score 回写 smoke 通过，baseline/post-hoc 路径 `langfuse_scores=ok:16`；M16B live lifecycle 路径 `score_payload_count=6`、`score_write_result.ok=6`、`langfuse_span_mode=live`。本地出现 LangFuse SDK OTLP trace export `WinError 10013` warning，但 eval 返回 0，score writer 返回 ok。
 - M18 smoke：`scripts/smoke_phase3b_langfuse.py` 默认模式下 API / JSONL PASS、LangFuse 检查 SKIP；`LANGFUSE_ENABLED=true --require-langfuse` 且设置 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` 时 trace mapping / `rule:m18_smoke` score / trace visibility 全 PASS（示例 `langfuse_trace_id=8937e57d85814f74a47d25dc2f431c8e`，observations=8，waited=7s）。不走代理时 trace visibility 查询曾因 Windows `WinError 10013` 失败。
 - M18 Experiment workflow smoke：临时 5-case Dataset `datapilot-m18-workflow-smoke-20260730` 已在 LangFuse UI 创建，CSV 导出 5 条 ACTIVE items；DeepSeek 5-case run 本地 eval `4/5`、scores `ok:25`，Qwen `qwen3.7-plus` `3/5`、scores `ok:22`。UI Dataset 可用，但现阶段不能在 UI 中纯手动把已有 traces/scores 编成两组 run 对比。
+- M19 failure triage：`eval/run_eval.py` 默认报告新增 `Failure Triage Summary`，`--triage-json` 输出本地 JSON，`--compare-triage-left/right/report` 输出本地失败分布对比。LangFuse 启用且 JSONL `langfuse_write_status=ok` 时回写 `triage:failed / triage:failure_stage / triage:needs_action / triage:confidence`；缺 trace 或 Cloud 失败时只记录 skipped/failed，不影响本地报告。真实 Cloud smoke（代理）`langfuse_triage_scores=ok:24`。
 - Eval 默认：formal / challenge 用于主线验收和回归对照；diagnostic 用于定位边界和下一步问题，不追满分。
 
 ### 最新评测基线
 
 - M13 后真实 LLM 基线（2026-07-26，阶段三A上一轮稳定快照）：formal `10/10`（`eval/reports/phase3a-new-pipeline.md`）、challenge `14/16`（`eval/reports/phase3a-challenge-new-pipeline.md`）、diagnostic `23/32`，`review_required=3`（`eval/reports/phase3a-diagnostic-new-pipeline.md`）。
 - M14-lite 后 DeepSeek / 本地 retrieval 临时快照（2026-07-27，真实 LLM 有波动）：formal 曾跑出 `9/10`，最新补测为 `8/10`；challenge `12/16`；diagnostic `24/32`。本轮 result_match / 安全 / trace 口径更严格，不能直接当作 M13 退化结论。
+- M19 后 DeepSeek `deepseek-v4-flash` 快照（2026-08-02，真实 LLM 有波动）：formal `7/10`（失败归因：`schema_context=1`、`plan_validation=1`、`query_plan=1`）；challenge `9/16`（`schema_context=1`、`result_match=3`、`query_plan=3`、`unknown=1`）；diagnostic `19/32`（`schema_context=6`、`schema_retrieval=1`、`result_match=2`、`plan_validation=1`、`sql_guard=1`、`unknown=2`、`query_plan=1`、`sql_generation=1`；动作聚合 `fix_schema_desc=7`、`fix_pipeline=5`、`manual_review=3`）。这轮是 M19 triage 验证快照，不直接等同模型能力稳定基线。
 - M14-lite 后 Qwen 主模型对照（2026-07-27）：`qwen3.7-plus` formal `9/10`、challenge `13/16`、diagnostic `21/32`；`qwen3.7-max` diagnostic `22/32`。结论：Qwen 可保留为显式候选，但默认仍不切。
 - M14-lite 后 embedding formal 对照（2026-07-27，固定主模型 DeepSeek）：本地 `inmemory + deterministic` 最新补测 `8/10`，`Milvus + SiliconFlow BAAI/bge-m3` `8/10`，`Milvus + qwen3.7-text-embedding` `9/10`。差距仅 1 题，后续进入 RAG / Hybrid 再测 challenge / diagnostic。
 

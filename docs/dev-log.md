@@ -925,7 +925,7 @@ python -m uvicorn app.main:app --reload
 
 ### 面试怎么讲
 
-我的 DataPilot 项目从 0 到 1 搭建了一个 **SQL Agent v1**，核心方法是"先跑通、再变强、然后给它装上尺子和眼睛"。v0 阶段先用 5 条模板 SQL 跑通端到端闭环，并把 **sqlglot AST 只读检查**固定为所有 SQL 执行前唯一入口；v1 阶段接入 DeepSeek LLM 生成 SQL，但模型生成的 SQL 与模板 SQL 走**同一个安全闸门**——AST 只读 + 表级 RBAC + 字段级敏感字段拦截，安全不靠 prompt 靠硬拦截。随后把响应扩展成结构化 AgentResponse 契约（答案/SQL/表格/图表/工具调用/trace），SQL 执行收进统一 SQL Tool，每次查询写 JSONL Trace，并搭了 EvalOps-lite（6 条 smoke 走真实 API 评测）和 Streamlit 演示页，形成可评测、可演示的 v1 闭环。最后把数据底座从 7 张表升级为 **14 张物理表 + 1 万级确定性订单数据**，内置固定业务事实（如 GMV 11285752.00）和数据质量彩蛋，为阶段三的 Text2SQL 深化评测提供真实复杂度。
+我做的是一个企业经营数据分析 Agent，目标是让运营/客服用自然语言安全查询订单、退款、渠道 GMV 等指标。Phase 2 从 0 到 1 搭建了一个 **SQL Agent v1**，核心方法是"先跑通、再变强、然后给它装上尺子和眼睛"。v0 阶段先用 5 条模板 SQL 跑通端到端闭环，并把 **sqlglot AST 只读检查**固定为所有 SQL 执行前唯一入口；v1 阶段接入 DeepSeek LLM 生成 SQL，但模型生成的 SQL 与模板 SQL 走**同一个安全闸门**——AST 只读 + 表级 RBAC + 字段级敏感字段拦截，安全不靠 prompt 靠硬拦截。随后把响应扩展成结构化 AgentResponse 契约（答案/SQL/表格/图表/工具调用/trace），SQL 执行收进统一 SQL Tool，每次查询写 JSONL Trace，并搭了 EvalOps-lite（6 条 smoke 走真实 API 评测）和 Streamlit 演示页，形成可评测、可演示的 v1 闭环。最后把数据底座从 7 张表升级为 **14 张物理表 + 1 万级确定性订单数据**，内置固定业务事实（如 GMV 11285752.00）和数据质量彩蛋，为阶段三的 Text2SQL 深化评测提供真实复杂度。
 
 1. **[基础追问] 安全链路从 M1 到 M4 是怎么层层叠加的？**
 
@@ -2064,7 +2064,11 @@ Phase 3A 做的事情，可以概括成两件：
 
 ### 面试怎么讲
 
-我的 DataPilot 项目在 Phase 3A 完成了一次 Text2SQL 的体系化升级：从"模板优先 + LLM 兜底"的简单链路，重构为**"Schema Retrieval → QueryPlan 自检 → 局部 Schema SQL 生成 → SQL Guard"**的分层推理链路。核心方法论是**评测驱动**：先建 10/16/32 三层评测基座、冻结旧链路 baseline，再改系统；每步改进都先修评测尺子（`expected_value` 数值校验，堵住"GMV=NULL 也算对"的伪通过），再沿 trace_steps 分步归因修复，最终新链路 formal 从 4/10 提升到 **10/10**、challenge 6/16 → **14/16**、diagnostic 12/32 → **23/32**，全程不改测试题、不过拟合。过程中用端到端 A/B 回答了三个技术路线问题：Milvus + 真实 embedding **可用但不切默认**（单点 recall 持平、端到端 diagnostic 略降）、Qwen 主模型**不切默认**（失败形态分析：独有 blocking 错误更多）、in-memory 检索保持默认但保留显式开关。安全侧把"敏感字段优先于 admin 角色"定为口径，防幻觉靠 plan 层预检 + SQL Guard 双层独立拦截，不靠 prompt 承诺。
+我的 DataPilot 项目在 Phase 3A 完成了一次 Text2SQL 的体系化升级：从"模板优先 + LLM 兜底"的简单链路，重构为**"Schema Retrieval → QueryPlan 自检 → 局部 Schema SQL 生成 → SQL Guard"**的分层推理链路。
+
+核心方法论是**评测驱动**：先建 10/16/32 三层评测基座、冻结旧链路 baseline，再改系统；每步改进都先修评测尺子（`expected_value` 数值校验，堵住"GMV=NULL 也算对"的伪通过），再沿 `trace_steps` 判断失败发生在检索、计划、生成、执行还是 scorer。
+
+最终新链路 formal 从 4/10 提升到 **10/10**、challenge 6/16 → **14/16**、diagnostic 12/32 → **23/32**，全程不改测试题、不过拟合。过程中用端到端 A/B 回答了三个技术路线问题：Milvus + 真实 embedding **可用但不切默认**（单点 recall 持平、端到端 diagnostic 略降）、Qwen 主模型**不切默认**（失败形态分析：独有 blocking 错误更多）、in-memory 检索保持默认但保留显式开关。安全侧把"敏感字段优先于 admin 角色"定为口径，防幻觉靠 plan 层预检 + SQL Guard 双层独立拦截，不靠 prompt 承诺。
 
 1. **[基础追问] 旧链路有什么具体问题，值得你重构一遍？**
 
@@ -2073,6 +2077,10 @@ Phase 3A 做的事情，可以概括成两件：
 2. **[基础追问] 三层评测为什么这么设计？它们各自解决什么问题？**
 
    一层测试集的毛病是**分不清"验收没过"和"哪里不行"**。formal 10 条是主硬门，验收用；challenge 16 条是 superset，覆盖多表、窗口函数、困难诊断，测试数据库复杂度扩展能力；diagnostic 32 条是带 capability 标签的能力体检，每条标注测的是 schema_retrieval / join_path / query_plan / local_schema_prompt / trace_steps / security_guard 中哪项能力，跑完直接看 capability summary，就知道下一步该修哪块。而且 diagnostic 不追满分——它的职责是定位边界，不是刷数字。
+
+3. **[工程/深挖追问] 为什么不直接把全量 schema 都塞给 LLM，而要做 Schema Retrieval 和局部 Schema prompt？**
+
+   全量 schema 看起来信息更多，但对 Text2SQL 反而是**噪音**：表多、字段多、相似字段多，LLM 更容易选错表、编造字段或乱连 Join，而且失败后很难判断是 schema 没给清楚，还是模型自己生成错。Schema Retrieval 的作用是先把问题相关的表、字段、指标和关系召回成一个局部 **SchemaGraph**，再让 LLM 基于局部上下文写 QueryPlan 和 SQL。这样好处有三个：**token 更少、干扰更少、失败更可归因**。如果召回没命中，是 retrieval 问题；如果计划用了不存在字段，是 plan validation 问题；如果 SQL 写错，是 generation 问题。
 
 4. **[工程/深挖追问] M13 从 4/10 提到 10/10，具体怎么定位问题的？怎么证明不是刷评测？**
 
@@ -2670,11 +2678,11 @@ M18 没有新增 API 端点，体验入口是 smoke CLI 和 LangFuse Cloud UI。
 
 
 
-## ★ ★ ★ Phase 3B 阶段总结：LangFuse 可观测性与评测基座
+## ★ ★ ★ Phase 3B 阶段总结：LangFuse 可观测性与评测基座（注意：本章节完成于M19之前）
 
 （2026-07-31）
 
-**简述**：Phase 3B 给 DataPilot 装上了"观察自己的眼睛"——在 **不动 `/api/query` 响应契约、不替代 JSONL trace 和现有 eval** 的前提下，验证并落地 LangFuse 可观测性：**trace 双写、live lifecycle span、评分分层与 score 回写、一键 smoke、trace → Dataset 手动实验**。这个阶段证明了一件事：**"业务 Agent 可被观测、可被评测"**，为下一阶段 RAG / Hybrid 和独立 EvalBench 评测项目铺好底座。
+**简述**：Phase 3B 给 DataPilot 装上了"观察自己的眼睛"——在 **不动 `/api/query` 响应契约、不替代 JSONL trace 和现有 eval** 的前提下，验证并落地 LangFuse 可观测性：**trace 双写、live lifecycle span、评分分层与 score 回写、一键 smoke、trace → Dataset 工作流手动验证**（未实现自动 Experiment run）。这个阶段证明了一件事：**"业务 Agent 可被观测、可被评测"**，为下一阶段 RAG / Hybrid 和独立 EvalBench 评测项目铺好底座。trace → Dataset
 
 ### 先用大白话讲
 
@@ -2756,23 +2764,35 @@ Phase 3B 之前，DataPilot 已经能查数据、能评测，但它只回答了�
 
    可以答：一次请求对应一个 **Trace**，Trace 下面有多个 **Span**（每个 span 是一个步骤，比如 schema retrieval、sql generation、sql guard）；评测跑完后，按 `langfuse_trace_id` 把每个评分项写成 **Score** 挂在 trace 上；需要做实验对比时，把样本收成 **Dataset**（每条 item 包含 input、expected output 和 metadata）；用 Dataset 跑一组对比就叫 **Experiment**。Phase 3B 把前四个都跑通并有验证证据，Experiment 只验证了 UI 边界。
 
-3. **[工程/深挖追问] post-hoc flat spans 和 live lifecycle spans 有什么本质区别？你为什么先做前者再做后者？**
+3. **[工程/深挖追问] 为什么保留 DataPilot 自己的 `trace_id`，而不是直接用 `langfuse_trace_id` 当全局 ID？**
+
+   因为 LangFuse 是旁路观测平台，不应该接管 DataPilot 的内部契约。`trace_id` 服务 API、JSONL、本地 eval 和错误排查，是项目自己的主 ID；`langfuse_trace_id` 是第三方平台里的观测 ID。两者靠 JSONL 字段映射。这样即使 LangFuse 关闭、网络失败、未来换平台，DataPilot 的 trace、报告和测试都还能继续工作。这个设计类似业务订单号和第三方支付流水号：可以关联，但不能混用。
+
+4. **[工程/深挖追问] post-hoc flat spans 和 live lifecycle spans 有什么本质区别？你为什么先做前者再做后者？**
 
    可以答：post-hoc 是请求结束后拿 `TraceRecord` 一次性拆 spans，**没有真实的开始/结束时间**，只有步骤顺序，所以叫 flat spans；live 是在 pipeline 执行过程中真正记录"这步开始、这步结束、这步失败了"，时间线是真实的。先做 post-hoc 是因为它能**最快验证双写、降级和 ID 映射**这些基础设施；live 涉及 SDK 边界、span 去重、flush 时机和错误路径快照，复杂度更高，单独放 M16B 分支验证。最后用 `langfuse_span_mode` 显式区分两种模式，避免同一个步骤在 Cloud UI 出现两次。
 
-4. **[工程/深挖追问] 如果 LangFuse Cloud 完全不可用，你的系统会发生什么？**
+5. **[工程/深挖追问] 如果 LangFuse Cloud 完全不可用，你的系统会发生什么？**
 
    可以答：什么都不会发生——这正是设计的底线。LangFuse 默认关闭（`LANGFUSE_ENABLED=false`），SDK 在 optional extra 里，未启用时根本不会 import；启用后 router 对每个 backend 独立 try/except，LangFuse 失败只把 `langfuse_write_status` 标记为 `failed`，然后继续写 JSONL。M18 的 smoke 专门有一个默认模式：LangFuse 关闭时 API / JSONL 必须 PASS，Cloud 检查显示 SKIP。测试里也覆盖了 fake client 抛异常、缺 key、SDK import 失败这些路径。**观测系统是加分项，不是生命线**。
 
-5. **[工程/深挖追问] 评分为什么要拆 L1/L2/L3？为什么不用 LangFuse 自带的 evaluator？**
+6. **[工程/深挖追问] 评分为什么要拆 L1/L2/L3？为什么不用 LangFuse 自带的 evaluator？**
 
    可以答：拆层是因为**成本和质量递减**：L1 看表、列、安全这些结构规则，L2 看结果是否匹配固定事实，都是确定性的、便宜的；L3 的 LLM judge 有费用、延迟和抖动，所以默认关闭、显式开启。不用 LangFuse 托管 evaluator，是因为 DataPilot 已经有 YAML cases、Markdown 报告和一套历史规则评分，托管化会引入 UI 配置和调度依赖，容易让本地报告和 Cloud 分数**两套口径**。M17 让本地 scorer 产出统一的 `EvalScoreDetail`，同时服务 Markdown 和 LangFuse，分数只有一份。
 
-6. **[压力追问] 这个阶段没有让用户多问出一个正确答案，也没有提升模型效果，它是不是偏工程自嗨？**
+7. **[压力追问] 这个阶段没有让用户多问出一个正确答案，也没有提升模型效果，它是不是偏工程自嗨？**
 
    可以答：这个质疑有合理的地方——Phase 3B **确实不是模型优化模块**，它不提升通过率。但它解决的是另一类问题：**当系统变复杂以后，你怎么知道它为什么失败、怎么持续改进**。Phase 3A 的教训就是失败归因难：同一道题失败，可能是 schema 没召回、plan 没通过、SQL 生成跑偏，也可能是评测尺子本身错了。Phase 3B 把"失败发生在哪一步"变成可见的（live spans）、把"每个评分项对不对"变成可回写的（score）、把"样本怎么复用"变成可管理的（dataset）。没有这层底座，后续 RAG / Hybrid 多步骤链路一接进来，排障会直接失控。所以我会把它讲成**给后续阶段铺观测地基**，而不是包装成模型效果提升。
 
-7. **[压力追问] 你们 Experiment 实际上没跑通——UI run 要 LLM key，Webhook 没有实现，这算阶段收口吗？**
+8. **[压力追问] LangFuse Cloud 会不会上传业务数据、SQL 结果或敏感信息？**
+
+   Phase 3B 的原则是最小 payload。Cloud 只作为观测旁路，不作为长期数据资产；本地 JSONL 才是主记录。上传到 LangFuse 的内容应该控制在 trace 元信息、步骤摘要、状态、错误类型和评分结果，避免上传完整 rows、PII 和不必要的业务明细。这个取舍是为了证明观测链路可用，同时不把企业数据安全边界交给外部平台。
+
+9. **[压力追问] 怎么证明 LangFuse 关闭、key 缺失、SDK 不可用或网络失败时，本地 eval 仍然可用？**
+
+   我专门把这些当成 Phase 3B 的验收边界。默认配置下 `LANGFUSE_ENABLED=false`，SDK 在 optional extra 里，未启用时不应该影响主链路；启用后 TraceRouter 对每个 backend 独立 try/except，LangFuse 写失败只标记 `langfuse_write_status=failed`，JSONL 仍然落盘。M18 smoke 也分成默认模式和 `--require-langfuse` 模式：默认模式必须证明 API / JSONL / 本地 eval PASS，LangFuse 检查 SKIP；只有 require 模式才把 Cloud 可见性作为硬门。这样观测系统坏了，业务和本地评测仍能跑。
+
+10. **[压力追问] 你们 Experiment 实际上没跑通——UI run 要 LLM key，Webhook 没有实现，这算阶段收口吗？**
 
    可以答：如果阶段目标定义成"完整自动化 Experiment 平台"，那确实没完成，我会诚实承认。但 Phase 3B 的目标是**验证 LangFuse 是否适合作为 DataPilot 的可观测与评测前置底座**，这个目标完成了：trace 双写、live spans、score 回写、trace visibility、trace → Dataset item 全部有真实 Cloud 验证证据。Experiment 的边界也摸清了：run 需要 LLM key（UI 路径）或远程实验服务（Webhook 路径）。我没有在 M18 临时补一个不完整的 webhook runner，因为那是 EvalBench adapter 的活，临时实现反而会留下半吊子架构。**结论是"DataPilot 侧闭环到 score 和 dataset，run 编排进入 EvalBench 设计"**——这比假装全通更诚实。
 
@@ -2798,3 +2818,132 @@ Phase 3B 之前，DataPilot 已经能查数据、能评测，但它只回答了�
 - **Phase 3 RAG / Hybrid（下一模块）**：基于 **M16B live lifecycle 底座**继续评估，多步骤链路直接复用 `TraceContext / SpanHandle` 和统一的 span 命名约定；Schema Retrieval 的 Qwen embedding（`qwen3.7-text-embedding`）在 Phase 3A 已显示 formal 略好，继续在文档检索上验证收益。主模型默认已切换为 `deepseek-v4-flash`，真实 LLM 基线待 Phase 3 评估时重新验证。
 - **独立 EvalBench 项目**：吸收 Phase 3B 的踩坑记录，设计 **LangFuse Webhook / SDK 方式的 DatasetRun runner**、**self-host 部署 spike**，并从 root trace / case 定义统一生成清洗过的 Dataset 样本。
 - **可复用的阶段级验证命令**：M15-M18 的模块记录里都有完整验证命令；阶段收口时的总检查入口是 M18 的 smoke 脚本（默认模式 `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3b_langfuse.py --trace .agent_work\temp\m18-final-default-traces.jsonl --visibility-timeout-seconds 5`，预期 API / JSONL PASS、LangFuse SKIP）和全量 pytest（预期 **107 passed, 2 skipped**）。
+
+## ★ M19 Trace Failure Triage：把观测数据变成改进闭环
+
+（2026-08-02）
+
+**简述**：M19 补上 Phase 3B 最后一个关键问题：LangFuse 和 JSONL 不只是“能看见 trace”，还要能回答“失败到底更像哪一层的问题，下一步该修哪里”。这一步没有改业务查询能力，也没有改正式测试集，而是在 eval 报告里新增 **Failure Triage Summary**，把失败 case 归成 `schema_retrieval / schema_context / query_plan / plan_validation / sql_generation / sql_guard / sql_execution / result_match / scorer_issue / unknown` 等阶段，并给出 `fix_schema_desc / fix_pipeline / fix_scorer / manual_review / infra_retry` 这类下一步动作。
+
+### 先用大白话讲
+
+前面 M15-M18 相当于给 DataPilot 装了监控摄像头：能把一次请求的每个步骤拍下来，也能把分数贴回 LangFuse。但光有摄像头还不够，出了问题时你还要有人帮你看录像、圈出“可能是这里坏了”。
+
+M19 做的就是这个“看录像做初步标注”的工作。它不会神奇地修好模型，也不会替你直接改测试集；它只是把失败 case 归类成更容易行动的清单：有些是 schema 上下文没给够，有些是 QueryPlan 生成失败，有些是 SQL 跑出来但结果和标准答案不一致，有些证据不够只能人工复核。
+
+所以本模块的核心价值是：把 **trace / score / report** 从“记录事实”推进到“指导下一步怎么修”。
+
+### 这次做了什么
+
+M19 新增了一个本地优先的 `eval/triage.py`：它读取 eval result、score details 和 JSONL trace，对每条失败、跳过或需要人工复核的 case 生成 `failure_stage`、`failure_reason`、`needs_action`、`evidence_step` 和 `confidence`。`eval/run_eval.py` 现在会把这些信息写进 Markdown report，并可用 `--triage-json` 输出 JSON，方便后续做 A/B failure distribution 对比。
+
+LangFuse 仍然只是增强：如果 JSONL 里有确认成功的 `langfuse_trace_id`，M19 会把 `triage:failed`、`triage:failure_stage`、`triage:needs_action`、`triage:confidence` 写成 LangFuse Scores，方便在 Cloud UI 里筛选；如果 LangFuse 关闭、网络失败或 trace id 缺失，本地报告照常生成，只把 score write 统计为 skipped / failed。
+
+最重要的边界是：M19 **不自动改正式 case 集**。它可以输出“建议沉淀为 regression 的候选”，但不会直接写 `eval/cases/*`，因为这会影响长期基线，必须单独确认。
+
+### 新概念
+
+- **Failure triage**：不是只看 pass/fail，而是把失败映射到“可能的问题层”。它是排障导航，不是绝对真因。
+- **Evidence-first**：归因优先看 trace step 的 `status/error_type` 和 scorer 明细，比如 `rule:table_hit` 失败更像 schema retrieval，`rule:result_match` 失败更像结果口径/SQL 输出问题。
+- **本地闭环优先**：评测报告和 JSON 文件必须在 `LANGFUSE_ENABLED=false` 时也完整可用；Cloud 只是筛选和展示增强。
+- **A/B failure distribution**：两个 run 不只比较总分，还要比较失败结构，比如新方案 `schema_context` 失败少了但 `result_match` 失败多了，这比一个总分更能指导下一步。
+
+### 代码阅读路线
+
+1. **归因核心**：`eval/triage.py`
+   先看 `FailureTriage` 这个数据结构，它就是 M19 输出的一条“失败诊断卡片”。然后看 `triage_result()`：它按 **trace step → error_type → scorer detail → manual fallback** 的顺序归因。最后看 `build_triage_score_payloads()` 和 `compare_triage_files()`，前者把本地 triage 变成 LangFuse Score，后者把两个 run 的失败阶段分布做本地对比。
+
+2. **评测入口**：`eval/run_eval.py`
+   从 `main()` 开始看：正常 eval 跑完后，先写原有 rule score，再调用 `triage_results()` 生成 M19 归因，然后写 Markdown report 和可选 JSON。`_append_failure_triage_summary()` 只负责展示，不负责判断，这样报告层不会变成第二套归因逻辑。
+
+3. **测试样例**：`tests/test_m19_failure_triage.py`
+   这个文件是理解 M19 的最快入口：它用很小的假 `EvalResult` 和 JSONL trace 覆盖 SQL Guard、SQL Execution、Result Match、LangFuse mapping 降级和本地 A/B 对比。读测试能直接看到每类失败应该被归到哪里。
+
+核心链路：
+
+`EvalResult + JSONL Trace`
+→ `FailureTriage`
+→ `Markdown Failure Triage Summary`
+→ `triage JSON`
+→ `LangFuse triage scores（可选）`
+→ `A/B failure distribution（本地）`
+
+### 设计要点
+
+- **不让 LangFuse 成为强依赖**：M19 第一交付是本地 Markdown / JSON。Cloud 可用时写 score，不可用时只记 skipped / failed。
+- **启发式而非 LLM 自由判断**：本模块不让 LLM 读完整 trace 来“自由发挥”，因为那会引入成本、抖动和新一层误判。第一版只用确定性证据做归因。
+- **建议回归候选但不改正式基线**：自动写 case 会改变评测结构和长期基线，所以 M19 只输出 candidate list，是否沉淀为 regression 要单独确认。
+- **保留 unknown / manual_review**：证据不足时宁愿不判断，也不把猜测包装成真因。
+
+### 面试怎么讲
+
+可以这样讲：
+
+“我在可观测性阶段最后补了一层 failure triage。之前 eval 只能告诉我这条 case 过没过，LangFuse 能告诉我每一步 trace 长什么样，但它们还没有直接告诉我下一步该修哪。M19 做的是把 eval 的 scorer 明细和 JSONL trace 结合起来：如果 schema retrieval 没召回表，就归到 schema_retrieval；如果 QueryPlan validation 挡住了，就归到 plan_validation；如果 SQL 跑通但 result_match 不一致，就归到 result_match；如果证据不足，就保留 unknown/manual_review。报告里会聚合每类失败数量和建议动作，LangFuse 可用时再把 triage 结果写成 score，方便 Cloud UI 筛选。这样 A/B 不再只看总分，而能看到失败结构有没有变好。”
+
+压力追问可以这样答：
+
+“这不是一个自动判案系统，它只是工程排障建议。比如 `missing_columns` 第一版会归到 schema_context，但真实原因可能是 schema 描述不足、SQL alias 不一致或 scorer 太严格，所以报告里必须保留 `failure_reason` 和 `evidence_step`，不能只给一个标签。对 `review_required` 的困难 case，我宁愿保守标成 manual_review，也不让系统过度自信。”
+
+### 验证与下一步
+
+- 单元测试：M19/M17 focused tests 15 passed；M16-M19 focused tests 31 passed。
+- 全量测试：`121 passed, 2 skipped`。
+- 默认 smoke：`passed=6/6`，LangFuse triage score 因本地模式正常 `skipped=24`。
+- LangFuse enabled smoke：`passed=5/6`，`langfuse_triage_scores=ok:24`，说明四类 triage score 可回写。
+- DeepSeek `deepseek-v4-flash` 当前快照：formal `7/10`，challenge `9/16`，diagnostic `19/32`。
+- Diagnostic 主展示集的失败结构：`schema_context=6`、`schema_retrieval=1`、`result_match=2`、`plan_validation=1`、`sql_guard=1`、`unknown=2`、`query_plan=1`、`sql_generation=1`；下一步动作聚合是 `fix_schema_desc=7`、`fix_pipeline=5`、`manual_review=3`。
+- 下一步：进入 Phase 3 RAG / Hybrid 时，复用 M16B live lifecycle 和 M19 triage 口径；如果要把候选失败样本写回正式 regression，需要单独确认。
+
+### 这次测试怎么看
+
+M19 的测试结果要分两层读，不能只盯着 `passed=19/32` 这个总分。
+
+第一层是**代码能力是否实现**：看 `pytest`、smoke 和 LangFuse score 回写。这里的结论是通过的：M19 focused tests、M16-M19 focused tests、全量 pytest 都通过；本地 smoke 能在 LangFuse 关闭时生成 triage；LangFuse enabled smoke 能把 6 条 smoke case 的 24 个 triage score 写回 Cloud。这说明 **M19 这个工具本身能工作**。
+
+第二层是**当前 Text2SQL 系统失败在哪里**：看 formal / challenge / diagnostic 的 failure distribution。这里的结论不是“系统变好了”，而是“失败结构看清楚了”。本轮 DeepSeek `deepseek-v4-flash` 快照是 formal `7/10`、challenge `9/16`、diagnostic `19/32`，低于 M13 稳定基线；但 M19 的价值是把 32 条 diagnostic 里的失败拆成了具体方向。
+
+Diagnostic 的主结论可以这样读：
+
+| failure_stage | 数量 | 怎么理解 | 下一步 |
+|---|---:|---|---|
+| `schema_context` | 6 | 表大多找到了，但传给后续步骤的字段/上下文不够，典型表现是 `missing_columns` | 优先检查 `domain_pack/schema_desc/*`、retrieval 命中文档、局部 SchemaGraph 输出列 |
+| `schema_retrieval` | 1 | 需要的表没有召回，例如期望 `products` 但没进上下文 | 调 schema retrieval query / aliases / metric doc |
+| `result_match` | 2 | SQL 能跑通，但结果列名、排序或数值和 expected SQL 不一致 | 查 generated SQL、expected SQL、scorer 是否过严 |
+| `plan_validation` | 1 | QueryPlan 生成出来了，但自检不通过 | 查 planner / validator 的错误标签和 prompt 约束 |
+| `query_plan` | 1 | 自然语言到 QueryPlan 阶段失败，多见 LLM 输出不可解析或理解偏了 | 查 QueryPlan prompt、模型输出、失败 case 是否多步/歧义 |
+| `sql_generation` | 1 | plan 有了，但 SQL 生成阶段失败 | 查 SQL prompt 和局部 schema 是否足够 |
+| `sql_guard` | 1 | 安全门相关失败，可能是真拦截，也可能是误拦截 | 先人工复核，不能贸然放宽安全策略 |
+| `unknown` | 2 | 证据不足或人工复核 case，不该硬贴标签 | 保留 manual_review，补更细 trace 或 case 说明 |
+
+所以这次测试暴露的最大方向不是“LangFuse 写入问题”，而是 **schema 上下文质量**：`schema_context + schema_retrieval = 7`，占 diagnostic 失败的主要部分。第二类是 **pipeline 生成/验证/结果匹配问题**：`result_match + plan_validation + query_plan + sql_generation = 5`。这就是 M19 说的闭环：不是只说“失败了 13 条”，而是告诉你下一轮更该先修 schema 上下文，再看 SQL 结果口径。
+
+### 怎么用于改进
+
+M19 的改进方法不是“一次性全修”，而是按 failure distribution 排优先级：
+
+1. **先修 `fix_schema_desc=7` 的问题**
+   重点看 `schema_context` 和 `schema_retrieval` 的 Top cases，例如 `db_prompt_001 / db_prompt_002 / db_prompt_003 / db_schema_003 / db_simple_002`。这些 case 多数是字段缺失或上下文不完整。下一步可以逐条打开 `.agent_work/temp/m19-diagnostic-report.md`，看 `evidence_step=score:rule:column_recall` 对应的 missing columns，再反查 `domain_pack/schema_desc/*` 和 retrieval metadata。
+
+2. **再修 `fix_pipeline=5` 的问题**
+   重点看 `result_match`、`plan_validation`、`query_plan`、`sql_generation`。这里不要先改 scorer，也不要先换模型，而是先看 trace step：失败发生在 QueryPlan，就看 plan prompt / LLM raw response；失败发生在 result_match，就对比 generated SQL 和 expected SQL。比如 `result_match` 可能只是列名 alias 不一致，也可能是真 SQL 口径错，两者修法完全不同。
+
+3. **最后处理 `manual_review=3`**
+   `unknown` 和 review_required case 不应该被自动归因。它们更像“诊断题”或“边界题”，需要人工判断：是 case 本身歧义、scorer 太严格、安全策略误拦，还是当前系统确实不支持。
+
+4. **用 A/B failure distribution 检查改动是否真的变好**
+   改完后不要只看总分从 19/32 到多少，而要比较失败结构。例如如果 `schema_context` 从 6 降到 2，但 `result_match` 从 2 升到 6，说明你可能让更多表字段进来了，但 SQL 口径更乱了；这不是纯提升。M19 的 `--compare-triage-left/right/report` 就是为了看这种变化。
+
+一句话：M19 不是“自动修复器”，而是把下一轮优化从“凭感觉挑 case”变成 **按失败阶段排队修**。
+
+可复制验证命令：
+
+```powershell
+# M19 focused tests：预期 5 passed
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m19_failure_triage.py --basetemp=.agent_work\temp\pytest-m19-check
+
+# 生成带 Failure Triage Summary 的 smoke report：预期 passed=6/6，本地 LangFuse triage scores skipped=24
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\smoke.yaml --pipeline-mode new_text2sql --trace .agent_work\temp\m19-smoke-traces.jsonl --report .agent_work\temp\m19-smoke-report.md --triage-json .agent_work\temp\m19-smoke-triage.json
+```
+
+**本地启动体验：**本模块没有新增 Web 页面或 API endpoint；它的入口是 eval CLI。用户体验方式是运行 `eval.run_eval` 后打开生成的 Markdown report，看 `Failure Triage Summary` 和 `Case Triage Details`。

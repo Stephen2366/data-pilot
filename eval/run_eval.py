@@ -34,6 +34,14 @@ from eval.scorers.factory import score_case as score_case_details
 from eval.scorers.langfuse_scores import LangFuseScoreWriter, build_langfuse_score_payloads
 from eval.scorers.llm_judge import resolve_judge_model
 from eval.scorers.rule_scorers import score_case_rules, should_skip_due_to_pipeline_mode
+from eval.triage import (
+    FailureTriage,
+    build_triage_score_payloads,
+    compare_triage_files,
+    triage_results,
+    triage_summary,
+    write_triage_json,
+)
 from scripts.seed_data import seed_database
 
 DEFAULT_CASES_PATH = PROJECT_ROOT / "eval" / "cases" / "smoke.yaml"
@@ -354,6 +362,8 @@ def write_report(
     path: Path = DEFAULT_REPORT_PATH,
     *,
     langfuse_score_write_result: dict[str, int] | None = None,
+    triages: list[FailureTriage] | None = None,
+    langfuse_triage_write_result: dict[str, int] | None = None,
 ) -> None:
     """把评测结果写成 Markdown，方便 README / dev-log / 验收报告引用。"""
 
@@ -397,6 +407,12 @@ def write_report(
                 f"- skipped: {langfuse_score_write_result.get('skipped', 0)}",
                 f"- failed: {langfuse_score_write_result.get('failed', 0)}",
             ]
+        )
+    if triages is not None:
+        _append_failure_triage_summary(
+            lines,
+            triages=triages,
+            langfuse_triage_write_result=langfuse_triage_write_result,
         )
     lines.extend(
         [
@@ -507,6 +523,116 @@ def write_report(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _append_failure_triage_summary(
+    lines: list[str],
+    *,
+    triages: list[FailureTriage],
+    langfuse_triage_write_result: dict[str, int] | None,
+) -> None:
+    """把 M19 failure triage 汇总写入 Markdown 报告。
+
+    ★ 这里只负责展示，不做归因判断；归因单一事实源在 `eval.triage`，避免报告函数越写越胖。
+    """
+
+    summary = triage_summary(triages)
+    failed_triages = [triage for triage in triages if triage.failed]
+    lines.extend(
+        [
+            "",
+            "## Failure Triage Summary",
+            "",
+            f"- triaged_cases: {summary['total']}",
+            f"- failed_or_review_cases: {summary['failed']}",
+            "",
+            "### Failure Stage Counts",
+            "",
+            "| failure_stage | count |",
+            "|---|---:|",
+        ]
+    )
+    if summary["failure_stage_counts"]:
+        for stage, count in sorted(summary["failure_stage_counts"].items()):
+            lines.append(f"| {stage} | {count} |")
+    else:
+        lines.append("| - | 0 |")
+
+    lines.extend(
+        [
+            "",
+            "### Needs Action Counts",
+            "",
+            "| needs_action | count |",
+            "|---|---:|",
+        ]
+    )
+    if summary["needs_action_counts"]:
+        for action, count in sorted(summary["needs_action_counts"].items()):
+            lines.append(f"| {action} | {count} |")
+    else:
+        lines.append("| - | 0 |")
+
+    lines.extend(
+        [
+            "",
+            "### Top Cases",
+            "",
+            "| case_id | failure_stage | needs_action | confidence | evidence_step | regression_candidate | reason |",
+            "|---|---|---|---:|---|---|---|",
+        ]
+    )
+    top_cases = summary["top_cases"]
+    if top_cases:
+        for item in top_cases:
+            lines.append(
+                "| {case_id} | {failure_stage} | {needs_action} | {confidence} | {evidence_step} | {candidate} | {reason} |".format(
+                    case_id=item["case_id"],
+                    failure_stage=item["failure_stage"],
+                    needs_action=item["needs_action"],
+                    confidence=item["confidence"],
+                    evidence_step=item["evidence_step"],
+                    candidate="yes" if item["regression_candidate"] else "no",
+                    reason=item["failure_reason"],
+                )
+            )
+    else:
+        lines.append("| - | - | - | 0 | - | no | no_failed_cases |")
+
+    lines.extend(
+        [
+            "",
+            "### Case Triage Details",
+            "",
+            "| case_id | failed | failure_stage | needs_action | evidence_step | confidence | reason |",
+            "|---|---|---|---|---|---:|---|",
+        ]
+    )
+    for triage in failed_triages:
+        lines.append(
+            "| {case_id} | yes | {stage} | {action} | {evidence} | {confidence} | {reason} |".format(
+                case_id=triage.case_id,
+                stage=triage.failure_stage,
+                action=triage.needs_action,
+                evidence=triage.evidence_step,
+                confidence=triage.confidence,
+                reason=triage.failure_reason,
+            )
+        )
+    if not failed_triages:
+        lines.append("| - | no | - | - | - | 0 | no_failed_cases |")
+
+    if langfuse_triage_write_result is not None:
+        lines.extend(
+            [
+                "",
+                "### LangFuse Triage Score Write",
+                "",
+                f"- ok: {langfuse_triage_write_result.get('ok', 0)}",
+                f"- skipped: {langfuse_triage_write_result.get('skipped', 0)}",
+                f"- failed: {langfuse_triage_write_result.get('failed', 0)}",
+            ]
+        )
+
+
 def _format_score_details(details: list[EvalScoreDetail]) -> str:
     """把 scorer 明细压成一行，避免 Case Details 过度膨胀。"""
 
@@ -530,7 +656,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--judge-model", default="", help="显式启用 L3 llm:correctness；优先级高于 EVAL_JUDGE_MODEL。")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--trace", type=Path, default=DEFAULT_TRACE_PATH)
+    parser.add_argument("--triage-json", type=Path, default=None, help="输出 M19 failure triage JSON，供本地 A/B 分布对比。")
+    parser.add_argument("--compare-triage-left", type=Path, default=None, help="本地 A/B 对比左侧 triage JSON。")
+    parser.add_argument("--compare-triage-right", type=Path, default=None, help="本地 A/B 对比右侧 triage JSON。")
+    parser.add_argument("--compare-triage-report", type=Path, default=None, help="本地 A/B failure distribution Markdown 输出路径。")
     args = parser.parse_args(argv)
+
+    if args.compare_triage_left or args.compare_triage_right or args.compare_triage_report:
+        if not (args.compare_triage_left and args.compare_triage_right and args.compare_triage_report):
+            parser.error("--compare-triage-left/--compare-triage-right/--compare-triage-report must be used together")
+        compare_triage_files(
+            left_path=args.compare_triage_left,
+            right_path=args.compare_triage_right,
+            output_path=args.compare_triage_report,
+        )
+        print(f"triage_compare_report={args.compare_triage_report}")
+        return 0
 
     cases = load_cases(args.cases, extra_cases=args.extra_cases)
     judge_model = resolve_judge_model(args.judge_model)
@@ -538,7 +679,19 @@ def main(argv: list[str] | None = None) -> int:
         results = run_cases(cases, client, pipeline_mode=args.pipeline_mode, judge_model=judge_model)
     score_payloads = build_langfuse_score_payloads(results=results, trace_path=args.trace)
     score_write_result = LangFuseScoreWriter().write_scores(score_payloads)
-    write_report(results, args.report, langfuse_score_write_result=score_write_result)
+    triages = triage_results(results, trace_path=args.trace)
+    triage_payloads = build_triage_score_payloads(triages)
+    triage_write_result = LangFuseScoreWriter().write_scores(triage_payloads)
+    triage_write_result["skipped"] += max(0, len(triages) * 4 - len(triage_payloads))
+    if args.triage_json is not None:
+        write_triage_json(triages, args.triage_json)
+    write_report(
+        results,
+        args.report,
+        langfuse_score_write_result=score_write_result,
+        triages=triages,
+        langfuse_triage_write_result=triage_write_result,
+    )
 
     passed_count = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in results)
     skipped_count = sum(result.skipped_due_to_pipeline_mode for result in results)
@@ -549,6 +702,12 @@ def main(argv: list[str] | None = None) -> int:
         "langfuse_scores="
         f"ok:{score_write_result['ok']} skipped:{score_write_result['skipped']} failed:{score_write_result['failed']}"
     )
+    print(
+        "langfuse_triage_scores="
+        f"ok:{triage_write_result['ok']} skipped:{triage_write_result['skipped']} failed:{triage_write_result['failed']}"
+    )
+    if args.triage_json is not None:
+        print(f"triage_json={args.triage_json}")
     print(f"passed={passed_count}/{len(results)}")
     print(f"skipped_due_to_pipeline_mode={skipped_count}/{len(results)}")
     for result in results:

@@ -1,6 +1,6 @@
 # DataPilot 数据库当前状态速查（Phase 2.7 / 2.7.1 后）
 
-> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/AI_CONTEXT_CHANGELOG.md`「历史档案」Phase 2.7 / 2.7.1 条目。
+> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/AI_CONTEXT_CHANGELOG.md`「变更记录」Phase 2.7 / 2.7.1 条目。
 
 ## 一句话结论
 
