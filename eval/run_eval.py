@@ -26,6 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -42,6 +43,9 @@ from eval.triage import (
     triage_summary,
     write_triage_json,
 )
+from engine.nl2sql.schema_loader import load_domain_schema
+from engine.schema_retrieval.retriever import build_configured_schema_vector_index
+from engine.schema_retrieval.vector_index import VectorIndex
 from scripts.seed_data import seed_database
 
 DEFAULT_CASES_PATH = PROJECT_ROOT / "eval" / "cases" / "smoke.yaml"
@@ -214,7 +218,12 @@ def _prepare_sqlite_seed() -> Any:
 
 
 @contextmanager
-def seeded_api_client(trace_path: Path = DEFAULT_TRACE_PATH) -> Generator[TestClient, None, None]:
+def seeded_api_client(
+    trace_path: Path = DEFAULT_TRACE_PATH,
+    *,
+    schema_vector_index: VectorIndex | None = None,
+    schema_vector_index_metadata: dict[str, Any] | None = None,
+) -> Generator[TestClient, None, None]:
     """返回一个连接内存 seed 数据库的 FastAPI TestClient。"""
 
     trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,12 +238,19 @@ def seeded_api_client(trace_path: Path = DEFAULT_TRACE_PATH) -> Generator[TestCl
 
     app.dependency_overrides[get_db] = override_get_db
     app.state.trace_path = trace_path
+    if schema_vector_index is not None:
+        app.state.schema_vector_index = schema_vector_index
+        app.state.schema_vector_index_metadata = schema_vector_index_metadata or {}
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.clear()
         if hasattr(app.state, "trace_path"):
             delattr(app.state, "trace_path")
+        if hasattr(app.state, "schema_vector_index"):
+            delattr(app.state, "schema_vector_index")
+        if hasattr(app.state, "schema_vector_index_metadata"):
+            delattr(app.state, "schema_vector_index_metadata")
         Base.metadata.drop_all(engine)
 
 
@@ -357,6 +373,52 @@ def run_cases(
     return results
 
 
+def _build_eval_schema_vector_index(
+    *,
+    pipeline_mode: str | None,
+) -> tuple[VectorIndex | None, dict[str, Any]]:
+    """按 M20 规则为一次 eval run 预建可复用的 Schema vector index。
+
+    默认 `inmemory + deterministic` 不需要走这条路径；只有显式 new_text2sql + Milvus 实验才
+    预建 index。这样一个 eval run 内 10/16/32 个 case 会复用同一个 Milvus collection，不再
+    每个 case 重复插入同一批 schema docs。
+    """
+
+    settings = get_settings()
+    runtime_metadata: dict[str, Any] = {
+        "result_match_oracle_backend": "sqlite_deterministic_seed",
+        "schema_vector_backend": settings.schema_vector_backend,
+        "schema_embedding_provider": settings.schema_embedding_provider,
+    }
+    if pipeline_mode != "new_text2sql" or settings.schema_vector_backend.lower() != "milvus":
+        runtime_metadata["schema_vector_index_reuse"] = "not_applicable"
+        return None, runtime_metadata
+
+    vector_index, documents, docs_hash = build_configured_schema_vector_index(
+        domain_schema=load_domain_schema(),
+        schema_retrieval_profile="default",
+    )
+    runtime_metadata.update(
+        {
+            "schema_vector_index_reuse": "run_scoped",
+            "schema_docs_count": len(documents),
+            "schema_docs_hash": docs_hash,
+            "milvus_collection": settings.milvus_collection,
+            "milvus_uri": settings.milvus_uri,
+            "milvus_reset_collection": settings.milvus_reset_collection,
+            "milvus_dimension": getattr(vector_index, "dimension", None),
+            "milvus_initial_row_count": getattr(vector_index, "initial_row_count", None),
+            "milvus_inserted_document_count": getattr(vector_index, "inserted_document_count", None),
+            "milvus_final_row_count": getattr(vector_index, "final_row_count", None),
+            "qwen_embedding_model": settings.qwen_embedding_model,
+            "qwen_embedding_dimensions": settings.qwen_embedding_dimensions,
+            "siliconflow_embedding_model": settings.siliconflow_embedding_model,
+            "siliconflow_embedding_dimensions": settings.siliconflow_embedding_dimensions,
+        }
+    )
+    return vector_index, runtime_metadata
+
+
 def write_report(
     results: list[EvalResult],
     path: Path = DEFAULT_REPORT_PATH,
@@ -364,6 +426,7 @@ def write_report(
     langfuse_score_write_result: dict[str, int] | None = None,
     triages: list[FailureTriage] | None = None,
     langfuse_triage_write_result: dict[str, int] | None = None,
+    runtime_metadata: dict[str, Any] | None = None,
 ) -> None:
     """把评测结果写成 Markdown，方便 README / dev-log / 验收报告引用。"""
 
@@ -397,6 +460,18 @@ def write_report(
                 )
     else:
         lines.append("| - | - | - | - | - | no_score_details |")
+    if runtime_metadata is not None:
+        lines.extend(
+            [
+                "",
+                "## Eval Runtime Metadata",
+                "",
+                "| key | value |",
+                "|---|---|",
+            ]
+        )
+        for key, value in sorted(runtime_metadata.items()):
+            lines.append(f"| {key} | {value} |")
     if langfuse_score_write_result is not None:
         lines.extend(
             [
@@ -675,8 +750,18 @@ def main(argv: list[str] | None = None) -> int:
 
     cases = load_cases(args.cases, extra_cases=args.extra_cases)
     judge_model = resolve_judge_model(args.judge_model)
-    with seeded_api_client(args.trace) as client:
-        results = run_cases(cases, client, pipeline_mode=args.pipeline_mode, judge_model=judge_model)
+    schema_vector_index, runtime_metadata = _build_eval_schema_vector_index(pipeline_mode=args.pipeline_mode)
+    try:
+        with seeded_api_client(
+            args.trace,
+            schema_vector_index=schema_vector_index,
+            schema_vector_index_metadata=runtime_metadata,
+        ) as client:
+            results = run_cases(cases, client, pipeline_mode=args.pipeline_mode, judge_model=judge_model)
+    finally:
+        close_index = getattr(schema_vector_index, "close", None)
+        if callable(close_index):
+            close_index()
     score_payloads = build_langfuse_score_payloads(results=results, trace_path=args.trace)
     score_write_result = LangFuseScoreWriter().write_scores(score_payloads)
     triages = triage_results(results, trace_path=args.trace)
@@ -691,6 +776,7 @@ def main(argv: list[str] | None = None) -> int:
         langfuse_score_write_result=score_write_result,
         triages=triages,
         langfuse_triage_write_result=triage_write_result,
+        runtime_metadata=runtime_metadata,
     )
 
     passed_count = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in results)
@@ -698,6 +784,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"report={args.report}")
     print(f"trace_path={args.trace}")
     print(f"judge_model={judge_model or '<disabled>'}")
+    print(f"result_match_oracle_backend={runtime_metadata.get('result_match_oracle_backend')}")
+    if runtime_metadata.get("schema_vector_index_reuse") == "run_scoped":
+        print(f"schema_docs_hash={runtime_metadata.get('schema_docs_hash')}")
+        print(f"milvus_collection={runtime_metadata.get('milvus_collection')}")
+        print(f"milvus_final_row_count={runtime_metadata.get('milvus_final_row_count')}")
     print(
         "langfuse_scores="
         f"ok:{score_write_result['ok']} skipped:{score_write_result['skipped']} failed:{score_write_result['failed']}"

@@ -135,10 +135,14 @@ class MilvusVectorIndex:
         inferred_dimension = len(document_vectors[0]) if document_vectors and isinstance(document_vectors[0], list) else dimension
         self.dimension = inferred_dimension
         self._client = MilvusClient(uri=uri, timeout=timeout)
+        self.inserted_document_count = 0
+        self.initial_row_count: int | None = None
+        self.final_row_count: int | None = None
 
         if reset_collection and self._client.has_collection(collection_name):
             self._client.drop_collection(collection_name)
-        if not self._client.has_collection(collection_name):
+        collection_exists = self._client.has_collection(collection_name)
+        if not collection_exists:
             schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
             schema.add_field("doc_id", DataType.VARCHAR, is_primary=True, max_length=512)
             schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self.dimension)
@@ -149,23 +153,87 @@ class MilvusVectorIndex:
                 schema=schema,
                 index_params=index_params,
             )
+        else:
+            self.initial_row_count = self._collection_row_count()
+            existing_dimension = self._collection_vector_dimension()
+            if existing_dimension is not None and existing_dimension != self.dimension:
+                raise RuntimeError(
+                    "Milvus collection vector dimension does not match current embedding: "
+                    f"collection={collection_name} dimension={existing_dimension} expected={self.dimension}. "
+                    "Use a unique MILVUS_COLLECTION or set MILVUS_RESET_COLLECTION=true."
+                )
 
         # 步骤 1：写入向量并 flush，确保后续 search 能立即看到本轮实验文档。-------------
-        rows = [
-            {
-                "doc_id": document.doc_id,
-                "vector": self._to_dense_vector(document_vector),
-            }
-            for document, document_vector in zip(
-                documents,
-                document_vectors,
-                strict=True,
+        # M20 索引卫生：固定 collection 如果已经有正确数量的文档，就复用而不是再次 insert；
+        # 如果行数不等于当前 schema docs 数量，说明 collection 可能来自旧模型、旧 schema 或重复灌入，
+        # 直接拒绝复用，要求调用方换唯一 collection 或显式 reset。
+        should_insert = True
+        if self.initial_row_count is not None:
+            if self.initial_row_count == len(documents):
+                should_insert = False
+            else:
+                raise RuntimeError(
+                    "Milvus collection is not clean for current schema docs: "
+                    f"collection={collection_name} row_count={self.initial_row_count} "
+                    f"expected={len(documents)}. Use a unique MILVUS_COLLECTION or set "
+                    "MILVUS_RESET_COLLECTION=true for an explicit rebuild."
+                )
+        elif collection_exists:
+            raise RuntimeError(
+                "Milvus collection already exists but row_count is unavailable: "
+                f"collection={collection_name}. Use a unique MILVUS_COLLECTION or set "
+                "MILVUS_RESET_COLLECTION=true before reusing it."
             )
-        ]
-        if rows:
-            self._client.insert(collection_name=collection_name, data=rows)
-            self._client.flush(collection_name=collection_name)
+        if should_insert:
+            rows = [
+                {
+                    "doc_id": document.doc_id,
+                    "vector": self._to_dense_vector(document_vector),
+                }
+                for document, document_vector in zip(
+                    documents,
+                    document_vectors,
+                    strict=True,
+                )
+            ]
+            if rows:
+                self._client.insert(collection_name=collection_name, data=rows)
+                self.inserted_document_count = len(rows)
+                self._client.flush(collection_name=collection_name)
         self._client.load_collection(collection_name)
+        self.final_row_count = self._collection_row_count()
+
+    def _collection_row_count(self) -> int | None:
+        """读取 Milvus collection 行数；旧 SDK 不支持时返回 None。
+
+        `get_collection_stats()` 是 M20 smoke 的核心观测点。这里做兼容兜底，是为了不让
+        pymilvus 小版本差异影响默认本地路径；真正的 Milvus 验收脚本会把 None 视为待排查。
+        """
+
+        get_stats = getattr(self._client, "get_collection_stats", None)
+        if not callable(get_stats):
+            return None
+        stats = get_stats(collection_name=self.collection_name)
+        raw_count = stats.get("row_count") if isinstance(stats, dict) else None
+        if raw_count is None:
+            return None
+        return int(raw_count)
+
+    def _collection_vector_dimension(self) -> int | None:
+        """尽量读取已有 collection 的 vector 维度。"""
+
+        describe = getattr(self._client, "describe_collection", None)
+        if not callable(describe):
+            return None
+        payload = describe(collection_name=self.collection_name)
+        fields = payload.get("schema", {}).get("fields", []) if isinstance(payload, dict) else []
+        for field in fields:
+            if not isinstance(field, dict) or field.get("name") != "vector":
+                continue
+            params = field.get("params") or {}
+            raw_dim = params.get("dim")
+            return int(raw_dim) if raw_dim is not None else None
+        return None
 
     def _embed_texts(self, texts: list[str]) -> list[EmbeddingVector]:
         """优先使用 provider 的 batch API，降低真实 embedding 请求次数。"""

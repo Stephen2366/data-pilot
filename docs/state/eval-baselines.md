@@ -2,6 +2,8 @@
 
 > 本文是 DataPilot 长期评测账本：记录 formal / challenge / diagnostic 基线、模型/检索 A/B、失败结构和典型错因。Trigger：只要涉及 eval 数字、模型 A/B、failure_stage、benchmark、pass rate、case 口径或失败归因，必须先读本文。AI 续接时先读 `docs/state/AI_CONTEXT.md`。
 
+更新时间：2026-08-02
+
 ## 当前摘要
 
 - 当前默认主模型：DeepSeek `deepseek-v4-flash`，配置入口为 `LLM_PROVIDER=deepseek` + `LLM_MODEL=deepseek-v4-flash`。
@@ -10,6 +12,7 @@
 - 最新候选模型对照：M19 qwen3.7-max formal `8/10`、challenge `12/16`、diagnostic `22/32`。
 - 当前优先改进方向：先看 `schema_context / schema_retrieval`，再看 `result_match / plan_validation / query_plan / sql_generation`。换模型能缓解部分生成失败，但不能替代 schema 上下文修复。
 - 当前结论：Qwen 3.7 max 可作为后续 A/B 组；默认模型、默认 embedding、正式 eval case 集都属于长期基线选择，不在普通实验中自动切换或改写。
+- M20 结论：clean Milvus + Qwen embedding diagnostic 未显示稳定收益；默认 embedding / Milvus 不切换。
 
 ## 如何读这些数字
 
@@ -26,6 +29,7 @@
 - `docs/state/runbook.md`：运行入口，保留模型、embedding、LangFuse、eval 命令矩阵和运行纪律。
 - `docs/state/eval-baselines.md`：长期评测账本，保留基线、A/B、失败结构、报告路径和典型错因。
 - `docs/state/database-current-state.md`：数据库事实、14 表清单、固定 seed 和指标口径；排查 `result_match`、漏表漏列、指标口径类 eval 失败时必须对照。
+- `docs/state/schema-retrieval-milvus-embedding.md`：Schema Retrieval / Milvus / embedding 速查，保留默认值、collection 纪律、`schema_docs_hash`、报告字段和排查菜单。
 - `docs/eval-observability-guide.md`：面向用户的 Eval / Trace / LangFuse 说明文档；AI 只有在需要理解 eval 功能设计、写说明或讲解报告时再读，不作为日常续接必读。
 
 ## 基线索引
@@ -38,6 +42,60 @@
 | 2026-07-27 | M14-lite A/B | Qwen `qwen3.7-max` | 未补跑 | 未补跑 | 22/32 | 略高于 plus；仍不切默认。 |
 | 2026-08-02 | M19 | DeepSeek `deepseek-v4-flash` | 7/10 | 9/16 | 19/32 | M19 triage 验证快照，低于 M13；真实 LLM 有波动。 |
 | 2026-08-02 | M19 follow-up | Qwen `qwen3.7-max` | 8/10 | 12/16 | 22/32 | 本轮优于 DeepSeek flash，但 schema 上下文仍是主问题；不自动切默认。 |
+| 2026-08-02 | M20 clean Milvus | DeepSeek + Milvus + Qwen embedding | 未跑 | 未跑 | 17/32 | clean collection `row_count=193`，低于 M19 污染链路 19/32；不切默认 embedding。 |
+
+## M20 Clean Milvus / Qwen Embedding
+
+配置：
+
+- `LLM_PROVIDER=deepseek`
+- `LLM_MODEL=deepseek-v4-flash`
+- `SCHEMA_VECTOR_BACKEND=milvus`
+- `SCHEMA_EMBEDDING_PROVIDER=dashscope`
+- `QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding`
+- `QWEN_EMBEDDING_DIMENSIONS=1024`
+- `MILVUS_COLLECTION=datapilot_schema_docs_m20_deepseek_qwenemb_20260802_a`
+- `LANGFUSE_ENABLED=false`
+
+报告路径：
+
+- Diagnostic report：`.agent_work/temp/m20-deepseek-qwenemb-diagnostic-report.md`
+- Diagnostic triage：`.agent_work/temp/m20-deepseek-qwenemb-diagnostic-triage.json`
+- M19 polluted vs M20 clean compare：`.agent_work/temp/m20-m19-polluted-vs-clean-deepseek-qwenemb-compare.md`
+- Milvus index smoke：`.agent_work/temp/m20-milvus-index-smoke.md`
+
+索引卫生：
+
+- `schema_docs_count=193`
+- `schema_docs_hash=7b531e073fa0b2dfaae205097b8440c44b745234305396b5f185561dcf9cc644`
+- Clean smoke collection `datapilot_schema_docs_m20_20260802_203949_007d1e09`：`final_row_count=193`
+- Diagnostic collection `datapilot_schema_docs_m20_deepseek_qwenemb_20260802_a`：`milvus_final_row_count=193`，`schema_vector_index_reuse=run_scoped`
+- Report 明确 `result_match_oracle_backend=sqlite_deterministic_seed`
+
+结果：
+
+| 集合 | 命令行通过率 | failure_stage 分布 | needs_action 聚合 |
+|---|---:|---|---|
+| diagnostic | 17/32 | `schema_context=5`、`query_plan=5`、`plan_validation=2`、`result_match=1`、`sql_guard=1`、`schema_retrieval=1` | `fix_schema_desc=5`、`fix_pipeline=7`、`manual_review=3` |
+
+M19 polluted DeepSeek + Qwen embedding vs M20 clean DeepSeek + Qwen embedding diagnostic failure distribution：
+
+| failure_stage | M19 polluted | M20 clean | clean - polluted |
+|---|---:|---:|---:|
+| plan_validation | 1 | 2 | +1 |
+| query_plan | 4 | 5 | +1 |
+| result_match | 2 | 1 | -1 |
+| schema_context | 4 | 5 | +1 |
+| schema_retrieval | 1 | 1 | 0 |
+| sql_guard | 1 | 1 | 0 |
+| unknown | 2 | 0 | -2 |
+
+结论：
+
+- M20 解决的是索引可信度，不是追求 diagnostic 提分。clean collection 后 diagnostic 为 `17/32`，没有显示 Qwen embedding 稳定收益。
+- M19 的污染链路结果不能再作为 embedding 模型优劣结论；M20 clean run 也不足以直接判定 Qwen embedding “无效”，因为真实 LLM 有波动且 schema doc 粒度未调整。
+- Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 曾尝试运行，但 900s 超时，只产生 21 行 partial trace，没有 final report / triage，不纳入账本结论。
+- 默认仍保持 `inmemory + deterministic`；Milvus / DashScope embedding 继续作为显式实验路径。
 
 ## M19 DeepSeek Flash
 

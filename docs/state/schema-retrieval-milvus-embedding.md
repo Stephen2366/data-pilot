@@ -1,0 +1,152 @@
+# DataPilot Schema Retrieval / Milvus / Embedding 速查
+
+> 本文是 DataPilot 的 Schema Retrieval、Milvus 向量库和 embedding 实验速查。Trigger：只要涉及 `SCHEMA_VECTOR_BACKEND`、`SCHEMA_EMBEDDING_PROVIDER`、Milvus collection、embedding A/B、`schema_docs_hash`、schema retrieval 召回质量或 M20 clean run 结论，必须先读本文。当前运行命令入口仍以 `docs/state/runbook.md` 为准，长期 eval 数字以 `docs/state/eval-baselines.md` 为准。
+
+更新时间：2026-08-02
+
+## 一句话结论
+
+默认链路仍是 **`inmemory + deterministic`**，Milvus / SiliconFlow / DashScope-Qwen embedding 只作为显式实验路径。M20 已修复“固定 Milvus collection 被重复灌入”的实验污染问题：后续 clean 实验必须使用唯一 collection 或干净 collection，并在报告中检查 `schema_docs_hash`、row_count、embedding 配置和 `schema_vector_index_reuse`。
+
+## 当前默认与边界
+
+| 项目 | 当前值 / 口径 | 说明 |
+|---|---|---|
+| 默认向量后端 | `SCHEMA_VECTOR_BACKEND=inmemory` | 不依赖 Docker、不联网，服务本地开发和默认 eval。 |
+| 默认 embedding | `SCHEMA_EMBEDDING_PROVIDER=deterministic` | 稳定可复现，不代表真实 embedding 能力上限。 |
+| Milvus | `SCHEMA_VECTOR_BACKEND=milvus` | 只在显式实验时开启；需要本地 Milvus 服务。 |
+| SiliconFlow embedding | `SCHEMA_EMBEDDING_PROVIDER=siliconflow` | 需要 API key；当前不切默认。 |
+| DashScope / Qwen embedding | `SCHEMA_EMBEDDING_PROVIDER=dashscope` 或 `qwen` | 常用模型 `qwen3.7-text-embedding`，维度 `1024`；当前不切默认。 |
+| `result_match` oracle | SQLite deterministic seed | M20 只做 MySQL audit 和报告标注，未切换 scorer oracle。 |
+
+长期选择边界：
+
+- 不自动把 Milvus 升级为正式默认路径。
+- 不自动更换默认 embedding 模型或维度。
+- 不因一次 clean eval 好看或难看就宣布某个 embedding 胜出 / 失败。
+- 不在未确认前改变 formal / challenge / diagnostic case 集或 `result_match` oracle backend。
+
+## 关键代码入口
+
+| 文件 | 作用 | 阅读重点 |
+|---|---|---|
+| `engine/schema_retrieval/document_builder.py` | 构建 field / metric / relation 三类 schema docs | `build_schema_documents()` 当前生成 193 条文档；`schema_documents_hash()` 给文档版本打指纹。 |
+| `engine/schema_retrieval/vector_index.py` | In-memory 与 Milvus vector index | `MilvusVectorIndex` 会检查 collection row_count / vector dimension，拒绝污染 collection。 |
+| `engine/schema_retrieval/retriever.py` | keyword + vector + merged hits | `build_configured_schema_vector_index()` 供 eval run 内复用 index。 |
+| `engine/nl2sql/pipeline.py` | Text2SQL pipeline 调用 retrieval | 可接收外部 `schema_vector_index`，不改变默认调用。 |
+| `eval/run_eval.py` | Eval runner / Markdown 报告 | Milvus eval 时预建 run-scoped index，并写 `Eval Runtime Metadata`。 |
+| `scripts/smoke_m20_milvus_index.py` | M20 Milvus clean collection smoke | 验证 `row_count == len(schema_documents)`。 |
+| `scripts/audit_m20_eval_ground_truth.py` | M20 MySQL ground truth audit | 用 MySQL 执行 expected SQL，但不改 scorer oracle。 |
+
+核心流向：
+
+`build_schema_documents()`
+→ `schema_documents_hash()`
+→ `MilvusVectorIndex`
+→ `app.state.schema_vector_index`
+→ `run_text2sql_pipeline()`
+→ `retrieve_schema()`
+→ `Eval Runtime Metadata`
+
+## Milvus Collection 纪律
+
+M20 前的旧固定 collection `datapilot_schema_docs` 已确认被重复灌入污染：schema docs 实际 193 条，历史 row_count 曾达到 19493。因此后续实验不要直接复用这个旧 collection 作为可信对照。
+
+推荐做法：
+
+- 每次实验使用唯一 collection 名，例如 `datapilot_schema_docs_m20_<model>_<embedding>_<date>_<run_id>`。
+- clean collection 的验收条件至少包括：
+  - `schema_docs_count=193`
+  - `milvus_final_row_count=193`
+  - `schema_vector_index_reuse=run_scoped`
+  - `schema_docs_hash` 有记录
+  - embedding provider / model / dimension 有记录
+- 如果已有 collection 的 row_count 或 vector dimension 不匹配，当前代码会拒绝复用。不要为了继续跑分临时绕过这个错误。
+
+可接受但要说明用途的方案：
+
+| 方案 | 使用场景 | 风险 |
+|---|---|---|
+| 唯一 collection | 推荐的 eval / smoke 实验方式 | collection 会变多，需要后续显式清理。 |
+| `MILVUS_RESET_COLLECTION=true` | 一次性本地重建验证 | 固定 collection reset 有误删和并发风险，不建议作为长期默认。 |
+| upsert / delete-by-doc-id | 后续正式服务形态 | 需要单独验证 Milvus API 一致性；M20 未实现。 |
+
+## 报告字段怎么读
+
+M20 后，`eval/run_eval.py` 的 Markdown 报告会出现 `Eval Runtime Metadata`。重点看：
+
+| 字段 | 含义 |
+|---|---|
+| `result_match_oracle_backend` | 当前 `result_match` 标准答案来源；M20 为 `sqlite_deterministic_seed`。 |
+| `schema_vector_backend` | 本轮是否真的走 Milvus。 |
+| `schema_embedding_provider` | 本轮 embedding provider。 |
+| `schema_vector_index_reuse` | `run_scoped` 表示一个 eval run 内复用同一个 index。 |
+| `schema_docs_count` | 当前 schema docs 数量，M20 为 193。 |
+| `schema_docs_hash` | schema docs 内容指纹，用于复现实验版本。 |
+| `milvus_collection` | 本轮 collection 名；应优先是唯一实验名。 |
+| `milvus_final_row_count` | clean collection 应等于 `schema_docs_count`。 |
+| `milvus_dimension` | 当前 embedding 向量维度。 |
+
+读 embedding A/B 时，不只看 passed/total，还要看 failure distribution。比如 clean run 后 `schema_context` 降了但 `query_plan` 升了，说明检索和生成之间可能发生了能力转移，不能简单宣布总分提升。
+
+## 当前实验结论
+
+M19 污染链路：
+
+- Qwen `qwen3.7-max` + Qwen embedding：formal `8/10`、challenge `12/16`、diagnostic `20/32`。
+- DeepSeek `deepseek-v4-flash` + Qwen embedding diagnostic：`19/32`。
+- 由于固定 collection 被重复灌入，不能用这批结果直接判断 embedding 模型优劣。
+
+M20 clean 链路：
+
+- Milvus smoke：clean collection `row_count=193`，`schema_docs_hash=7b531e073fa0b2dfaae205097b8440c44b745234305396b5f185561dcf9cc644`。
+- DeepSeek `deepseek-v4-flash` + clean Milvus + DashScope `qwen3.7-text-embedding` diagnostic：`17/32`。
+- Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 曾尝试运行，900s 超时，只生成 partial trace，不纳入结论。
+
+当前结论：
+
+- Clean Milvus 后暂未看到 Qwen embedding 对 Text2SQL diagnostic 的稳定收益。
+- 这个结论不等于“Qwen embedding 无效”，因为真实 LLM 有波动，且 schema doc 粒度 / rerank / RAG 场景尚未展开。
+- 默认仍保持 `inmemory + deterministic`；Milvus / DashScope embedding 继续作为显式实验路径。
+
+## 常用命令
+
+```powershell
+# 检查 Milvus 容器是否运行
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+# M20 clean collection smoke：预期 final_row_count=193
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.smoke_m20_milvus_index --output .agent_work\temp\m20-milvus-index-smoke.md
+
+# MySQL expected_sql audit：只读审查，不改变 scorer
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.audit_m20_eval_ground_truth
+
+# DeepSeek + clean Milvus + Qwen embedding diagnostic 示例
+$env:LANGFUSE_ENABLED='false'
+$env:LLM_PROVIDER='deepseek'
+$env:LLM_MODEL='deepseek-v4-flash'
+$env:SCHEMA_VECTOR_BACKEND='milvus'
+$env:SCHEMA_EMBEDDING_PROVIDER='dashscope'
+$env:QWEN_EMBEDDING_MODEL='qwen3.7-text-embedding'
+$env:QWEN_EMBEDDING_DIMENSIONS='1024'
+$env:MILVUS_COLLECTION='datapilot_schema_docs_m20_deepseek_qwenemb_<run_id>'
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace .agent_work\temp\<name>-traces.jsonl --report .agent_work\temp\<name>-report.md --triage-json .agent_work\temp\<name>-triage.json
+```
+
+## 排查菜单
+
+| 现象 | 优先判断 | 处理 |
+|---|---|---|
+| Milvus 连接失败 | Docker / Milvus 是否启动 | 先 `docker ps`，确认 `milvus-standalone` healthy。 |
+| collection row_count 不是 193 | 旧 collection 污染或 schema docs 变化 | 换唯一 collection；不要直接把结果当 A/B 结论。 |
+| vector dimension mismatch | collection 来自不同 embedding 模型 / 维度 | 换唯一 collection 或显式 reset。 |
+| Qwen / DashScope embedding 报 key 错 | `.env` / 环境变量未设置或账号不可用 | 先跑最小 provider smoke；不要改默认 embedding。 |
+| eval 很慢或超时 | 真实 LLM + embedding 调用慢 | 长 run 用更长 timeout 或后台日志方式；partial trace 不纳入结论。 |
+| 总分变好但 failure 分布变差 | 可能只是 LLM 波动或错误转移 | 对比 triage JSON，不只看总分。 |
+
+## 后续可选改进
+
+- 单独确认是否把 `result_match` oracle 从 SQLite deterministic seed 切到当前 configured database / MySQL。
+- 单独确认是否增强 formal 多表题检查强度，或重写退款率 / 已支付订单题面。
+- 如果 Milvus 要进入长期服务路径，再设计 upsert / delete-by-doc-id 和 collection cleanup。
+- RAG / Hybrid 阶段再评估真实 embedding、rerank、chunk coverage 指标，不在 Text2SQL M20 中提前扩大范围。

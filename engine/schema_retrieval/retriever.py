@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.core.config import Settings, get_settings
 from engine.nl2sql.schema_loader import DomainSchema
-from engine.schema_retrieval.document_builder import DEFAULT_RELATIONS_PATH, build_schema_documents
+from engine.schema_retrieval.document_builder import DEFAULT_RELATIONS_PATH, build_schema_documents, schema_documents_hash
 from engine.schema_retrieval.embedding_provider import DashScopeEmbeddingProvider, SiliconFlowEmbeddingProvider
 from engine.schema_retrieval.objects import SchemaDocument, SchemaHit, SchemaRetrievalResult
 from engine.schema_retrieval.vector_index import (
@@ -132,7 +132,7 @@ def _configured_milvus_dimension(settings: Settings, *, provider_override: str |
     return settings.siliconflow_embedding_dimensions or DEFAULT_MILVUS_DIMENSION
 
 
-def _build_configured_vector_index(
+def build_configured_vector_index(
     documents: list[SchemaDocument],
     *,
     schema_retrieval_profile: str = "default",
@@ -168,6 +168,31 @@ def _build_configured_vector_index(
     raise ValueError(f"Unsupported SCHEMA_VECTOR_BACKEND={settings.schema_vector_backend}.")
 
 
+# 兼容旧测试/旧脚本里可能直接 import 私有函数的用法；新代码优先用 public 名称。
+_build_configured_vector_index = build_configured_vector_index
+
+
+def build_configured_schema_vector_index(
+    *,
+    domain_schema: DomainSchema,
+    relations_path: Path = DEFAULT_RELATIONS_PATH,
+    schema_retrieval_profile: str = "default",
+) -> tuple[VectorIndex, list[SchemaDocument], str]:
+    """构建可在一个 eval run 内复用的 Schema vector index。
+
+    ★ M20 前 `retrieve_schema()` 每个 case 都会隐式重建 Milvus index，导致同一批 schema docs
+    被反复写入固定 collection。这个函数让 eval runner 在 run 开始时显式建一次，再通过
+    `vector_index` 参数传给每个请求；默认 in-memory 路径仍可不使用它。
+    """
+
+    documents = build_schema_documents(domain_schema, relations_path=relations_path)
+    vector_index = build_configured_vector_index(
+        documents,
+        schema_retrieval_profile=schema_retrieval_profile,
+    )
+    return vector_index, documents, schema_documents_hash(documents)
+
+
 def retrieve_schema(
     *,
     question: str,
@@ -182,7 +207,7 @@ def retrieve_schema(
 
     documents = build_schema_documents(domain_schema, relations_path=relations_path)
     keyword_hits = _keyword_search(question, documents, top_k=top_k)
-    active_vector_index = vector_index or _build_configured_vector_index(
+    active_vector_index = vector_index or build_configured_vector_index(
         documents,
         schema_retrieval_profile=schema_retrieval_profile,
     )

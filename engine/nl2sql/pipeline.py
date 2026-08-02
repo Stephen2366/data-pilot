@@ -25,6 +25,7 @@ from engine.nl2sql.schema_loader import DomainSchema, load_domain_schema
 from engine.schema_retrieval.graph import build_schema_graph
 from engine.schema_retrieval.objects import SchemaGraph, SchemaRetrievalResult
 from engine.schema_retrieval.retriever import retrieve_schema
+from engine.schema_retrieval.vector_index import VectorIndex
 from engine.sql_guard.guard import validate_readonly_sql
 from engine.sql_guard.precheck import looks_like_dangerous_sql
 from engine.tools.chart_tool import build_chart_spec
@@ -218,6 +219,7 @@ def run_text2sql_pipeline(
     domain_schema: DomainSchema | None = None,
     top_k: int = 30,
     schema_retrieval_profile: str = "default",
+    schema_vector_index: VectorIndex | None = None,
 ) -> Text2SQLPipelineResult:
     """执行 M11 single-step Text2SQL pipeline。
 
@@ -281,6 +283,7 @@ def run_text2sql_pipeline(
         top_k=top_k,
         domain_schema=active_domain_schema,
         schema_retrieval_profile=schema_retrieval_profile,
+        vector_index=schema_vector_index,
     )
     span.end(
         output_summary=f"merged_hits={len(retrieval_result.merged_hits)}",

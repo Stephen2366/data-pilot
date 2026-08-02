@@ -13,6 +13,43 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [小修] 新增 Schema Retrieval / Milvus / embedding 速查文档（2026-08-02）
+
+- 新增 `docs/state/schema-retrieval-milvus-embedding.md`，集中说明默认 `inmemory + deterministic`、Milvus 显式实验边界、M20 collection hygiene、`schema_docs_hash`、报告字段、常用命令和排查菜单。
+- 文档顶部标注 `更新时间：2026-08-02`，方便后续 AI 判断速查事实的新旧。
+- `docs/state/AI_CONTEXT.md`、`docs/state/runbook.md`、`docs/state/eval-baselines.md` 已加入该文档入口；本次只做文档索引与说明，不改变代码默认值或 eval 口径。
+
+### [模块任务] M20 Schema Retrieval / Milvus Index Hygiene（2026-08-02）
+
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `engine/schema_retrieval/*`、`engine/nl2sql/pipeline.py`、`app/api/query.py`、`eval/run_eval.py`、`scripts/audit_m20_eval_ground_truth.py`、`scripts/smoke_m20_milvus_index.py`、`tests/test_m20_schema_index_hygiene.py`、`.agent_work/temp/m20-notes.md`、`.agent_work/temp/m20-eval-ground-truth-audit.md`、`.agent_work/temp/m20-milvus-index-smoke.md` 和 M20 eval/triage artifacts。
+- 关键记录：
+  - 用户确认 M20 采用三条边界：Milvus 实验使用唯一 collection 名；`result_match` 本轮只做 oracle 可追溯标注和 MySQL audit，不切换到 MySQL oracle；formal case 强度、退款率题面和“已支付订单”题面只审查不改 YAML。
+  - 新增 `schema_documents_hash()`，基于 `doc_id + keyword_text + vector_text` 生成 schema docs 指纹，用于报告索引版本。
+  - `MilvusVectorIndex` 新增 collection hygiene：记录 `initial_row_count / inserted_document_count / final_row_count`；已有 clean collection 且维度匹配时复用不插入；已有 collection 行数或维度不匹配时拒绝复用并要求唯一 collection 或显式 reset。
+  - `eval/run_eval.py` 在 `--pipeline-mode new_text2sql` 且 `SCHEMA_VECTOR_BACKEND=milvus` 时预建 run-scoped vector index，并通过 `app.state.schema_vector_index` 传入 `/api/query` -> `run_text2sql_pipeline()` -> `retrieve_schema()`，避免一个 eval run 内每个 case 重复灌入 193 条 schema docs。
+  - Eval Markdown 报告新增 `Eval Runtime Metadata`，显式写出 `result_match_oracle_backend=sqlite_deterministic_seed`、`schema_docs_hash`、embedding provider/model/dimension、Milvus collection 和 row_count。
+  - 新增 `scripts/audit_m20_eval_ground_truth.py` 生成 `.agent_work/temp/m20-eval-ground-truth-audit.md`，用当前 MySQL 执行 `expected_sql`，但不改变 scorer 口径。
+  - 新增 `scripts/smoke_m20_milvus_index.py`，创建唯一 collection，验证 clean collection 下 `row_count == len(schema_documents)`，并输出五类典型 query 的 keyword/vector/merged hits。
+- 验证快照：
+  - MySQL audit：`.agent_work/temp/m20-eval-ground-truth-audit.md`；formal `10`、challenge `16`、diagnostic extra `16`，共 `42` 条且无重复 case id；14 条 `expected_sql` 在当前 MySQL 执行 `ok=14 error=0`；当前 `result_match` oracle 明确仍为 SQLite deterministic seed。
+  - Focused tests：`pytest tests\test_m20_schema_index_hygiene.py tests\test_phase3a_schema_retrieval.py -q --basetemp=.agent_work\temp\pytest-m20-focused` -> `14 passed, 1 warning`。
+  - Default smoke eval：`.agent_work/temp/m20-smoke-report.md` -> `passed=5/6`，报告显示 `result_match_oracle_backend=sqlite_deterministic_seed`、`schema_vector_index_reuse=not_applicable`。
+  - Milvus index smoke：`.agent_work/temp/m20-milvus-index-smoke.md` -> PASS；collection `datapilot_schema_docs_m20_20260802_203949_007d1e09`，`schema_docs_count=193`、`final_row_count=193`、`schema_docs_hash=7b531e073fa0b2dfaae205097b8440c44b745234305396b5f185561dcf9cc644`。
+  - Clean Milvus + Qwen embedding diagnostic：DeepSeek `deepseek-v4-flash` + DashScope `qwen3.7-text-embedding`，unique collection `datapilot_schema_docs_m20_deepseek_qwenemb_20260802_a`，`.agent_work/temp/m20-deepseek-qwenemb-diagnostic-report.md` -> `passed=17/32`、`milvus_final_row_count=193`、`schema_vector_index_reuse=run_scoped`。
+  - Failure distribution compare：`.agent_work/temp/m20-m19-polluted-vs-clean-deepseek-qwenemb-compare.md`；clean vs M19 polluted：`schema_retrieval 1 -> 1`、`schema_context 4 -> 5`、`query_plan 4 -> 5`、`result_match 2 -> 1`、`unknown 2 -> 0`。
+  - Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 尝试 900s 超时，只生成 21 行 partial trace，无 final report / triage；不作为结论。
+  - Related regression：`pytest tests\test_phase3a_pipeline.py tests\test_m16_trace_router.py tests\test_m19_failure_triage.py tests\test_m20_schema_index_hygiene.py -q --basetemp=.agent_work\temp\pytest-m20-related` -> `27 passed, 1 warning`。
+  - Full pytest：首次 300s 超时中断且无失败输出；复跑 `pytest -q --basetemp=.agent_work\temp\pytest-m20-full-2` -> `127 passed, 1 warning`。
+  - `git diff --check`：仅 Windows LF/CRLF 提示，无 whitespace error。
+- 结论：
+  - M20 已修复 Milvus 实验链路的索引可信度问题：clean collection 可证明 193 条 schema docs，eval run 内不再重复 insert，报告能追溯 schema docs hash、collection、row_count、embedding 配置和 oracle backend。
+  - Clean Milvus 后 DeepSeek + Qwen embedding diagnostic 为 `17/32`，低于 M19 污染链路 `19/32`，因此不能宣布 Qwen embedding 胜出；也不能据此自动切默认 embedding，后续仍需在 RAG / Hybrid 或单独 embedding 评估中继续看。
+  - 默认配置不变：`SCHEMA_VECTOR_BACKEND=inmemory`、`SCHEMA_EMBEDDING_PROVIDER=deterministic`；Milvus / DashScope embedding 仍为显式实验路径。
+- 遗留/后续：
+  - `result_match` 是否切到 MySQL/current configured database 是长期 benchmark 口径决策，M20 未改。
+  - Formal 多表题检查强度、`db_core_002` 退款率口径、`db_simple_002` 已支付订单题面仍需单独确认后再改 case。
+  - 唯一 collection 策略会带来 collection 数量增长；后续可加显式 cleanup 工具，但 M20 不默认自动删除历史实验 collection。
+
 ### [实验/计划] M19 后续 Qwen embedding / Milvus A/B 复测与 M20 立项（2026-08-02）
 
 - 触发原因：用户要求用 Qwen `qwen3.7-max` + Qwen embedding 再跑三类 eval，并追问 DeepSeek + Qwen embedding 效果差是否可能来自 Milvus 链路问题。

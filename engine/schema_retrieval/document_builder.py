@@ -7,6 +7,8 @@ M9 不直接读取数据库 DDL，而是复用已经人工维护过的 `schema_d
 
 from __future__ import annotations
 
+import json
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -188,3 +190,23 @@ def build_schema_documents(
         )
 
     return documents
+
+
+def schema_documents_hash(documents: list[SchemaDocument]) -> str:
+    """计算 Schema 文档内容指纹，供 Milvus 实验记录索引版本。
+
+    ★ M20 关注的是“这次向量索引里到底灌了哪一版 schema docs”。这里只使用
+    `doc_id + keyword_text + vector_text`，避免 metadata 里字段顺序或无关展示信息导致 hash
+    抖动。后续如果 schema doc 粒度升级，hash 会自然变化，实验报告也能追溯。
+    """
+
+    payload = [
+        {
+            "doc_id": document.doc_id,
+            "keyword_text": document.keyword_text,
+            "vector_text": document.vector_text,
+        }
+        for document in sorted(documents, key=lambda item: item.doc_id)
+    ]
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(encoded.encode("utf-8")).hexdigest()
