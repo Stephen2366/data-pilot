@@ -4,7 +4,7 @@
 >
 > **核心目标**：在不改动 `/api/query` 响应契约、不替代 JSONL 和现有 eval 报告的前提下，新增可选 LangFuse Cloud 写入，并补齐 **L1/L2 规则评分器 + 最小 L3 LLM-as-Judge** 评分能力，最后跑通一次最小 Experiment 验证全链路闭环。LangFuse 自部署不再作为 DataPilot Phase 3B 的默认目标，改为 EvalBench 阶段重点探索。
 >
-> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。
+> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。
 
 ## 灵感来源：一线开发者的 LangFuse 评测实战经验
 
@@ -100,8 +100,8 @@
 | `scripts/smoke_phase3b_langfuse.py` | Phase 3B smoke 脚本（新文件）| ✅ 新建 |
 | `eval/cases/` | Eval 用例（已有）| 📋 参考，不修改 |
 | `domain_pack/metrics.yaml` | KPI 指标定义 | 📋 参考，不修改 |
-| `docs/AI_CONTEXT.md` | 技术档案 | ✅ 更新当前状态 |
-| `docs/AI_CONTEXT_CHANGELOG.md` | 变更记录 | ✅ 记录本阶段 |
+| `docs/state/AI_CONTEXT.md` | 技术档案 | ✅ 更新当前状态 |
+| `docs/state/AI_CONTEXT_CHANGELOG.md` | 变更记录 | ✅ 记录本阶段 |
 
 ---
 
@@ -130,7 +130,7 @@
 - [ ] 手动 Experiment workflow smoke 走通：5 条代表性 case 能完成 dataset / experiment / score 对比；是否扩展 formal 全量 case 有记录
 - [ ] 失败归因闭环可用：至少能从本地 eval report + JSONL trace 生成 `failure_stage / failure_reason / needs_action`，并在 LangFuse 启用时把 triage 结果回写为可筛选的 score / metadata
 - [ ] 原链路兜底通过：`LANGFUSE_ENABLED=false`、key 缺失、Cloud 不可达、Score 写入失败时，`/api/query`、JSONL、规则评分和 Markdown 报告仍可用
-- [ ] 文档同步完成：`AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md`、`.agent_work/temp/m15-notes.md` 至 `.agent_work/temp/m19-notes.md` 记录关键结论、验证结果和遗留风险
+- [ ] 文档同步完成：`docs/state/AI_CONTEXT.md`、`docs/state/AI_CONTEXT_CHANGELOG.md`、`.agent_work/temp/m15-notes.md` 至 `.agent_work/temp/m19-notes.md` 记录关键结论、验证结果和遗留风险
 - [ ] Smoke 脚本一键可跑：`scripts/smoke_phase3b_langfuse.py` 输出每个检查点的 PASS / FAIL / PENDING
 
 ### 项目边界一句话
@@ -326,6 +326,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 - M17 合并 L1/L2/L3 scorer 和 Score 回写，因为它们共同回答“怎么评测、怎么把分数送到 LangFuse”。
 - M18 合并 smoke、手动 Experiment 和文档收尾，因为这些都是阶段闭环材料，不单独拆模块。
 - M19 不再继续验证“LangFuse 能不能记录”，而是专门回答“LangFuse 比本地 eval 多带来了什么”：把失败 trace 归因成可行动的问题清单，并支持后续跨模型 / 跨版本对比失败分布。
+- M20 是 M19 后续的检索链路修复模块：M19 的真实 LLM + embedding A/B 发现 Qwen embedding 结果不稳定，但排查后确认 Milvus collection 存在重复灌入污染，因此先修 Schema Retrieval / Milvus 索引生命周期，再重新评估 embedding，而不是直接判定 embedding 模型无效。
 
 ## 模块总览
 
@@ -335,8 +336,9 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 | M16 Trace 双写与降级 | 2 | M15 | 保留 JSONL 主链路，新增 LangFuse 旁路写入和 payload 脱敏；LangFuse 失败不影响 `/api/query` / eval | `engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、双写 / 降级测试 |
 | M16B Trace Lifecycle 下沉预备分支 | 2B（已作为当前执行底座） | M16 | 在独立 `M16B` 分支上把 trace start/end/fail lifecycle 下沉到 Text2SQL pipeline，验证是否适合作为 RAG/Hybrid 观测底座 | `engine/trace/lifecycle.py`、`engine/nl2sql/pipeline.py`、lifecycle 测试、A/B 观测对照记录 |
 | M17 Scorer 分层与 Score 回写 | 3 | M16B（当前分支） | 把现有规则评分迁移为单一事实源，补最小 L3 judge，并按 `langfuse_trace_id` 写回 LangFuse Score | `eval/scorers/*`、`eval/run_eval.py`、score 回写测试 |
-| M18 Smoke / Experiment / 阶段收尾 | 4 | M17（基于 M16B） | 一键 smoke、5 条代表性 case 手动 Experiment、阶段档案和学习复盘收尾 | `scripts/smoke_phase3b_langfuse.py`、Experiment 记录、`AI_CONTEXT.md` / CHANGELOG / dev-log |
+| M18 Smoke / Experiment / 阶段收尾 | 4 | M17（基于 M16B） | 一键 smoke、5 条代表性 case 手动 Experiment、阶段档案和学习复盘收尾 | `scripts/smoke_phase3b_langfuse.py`、Experiment 记录、`docs/state/AI_CONTEXT.md` / CHANGELOG / dev-log |
 | M19 Trace Failure Triage / LangFuse-driven Eval Analysis | 5 | M18 | 把 trace/span/score 转成失败阶段、失败原因和下一步动作，形成本地报告 + 可选 LangFuse triage score 的改进闭环 | failure triage summary、triage scorer/heuristics、A/B failure distribution、`.agent_work/temp/m19-notes.md` |
+| M20 Schema Retrieval / Milvus Index Hygiene | 6 | M19 | 修复 Milvus 实验链路的索引生命周期、去重和版本口径，并先校准 eval 的 MySQL ground truth，保证 Qwen embedding / Milvus A/B 结果可信 | MySQL ground truth audit、Milvus collection reset/upsert、run 内 retriever 复用、schema_docs_hash、diagnostic 复测、`.agent_work/temp/m20-notes.md` |
 
 ## 模块实施明细
 
@@ -580,7 +582,7 @@ with trace_context.span("sql_generation", step_type="llm") as span:
 
 - 如果 M16B 明显提升 UI 排障体验，且 lifecycle 抽象没有把 LangFuse SDK 泄漏进业务层，则可作为 RAG/Hybrid 前的推荐底座。
 - 如果 M16B 只带来 UI 层轻微改善，却显著增加 pipeline 复杂度，则主线保持 M16A，等 RAG/Hybrid 真正出现多步骤分支后再做下沉。
-- 无论是否合入，M16B 的实验结论都写入 `AI_CONTEXT_CHANGELOG.md`；影响路线的摘要同步到 `AI_CONTEXT.md`。
+- 无论是否合入，M16B 的实验结论都写入 `docs/state/AI_CONTEXT_CHANGELOG.md`；影响路线的摘要同步到 `docs/state/AI_CONTEXT.md`。
 
 ## M17：Scorer 分层与 Score 回写
 
@@ -750,7 +752,7 @@ eval/scorers/
 
 **改动文件**：
 
-1. `docs/AI_CONTEXT.md`：
+1. `docs/state/AI_CONTEXT.md`：
    - 「当前状态」section：
      - 当前阶段指针从 `phase3a-plan.md` → `phase3b-langfuse-plan-v6.md`
      - 当前模块更新为 M18 / Phase 3B 收尾（执行中按 M15-M18 滚动更新）
@@ -765,7 +767,7 @@ eval/scorers/
      - Cloud trace 只是实验记录，不作为 DataPilot 长期数据资产；EvalBench 自部署时可重新采集
      - LangSmith 旧配置已从 `.env` / `.env.example` 清理；`Settings` 中的 `langsmith_tracing`、`langsmith_endpoint`、`langsmith_api_key`、`langsmith_project` 本阶段同步删除
 
-2. `docs/AI_CONTEXT_CHANGELOG.md`：
+2. `docs/state/AI_CONTEXT_CHANGELOG.md`：
    - 记录本阶段的改动范围、关键决策、验收结果
 
 3. `.agent_work/temp/m15-notes.md`、`.agent_work/temp/m16-notes.md`、`.agent_work/temp/m17-notes.md`、`.agent_work/temp/m18-notes.md`（开发中记录）：
@@ -905,6 +907,126 @@ M19 可以生成“建议沉淀为回归集”的 candidate list，但不要默�
 - `.agent_work/temp/m19-notes.md` 记录 taxonomy 取舍、验证命令、样例报告路径、LangFuse 回写结果和已知误判边界
 - M19 最终验证不只跑最小 case，还要跑 `formal + challenge + diagnostic`，其中 diagnostic 是 failure triage 的主展示集。验证完后给用户报告说明切换 deepseek-v4-flash 后的效果以及 M19 的效果。
 
+## M20：Schema Retrieval / Milvus Index Hygiene
+
+**目标**：修复 M19 后续 A/B 暴露出的 Milvus 实验链路污染问题，并在复测前校准 eval 的 MySQL ground truth，让 `Milvus + Qwen embedding` / `Milvus + SiliconFlow embedding` 的 eval 结果具备基本可信度。M20 不追求提升 Text2SQL 正确率本身，而是先保证“标准答案可信 + 检索索引可信”。
+
+### M20 背景事实（2026-08-02）
+
+M19 完成后，用户要求追加真实模型 / embedding 对照：
+
+| 配置 | formal | challenge | diagnostic | 备注 |
+|---|---:|---:|---:|---|
+| DeepSeek `deepseek-v4-flash` + 默认 `inmemory/deterministic` | 7/10 | 9/16 | 19/32 | M19 默认模型快照 |
+| Qwen `qwen3.7-max` + 默认 `inmemory/deterministic` | 8/10 | 12/16 | 22/32 | M19 Qwen 主模型对照 |
+| Qwen `qwen3.7-max` + Milvus + Qwen embedding | 8/10 | 12/16 | 20/32 | formal/challenge 持平，diagnostic 下降 |
+| DeepSeek `deepseek-v4-flash` + Milvus + Qwen embedding | 未跑 | 未跑 | 19/32 | 总分持平，但 failure 分布变化 |
+
+追加排查发现：
+
+- 当前 `build_schema_documents()` 生成 `193` 条 schema documents：`170` 个 field doc、`13` 个 relation doc、`10` 个 metric doc。
+- 当前 Milvus collection `datapilot_schema_docs` 的 `row_count=19493`，约等于 `193 * 101`。
+- `MilvusVectorIndex` 每次初始化都会 embed 全部 schema docs 并 `insert` 到同一个 collection；`MILVUS_RESET_COLLECTION` 默认是 `false`。
+- `retrieve_schema()` 每个 case 都会重新 `_build_configured_vector_index()`；真实 eval 跑多次后，同一批 `doc_id` 被重复插入，Milvus top_k 可能被重复项挤占。
+- 因此这批 Qwen embedding 结果只能说明“当前 Milvus 实验链路下没有稳定收益”，不能作为 Qwen embedding 真实能力的最终结论。
+
+### M20 Eval 自身审查事实（2026-08-02）
+
+用户追问“三类 eval 本身是否有问题”后，已结合本地 MySQL `datapilot_dev` 做过一次人工 + 脚本审查，结论如下：
+
+- 三类 case 共 `42` 条：formal `10`、challenge `16`、diagnostic extra `16`；`case_id` 无重复。
+- challenge 中所有 `expected_sql` 都能在当前 MySQL 上执行；GMV `11285752.00`、净收入 `11293058.25`、订单 / 明细 / 退款行数和 `docs/state/database-current-state.md` 一致。
+- challenge 的 `expected_sql` 在 MySQL 与 eval 当前 SQLite seed 上的业务结果一致，差异主要是 Decimal / float、datetime 字符串格式。
+- 但 `result_match` scorer 当前通过 `_prepare_sqlite_seed()` 临时 seed 内存 SQLite 后执行 `expected_sql`，并不是直接用本地 MySQL 作为 ground truth。如果 MySQL seed / migration / 数据异常菜单继续演进，eval 可能变成“SQLite 标准答案”而不是“当前 MySQL 真相”。
+- formal 里部分重复主硬门 case 检查过弱，例如 `p3a_multi_002` 只检查 `item_gmv` 字符串，`p3a_multi_003` 只检查 `SaaS 软件` 字符串；SQL 结果、排序或 TopN 错误时仍可能通过。
+- `db_core_002` 退款率 case 当前用 `orders.product_id + refunds.order_id` 的主商品口径；而指标文档写的是商品维度优先 `refunds.order_item_id -> order_items.product_id`。当前两种口径 Top1 都是 `Aurora Noise Cancelling Headphones`，所以 contains 可过，但没有真正验证订单明细归因口径。
+- `db_simple_002` “已支付订单”使用 `paid_at` 判断，会包含已支付后取消的订单；若题意是“发生过支付”则合理，若题意是“成交订单”则需改题面或 SQL。
+
+结论：M20 不能只修 Milvus 后立刻复测 embedding；必须先做 eval ground truth hygiene，否则 clean Milvus 复测仍可能被 scorer / case 口径干扰。
+
+### M20 关键决策点
+
+这是会影响后续 RAG / Hybrid 检索底座的设计，不允许临时糊一层绕过。执行前若发现需要改变以下口径，必须先向用户说明方案 / 风险 / 后续影响 / 建议，并等待确认：
+
+- 是否把 Milvus 从实验 adapter 升级为正式默认路径。
+- 是否改变默认 `SCHEMA_VECTOR_BACKEND=inmemory`。
+- 是否更换正式 embedding 模型或 embedding 维度。
+- 是否调整 formal / challenge / diagnostic case 集。
+- 是否把 `result_match` 标准答案来源从临时 SQLite 改为当前 MySQL / 当前 configured database，或保留 SQLite 但显式标注为离线 deterministic oracle。
+- 是否增强 formal 中重复多表题的检查强度，例如从 `contains` 升级为 `result_match` / `expected_value`。
+- 是否重写退款率和“已支付订单”的业务题面 / expected SQL 口径。
+- 是否把 table-level / metric bundle / relation bundle 新文档加入正式检索语料。
+
+### M20 推荐方案
+
+推荐先做“eval 标准答案卫生 + 索引卫生 + 复测”，不要直接做复杂 rerank 或新检索语料。
+
+0. **MySQL Ground Truth / Eval Case Hygiene**
+   - M20 开工后先固化 `.agent_work/temp/m20-eval-ground-truth-audit.md`：记录三类 case 数量、重复题关系、每条 `expected_sql` 在 MySQL 上的执行状态、关键固定事实快照。
+   - 优先修 `result_match` 标准答案来源：建议让 scorer 使用当前配置数据库执行 `expected_sql`，或至少新增显式配置 / 报告字段说明 oracle backend 是 MySQL 还是 SQLite。
+   - 对 formal 中明显过弱的多表题列出升级方案：哪些改成 `result_match`，哪些保持 `contains`，以及会如何影响历史基线。
+   - 对 `db_core_002` 退款率、`db_simple_002` 已支付订单这类业务语义题，先写方案 / 风险 / 后续影响 / 建议，等用户确认后再改 case。
+   - 这一步不追通过率，只保证“eval 标准答案和当前 MySQL 事实对齐”。
+
+1. **collection 生命周期修复**
+   - 明确实验运行前 collection 必须干净。
+   - 支持 `MILVUS_RESET_COLLECTION=true` 时先 drop 再 create。
+   - 更推荐 eval 实验使用唯一 collection 名，例如 `datapilot_schema_docs_qwen_20260802_<run_id>`，避免历史 volume 污染。
+   - 如果保留固定 collection 名，必须实现 upsert / delete-by-doc-id 语义，不能裸 insert 累积。
+
+2. **run 内 retriever / vector index 复用**
+   - 当前每个 case 重建 Milvus index，导致慢、贵、重复写入。
+   - M20 应在 eval run 级别复用同一个 vector index / retriever，至少保证一个 run 内只灌入一次 193 条 schema docs。
+   - 如果改动 eval runner 侵入较大，先新增显式实验脚本实现 run 级缓存，但要记录这是过渡验证工具，不是最终架构。
+
+3. **schema_docs_hash / embedding 版本标记**
+   - 计算 schema docs 内容 hash，至少基于 `doc_id + keyword_text + vector_text`。
+   - collection metadata 或本地实验报告记录：`schema_docs_hash`、`embedding_provider`、`embedding_model`、`dimension`、`collection_name`、`row_count`。
+   - 如果发现 collection 维度 / 模型 / hash 与当前配置不一致，应拒绝复用或强制 reset。
+
+4. **Milvus 健康检查与验收 smoke**
+   - 新增或增强 smoke：创建临时 collection，写入 193 条 schema docs，确认 `row_count == len(documents)`。
+   - 对典型 query 输出 `keyword_hits / vector_hits / merged_hits`，至少覆盖 GMV、优惠券、类目、退款、历史价格五类问题。
+   - smoke 输出写 `.agent_work/temp/m20-milvus-index-smoke.md`。
+
+5. **复测策略**
+   - 先跑 diagnostic，优先比较失败结构，不只看总分。
+   - 复测至少包含：
+     - DeepSeek + 默认 embedding diagnostic（可引用 M19 结果，不必重跑，除非用户要求）
+     - DeepSeek + clean Milvus + Qwen embedding diagnostic
+     - Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic
+   - 如果 clean Milvus 后 diagnostic 仍无收益，再判断 Qwen embedding 当前不适合这套 schema doc 粒度。
+
+### M20 可选方案对比
+
+| 方案 | 做法 | 优点 | 风险 / 后续影响 | 建议 |
+|---|---|---|---|---|
+| A. 每次 eval 前 `MILVUS_RESET_COLLECTION=true` | 固定 collection，跑前清空重建 | 最快验证污染问题 | 容易误删同名实验 collection；并发 eval 不安全 | 可作为一次性验证，不建议长期默认 |
+| B. 每次实验唯一 collection | collection 名带 run id，跑完可保留或清理 | 最隔离、最利于复现 | collection 数量会膨胀，需要清理策略 | M20 推荐 |
+| C. 实现 upsert / delete-by-doc-id | 固定 collection，按 doc_id 覆盖 | 更接近长期服务形态 | 需要确认 pymilvus 3.0 API 行为和一致性 | M20 可做，但先 smoke 证明 |
+| D. 只改 eval 脚本缓存，不动 index 语义 | 一个 run 内只建一次 index | 改动小，立刻降成本 | 旧 collection 污染仍存在，跨 run 不可信 | 只能作为过渡 |
+| E. 直接换 embedding / rerank | 不修索引，改模型或融合策略 | 看似能提分 | 会把数据污染和模型效果混在一起 | 不建议 |
+
+### M20 非目标
+
+- ❌ 不切默认模型或默认 embedding。
+- ❌ 不把 Milvus 设为默认 `SCHEMA_VECTOR_BACKEND`。
+- ❌ 不为提升分数随意改正式 eval case 集；case 语义、检查强度或 oracle backend 的长期口径变化必须先说明并确认。
+- ❌ 不新增 RAG 文档切片、RAG 语料库或 Hybrid Agent。
+- ❌ 不把 diagnostic 提分作为硬目标；M20 的硬目标是索引可信。
+- ❌ 不因一次 clean run 结果好看就自动宣布 Qwen embedding 胜出。
+
+### M20 验收
+
+- `.agent_work/temp/m20-notes.md` 记录索引污染证据、设计选择、执行命令和复测结论。
+- `.agent_work/temp/m20-eval-ground-truth-audit.md` 记录三类 eval 与当前 MySQL 的审查结果；若改动 scorer / case，需说明前后口径和历史基线影响。
+- `result_match` 的 oracle backend 在代码或报告里可追溯，不再让读报告的人误以为一定是当前 MySQL。
+- Milvus smoke 能证明 clean collection 下 `row_count == len(schema_documents)`，并记录 collection 名、维度、embedding 模型、schema_docs_hash。
+- eval run 内不再对同一个固定 collection 重复插入同一批 schema docs。
+- 至少跑一轮 clean Milvus + Qwen embedding diagnostic，并生成 report / triage JSON / failure distribution compare。
+- 复测结果同步到 `docs/state/eval-baselines.md`；若结论影响当前路线，再摘要同步到 `docs/state/AI_CONTEXT.md`。
+- 如果发现需要正式调整 schema doc 粒度、embedding 默认值、Milvus 默认值或 eval case 结构，先暂停并向用户说明方案 / 风险 / 后续影响 / 建议。
+
 ---
 
 ## 与独立评测项目（EvalBench）的关系
@@ -1026,8 +1148,8 @@ EvalBench 不应该直接照搬 DataPilot 内部业务代码，而应复用本�
 - 阶段三B v2：以 `docs/phase3b-langfuse-plan-v2.md` 为对照
 - 阶段三B 原始版本（v1）：以 `docs/archive-versions/phase3b-langfuse-plan-v1.md` 为存档
 - 阶段三A 执行计划：以 `docs/phase3a-plan.md` 为参考（已完成）
-- 数据库当前事实：以 `docs/database-current-state.md` 为准
-- 项目技术档案：以 `docs/AI_CONTEXT.md` 为准
+- 数据库当前事实：以 `docs/state/database-current-state.md` 为准
+- 项目技术档案：以 `docs/state/AI_CONTEXT.md` 为准
 - LangFuse 官方文档：https://langfuse.com/docs
 - LangFuse Cloud / Docs：https://langfuse.com/docs
 - LangFuse 自部署指南（EvalBench 阶段重点参考）：https://langfuse.com/docs/deployment/self-host
@@ -1072,6 +1194,7 @@ EvalBench 不应该直接照搬 DataPilot 内部业务代码，而应复用本�
 Phase 3B 完成后，后续阶段的受益：
 
 - **M19 Trace Failure Triage（Phase 3B 价值闭环）**：在 M18 证明 trace / score / smoke 可用之后，优先补 failure triage，把本地 eval + LangFuse trace 变成失败阶段分布、下一步动作和 A/B 改进证据。它比继续手动点 Web UI 更直接服务项目进步，也能为后续 RAG/Hybrid 建立可复用的失败归因口径。
+- **M20 Schema Retrieval / Milvus Index Hygiene（M19 后续检索可信度修复）**：在进入 RAG/Hybrid 前，先修复 Milvus collection 重复灌入、索引版本和 run 内复用问题，避免把 embedding 模型效果和索引污染混在一起。
 - **Phase 3B.1 工具调用容错与重试（可选轻量阶段）**：基于 Phase 3B 的 LangFuse trace 数据，分析当前工具调用失败模式，实现或整理 `ToolResult` 统一结构（status 分类、error_type、是否可重试、重试次数、降级原因），成为面试中回答“工具调用失败怎么办”的直接素材。它不是 Phase 3B 主验收项，只在 trace 暴露出足够失败样本时执行。
 - **M16B Trace Lifecycle 下沉预备分支（并行对照）**：如果用户要验证 LangFuse 的真实排障观测价值，先在独立 M16B 分支做 lifecycle 下沉，而不是等 RAG/Hybrid 一口气叠加检索、生成、工具、judge 等复杂度。M16B 不阻塞 M17/M18 主线；它的产出用于决定后续 RAG/Hybrid 是否采用 lifecycle 底座。
 - **Phase 3 RAG（检索增强生成）**：LangFuse 上看 retrieval span → generation span 的全链路；L1/L2/L3 评分器已就绪，RAG 专用评分器（faithfulness、context_relevancy）可直接启用。⚠️ 同行踩坑预警：retrieval recall 评测时，开源数据集的 reference text 和自己切片后的 chunk 粒度不一致，容易误判 miss。Phase 3 RAG 应设计 **coverage 指标**（将 reference 按句子拆分，计算 chunk 对 reference 的覆盖度）作为 L1 规则评分器，不做 LLM judge
@@ -1081,6 +1204,19 @@ Phase 3B 完成后，后续阶段的受益：
 ---
 
 ## 修订记录
+
+### v6.3（2026-08-02）—— M20 Schema Retrieval / Milvus Index Hygiene
+
+依据：M19 后续 Qwen `qwen3.7-max` + Qwen embedding、DeepSeek + Qwen embedding diagnostic 复测显示 Qwen embedding 未带来稳定收益；进一步排查发现 Milvus `datapilot_schema_docs` `row_count=19493`，而当前 schema docs 只有 193 条，说明固定 collection 被每 case / 每 run 重复灌入，A/B 结果受索引污染影响。
+
+| 改动 | 说明 |
+|------|------|
+| 新增 M20 模块 | `Schema Retrieval / Milvus Index Hygiene`，目标是修复 eval MySQL ground truth、Milvus collection 生命周期、重复写入、版本口径和 run 内复用 |
+| 明确 M20 前置事实 | 记录 `193` schema docs vs `19493` Milvus rows、Qwen embedding 复测结果和不能直接判定 embedding 模型无效的原因 |
+| 补充 eval 自身审查 | 记录三类 case 与本地 MySQL 对照结论：`expected_sql` 可执行且固定事实一致，但 `result_match` 当前用 SQLite oracle、formal 部分检查偏弱、退款率 / 已支付订单题面有口径歧义 |
+| 收紧决策边界 | 默认模型、默认 embedding、Milvus 默认值、eval case、schema doc 粒度变更都需先确认 |
+| 固定推荐方案 | 优先做 MySQL ground truth audit、clean collection、唯一 collection 或 upsert、`schema_docs_hash`、run 内 retriever 复用和 diagnostic 复测 |
+| 收紧非目标 | 不切默认、不做 RAG/Hybrid、不追 diagnostic 提分，不为提分随意改 case；只保证标准答案可信和索引可信 |
 
 ### v6.2（2026-08-02）—— LangFuse 价值闭环补充：M19 Failure Triage
 

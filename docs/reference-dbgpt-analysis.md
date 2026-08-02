@@ -2,7 +2,7 @@
 
 > 生成日期：2026-07-23  
 > 参考项目：`D:\.Work\Practice\Python-Practice\references\DB-GPT`  
-> DataPilot 对照基准：`docs/AI_CONTEXT.md` 当前状态、`docs/phase3a-plan.md`、`D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`
+> DataPilot 对照基准：`docs/state/AI_CONTEXT.md` 当前状态、`docs/phase3a-plan.md`、`D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`
 
 ## 0. 结论先行
 

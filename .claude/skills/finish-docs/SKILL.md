@@ -23,8 +23,8 @@ accept-module（最终门禁检查）
 
 - `.agent_work/temp/<module>-notes.md`（**首选**，前半程固化的素材）
 - 会话记忆（开发和收工是同一个会话时可用）
-- `docs/AI_CONTEXT.md`
-- `docs/AI_CONTEXT_CHANGELOG.md`
+- `docs/state/AI_CONTEXT.md`
+- `docs/state/AI_CONTEXT_CHANGELOG.md`
 - git diff
 - 终端验证输出
 
@@ -35,16 +35,16 @@ accept-module（最终门禁检查）
 ## 阶段 1：读取素材
 
 1. 读取 `.agent_work/temp/<module>-notes.md`——**必读**，包含：改动文件清单、关键决策与取舍（含选项/风险/推荐/用户选择）、注释小结、验证快照、参考资料、遗留。
-2. 读取 `docs/AI_CONTEXT.md` 当前状态 / 最新事实快照，确认当前模块、默认配置、最新基线。
-3. 按需读取 `docs/AI_CONTEXT_CHANGELOG.md` 近期变更记录，确认档案格式与最近结论。
+2. 读取 `docs/state/AI_CONTEXT.md` 当前状态 / 最新事实快照，确认当前模块、默认配置、最新基线。
+3. 按需读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 近期变更记录，确认档案格式与最近结论。
 4. 跑 `git status --short` 和 `git diff --name-only` 核对改动范围与 notes.md 一致。
 5. 如果 notes.md 缺失关键素材（例如没有验证快照、没有决策记录），在文档里明确写“过程细节未记录”，并提示用户：可以补跑验证/补记素材后再继续；不要自行脑补。
 
-## 阶段 2：更新 AI_CONTEXT.md / AI_CONTEXT_CHANGELOG.md
+## 阶段 2：更新 docs/state/AI_CONTEXT.md / docs/state/AI_CONTEXT_CHANGELOG.md
 
-模块完成时，在 `docs/AI_CONTEXT_CHANGELOG.md`「变更记录」头部新增一节（`###` 标题），保存完整模块档案和实验记录。
+模块完成时，在 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」头部新增一节（`###` 标题），保存完整模块档案和实验记录。
 
-同时只把会影响续接判断的最新事实摘要同步到 `docs/AI_CONTEXT.md`，例如当前模块、默认配置、最新评测基线、重要实验结论或活跃坑。`AI_CONTEXT.md` 必须保持短小，不再承载完整历史变更记录。
+同时只把会影响续接判断的最新事实摘要同步到 `docs/state/AI_CONTEXT.md`，例如当前模块、默认配置、最新评测基线、重要实验结论或活跃坑。`docs/state/AI_CONTEXT.md` 必须保持短小，不再承载完整历史变更记录。
 
 「变更记录」模板：
 
@@ -64,9 +64,9 @@ accept-module（最终门禁检查）
   - 比如：下一模块要接什么，当前还有什么风险，后续采用什么技术或方法
 ```
 
-同时更新 `docs/AI_CONTEXT.md` 顶部「当前状态」：「上一模块验收」在收工时填「Mx 未验收（待 accept-module）」（Mx = 本次收工的模块）；验收通过后由 accept-module 改写，本 skill 不代填「已验收」。
+同时更新 `docs/state/AI_CONTEXT.md` 顶部「当前状态」：「上一模块验收」在收工时填「Mx 未验收（待 accept-module）」（Mx = 本次收工的模块）；验收通过后由 accept-module 改写，本 skill 不代填「已验收」。
 
-如果只是小修复，不写完整档案，只在 `AI_CONTEXT_CHANGELOG.md`「变更记录」新增一个 `###` 条目（内容 1-3 行）；仅当它影响当前路线时，再同步一句到 `AI_CONTEXT.md`「最新事实快照」。
+如果只是小修复，不写完整档案，只在 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」新增一个 `###` 条目（内容 1-3 行）；仅当它影响当前路线时，再同步一句到 `docs/state/AI_CONTEXT.md`「最新事实快照」。
 
 新结论推翻或修正旧条目判断时（如归因修正、实验结论反转、口径变化），除了写新条目，还要在原条目处加一行 ⚠️ 注 指向新结论——让读旧条目的人当场看到它已过时，防止错误判断被后续误读。
 
@@ -322,7 +322,7 @@ accept-module（最终门禁检查）
 
 ## 阶段 4：收尾确认
 
-写完 AI_CONTEXT.md、AI_CONTEXT_CHANGELOG.md 和 dev-log.md 后，回读各自刚写入的章节，确认格式正确、内容完整、没有截断或乱码。发现异常立即修正。
+写完 docs/state/AI_CONTEXT.md、docs/state/AI_CONTEXT_CHANGELOG.md 和 dev-log.md 后，回读各自刚写入的章节，确认格式正确、内容完整、没有截断或乱码。发现异常立即修正。
 
 最后回复用户，列出本次写作做了什么：
 

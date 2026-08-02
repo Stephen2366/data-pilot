@@ -105,7 +105,7 @@ $py = "D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe"
 
 ## 当前基线
 
-最新真实 LLM 基线与默认配置以 `docs/AI_CONTEXT.md`「最新评测基线」为准。
+最新真实 LLM 基线与默认配置以 `docs/state/AI_CONTEXT.md`「最新评测基线」为准。
 
 - **最近稳定基线**：M13 后 `formal 10/10`、`challenge 14/16`、`diagnostic 23/32`。
 - **当前风险**：主模型在 2026-07-31 切换为 `deepseek-v4-flash` 后尚未重跑完整三层评测；需要重跑后才能把这些数字视为当前基线。

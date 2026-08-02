@@ -5,7 +5,7 @@
 
 ## 开工前置说明：Phase 2.7 数据库升级已完成
 
-阶段三A正式开工前，已经完成 Phase 2.7 数据库底座升级，并通过 accept-module（2026-07-22，报告 `accept-Phase2.7-20260722.md`）。随后 Phase 2.7.1 又补齐了数据库 polish 迁移。数据库当前事实以 `docs/database-current-state.md`、migration `20260722_0002` 和 polish migration `20260722_0003` 为准；归档设计背景以 `docs/archive-versions/database-upgrade-plan-v5.md` 为参考。升级结果是把阶段二 v1 的 7 表数据底座扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
+阶段三A正式开工前，已经完成 Phase 2.7 数据库底座升级，并通过 accept-module（2026-07-22，报告 `accept-Phase2.7-20260722.md`）。随后 Phase 2.7.1 又补齐了数据库 polish 迁移。数据库当前事实以 `docs/state/database-current-state.md`、migration `20260722_0002` 和 polish migration `20260722_0003` 为准；归档设计背景以 `docs/archive-versions/database-upgrade-plan-v5.md` 为参考。升级结果是把阶段二 v1 的 7 表数据底座扩展为 13 张业务分析表 + 1 张桥接表（14 张物理表），补入订单头 / 订单明细、优惠券多对多、类目层级、行为日志、SCD 价格历史、宽表快照和可控数据质量彩蛋。
 
 这意味着本文档仍保留 Phase 3A 的主线设计，但 **M8-M12 的具体输入默认基于升级后的新库**。调整如下：
 
@@ -74,10 +74,10 @@
 ## 单一事实源
 
 - 阶段三A执行计划：以 `docs/phase3a-plan.md` 为准。
-- 数据库当前事实：以 `docs/database-current-state.md`、migration `20260722_0002` 和 polish migration `20260722_0003` 为准，覆盖 14 表清单、固定 seed 事实、指标口径、RBAC 和后续写 plan 注意事项。
+- 数据库当前事实：以 `docs/state/database-current-state.md`、migration `20260722_0002` 和 polish migration `20260722_0003` 为准，覆盖 14 表清单、固定 seed 事实、指标口径、RBAC 和后续写 plan 注意事项。
 - 数据库升级设计背景：以 `docs/archive-versions/database-upgrade-plan-v5.md` 为归档参考，只查设计理由、取舍背景和 challenge 分层，不作为当前精确 DDL 事实源。
 - DB-GPT 参考项目取舍：以 `docs/reference-dbgpt-analysis.md` 为准；阶段三A只借鉴 Schema Retriever、Action schema、DAG 化 trace 和评测抽象，不基于 DB-GPT 重开、不引入 AWEL / Skill / Sandbox 运行时。
-- 模块实时进度：以 `docs/AI_CONTEXT.md`「当前状态」为准。
+- 模块实时进度：以 `docs/state/AI_CONTEXT.md`「当前状态」为准。
 - 项目目录结构：以 `AGENTS.md` / `CLAUDE.md`「目录结构」为准。
 - 阶段三A总路线与技术取舍：以 `D:\.Work\Practice\Python-Practice\LEARNING_ROADMAP_v3.md`「阶段三A」为准；本计划只把它拆成可施工模块。
 - 阶段三A 10 条正式回归用例：以 `eval/cases/phase3a-regression.yaml` 为准，是 M8-M12 主硬门。
@@ -108,7 +108,7 @@
 - 每个模块都必须能独立学习、实现、验证和复盘；测试、smoke、README 小修跟随对应功能模块，不单独拆模块。
 - 每个模块开始时在 `.agent_work/temp/m<module>-notes.md` 写 5-8 条极短 checklist，开发中同步记录关键决策、踩坑和验证素材。
 - 每个模块完成后先跑本模块验收门，再用 `finish-module` 收工整理；用户人工检查后再跑 `accept-module` 验收。
-- 涉及降级、技术选型变更、模块边界变更、验收标准变更时，先在 `AI_CONTEXT_CHANGELOG.md`「变更记录」写清原因、迁移风险、回切条件；若影响当前路线，再同步摘要到 `AI_CONTEXT.md`「最新事实快照」，然后问用户确认。
+- 涉及降级、技术选型变更、模块边界变更、验收标准变更时，先在 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」写清原因、迁移风险、回切条件；若影响当前路线，再同步摘要到 `docs/state/AI_CONTEXT.md`「最新事实快照」，然后问用户确认。
 - 默认 TDD：先写失败测试，再实现最小功能，再跑聚焦测试和必要回归。
 
 ## 目录与文件规划
@@ -151,8 +151,8 @@
 | `tests/test_phase3a_pipeline.py` | 新建 | M11 | 强制新 pipeline、trace_steps、SQL Guard 集成测试 |
 | `scripts/smoke_phase3a_text2sql.py` | 新建 | M12 | 阶段三A 本地 smoke，一键跑 10 条 formal、16 条 challenge、32 条 diagnostic 和对照报告 |
 | `README.md` | 修改 | M12 | 阶段三A 入口、命令、能力边界和 Milvus 实际状态 |
-| `docs/AI_CONTEXT.md` | 修改 | 每模块 | 当前状态、默认配置、最新基线和重要结论摘要 |
-| `docs/AI_CONTEXT_CHANGELOG.md` | 修改 | 每模块 | 完整变更记录、实验历史和模块档案 |
+| `docs/state/AI_CONTEXT.md` | 修改 | 每模块 | 当前状态、默认配置、最新基线和重要结论摘要 |
+| `docs/state/AI_CONTEXT_CHANGELOG.md` | 修改 | 每模块 | 完整变更记录、实验历史和模块档案 |
 | `docs/dev-log.md` | 修改 | 每模块 | 面向用户的学习复盘 |
 
 ## 模块划分说明
@@ -170,7 +170,7 @@
 
 ## 模块总览
 
-模块实时进度只看 `docs/AI_CONTEXT.md`「当前状态」。
+模块实时进度只看 `docs/state/AI_CONTEXT.md`「当前状态」。
 
 | 模块 | 顺序 | 依赖 | 模块目标 | 关键产出 |
 |---|---|---|---|---|
@@ -188,7 +188,7 @@
 | 项 | 内容 |
 |---|---|
 | 目标 | 校验现有 10 条 formal regression 和 16 条 challenge，先证明旧链路 baseline 的真实状态。 |
-| 输入 | `eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`docs/database-current-state.md`、`domain_pack/schema_desc/relations.yaml`、`domain_pack/metrics.yaml`、`eval/cases/smoke.yaml`、`eval/run_eval.py`、`docs/AI_CONTEXT.md` Phase 2.7 / 2.7.1 验收快照 |
+| 输入 | `eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`docs/state/database-current-state.md`、`domain_pack/schema_desc/relations.yaml`、`domain_pack/metrics.yaml`、`eval/cases/smoke.yaml`、`eval/run_eval.py`、`docs/state/AI_CONTEXT.md` Phase 2.7 / 2.7.1 验收快照 |
 | 关键产出 | `eval/cases/phase3a-regression.yaml`、`eval/reports/phase3a-baseline.md`、`eval/reports/phase3a-challenge-baseline.md`、`tests/test_phase3a_eval.py` |
 
 **需用户确认的决策点**
@@ -203,22 +203,22 @@
 |---|---|---|
 | `eval/cases/phase3a-regression.yaml` | 已落地的 10 条新库正式回归输入 | 校验字段、比例和 baseline 运行兼容性 |
 | `eval/cases/database-upgrade-challenge.yaml` | 已落地的 16 条 challenge superset | 校验 10 条 formal 全部包含在 challenge 中，困难题保留 manual review 语义 |
-| `docs/database-current-state.md` | Phase 2.7 后 14 表、固定事实、指标口径和写 plan 注意事项 | 校验 M8 case 是否仍贴合新库底座 |
+| `docs/state/database-current-state.md` | Phase 2.7 后 14 表、固定事实、指标口径和写 plan 注意事项 | 校验 M8 case 是否仍贴合新库底座 |
 | `eval/cases/smoke.yaml` | M6 已跑通 smoke 字段写法 | 保持字段兼容，增补 expected_metrics / expected_trace_steps 等阶段三A字段 |
 | `eval/run_eval.py` | TestClient + SQLite seed + Markdown 报告 | 先扩展，不重写评测入口 |
 
 ### 任务清单
 
 - [ ] [顺序] 创建 `.agent_work/temp/m8-notes.md` | 输入：本计划 M8 | 输出：5-8 条 checklist、case 校验理由、baseline 运行命令记录
-- [ ] [顺序] 校验并必要小修 `eval/cases/phase3a-regression.yaml` | 输入：现有 10 条新库 case、`docs/database-current-state.md` | 输出：比例仍为 2 simple、3 aggregation、3 multi_table、2 security；字段满足 M8 baseline 报告需要
+- [ ] [顺序] 校验并必要小修 `eval/cases/phase3a-regression.yaml` | 输入：现有 10 条新库 case、`docs/state/database-current-state.md` | 输出：比例仍为 2 simple、3 aggregation、3 multi_table、2 security；字段满足 M8 baseline 报告需要
 - [ ] [顺序] 校验并必要小修 `eval/cases/database-upgrade-challenge.yaml` | 输入：现有 16 条 challenge | 输出：比例为 3 simple、4 core_metric、4 multi_table、3 difficult_diagnosis、2 security；10 条 formal question 全部包含在 challenge 中
 - [ ] [顺序] 扩展 `eval/run_eval.py::EvalCase` | 输入：阶段三A YAML | 输出：兼容新增字段 `expected_metrics`、`expected_trace_steps`、`pipeline_mode`，旧 `smoke.yaml` 不受影响
 - [ ] [顺序] 扩展 `eval/run_eval.py::_score_case` | 输入：AgentResponse | 输出：最小 issue tags：`missing_table`、`missing_column`、`safety_mismatch`、`unexpected_error`；`manual` case 通过结构检查后标记 `review_required=yes`
 - [ ] [顺序] 新建 `tests/test_phase3a_eval.py` | 输入：`phase3a-regression.yaml`、`database-upgrade-challenge.yaml` | 输出：校验 formal total=10、challenge total=16、formal 是 challenge 子集、旧 smoke 仍可加载
 - [ ] [顺序] 运行旧链路 baseline | 输入：当前 `/api/query` | 输出：`eval/reports/phase3a-baseline.md` 和 `.agent_work/temp/phase3a-baseline-traces.jsonl`
 - [ ] [顺序] 运行旧链路 challenge baseline | 输入：当前 `/api/query` | 输出：`eval/reports/phase3a-challenge-baseline.md` 和 `.agent_work/temp/phase3a-challenge-baseline-traces.jsonl`
-- [ ] [并行] 更新 `docs/AI_CONTEXT.md`「当前状态」 | 输入：M8 进度 | 输出：当前阶段计划文件指向 `docs/phase3a-plan.md`，当前模块更新为 M8
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md` 变更记录、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
+- [ ] [并行] 更新 `docs/state/AI_CONTEXT.md`「当前状态」 | 输入：M8 进度 | 输出：当前阶段计划文件指向 `docs/phase3a-plan.md`，当前模块更新为 M8
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/state/AI_CONTEXT_CHANGELOG.md` 变更记录、`docs/state/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -231,7 +231,7 @@
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8-tmp`
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-baseline.md --trace .agent_work/temp/phase3a-baseline-traces.jsonl`
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval/cases/database-upgrade-challenge.yaml --report eval/reports/phase3a-challenge-baseline.md --trace .agent_work/temp/phase3a-challenge-baseline-traces.jsonl`
-- [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志
+- [ ] 更新 `docs/state/AI_CONTEXT.md` 技术档案，并在 `docs/dev-log.md` 追加本模块日志
 
 ### 降级与停止点
 
@@ -274,7 +274,7 @@
 - [ ] [顺序] 增加 diagnostic 报告字段 | 输入：EvalResult | 输出：报告含 `source_file`、`phase3a_capabilities`、`phase3a_blocking`、`case_properties`、`skipped_due_to_pipeline_mode`
 - [ ] [顺序] 增加一致性检查测试 | 输入：`db_multi_003` 与 `db_plan_001` 等 linked case | 输出：共享问题 case 标注 `linked_case_id`，GMV 等指标口径不漂移；多答案 case 能记录实际命中的 alternative
 - [ ] [顺序] 运行旧链路 32 条 diagnostic baseline | 输入：challenge 16 + extra 16 | 输出：`eval/reports/phase3a-diagnostic-baseline.md` 和 `.agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl`
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/state/AI_CONTEXT_CHANGELOG.md`、`docs/state/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -288,7 +288,7 @@
 - [ ] M8 formal baseline 和 challenge baseline 文件不被重写为新口径；M8.5 另写 `phase3a-diagnostic-baseline.md`
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8_5-tmp`
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pipeline-mode baseline --cases eval/cases/database-upgrade-challenge.yaml --extra-cases eval/cases/phase3a-diagnostic-benchmark.yaml --report eval/reports/phase3a-diagnostic-baseline.md --trace .agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl`
-- [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志
+- [ ] 更新 `docs/state/AI_CONTEXT.md` 技术档案，并在 `docs/dev-log.md` 追加本模块日志
 
 ### 降级与停止点
 
@@ -337,7 +337,7 @@
 - [ ] [顺序] 同步记录 challenge 召回表现 | 输入：16 条 challenge | 输出：challenge expected_tables / expected_columns / expected_metrics 命中摘要，困难题可标记 manual review
 - [ ] [顺序] 同步记录 diagnostic 召回表现 | 输入：32 条 diagnostic 中带 `schema_retrieval` / `join_path` capability 的 case | 输出：按 capability 汇总 expected_tables / expected_columns / expected_metrics / JoinPath 命中摘要；不属于 M9 的 `query_plan` / `trace_steps` 检查只保留 skipped 或待后续模块处理
 - [ ] [可选] 新增 Milvus adapter smoke 脚本草案 | 输入：本机 `localhost:19530` | 输出：只在环境可用时运行，不阻塞 pytest
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/state/AI_CONTEXT_CHANGELOG.md`、`docs/state/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -352,7 +352,7 @@
 - [ ] 10 条 formal、16 条 challenge 和 32 条 diagnostic 中 multi_table / `join_path` 相关 case 的 `expected_tables` 组合均已被 `relations.yaml` 覆盖；缺失关系必须在 M9 暴露并修正
 - [ ] 检索结果包含 `score/source/rank/doc_type`，为 RRF / rerank 留接口
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_schema_retrieval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m9-tmp`
-- [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志
+- [ ] 更新 `docs/state/AI_CONTEXT.md` 技术档案，并在 `docs/dev-log.md` 追加本模块日志
 
 ### 降级与停止点
 
@@ -400,7 +400,7 @@
 - [ ] [可选] 增强聚合函数类型校验 | 输入：`QueryPlanStep.aggregations` 与 `SchemaDocument.metadata.data_type` | 输出：若类型信息存在，`SUM/AVG` 只能作用于数值字段，非法时映射 `invalid_aggregation_column`
 - [ ] [可选] 增加 `QueryPlan.to_human_explanation()` | 输入：QueryPlan、SchemaGraph、JoinPath | 输出：把结构化计划转成可读解释，用于 trace / report / dev-log；不承担展示决策
 - [ ] [顺序] 新建 `tests/test_phase3a_planner.py` | 输入：合法 / 非法 plan fixture | 输出：合法计划通过；不存在字段、非法 Join、敏感字段计划被拦截
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/state/AI_CONTEXT_CHANGELOG.md`、`docs/state/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -411,7 +411,7 @@
 - [ ] 非法 Join 路径映射 `invalid_join_path`
 - [ ] 敏感字段计划在 SQL 生成前被预检拦截，最终仍保留 SQL Guard
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_planner.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m10-tmp`
-- [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志
+- [ ] 更新 `docs/state/AI_CONTEXT.md` 技术档案，并在 `docs/dev-log.md` 追加本模块日志
 
 ### 降级与停止点
 
@@ -459,7 +459,7 @@
 - [ ] [顺序] 修改 `app/api/query.py` | 输入：`QueryRequest.force_new_pipeline` | 输出：默认模板优先；`force_new_pipeline=true` 强制走新 pipeline；两条路径最终都写 trace
 - [ ] [顺序] 修改 `eval/run_eval.py` 的 pipeline mode 映射 | 输入：`configured_pipeline_mode` | 输出：`new_text2sql` 自动以 `force_new_pipeline=true` 调 API，`baseline` 保持旧链路；报告记录 `actual_pipeline_mode`
 - [ ] [顺序] 新建 `tests/test_phase3a_pipeline.py` | 输入：fake LLM / seeded TestClient | 输出：强制新链路 trace_steps 完整、模板问题也能绕过模板、新 SQL 仍过 SQL Guard
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/state/AI_CONTEXT_CHANGELOG.md`、`docs/state/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -472,7 +472,7 @@
 - [ ] 图表成功时记录 `chart_decision`，失败或无图表时不影响 SQL 答案
 - [ ] 新 pipeline 生成的 SQL 仍统一进入 `run_sql_tool()`，安全用例不能绕过 SQL Guard
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_phase3a_pipeline.py tests\test_m5_agent_response.py tests\test_m4_nl2sql.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m11-tmp`
-- [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志
+- [ ] 更新 `docs/state/AI_CONTEXT.md` 技术档案，并在 `docs/dev-log.md` 追加本模块日志
 
 ### 降级与停止点
 
@@ -519,7 +519,7 @@
 - [ ] [顺序] 新建 `scripts/smoke_phase3a_text2sql.py` | 输入：评测入口 | 输出：一键生成 formal baseline / challenge baseline / diagnostic baseline / formal new / challenge new / diagnostic new / comparison 报告的本地 smoke
 - [ ] [顺序] 修改 `README.md` | 输入：阶段三A真实实现 | 输出：命令入口、能力边界、Milvus 当前实际状态、未实现 P1/P2 不虚报
 - [ ] [顺序] 运行阶段三A最终门禁 | 输入：全量测试 + smoke | 输出：验收快照写入 AI_CONTEXT
-- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/AI_CONTEXT_CHANGELOG.md`、`docs/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
+- [ ] [并行] 本模块完成后用 `finish-module` 更新 `docs/state/AI_CONTEXT_CHANGELOG.md`、`docs/state/AI_CONTEXT.md` 当前摘要和 `docs/dev-log.md`
 
 ### 验收门
 
@@ -535,7 +535,7 @@
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m12-full`
 - [ ] 验证：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3a_text2sql.py`
 - [ ] 验证：`git diff --check`
-- [ ] 更新 AI_CONTEXT.md 技术档案，并在 dev-log.md 追加本模块日志
+- [ ] 更新 `docs/state/AI_CONTEXT.md` 技术档案，并在 `docs/dev-log.md` 追加本模块日志
 
 ### 降级与停止点
 
@@ -602,10 +602,10 @@ flowchart TD
 
 - [ ] 新增文件路径符合目录规划
 - [ ] 每个模块开工 notes 写入 `.agent_work/temp/m<module>-notes.md`
-- [ ] 核心命令记录在 README / AI_CONTEXT.md 或验收记录中
+- [ ] 核心命令记录在 README / `docs/state/AI_CONTEXT.md` 或验收记录中
 - [ ] 如果修改 API 响应结构，同步更新 Pydantic Schema 和 README 示例
 - [ ] 不把未实现能力写成已实现；README 使用“已完成 / 进行中 / 后续计划”分层表述
-- [ ] 如果查了 references/ 项目，在 AI_CONTEXT.md 模块档案「参考资料」写清楚
+- [ ] 如果查了 references/ 项目，在 `docs/state/AI_CONTEXT_CHANGELOG.md` 模块档案「参考资料」写清楚
 - [ ] 新增 / 大幅修改代码符合 AGENTS.md 中文注释要求
 - [ ] `eval/traces/*.jsonl` 默认不提交；一次性报告素材放 `.agent_work/temp/`
 - [ ] 每个模块完成后先 `finish-module`，用户人工检查后再 `accept-module`

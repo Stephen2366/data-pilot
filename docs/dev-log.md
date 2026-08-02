@@ -1,6 +1,6 @@
 # DataPilot 开发日志（学习复盘）
 
-> 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `AI_CONTEXT.md`「当前状态」；完整技术档案和历史实验看 `AI_CONTEXT_CHANGELOG.md`，查 bug 时按需追溯。
+> 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `docs/state/AI_CONTEXT.md`「当前状态」；完整技术档案和历史实验看 `docs/state/AI_CONTEXT_CHANGELOG.md`，查 bug 时按需追溯。
 
 ## ★ M0 工程骨架与配置
 
@@ -945,7 +945,7 @@ python -m uvicorn app.main:app --reload
 
 5. **[压力追问] 数据里埋了彩蛋（金额不一致、负数退款），评测标准答案怎么确定？会不会模型查对了但被标准答案冤枉？**
 
-   这正是固定事实 + 确定性 seed 的意义：标准答案不是"模型输出什么就信什么"，而是**先用参考 SQL 在确定性数据上执行得到基准值**，再把它固化成语义明确的固定事实（比如 GMV = 11285752.00，Aurora 退款率最高）。彩蛋本身是数据事实，不是评测陷阱——比如金额不一致的 5 条订单是刻意设计的可解释样例，负数退款是合法的冲销记录，它们的口径都写进了 `database-current-state.md` 和 metrics.yaml。只要问题语义和口径定义一致，标准答案不会冤枉模型；真正会冤枉的是口径定义不清（比如 `paid_at` vs `created_at`），而这类问题在 Phase 3A 修口径时被逐一暴露和校准——数据彩蛋反而帮我们把口径磨清楚了。
+   这正是固定事实 + 确定性 seed 的意义：标准答案不是"模型输出什么就信什么"，而是**先用参考 SQL 在确定性数据上执行得到基准值**，再把它固化成语义明确的固定事实（比如 GMV = 11285752.00，Aurora 退款率最高）。彩蛋本身是数据事实，不是评测陷阱——比如金额不一致的 5 条订单是刻意设计的可解释样例，负数退款是合法的冲销记录，它们的口径都写进了 `docs/state/database-current-state.md` 和 metrics.yaml。只要问题语义和口径定义一致，标准答案不会冤枉模型；真正会冤枉的是口径定义不清（比如 `paid_at` vs `created_at`），而这类问题在 Phase 3A 修口径时被逐一暴露和校准——数据彩蛋反而帮我们把口径磨清楚了。
 
 ### 阶段成果与边界
 
@@ -968,11 +968,11 @@ python -m uvicorn app.main:app --reload
 
 > 早期模块记录是**时间切片**，记录的是当时状态，未回溯修改；以下为后续阶段校准后的最新口径，读早期记录时以本节为准。
 
-- **数据库**：本总结正文中的"7 表"是 Phase 2.7 之前的状态；当前是 **14 张物理表 + 1 万级数据**，固定事实与口径速查见 [database-current-state.md](docs/database-current-state.md)。
+- **数据库**：本总结正文中的"7 表"是 Phase 2.7 之前的状态；当前是 **14 张物理表 + 1 万级数据**，固定事实与口径速查见 [database-current-state.md](state/database-current-state.md)。
 - **安全口径**：M4 记录中"`admin` 可以看全量"是当时状态；M14-lite 定案后**敏感字段优先于 admin 角色**，`users.email / users.phone` 在任何角色下都不能通过 Text2SQL 直出。
 - **评测体系**：M6 的"6 条 smoke"是当时全部；M8 起扩展为三层（10 formal + 16 challenge + 32 diagnostic），M17 起 scorer 分层（L1/L2/L3）。
 - **Trace**：M5 的 JSONL 是当时唯一入口；M16 起为 TraceRouter + 可选 LangFuse 双写，JSONL 仍是默认路径。
-- **指标口径**：GMV / 退款率等口径在 Phase 2.7.1 和 Phase 3A 过程中实地查库校准（如 `order_status` 共 6 种状态、整单退款占 10% 需 LEFT JOIN、`refunds.source_order_no` 与 `orders.order_no` 命名空间不兼容不可 join），以 `database-current-state.md` 为准。
+- **指标口径**：GMV / 退款率等口径在 Phase 2.7.1 和 Phase 3A 过程中实地查库校准（如 `order_status` 共 6 种状态、整单退款占 10% 需 LEFT JOIN、`refunds.source_order_no` 与 `orders.order_no` 命名空间不兼容不可 join），以 `docs/state/database-current-state.md` 为准。
 
 ### 下一阶段怎么接
 
@@ -2917,6 +2917,34 @@ Diagnostic 的主结论可以这样读：
 | `unknown` | 2 | 证据不足或人工复核 case，不该硬贴标签 | 保留 manual_review，补更细 trace 或 case 说明 |
 
 所以这次测试暴露的最大方向不是“LangFuse 写入问题”，而是 **schema 上下文质量**：`schema_context + schema_retrieval = 7`，占 diagnostic 失败的主要部分。第二类是 **pipeline 生成/验证/结果匹配问题**：`result_match + plan_validation + query_plan + sql_generation = 5`。这就是 M19 说的闭环：不是只说“失败了 13 条”，而是告诉你下一轮更该先修 schema 上下文，再看 SQL 结果口径。
+
+还有一个很重要的读数风险：**三类测试虽然是包含关系，但这次不是“同一次运行结果的子集统计”，而是 formal / challenge / diagnostic 三次独立 LLM eval**。所以重复 case 会因为 LLM 非确定性、请求上下文和模型输出波动出现不同结果。
+
+本轮同 `case_id` 在 challenge 和 diagnostic 中出现结果差异的例子有 6 个：
+
+| case_id | challenge | diagnostic | 说明 |
+|---|---|---|---|
+| `db_core_001` | fail：`result_match` 列名 `gmv` vs `total_gmv` | pass：`result_match_ok` | 同题重跑后 SQL alias / 输出列口径变了 |
+| `db_core_002` | fail：`llm_generation_error` | fail：`missing_tables=['products']` | 都失败，但失败阶段从 query/生成类变成 schema retrieval |
+| `db_core_004` | fail：渠道排序/行值不一致 | fail：仍是 result mismatch，但错在另一行 | 都失败，但输出顺序或 SQL 结果波动 |
+| `db_hard_001` | fail：`llm_generation_error` | fail：`sql_guard_blocked` | 困难题失败形态变了，不能只看总分 |
+| `db_multi_002` | fail：`llm_generation_error` | pass | 典型 LLM 重跑波动 |
+| `db_multi_004` | pass | fail：`plan_validation_failed` | 典型 LLM 重跑波动 |
+
+所以以后读三类测试时要记住：**同一轮内的总分可以横向参考，但如果要严格比较包含关系，最好只跑一次 superset，再从同一份结果里切 formal / challenge / diagnostic 子集**。否则“challenge 过了但 diagnostic 同题没过”不一定代表测试集定义矛盾，可能只是 LLM 重跑波动。
+
+按你的要求又补跑了一轮 `qwen3.7-max`。`qwen3.8-max` 这次不是模型效果差，而是当前 DashScope 账号/配置直接返回 HTTP 403 `access_denied`，所以没有跑三类 eval；`qwen3.7-max` 最小调用可用，于是用它完整跑了 formal / challenge / diagnostic。
+
+| 模型 / 运行 | formal | challenge | diagnostic | 主要失败结构 |
+|---|---:|---:|---:|---|
+| DeepSeek `deepseek-v4-flash`（M19 快照） | 7/10 | 9/16 | 19/32 | `schema_context=6`、`schema_retrieval=1`、`result_match=2`、`plan_validation=1`、`sql_guard=1`、`query_plan=1`、`sql_generation=1`、`unknown=2` |
+| Qwen `qwen3.7-max`（追加对照） | 8/10 | 12/16 | 22/32 | `schema_context=6`、`schema_retrieval=2`、`result_match=1`、`plan_validation=1`、`unknown=1` |
+
+这轮 qwen3.7-max 的总分更好，尤其是 challenge 从 9/16 到 12/16、diagnostic 从 19/32 到 22/32；从 triage 看，它少了一些 `query_plan / sql_generation / sql_guard` 类失败，说明生成稳定性在这批题上更顺。但它没有解决 M19 暴露的主问题：`schema_context` 仍然是 6，`schema_retrieval` 还从 1 变成 2。换句话说，**换模型能缓解一部分生成失败，但不能替代 schema 上下文修复**。
+
+这里还有一个读数细节：qwen3.7-max 的 challenge 命令行通过率是 `12/16`，但 triage summary 里显示 `failed=5`；diagnostic 命令行通过率是 `22/32`，triage summary 是 `failed=11`。差的 1 条不是算错，而是 `review_required` 的人工复核 case：它不一定按规则分数算失败，但 M19 triage 会把它保留在待处理清单里，避免困难/歧义样本被“通过率”藏起来。
+
+所以这轮对模型选择的结论是：`qwen3.7-max` 值得作为显式候选和后续 A/B 组，但 M19 不直接切默认模型。原因不是保守，而是模型默认会影响长期基线；如果要切，应该单独做一次“默认模型切换”决策，把成本、稳定性、三类 benchmark、失败形态和后续 RAG / Hybrid 影响一起看。
 
 ### 怎么用于改进
 

@@ -1,10 +1,10 @@
 # DataPilot 数据库当前状态速查（Phase 2.7 / 2.7.1 后）
 
-> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/AI_CONTEXT_CHANGELOG.md`「变更记录」Phase 2.7 / 2.7.1 条目。
+> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。Trigger：只要涉及 SQL、字段、表、指标、seed、expected SQL、`result_match` 或数据库事实，必须先读本文。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」Phase 2.7 / 2.7.1 条目。
 
 ## 一句话结论
 
-DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 张物理表**，并通过 `20260722_0003` polish 补齐宽表字段、优惠券有效期索引和价格历史调价原因字段。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。后续 Phase 3A Text2SQL 深化应直接基于这个 14 表新库，不再回到旧 7 表库。
+DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 张物理表**，并通过 `20260722_0003` polish 补齐宽表字段、优惠券有效期索引和价格历史调价原因字段。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。Phase 3A 之后的 Text2SQL / Eval / RAG-Hybrid 工作都默认基于这个 14 表新库，不再回到旧 7 表库。
 
 ## 关键入口
 
@@ -27,7 +27,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 
 | 表 | 行数 | 粒度 | 主要用途 | 使用提醒 |
 | --- | ---: | --- | --- | --- |
-| `users` | 200 | 用户 | 用户维度、角色、状态、客服归属 | `email` / `phone` 是敏感字段，非 admin 不应查 |
+| `users` | 200 | 用户 | 用户维度、角色、状态、客服归属 | `email` / `phone` 是敏感字段；Text2SQL 明文直出按敏感字段优先策略拦截 |
 | `product_categories` | 15 | 商品类目节点 | 一级类目、子类目、递归层级 | 查父类目及所有子类目时用递归 CTE |
 | `products` | 50 | 商品 | 商品基础信息、当前价、兼容旧类目字段 | `category` 是兼容冗余，规范类目优先 `category_id` |
 | `channels` | 6 | 渠道 | 渠道 GMV、订单量、行为来源 | 固定事实常用 `Mobile App` |
@@ -113,9 +113,35 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 
 写 plan 时不要把这些当成 bug 清掉，除非用户明确要求“清洗数据”。它们是后续 Text2SQL 诊断能力的训练素材。
 
+## 数据异常菜单
+
+| 异常 / 彩蛋 | 表 / 字段 | 数量 | 设计目的 | 容易导致的 eval 问题 |
+|---|---|---:|---|---|
+| 未支付订单 | `orders.order_status='pending_payment'`，`paid_at IS NULL` | 20 | 检查成交口径是否用 `paid_at IS NOT NULL` 过滤 | GMV / 净收入多算；模型幻想不存在的 `unpaid` 状态 |
+| 取消状态拼写差异 | `orders.order_status` | `cancelled=421`，`canceled=8` | 检查状态枚举鲁棒性 | 只排除一种拼写导致成交指标偏高 |
+| 外部源系统单号重复 | `orders.source_order_no` / `external_order_no` | 各 20 条重复；9980 distinct | 模拟外部系统幂等 / 去重边界 | 错把外部单号当唯一业务主键 |
+| 外部单号命名空间不兼容 | `source_order_no` vs `order_no` | 全量格式不同 | 检查 join path 是否尊重真实关系 | 用 `SRC-*` join `ORD-*` 导致空结果或错结果 |
+| 整单退款 | `refunds.order_item_id IS NULL` | 100（退款单 10%） | 检查商品退款率的 LEFT JOIN / 归因边界 | INNER JOIN 丢退款；商品维度退款率偏低 |
+| 负数退款冲销 | `refunds.refund_amount=-20.00` | 3 | 模拟退款冲销 / 财务修正 | 退款金额求和、异常值过滤口径争议 |
+| 订单头与明细金额不一致 | `orders.order_amount` vs `SUM(order_items.line_amount)` | 5 | 检查订单头口径和明细口径能否区分 | `result_match` 争议；模型混用 `gmv` / `item_gmv` |
+
+排查 eval 时，先判断失败是否撞上了这张菜单。菜单里的异常是**有意设计的数据质量素材**，不是默认要修掉的脏数据。
+
+## Eval 失败排查入口
+
+| failure_stage / 现象 | 优先查什么 | 不要先做什么 |
+|---|---|---|
+| `result_match` | 固定业务事实、指标默认口径、数据异常菜单、expected SQL 是否使用正确粒度 | 不要立刻改模型 prompt 或放宽 scorer |
+| `schema_context` / 漏列 | 字段是否真实存在、`domain_pack/schema_desc/*.md` 是否漏写、字段别名是否清楚 | 不要直接把缺列写进 eval case 当标准 |
+| `schema_retrieval` / 漏表 | 当前 14 表用途、`relations.yaml`、指标依赖的表和 join path | 不要让 LLM 临场猜 join |
+| 安全拦截相关 | RBAC / 敏感字段策略、SQL Guard 是否正确识别只读和敏感字段 | 不要为了通过率放宽安全策略 |
+| 指标口径争议 | `domain_pack/metrics.yaml`、本文件「指标默认口径」、固定业务事实 | 不要混用订单头 GMV 和明细 GMV |
+| Qwen / DeepSeek 重跑差异 | `docs/state/eval-baselines.md` 的重复 case 波动说明 | 不要把三次独立 LLM run 当作同一次 superset 切片 |
+
 ## RBAC / 安全边界
 
-- `admin`：可访问全部 14 表，可查敏感字段。
+- 底层表级 RBAC：`admin` 可访问全部 14 表；`ops` 可访问全部 14 表但不应访问敏感字段；`customer_service` / `demo_user` 只允许访问有限业务表。
+- Text2SQL 安全口径：**敏感字段优先于角色权限**，`admin` 也不能通过自然语言 Text2SQL 直出 `users.email` / `users.phone` 明文字段；如后续确需查看，应设计脱敏 / 审计 / 专门接口。
 - `ops`：可访问全部 14 表，但不能查 `users.email` / `users.phone` 等敏感字段。
 - `customer_service`：仅可访问 `tickets`、`knowledge_docs`。
 - `demo_user`：仅可访问 `products`、`channels`、`knowledge_docs`、`product_categories`、`orders_wide`。
@@ -123,7 +149,7 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 
 权限事实源是 `engine/sql_guard/rbac.py`。新增表或新增角色时，要同步测试安全 case。
 
-## Phase 3A 使用边界
+## Phase 3A 历史使用边界
 
 - Phase 3A M8 baseline 直接跑在 14 表新库上，不做旧 7 表 vs 新 14 表对照。
 - `eval/cases/phase3a-regression.yaml` 是 Phase 3A 正式 10 条 formal 回归输入，是 M8-M12 主硬门。
@@ -131,7 +157,7 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 - 数据库升级阶段已经验证结构、seed、固定事实、challenge 基础用例、安全和 pytest；不要要求 Phase 3A `trace_steps` 在这个阶段全部通过。
 - `schema_retrieval`、`join_path`、`query_plan`、`trace_steps` 属于 Phase 3A M9-M12 的主线工作，不要倒灌回 Phase 2.7。
 
-## 后续写 plan 时优先考虑
+## 后续 Phase 3 / RAG-Hybrid 使用注意
 
 - 新 SQL 链路需要能区分订单头指标和订单明细指标。
 - Schema Retrieval 不应只召回表名，还要召回字段、指标、关系和聚合风险。
@@ -152,7 +178,7 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 - `coupons` 已有 `ix_valid_range(valid_from, valid_to)`，优惠券有效期查询优先使用这组字段。
 - `app.db.base` 目前兼具 Base 定义和模型注册，导入顺序不当可能触发循环导入；脚本入口优先导入 `app.db.base` 再用模型。
 
-## 常用验证命令
+## 数据库验证命令
 
 ```powershell
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
@@ -163,7 +189,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cas
 git diff --check
 ```
 
-预期基线：
+Phase 2.7 历史验收快照：
 
 - Alembic head：`20260722_0003`
 - `alembic check`：无新增 migration 操作
@@ -171,10 +197,12 @@ git diff --check
 - Pytest：Phase 2.7 验收时为 `31 passed, 1 warning`
 - M6 smoke：Phase 2.7 验收时为 `6/6 passed`
 
+当前 pytest / eval / 模型 A/B 基线不要看这里，统一查 `docs/state/eval-baselines.md`；运行命令入口查 `docs/state/runbook.md`。
+
 ## 后续 AI 开工前检查清单
 
-- 先读 `docs/AI_CONTEXT.md` 当前状态，确认是否仍是 Phase 2.7 已验收。
-- 如果要做 Phase 3A，读 `docs/phase3a-plan.md` 顶部数据库升级前置说明。
+- 先读 `docs/state/AI_CONTEXT.md` 当前状态，确认当前阶段 / 当前模块。
+- 如果要追溯 Phase 3A 历史设计，读 `docs/phase3a-plan.md` 顶部数据库升级前置说明。
 - 如果要写 SQL / Text2SQL plan，读本文件、`domain_pack/metrics.yaml`、`domain_pack/schema_desc/relations.yaml`。
 - 如果要改数据库，先读本文档和当前 Alembic head；如需理解历史设计取舍，再读 `docs/archive-versions/database-upgrade-plan-v5.md`。
 - 如果看到测试中自增 ID 不从 1 开始，不要修成依赖 ID；改用稳定业务键。

@@ -1,6 +1,6 @@
 # DataPilot AI Context Changelog（技术档案变更记录）
 
-> 这里保存 `docs/AI_CONTEXT.md` 拆出的完整历史变更、实验记录和模块档案。续接任务时先读 `AI_CONTEXT.md` 的当前状态；只有需要追溯原因、验证快照或历史实验时再读本文。「变更记录」模板见 `finish-docs` skill。
+> 这里保存 `docs/state/AI_CONTEXT.md` 拆出的完整历史变更、实验记录和模块档案。Trigger：只要需要追溯设计原因、历史实验、默认值为何不切、模块完整验证快照或旧结论修正，必须先读本文。续接任务时先读 `docs/state/AI_CONTEXT.md` 的当前状态。「变更记录」模板见 `finish-docs` skill。
 
 M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先级：
 
@@ -13,9 +13,70 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验/计划] M19 后续 Qwen embedding / Milvus A/B 复测与 M20 立项（2026-08-02）
+
+- 触发原因：用户要求用 Qwen `qwen3.7-max` + Qwen embedding 再跑三类 eval，并追问 DeepSeek + Qwen embedding 效果差是否可能来自 Milvus 链路问题。
+- 执行配置：
+  - Qwen 主模型：`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-max`。
+  - DeepSeek 主模型：`LLM_PROVIDER=deepseek`、`LLM_MODEL=deepseek-v4-flash`。
+  - Qwen embedding / Milvus：`SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=dashscope`、`QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding`、`QWEN_EMBEDDING_DIMENSIONS=1024`、`LANGFUSE_ENABLED=false`。
+- 验证快照：
+  - Qwen `qwen3.7-max` + Qwen embedding：formal `8/10`、challenge `12/16`、diagnostic `20/32`；报告为 `.agent_work/temp/m19-qwen37max-qwenemb-formal-report.md`、`.agent_work/temp/m19-qwen37max-qwenemb-challenge-report.md`、`.agent_work/temp/m19-qwen37max-qwenemb-diagnostic-report.md`。
+  - Qwen `qwen3.7-max` + 默认 embedding 对照为 formal `8/10`、challenge `12/16`、diagnostic `22/32`；diagnostic 对比见 `.agent_work/temp/m19-qwen37max-default-vs-qwenemb-diagnostic-compare.md`。
+  - DeepSeek `deepseek-v4-flash` + Qwen embedding diagnostic 为 `19/32`；triage summary：`schema_retrieval=1`、`schema_context=4`、`query_plan=4`、`plan_validation=1`、`sql_guard=1`、`unknown=2`、`result_match=2`；报告见 `.agent_work/temp/m19-deepseek-qwenemb-diagnostic-report.md`。
+- 新发现：当前 `build_schema_documents()` 生成 193 条 schema docs，但 Milvus collection `datapilot_schema_docs` 的 `row_count=19493`，约等于 `193 * 101`。排查代码发现 `MilvusVectorIndex.__init__` 每次初始化都会重新 embedding + insert 全量 schema docs，而 `retrieve_schema()` 默认会按 case 构建配置化 vector index；固定 collection 且 `MILVUS_RESET_COLLECTION=false` 时会被重复灌入。
+- 结论：这轮 Qwen embedding / Milvus 结果不能直接判定 embedding 模型无效，只能说明当前 Milvus 实验链路不可信。已在 `docs/phase3b-langfuse-plan-v6.md` 新增 M20 `Schema Retrieval / Milvus Index Hygiene`，作为 M19 后续模块，先修 collection 生命周期、去重 / upsert、run 内 retriever 复用和 `schema_docs_hash`，再重新评估 embedding。
+- 边界：不自动切默认模型、不自动切默认 embedding / Milvus、不改 eval case、不扩展到 RAG/Hybrid；这些长期影响选择仍需用户确认。
+
+### [小修] AI_CONTEXT 时效性字段补日期（2026-08-02）
+
+- `docs/state/AI_CONTEXT.md` 的「最近验证事实」「当前路线判断」「已知的坑」补充日期列；最近事实和路线判断按实际发生 / 确认日期标注，活跃坑标注首次记录或已知起点，并注明 2026-08-02 仍有效。
+
+### [小修] database-current-state 增强 eval 排障口径（2026-08-02）
+
+- `docs/state/database-current-state.md` 新增「数据异常菜单」和「Eval 失败排查入口」，把未支付订单、取消状态拼写差异、外部单号重复 / 命名空间不兼容、整单退款、负数退款冲销、订单头与明细金额不一致等 seed 设计整理成可排查表。
+- 修正 RBAC / Text2SQL 安全表述：底层 `admin` 可访问全部表，但 Text2SQL 安全口径是敏感字段优先于角色权限，`admin` 也不能直出 `users.email/users.phone`。
+- 将 Phase 3A 和 Phase 2.7 验证数字标为历史使用边界 / 历史验收快照，并指向 `docs/state/eval-baselines.md` 和 `docs/state/runbook.md` 查看当前 eval 基线和运行入口。
+
+### [小修] state 文档增加强制阅读触发规则（2026-08-02）
+
+- `docs/state/AI_CONTEXT.md` 将「续接阅读顺序」改为「必读规则」，明确运行命令 / eval / 数据库事实 / 历史取舍等触发条件下必须继续读取对应 state 文档。
+- `docs/state/runbook.md`、`docs/state/eval-baselines.md`、`docs/state/database-current-state.md`、`docs/state/AI_CONTEXT_CHANGELOG.md` 顶部补充 Trigger；`CLAUDE.md` 顶部同步状态文档阅读规则，降低 AI 只读摘要就开工的风险。
+
+### [小修] AI_CONTEXT 瘦身为续接仪表盘（2026-08-02）
+
+- `docs/state/AI_CONTEXT.md` 重组为当前状态、续接阅读顺序、当前默认值、最近验证事实、当前路线判断、已知坑和索引；删除长篇链路说明，改为指向 `docs/state/runbook.md`、`docs/state/eval-baselines.md`、`docs/state/database-current-state.md` 和 `docs/state/AI_CONTEXT_CHANGELOG.md`。
+- 保留 M19 / Qwen / LangFuse / eval 的最新续接结论，但不再在 AI_CONTEXT 中展开命令矩阵、完整失败分布或历史实验细节。
+
+### [小修] AI 运行入口拆出 runbook（2026-08-02）
+
+- 新增 `docs/state/runbook.md`，承接原 `docs/state/AI_CONTEXT.md` 的模型、Schema Retrieval / embedding、LangFuse / Trace、eval 命令矩阵和运行纪律。
+- `docs/state/AI_CONTEXT.md` 的「AI 运行入口」瘦身为短引用；`docs/state/eval-baselines.md` 的相关文档分工和 `CLAUDE.md` 目录结构同步加入 runbook。
+
+### [小修] 状态文档迁移到 docs/state（2026-08-02）
+
+- 用户已将 `AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md`、`database-current-state.md`、`eval-baselines.md` 移入 `docs/state/`；本次同步当前入口文档、当前阶段计划、eval README 和 state 文档内部引用。
+- 路径口径：AI 续接入口统一为 `docs/state/AI_CONTEXT.md`；完整 changelog 为 `docs/state/AI_CONTEXT_CHANGELOG.md`；数据库状态为 `docs/state/database-current-state.md`；长期评测账本为 `docs/state/eval-baselines.md`。归档目录旧引用保持历史原貌，不批量改。
+
+### [小修] 评测基线拆出独立账本文档（2026-08-02）
+
+- 新增 `docs/state/eval-baselines.md` 作为长期评测账本，集中记录 formal / challenge / diagnostic 基线、模型/embedding A/B、报告路径、failure distribution 和典型错因。
+- `docs/state/AI_CONTEXT.md` 的「最新评测基线」瘦身为续接摘要，并引用 `docs/state/eval-baselines.md`；AI_CONTEXT 继续保留当前默认值、最新结论和操作入口，不再承载长篇历史评测细节。
+
+### [实验] M19 qwen3.7-max 三类 eval 对照（2026-08-02）
+
+- 触发原因：用户确认 qwen3.8-max 当前不可用后，要求改用 `qwen3.7-max` 执行 formal / challenge / diagnostic 三类评测。
+- 执行配置：`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-max`、`LANGFUSE_ENABLED=false`，保持 M19 本地 triage 输出，不改默认 `.env` / 代码兜底模型。
+- 验证快照：
+  - Formal：`.agent_work/temp/m19-qwen37max-formal-report.md` / `.agent_work/temp/m19-qwen37max-formal-triage.json`：`passed=8/10`；triage `schema_context=2`，动作 `fix_schema_desc=2`；失败 `p3a_multi_001` 缺 `coupon_order_count`、`p3a_multi_003` 缺 `category`。
+  - Challenge：`.agent_work/temp/m19-qwen37max-challenge-report.md` / `.agent_work/temp/m19-qwen37max-challenge-triage.json`：命令行通过率 `passed=12/16`；triage summary `failed=5`（多出的 1 条是 `review_required` manual case）；stage 为 `result_match=1`、`schema_context=1`、`query_plan=1`、`schema_retrieval=1`、`unknown=1`；动作 `fix_pipeline=2`、`fix_schema_desc=1`、`manual_review=2`。
+  - Diagnostic：`.agent_work/temp/m19-qwen37max-diagnostic-report.md` / `.agent_work/temp/m19-qwen37max-diagnostic-triage.json`：命令行通过率 `passed=22/32`；triage summary `failed=11`（含 1 条 manual/review case）；stage 为 `schema_context=6`、`schema_retrieval=2`、`result_match=1`、`plan_validation=1`、`unknown=1`；动作 `fix_schema_desc=6`、`fix_pipeline=2`、`manual_review=3`。
+  - DeepSeek flash vs qwen3.7-max diagnostic 本地分布对比：`.agent_work/temp/m19-deepseek-vs-qwen37max-diagnostic-triage-compare.md`；qwen3.7-max 相比本轮 DeepSeek flash 少了 `query_plan`、`result_match`、`sql_generation`、`sql_guard`、`unknown` 各 1 个，但 `schema_context` 持平为 6，`schema_retrieval` 多 1 个。
+- 结论：qwen3.7-max 在本轮 M19 三类 eval 上优于 `deepseek-v4-flash` 快照（8/10、12/16、22/32 vs 7/10、9/16、19/32），但 schema 上下文仍是主要失败来源，且模型默认切换属于长期基线选择；本次只记录为候选和 A/B 对照，不自动切默认。
+
 ### [模块任务] M19 Trace Failure Triage / LangFuse-driven Eval Analysis（2026-08-02）
 
-- 改动范围：`eval/triage.py`、`eval/run_eval.py`、`tests/test_m19_failure_triage.py`、`docs/AI_CONTEXT.md`、`docs/AI_CONTEXT_CHANGELOG.md`、`docs/dev-log.md`、`.agent_work/temp/m19-notes.md`。未修改数据库、架构分层、安全策略、正式 eval case 集或 LangFuse Dataset/Experiment 编排。
+- 改动范围：`eval/triage.py`、`eval/run_eval.py`、`tests/test_m19_failure_triage.py`、`docs/state/AI_CONTEXT.md`、`docs/state/AI_CONTEXT_CHANGELOG.md`、`docs/dev-log.md`、`.agent_work/temp/m19-notes.md`。未修改数据库、架构分层、安全策略、正式 eval case 集或 LangFuse Dataset/Experiment 编排。
 - 关键记录：
   - 新增 `eval/triage.py` 作为 M19 failure triage 单一事实源，定义 `failure_stage` taxonomy、`needs_action` taxonomy、JSONL trace 读取、单 case 归因、批量摘要、triage JSON、LangFuse triage score payload 和本地 A/B failure distribution 对比。
   - `eval/run_eval.py` 的 Markdown 报告新增 `Failure Triage Summary`，包含 `failure_stage` 聚合、`needs_action` 聚合、Top cases 和 case 明细；新增 `--triage-json` 输出本地 JSON；新增 `--compare-triage-left/--compare-triage-right/--compare-triage-report` 生成本地分布对比 Markdown。
@@ -37,9 +98,14 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
   - `review_required=True` 的困难 case 即使 trace 指向具体阶段，也默认保留 `manual_review`，避免把人工诊断题误标成自动修复候选。
   - M19 暴露出 deepseek-v4-flash 当前快照低于 M13 稳定基线，但真实 LLM 波动较大；这轮数字主要作为 M19 triage 验证和 Phase 3 RAG/Hybrid 前的参考，不直接作为默认模型切换结论。
 
+### [实验] M19 重复 case 波动与 Qwen 3.8 availability probe（2026-08-02）
+
+- 重复 case 波动：M19 formal / challenge / diagnostic 是三次独立真实 LLM eval，不是同一次 superset run 的切片。challenge 与 diagnostic 中相同 `case_id` 有 6 个结果或失败形态不同：`db_core_001`、`db_core_002`、`db_core_004`、`db_hard_001`、`db_multi_002`、`db_multi_004`。结论：读包含关系时不能把三次独立运行当作同一批结果；若要严格比较包含关系，应跑一次 superset，再按 case 集切子集统计。
+- Qwen 3.8 probe：`LLM_PROVIDER=qwen; QWEN_MODEL=qwen3.8-max` 最小 DashScope chat completion 返回 HTTP 403 `access_denied`，当前账号/配置不可用；对照 `QWEN_MODEL=qwen3.7-max` 返回 `{"ok": true}`，说明 DashScope key/base URL 正常。未跑 qwen3.8-max 三类 eval。
+
 ### [小修] 主模型切换 deepseek-v4-pro → deepseek-v4-flash（2026-07-31）
 
-- 改动范围：`.env`（新增 `LLM_PROVIDER=deepseek` / `LLM_MODEL=deepseek-v4-flash`，此前未显式设置，一直靠代码兜底）、`engine/nl2sql/generator.py` 两处兜底默认值、`.env.example`、`README.md` LLM 配置示例、`docs/AI_CONTEXT.md` 技术默认值快照。
+- 改动范围：`.env`（新增 `LLM_PROVIDER=deepseek` / `LLM_MODEL=deepseek-v4-flash`，此前未显式设置，一直靠代码兜底）、`engine/nl2sql/generator.py` 两处兜底默认值、`.env.example`、`README.md` LLM 配置示例、`docs/state/AI_CONTEXT.md` 技术默认值快照。
 - 关键记录：模型名配置本来就是"`.env` 的 `LLM_MODEL` 优先、代码 `deepseek-v4-pro` 兜底"结构（见 M12 修复），本次切换只是补上 `.env` 显式配置 + 把兜底值同步为 flash，零逻辑改动。L3 judge 独立走 `EVAL_JUDGE_MODEL`，不受影响；`scripts/run_qwen_ab_experiments.py` 的 A/B 实验模型硬编码是刻意设计，未改。
 - 验证快照：
   - `get_default_llm_client()` 解析结果 `resolved model: deepseek-v4-flash`；真实 DeepSeek API 调用返回 `{"ok": true}`（HTTP 200，flash 模型名被 API 接受）。
@@ -54,7 +120,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [模块任务] M18 Smoke / Experiment / 阶段收尾（2026-07-30）
 
-- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `scripts/smoke_phase3b_langfuse.py`、`tests/test_m18_phase3b_smoke.py`、`docs/AI_CONTEXT.md`、`docs/AI_CONTEXT_CHANGELOG.md`、`docs/dev-log.md`、`.agent_work/temp/m18-notes.md`、`.agent_work/temp/m18-experiment-workflow-cases.yaml`。用户导出的 LangFuse Dataset CSV 曾作为 UI 验证素材保留在项目根目录；2026-07-30 review 修复后已从 git 跟踪移除并加入 ignore。
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `scripts/smoke_phase3b_langfuse.py`、`tests/test_m18_phase3b_smoke.py`、`docs/state/AI_CONTEXT.md`、`docs/state/AI_CONTEXT_CHANGELOG.md`、`docs/dev-log.md`、`.agent_work/temp/m18-notes.md`、`.agent_work/temp/m18-experiment-workflow-cases.yaml`。用户导出的 LangFuse Dataset CSV 曾作为 UI 验证素材保留在项目根目录；2026-07-30 review 修复后已从 git 跟踪移除并加入 ignore。
 - 关键记录：
   - 新增 `scripts/smoke_phase3b_langfuse.py`：一键验证配置摘要、真实 `/api/query`、JSONL trace 写入、DataPilot trace id 与 JSONL 匹配、LangFuse trace mapping、`rule:m18_smoke` Score 回写和 trace visibility 查询。脚本默认允许 `LANGFUSE_ENABLED=false` 时 Cloud 检查 SKIP；显式 `--require-langfuse` 时 LangFuse disabled / 缺 key / SDK 不可用 / score 或 visibility 失败均会 FAIL。
   - smoke 复用 `eval.run_eval.seeded_api_client()`，使用内存 SQLite seed + FastAPI TestClient 调真实 `/api/query`，不碰 MySQL 开发库，不绕过 API seam。
@@ -81,7 +147,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [模块任务] M17 Scorer 分层与 Score 回写（2026-07-29）
 
-- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `docs/phase3b-langfuse-plan-v6.md`、`eval/run_eval.py`、`eval/scorers/*`、`tests/test_m17_scorers.py`、`docs/AI_CONTEXT.md`、`.agent_work/temp/m17-notes.md`。`git diff --name-only` 只列出已跟踪文件，完整范围以 `git status --short` 为准。
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `docs/phase3b-langfuse-plan-v6.md`、`eval/run_eval.py`、`eval/scorers/*`、`tests/test_m17_scorers.py`、`docs/state/AI_CONTEXT.md`、`.agent_work/temp/m17-notes.md`。`git diff --name-only` 只列出已跟踪文件，完整范围以 `git status --short` 为准。
 - 关键记录：
   - 按用户要求先补 plan：当前执行路线改为在 `M16B` 分支继续 M17/M18，完成后整体合并回 `main`；不新增 `M17B` / `M18B` 双章节，现有 M17/M18 目标不变，只把底座调整为 M16B live lifecycle spans。
   - M17-1 调研结论：LangFuse Scores 是统一质量评估对象；Code evaluators 适合 deterministic checks，LLM-as-a-Judge 适合 semantic judgment。本模块不把规则评分迁到 LangFuse 托管 evaluator，原因是会引入 UI 配置、observation target 和 dispatcher 依赖；M17 先做本地 scorer 单一事实源 + SDK/API score 回写。
@@ -106,7 +172,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [模块任务] M16B Trace Lifecycle 下沉预备分支（2026-07-29）
 
-- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `engine/trace/lifecycle.py`、`engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、`engine/nl2sql/pipeline.py`、`engine/tools/sql_tool.py`、`app/api/query.py`、`tests/test_m16_trace_router.py`、`tests/test_phase3a_pipeline.py`、`docs/AI_CONTEXT.md`、`.agent_work/temp/m16b-notes.md`。
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；涉及 `engine/trace/lifecycle.py`、`engine/trace/recorder.py`、`engine/trace/langfuse_backend.py`、`engine/nl2sql/pipeline.py`、`engine/tools/sql_tool.py`、`app/api/query.py`、`tests/test_m16_trace_router.py`、`tests/test_phase3a_pipeline.py`、`docs/state/AI_CONTEXT.md`、`.agent_work/temp/m16b-notes.md`。
 - 关键记录：
   - 用户确认重复 span 处理采用方案 1：`TraceRecord.langfuse_span_mode` 显式区分 `post_hoc` / `live`。M16 post-hoc 继续由 `LangFuseBackend.record()` 请求结束后拆 flat spans；M16B live 由 pipeline/tool lifecycle 执行中写 LangFuse spans，最终 backend 只保留 JSONL 映射字段，不再重复写 post-hoc spans。
   - 用户确认 SQL tool 分层采用方案 1：`run_sql_tool()` 增加可选 DataPilot `trace_context` 参数，在工具层内部记录 `sql_guard` / `sql_execution` spans。原因是 guard 与 DB 执行真实边界在 tool 内部；pipeline 事后补 span 改动更小，但不适合作为后续 RAG/Hybrid 底座。
@@ -169,7 +235,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [小修] AI_CONTEXT 拆分为当前快照 + Changelog（2026-07-27）
 
-- 按用户确认，将 `docs/AI_CONTEXT.md` 的完整历史变更记录拆到 `docs/AI_CONTEXT_CHANGELOG.md`；`AI_CONTEXT.md` 保留当前状态、默认配置、最新基线、重要实验结论、活跃坑和 changelog 索引，减少后续 AI 续接时默认加载的历史上下文。
+- 按用户确认，将 `docs/state/AI_CONTEXT.md` 的完整历史变更记录拆到 `docs/state/AI_CONTEXT_CHANGELOG.md`；`AI_CONTEXT.md` 保留当前状态、默认配置、最新基线、重要实验结论、活跃坑和 changelog 索引，减少后续 AI 续接时默认加载的历史上下文。
 - 同步更新 `AGENTS.md` / `CLAUDE.md`、`.claude/skills/finish-module/SKILL.md` 和 `docs/phase3a-plan.md` 的开发记录规则：完整模块档案、真实 LLM eval、A/B 实验和 smoke 结论写入 changelog；影响当前路线的摘要再同步到 `AI_CONTEXT.md`。
 - 同轮将真实 `.env` 静默补齐 `DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1` 与 `DASHSCOPE_EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/api/v1`，不输出任何 API key。
 
@@ -218,7 +284,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [模块任务] M13 第二批：alias scorer + item_gmv/转化率 prompt 修复（2026-07-26）
 
-- 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`tests/test_phase3a_pipeline.py`、`eval/reports/phase3a-*.md`、`docs/phase3a-issues-and-fixes-v5.md`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m13-notes.md`。
+- 改动范围：`eval/run_eval.py`、`eval/cases/phase3a-regression.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/nl2sql/pipeline.py`、`tests/test_phase3a_eval.py`、`tests/test_phase3a_planner.py`、`tests/test_phase3a_pipeline.py`、`eval/reports/phase3a-*.md`、`docs/phase3a-issues-and-fixes-v5.md`、`docs/state/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m13-notes.md`。
 - 关键记录：
   - 继续按分步修复，不做 JSON mode 大改；先用 trace 证明失败位于 eval 评分、QueryPlan prompt、SQL prompt 还是数据预期。
   - `expected_value` 单指标题新增单列兜底：如果结果只有一列，即使列名是 `"2026年6月GMV"` 这类中文别名，也交给数值校验判定；多列结果仍按列名/显式 alias 检查。
@@ -283,12 +349,12 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [小修] AI_CONTEXT M9.1/M9.2 合并状态修正（2026-07-25）
 
-- 改动范围：`docs/AI_CONTEXT.md`（仅文档）
+- 改动范围：`docs/state/AI_CONTEXT.md`（仅文档）
 - 关键决策：M9.1/M9.2 的遗留说明"未合并回 main"已过时——`9fa9368` 已将 Milvus 和 SiliconFlow embedding 可选支持合入 main。默认检索路径仍为 `InMemoryVectorIndex`，不影响 M12 结果（和 Milvus 没启动无关）。修正 M9.1 遗留第 3 条、M9.2 遗留第 2 条。
 
 ### [小修] 数据库状态文档补充 + Phase 3A 问题分析 v3 修订（2026-07-25）
 
-- 改动范围：`docs/database-current-state.md`、`docs/phase3a-issues-and-fixes-v3.md`（仅文档，无代码改动）
+- 改动范围：`docs/state/database-current-state.md`、`docs/phase3a-issues-and-fixes-v3.md`（仅文档，无代码改动）
 - 关键决策：
   - **实地查库验证 Phase 2.7 数据质量彩蛋**：连接 MySQL `datapilot_dev` 逐项核实 7 个彩蛋的实际数据。确认全部存在，但文档描述有 3 处不够精确：`order_status` 漏了 `pending_payment` 状态（20 条）、`refunds.source_order_no` 格式与 `orders.order_no` 完全不同（SRC-xxx vs ORD-xxx，不能 join）、整单退款（100 条 `order_item_id IS NULL`，10%）未被列为独立彩蛋。
   - **`database-current-state.md` 4 处修正**：① `order_status` 行补完整 6 种状态及行数；② `source_order_no` 行补格式差异和"不能 join"警告；③ refunds 表行量化整单退款比例（10%，必须 LEFT JOIN）；④ "数据质量设计"节全部 7 条量化到具体数字，原"弱关联退款"改为"命名空间不兼容"，新增整单退款条目。
@@ -307,7 +373,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [模块任务] Phase 3A M12 对照报告与阶段收尾（2026-07-25）
 
-- 改动范围：新增 `eval/compare_phase3a.py`、`scripts/smoke_phase3a_text2sql.py`；修改 `engine/nl2sql/generator.py`、`engine/nl2sql/planner.py`、`app/api/query.py`、`README.md`、`docs/AI_CONTEXT.md`
+- 改动范围：新增 `eval/compare_phase3a.py`、`scripts/smoke_phase3a_text2sql.py`；修改 `engine/nl2sql/generator.py`、`engine/nl2sql/planner.py`、`app/api/query.py`、`README.md`、`docs/state/AI_CONTEXT.md`
 - 关键决策：
   - M12 负责跑新 pipeline 10 条 formal / 16 条 challenge / 32 条 diagnostic 报告，生成新旧链路对照报告，提供一键 smoke 脚本，更新 README 能力边界。
   - **DeepSeek 模型名修复**：API 已废弃 `deepseek-chat`，修改 `generator.py` 两处默认值为 `deepseek-v4-pro`；同步更新 README LLM_MODEL 示例。
@@ -331,7 +397,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [模块任务] Phase 3A M11 新 Text2SQL Pipeline 与 Trace Steps（2026-07-24）
 
-- 改动范围：未提供模块起始 commit，本次按 `git status --short`、`git diff --name-only` 和未跟踪文件检查；`engine/nl2sql/pipeline.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/trace/recorder.py`、`app/schemas/agent.py`、`app/api/query.py`、`tests/test_phase3a_pipeline.py`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m11-notes.md`
+- 改动范围：未提供模块起始 commit，本次按 `git status --short`、`git diff --name-only` 和未跟踪文件检查；`engine/nl2sql/pipeline.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`engine/trace/recorder.py`、`app/schemas/agent.py`、`app/api/query.py`、`tests/test_phase3a_pipeline.py`、`docs/state/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m11-notes.md`
 - 关键决策：
   - `QueryRequest.force_new_pipeline: bool = False` 作为 API 侧显式评测开关，默认旧请求仍模板优先；没有修改 `AgentResponse` 必填字段，也没有暴露 `plan_execute` / 多 SQL Agent 模式。
   - `trace_steps` 只写入 JSONL `TraceRecord`，不放进公开响应体；每步包含 `step_index/step_type/status/input_summary/output_summary/latency_ms/error_type/metadata/parent_step_id`，SQL 执行 step 的 `step_type=sql_query`，执行元信息放 `metadata`。
@@ -357,7 +423,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### Phase 3A M10 QueryPlanStep 与自检（2026-07-24）
 
-- 改动范围：未提供模块起始 commit，本次按 `git status --short`、`git diff --name-only` 和未跟踪文件检查；`engine/nl2sql/planner.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`tests/test_phase3a_planner.py`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m10-notes.md`
+- 改动范围：未提供模块起始 commit，本次按 `git status --short`、`git diff --name-only` 和未跟踪文件检查；`engine/nl2sql/planner.py`、`engine/nl2sql/prompt.py`、`engine/nl2sql/generator.py`、`tests/test_phase3a_planner.py`、`docs/state/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m10-notes.md`
 - 关键决策：
   - 新增 `QueryPlanStep` / `QueryPlan`，字段覆盖 `step_id/step_index/step_type/purpose/depends_on/task_type/tables/columns/metrics/filters/joins/aggregations/group_by/order_by/limit/output_columns`；`QueryPlan.steps` 保留未来多步骤扩展，但 M10 校验阶段把多个可执行 `sql_query` step 映射为 `unsupported_multi_step_plan`。
   - `QueryPlanStep` 不包含 `thoughts` / CoT，也不把 `display_type` 作为执行字段；只用 `purpose` 表达意图摘要，展示策略留给 M11 `chart_decision`。
@@ -384,7 +450,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### Phase 3A M9.2 真实中文 Embedding + Milvus 效果测试（2026-07-24）
 
-- 改动范围：未提供模块起始 commit，本次按当前实验分支工作树变更检查；`engine/schema_retrieval/embedding_provider.py`、`engine/schema_retrieval/vector_index.py`、`scripts/smoke_m9_2_real_embedding.py`、`tests/test_m9_2_siliconflow_embedding.py`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9.2-notes.md`、`.agent_work/temp/m9_2-real-embedding-smoke-bge-m3.md`、`.agent_work/temp/m9_2-real-embedding-smoke-qwen3-0.6b.md`
+- 改动范围：未提供模块起始 commit，本次按当前实验分支工作树变更检查；`engine/schema_retrieval/embedding_provider.py`、`engine/schema_retrieval/vector_index.py`、`scripts/smoke_m9_2_real_embedding.py`、`tests/test_m9_2_siliconflow_embedding.py`、`docs/state/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9.2-notes.md`、`.agent_work/temp/m9_2-real-embedding-smoke-bge-m3.md`、`.agent_work/temp/m9_2-real-embedding-smoke-qwen3-0.6b.md`
 - 关键决策：
   - M9.2 从 M9.1 实验状态切出 `codex-m9.2-real-embedding-experiment`，继续遵守“不合并前先询问用户”。M10 主线仍建议基于已验收 M9 / main，而不是实验分支。
   - 新增 `SiliconFlowEmbeddingProvider`，默认模型 `BAAI/bge-m3`；通过环境变量可切换 `SILICONFLOW_EMBEDDING_MODEL` 和 `SILICONFLOW_EMBEDDING_DIMENSIONS`。真实 API 调用只放 smoke，pytest 用 fake transport，不消耗额度、不依赖网络。
@@ -407,7 +473,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### Phase 3A M9.1 Milvus Adapter 实验（2026-07-23）
 
-- 改动范围：未提供模块起始 commit，本次按当前实验分支工作树变更检查；`engine/schema_retrieval/vector_index.py`、`engine/schema_retrieval/retriever.py`、`tests/test_m9_1_milvus_schema_retrieval.py`、`scripts/smoke_m9_1_milvus.py`、`pyproject.toml`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9.1-notes.md`、`.agent_work/temp/m9_1-milvus-smoke.md`
+- 改动范围：未提供模块起始 commit，本次按当前实验分支工作树变更检查；`engine/schema_retrieval/vector_index.py`、`engine/schema_retrieval/retriever.py`、`tests/test_m9_1_milvus_schema_retrieval.py`、`scripts/smoke_m9_1_milvus.py`、`pyproject.toml`、`docs/state/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9.1-notes.md`、`.agent_work/temp/m9_1-milvus-smoke.md`
 - 关键决策：
   - 从已验收 M9 后的 `main` 切出实验分支 `codex-m9.1-milvus-experiment`，不在实验完成后自动合并；用户明确要求“如果要合并先询问”。
   - 使用 `pymilvus 3.0.0` 的 `MilvusClient` 新 API，不使用会触发 deprecation warning 的 ORM API。`pyproject.toml` 登记 `pymilvus>=3.0.0`，避免实验分支依赖只存在于本机环境而没有项目声明。
@@ -431,7 +497,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### Phase 3A M9 Schema Retrieval 与 JoinPath（2026-07-23）
 
-- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`engine/schema_retrieval/*`、`tests/test_phase3a_schema_retrieval.py`、`domain_pack/schema_desc/relations.yaml`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9-notes.md`、`.agent_work/temp/m9-recall-summary.md`
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`engine/schema_retrieval/*`、`tests/test_phase3a_schema_retrieval.py`、`domain_pack/schema_desc/relations.yaml`、`docs/state/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m9-notes.md`、`.agent_work/temp/m9-recall-summary.md`
 - 关键决策：
   - 用户确认选择 M9 选项 A：按 ROADMAP 保留 Milvus 主路径边界，但本模块只实现 deterministic in-memory vector index 与 `EmbeddingProvider` / `InMemoryVectorIndex` 协议，不新增 `pymilvus`、Docker 启动脚本或网络下载依赖。主要风险是真实语义召回质量仍需后续 Milvus / BGE adapter smoke 验证；好处是 M9 不被环境集成阻塞，P0 的文档结构、召回契约和 JoinPath 可先稳定。
   - Schema 文档只分 `field_doc`、`metric_doc`、`relation_doc` 三类；没有新增独立 alias 文件。字段文档复用 `schema_desc/*.md`，指标文档复用 `metrics.yaml` 并做轻量中文业务说法扩写，关系文档优先来自 `relations.yaml`。
@@ -454,7 +520,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### Phase 3A M8.5 Diagnostic Benchmark 骨架与旧链路诊断基线（2026-07-23）
 
-- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`eval/cases/phase3a-diagnostic-benchmark.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/run_eval.py`、`tests/test_phase3a_eval.py`、`eval/reports/phase3a-diagnostic-baseline.md`、`docs/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m8.5-notes.md`、`.agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl`、`.agent_work/temp/m8_5-smoke-compat.md`、`.agent_work/temp/m8_5-smoke-compat-traces.jsonl`
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`eval/cases/phase3a-diagnostic-benchmark.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/run_eval.py`、`tests/test_phase3a_eval.py`、`eval/reports/phase3a-diagnostic-baseline.md`、`docs/state/AI_CONTEXT.md`、`docs/dev-log.md`、`.agent_work/temp/m8.5-notes.md`、`.agent_work/temp/phase3a-diagnostic-baseline-traces.jsonl`、`.agent_work/temp/m8_5-smoke-compat.md`、`.agent_work/temp/m8_5-smoke-compat-traces.jsonl`
 - 关键决策：
   - M8.5 按 proposal v5 采用显式 `--cases + --extra-cases` 多文件组合：`database-upgrade-challenge.yaml` 仍是 16 条 challenge 唯一源，`phase3a-diagnostic-benchmark.yaml` 只维护新增 16 条 extra case；没有复制 challenge，也没有实现完整 `includes`。
   - `eval/run_eval.py` 只扩展多文件合并、case id 全局唯一校验、`source_file`、`configured_pipeline_mode` / `actual_pipeline_mode` 和 Markdown 摘要，不引入历史结果库、HTML dashboard 或复杂 scorer。
@@ -482,14 +548,14 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### Phase 3A M8 回归基线冻结（2026-07-22）
 
-- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`eval/run_eval.py`、`tests/test_phase3a_eval.py`、`eval/reports/phase3a-baseline.md`、`eval/reports/phase3a-challenge-baseline.md`、`docs/phase3a-plan.md`、`docs/database-current-state.md`、`.agent_work/temp/m8-notes.md`、`.agent_work/temp/phase3a-baseline-traces.jsonl`、`.agent_work/temp/phase3a-challenge-baseline-traces.jsonl`
+- 改动范围：未提供模块起始 commit，本次按当前工作树变更检查；`eval/run_eval.py`、`tests/test_phase3a_eval.py`、`eval/reports/phase3a-baseline.md`、`eval/reports/phase3a-challenge-baseline.md`、`docs/phase3a-plan.md`、`docs/state/database-current-state.md`、`.agent_work/temp/m8-notes.md`、`.agent_work/temp/phase3a-baseline-traces.jsonl`、`.agent_work/temp/phase3a-challenge-baseline-traces.jsonl`
 - 关键决策：
   - M8 只扩展 EvalOps-lite 的 case 结构和 baseline 报告，不引入新 Text2SQL pipeline、Schema Retrieval、QueryPlanStep 或 trace_steps，避免把 M9-M12 的工作提前倒灌。
   - `EvalCase` 前向兼容 `expected_metrics`、`expected_trace_steps`、`pipeline_mode`，但旧 `smoke.yaml` 默认仍是 `pipeline_mode=baseline`，旧 M6 smoke 不需要补新字段。
   - `_score_case()` 从 tuple 改为 `EvalScore`，新增最小 `issue_tags`：`missing_table`、`missing_column`、`safety_mismatch`、`unexpected_error`；补充轻量 `manual` 语义，困难诊断题无论通过或失败都可在报告中标记 `review_required`。这只服务 baseline 和后续对照报告，不扩展成完整 scorer 平台。
   - 10 条 formal 与 16 条 challenge 的最终口径：10 条 formal 是主硬门；16 条 challenge 是 superset，包含 10 条 formal question，额外 6 条用于扩展数据库复杂度诊断。后续每个模块同步跑两套报告。
   - 用户确认：baseline 首轮结果为 8/10 overall、2/2 security blocked、允许类 SQL 6/8；可选项是 ① 按真实 baseline 继续收工整理、② 调整 regression expected columns、③ 先修旧链路别名再重跑。风险分别是保留低于计划门槛的真实旧链路事实、可能弱化后续对照硬门、可能扩大 M8 到旧链路修复。我的建议是选 ①，用户最终确认选 ①。
-- 参考资料：未查阅外部参考；本次按 `docs/phase3a-plan.md` M8、`docs/database-current-state.md`、`domain_pack/schema_desc/relations.yaml`、`domain_pack/metrics.yaml` 和现有 M6 eval runner 实现，没有照搬参考项目。
+- 参考资料：未查阅外部参考；本次按 `docs/phase3a-plan.md` M8、`docs/state/database-current-state.md`、`domain_pack/schema_desc/relations.yaml`、`domain_pack/metrics.yaml` 和现有 M6 eval runner 实现，没有照搬参考项目。
 - 验证快照：
   - TDD 红灯：`pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8-red` 首次 1 passed / 3 failed，失败点为 `EvalCase` 缺 M8 字段、`_score_case` 仍返回 tuple、报告不能接收 issue tags，符合预期。
   - 聚焦 pytest：`pytest tests\test_phase3a_eval.py -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m8-final-align` 7 passed, 1 warning（Starlette TestClient / httpx deprecation，既有警告）。
@@ -504,7 +570,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 ### Phase 2.7.1 数据库 polish（2026-07-22）
 
 - 背景：外部 AI 对 Phase 2.7 审查后指出若干 plan v5 与实现偏差。本轮不重开 Phase 3A M8，只处理进入 M8 前值得补齐且低扰动的数据库口径问题。
-- 改动范围：`app/models/orders_wide.py`、`app/models/coupons.py`、`app/models/product_price_history.py`、`alembic/versions/20260722_0003_phase27_database_polish.py`、`scripts/seed_data.py`、`tests/test_m1_models.py`、`domain_pack/schema_desc/{orders_wide,coupons,product_price_history,user_behavior_log}.md`、`docs/database-current-state.md`、`.agent_work/temp/phase2.7.1-notes.md`
+- 改动范围：`app/models/orders_wide.py`、`app/models/coupons.py`、`app/models/product_price_history.py`、`alembic/versions/20260722_0003_phase27_database_polish.py`、`scripts/seed_data.py`、`tests/test_m1_models.py`、`domain_pack/schema_desc/{orders_wide,coupons,product_price_history,user_behavior_log}.md`、`docs/state/database-current-state.md`、`.agent_work/temp/phase2.7.1-notes.md`
 - 关键决策：
   - `orders_wide` 不重命名旧字段，保留 `product_name/category/user_status` 等已通过用例依赖的兼容列；仅追加 plan v5 需要的 `user_role`、`primary_product_price`、`item_count`、`refund_count`、`total_refund`、`has_refund`、`updated_at`，让宽表具备“看板预聚合 vs 星型强一致”的后续挑战价值。
   - `user_behavior_log` 不回退到 `target_type/target_id` 多态列；当前显式 `product_id/channel_id` 外键更适合参照完整性和 Text2SQL join path，偏离理由写入 schema_desc 和数据库速查。

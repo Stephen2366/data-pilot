@@ -26,8 +26,8 @@ accept-module（最终门禁检查）
 如果从以下来源都找不到某个决策、踩坑或命令信息：
 
 - 当前对话
-- `docs/AI_CONTEXT.md`
-- `docs/AI_CONTEXT_CHANGELOG.md`
+- `docs/state/AI_CONTEXT.md`
+- `docs/state/AI_CONTEXT_CHANGELOG.md`
 - `.agent_work/temp/<module>-notes.md`
 - git diff
 - 终端验证输出
@@ -40,7 +40,7 @@ accept-module（最终门禁检查）
 
 1. 读取：
    - `AGENTS.md` 或 `CLAUDE.md`
-   - `docs/AI_CONTEXT.md`
+   - `docs/state/AI_CONTEXT.md`
    - 当前阶段计划文件
    - 当前模块小节
 
@@ -55,8 +55,8 @@ accept-module（最终门禁检查）
    - 只处理本模块相关文件，不回滚用户改动
 
 4. 收集过程素材：
-   - 读取 `docs/AI_CONTEXT.md` 当前状态 / 最新事实快照
-   - 按需读取 `docs/AI_CONTEXT_CHANGELOG.md` 近期变更记录
+   - 读取 `docs/state/AI_CONTEXT.md` 当前状态 / 最新事实快照
+   - 按需读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 近期变更记录
    - 读取 `.agent_work/temp/<module>-notes.md`，如果存在
    - 查找当前对话中已经跑过的验证命令输出
    - 如果模块中曾向用户确认关键取舍，必须记录当时给出的选项、主要风险、推荐方案和用户最终选择；不要只写最终结论

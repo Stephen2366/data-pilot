@@ -15,7 +15,7 @@ description: 项目模块验收门禁，在收工整理和用户人工检查之�
 
 执行方式：8 项检查全部跑完再汇总，不要在第一个 ❌ 处停下——验收要一次给出全量结果。所有命令假定在项目根目录执行。项目 Python 路径、外部文档（LEARNING_ROADMAP.md、REFERENCE_GUIDE.md）的位置一律以 CLAUDE.md 顶部为准，不要在本文件里另抄一份。
 
-当前阶段计划文件：优先使用用户指定的计划文件；未指定时，先读 `docs/AI_CONTEXT.md`「当前状态」里的“当前阶段计划文件”。下文的“当前阶段计划文件”都指这个文件。
+当前阶段计划文件：优先使用用户指定的计划文件；未指定时，先读 `docs/state/AI_CONTEXT.md`「当前状态」里的“当前阶段计划文件”。下文的“当前阶段计划文件”都指这个文件。
 
 ## 检查 1：废弃口径清零
 
@@ -23,12 +23,12 @@ description: 项目模块验收门禁，在收工整理和用户人工检查之�
 
 ```bash
 rg -n -f .claude/skills/accept-module/deprecated-terms.txt --hidden \
-   -g '!.git' -g '!dev-log.md' -g '!AI_CONTEXT.md' -g '!AI_CONTEXT_CHANGELOG.md' -g '!CLAUDE.md' \
+   -g '!.git' -g '!dev-log.md' -g '!docs/state/AI_CONTEXT.md' -g '!docs/state/AI_CONTEXT_CHANGELOG.md' -g '!CLAUDE.md' \
    -g '!.agent_work/**' -g '!docs/archive-dormant/**' -g '!docs/archive-versions/**' -g '!.claude/skills/accept-module/**' .
 ```
 
 - 无输出（exit code 1）= ✅；有命中 = ❌，逐条列出 `文件:行` 与命中内容。
-- 排除原因：dev-log.md / AI_CONTEXT.md / AI_CONTEXT_CHANGELOG.md 是历史记录文件（含旧日志与旧条目），引用的旧路径/旧口径不代表当前状态（AI_CONTEXT「当前状态」「已知的坑」「最新事实快照」的时效性由检查 3 / 8 兜底）；`docs/archive-dormant/` 和 `docs/archive-versions/` 是冻结历史文档，引用的旧路径/旧口径不代表当前项目；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
+- 排除原因：dev-log.md / docs/state/AI_CONTEXT.md / docs/state/AI_CONTEXT_CHANGELOG.md 是历史记录文件（含旧日志与旧条目），引用的旧路径/旧口径不代表当前状态（AI_CONTEXT「当前状态」「已知的坑」「最新事实快照」的时效性由检查 3 / 8 兜底）；`docs/archive-dormant/` 和 `docs/archive-versions/` 是冻结历史文档，引用的旧路径/旧口径不代表当前项目；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
 - rg 默认跳过 .gitignore 覆盖的文件。若本次模块改过路径类配置，额外人工看一眼本地 `.env`。
 
 ## 检查 2：目录地图一致
@@ -54,9 +54,9 @@ ls -la
 
 ## 检查 3：进度状态一致
 
-模块实时进度的唯一权威是 `AI_CONTEXT.md`「当前状态」（自 2026-07-18 起，计划文件的「模块总览」不再维护状态列）。核对以下三点：
+模块实时进度的唯一权威是 `docs/state/AI_CONTEXT.md`「当前状态」（自 2026-07-18 起，计划文件的「模块总览」不再维护状态列）。核对以下三点：
 
-1. `AI_CONTEXT.md`「当前状态」：当前模块、上一模块验收、阻塞项、更新时间是否为最新事实。
+1. `docs/state/AI_CONTEXT.md`「当前状态」：当前模块、上一模块验收、阻塞项、更新时间是否为最新事实。
 2. `dev-log.md` 最新一条模块日志的「验证与下一步」：其"下一步"应与「当前状态」指向同一个模块。
 3. 当前阶段计划文件存在该模块对应小节（范围 / 验收标准 / 模块验证命令仍可查到）。
 
@@ -64,11 +64,11 @@ ls -la
 
 ## 检查 4：最新日志完整性
 
-读 `AI_CONTEXT_CHANGELOG.md`「变更记录」最新一条 `###` 条目和 `dev-log.md` 最新一条模块日志：
+读 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」最新一条 `###` 条目和 `dev-log.md` 最新一条模块日志：
 
-- `AI_CONTEXT_CHANGELOG.md` 模块档案须含 5 个部分：改动范围、关键记录、参考资料、验证快照、遗留/后续。缺项 = ❌。
+- `docs/state/AI_CONTEXT_CHANGELOG.md` 模块档案须含 5 个部分：改动范围、关键记录、参考资料、验证快照、遗留/后续。缺项 = ❌。
 - `dev-log.md` 模块日志须含 8 个部分：简述、先用大白话讲、这次做了什么、新概念、代码阅读路线、设计要点、面试怎么讲、验证与下一步。缺项 = ❌。
-- 小修复走 `AI_CONTEXT_CHANGELOG.md`「变更记录」，放宽为：改了什么 / 为什么 / 验证了什么，或等价信息。
+- 小修复走 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」，放宽为：改了什么 / 为什么 / 验证了什么，或等价信息。
 - 「验证快照」出现"期待 / 预计 / 预期 / 应该会"这类措辞时，判断是否属于"没跑命令就下结论"，是则 ❌——验证快照必须来自真实执行过的命令 + 真实输出（铁律的日志版）。
 - 如果日志中出现“过程细节未记录”，不自动判 ❌。这是 `finish-module` 的防幻觉诚实标记；但如果大量关键决策都未记录，应给 ⚠️，建议后续开发中维护 `.agent_work/temp/<module>-notes.md`。
 - 若本模块推翻或修正了旧条目的判断（归因修正、实验结论反转、口径变化），原条目处应有 ⚠️ 注 指向新结论；缺失 = ❌。
@@ -136,19 +136,19 @@ PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:c
 
 ## 检查 8：最新事实快照同步
 
-收工模块若有影响续接的事实，必须已同步到 `docs/AI_CONTEXT.md`「最新事实快照 / 已知的坑 / 当前状态」：
+收工模块若有影响续接的事实，必须已同步到 `docs/state/AI_CONTEXT.md`「最新事实快照 / 已知的坑 / 当前状态」：
 
 1. 读 `.agent_work/temp/<module>-notes.md`，抽取影响续接的事实：
    - 验证快照里的**真实 LLM eval / A/B / smoke 数字**
    - 关键决策里的**"决定不采用某方案 / 不切默认 / 不追某指标"**
    - 新踩的**坑**（对后续模块有影响）
    - **默认配置 / 口径 / 基线**变化
-2. 对照 `AI_CONTEXT.md` 的「最新事实快照」+「已知的坑」+「当前状态」逐条核对：
+2. 对照 `docs/state/AI_CONTEXT.md` 的「最新事实快照」+「已知的坑」+「当前状态」逐条核对：
    - 每条事实都有对应记录 → ✅
    - 缺同步 → ❌，列出缺失条目和建议落点（加在哪一节）
    - 模块无此类素材（纯内部 / 文档模块）→ ✅，注明"本模块无影响续接的事实"
    - notes.md 素材缺失（写了"过程细节未记录"）→ ⚠️，不自动判 ❌，提示补素材后复核
-3. 判定依据：续接 AI 只读 `AI_CONTEXT.md` 不读 notes.md，影响当前路线的事实漏同步，下一模块就会基于过时快照开工。
+3. 判定依据：续接 AI 只读 `docs/state/AI_CONTEXT.md` 不读 notes.md，影响当前路线的事实漏同步，下一模块就会基于过时快照开工。
 
 ## 验收报告
 
@@ -178,8 +178,8 @@ PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:c
 
 报告落点（防止结论只活在临时目录里）：
 
-- 更新 `AI_CONTEXT.md`「当前状态」的「上一模块验收」：全部通过 → 「Mx 已验收（日期）」；有 ❌ → 「Mx 验收未通过（日期）」，修复复检通过后再改写为已验收。验收事件不写入 `AI_CONTEXT_CHANGELOG.md`。
-- ⚠️ / 遗留项不允许只写在报告里：需要跟进的，登记进 `AI_CONTEXT.md`「已知的坑」或下一模块任务清单，让后续验收的检查 3 / 4 能自然看到它。
+- 更新 `docs/state/AI_CONTEXT.md`「当前状态」的「上一模块验收」：全部通过 → 「Mx 已验收（日期）」；有 ❌ → 「Mx 验收未通过（日期）」，修复复检通过后再改写为已验收。验收事件不写入 `docs/state/AI_CONTEXT_CHANGELOG.md`。
+- ⚠️ / 遗留项不允许只写在报告里：需要跟进的，登记进 `docs/state/AI_CONTEXT.md`「已知的坑」或下一模块任务清单，让后续验收的检查 3 / 4 能自然看到它。
 
 ## 报告后提醒
 
