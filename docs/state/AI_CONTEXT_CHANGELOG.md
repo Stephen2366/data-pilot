@@ -13,6 +13,35 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验] Qwen qwen3.7-max M21 follow-up pilot timeout（2026-08-03）
+
+- 配置：固定 M21 clean Milvus collection `datapilot_schema_docs_m21_qwen_weighted_20260803_001`、Qwen embedding 1024 维、`weighted`、`LANGFUSE_ENABLED=false`；先执行 32 条 diagnostic，随后缩小为 16 条 `database-upgrade-challenge` pilot。
+- 结果：32 条 run 在约 15 分钟外层命令上限内未生成 report/triage；16 条 pilot 继续等待后也未生成任何产物，进程长期低 CPU 等待，已停止。没有可用的新增 Qwen 分数，也没有启动 RRF 对照，避免在端点未稳定时继续消耗长时间 eval。
+- 判断：这次不能证明 Qwen 模型质量或 weighted/RRF 差异；只能说明当前环境下该 Qwen 端点在本次运行中不可稳定完成。历史 M20 的 Qwen `21/32` 仍是唯一完整基线，不改默认模型或 fusion。
+- 产物：未生成有效 report/triage；本记录是超时/阻塞事实，不能作为模型优劣结论。
+
+### [实验] Qwen qwen3.7-max health check + 32-case rerun（2026-08-03）
+
+- 健康检查：通过项目现有配置、代理和 `get_default_llm_client()` 发起最小 JSON 请求，返回合法 JSON，耗时 `6.57s`；因此 key、模型名、网络和 DashScope 路由均可用。
+- 重测配置：沿用 M21 clean Milvus collection、Qwen embedding 1024 维、`weighted`、32 条 diagnostic；产物为 `.agent_work/temp/m21-qwen-health-weighted-diagnostic-report.md`、`-triage.json`、`-traces.jsonl`。
+- 结果：`11/32`。失败结构中 `query_plan=12`，多数请求耗时约 `45.4–45.5s`；客户端 `OpenAICompatibleChatClient` 当前单次请求 timeout 固定为 `45s`，这些失败应优先视为 timeout / infra，而不是模型能力结论。其余结构为 `sql_generation=2`、`schema_context=5`、`schema_retrieval=1`、`plan_validation=1`。
+- 判断：Qwen 端点健康但长 prompt 生成延迟高；本次 `11/32` 不能与 M20 `21/32` 直接做能力比较。若要公平重测，需要先确认是否允许调整 timeout / 评测耗时策略；本次不改默认配置。
+
+### [实验] Qwen qwen3.7-plus M21 weighted diagnostic（2026-08-03）
+
+- 配置：仅通过本次命令设置 `QWEN_MODEL=qwen3.7-plus`；其余保持 clean Milvus collection、Qwen embedding 1024 维、`weighted`、32 条 diagnostic 不变，未修改默认配置。
+- 健康检查：返回合法 JSON，耗时 `5.04s`。
+- 结果：`21/32`；平均单 case latency `38.9s`、P50 `38s`、P95 `65.8s`。失败阶段为 `schema_context=6`、`schema_retrieval=2`、`result_match=1`、`query_plan=1`、`unknown=2`、`sql_generation=1`，只有 1 条 query_plan 和 1 条 sql_generation 的 LLM error，不再像 qwen3.7-max 重测那样有 12 条 query_plan timeout 型失败。
+- 判断：plus 与历史 M20 qwen3.7-max 的 `21/32` 总分相同，但本次 plus 的端点稳定性 / 规划阶段明显更好；剩余主要问题转为 schema context / schema docs 与少量结果匹配。该单次 A/B 仍不足以直接切换默认模型。
+- 产物：`.agent_work/temp/m21-qwen-plus-weighted-diagnostic-report.md`、`-triage.json`、`-traces.jsonl`。
+
+### [实验] M21 proper A/B：qwen3.7-plus weighted vs RRF（2026-08-03）
+
+- 固定 `qwen3.7-plus`、同一 clean Milvus collection、Qwen embedding 1024 维、32 条 diagnostic；只把 fusion 从 `weighted` 改为显式 `rrf`。
+- 结果：weighted `21/32`，RRF `20/32`。triage 对比：`schema_context 6→5`、`query_plan 1→2`、`result_match 1→2`、`unknown 2→1`，`schema_retrieval=2`、`sql_generation=1` 不变。
+- 判断：在同一主模型下，RRF 的离线召回优势没有转化为端到端收益，反而少 1 条通过；M21 保持 `weighted` 默认的结论得到第二个模型证据支持。
+- 产物：`.agent_work/temp/m21-qwen-plus-rrf-diagnostic-report.md`、`-triage.json`、`-traces.jsonl`、`m21-qwen-plus-weighted-vs-rrf-compare.md`。
+
 ### [模块任务] M21 Schema Retrieval Fusion / Context Repair（2026-08-03）
 
 - 改动范围：未提供模块起始 commit，按当前工作树检查；本模块涉及 `engine/schema_retrieval/retriever.py`、`engine/nl2sql/pipeline.py`、`app/schemas/agent.py`、`app/api/query.py`、`eval/run_schema_retrieval_benchmark.py`、`eval/run_eval.py`、两份 retrieval 测试和 `.agent_work/temp/m21-*` 验证素材。`docs/dev-log.md` 存在用户既有未提交改动，未重写其旧内容。

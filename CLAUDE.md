@@ -64,7 +64,8 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
     runbook.md          # AI / 本地运行入口，模型、检索、LangFuse、eval 命令矩阵
     eval-baselines.md   # 长期评测基线、A/B 结果、失败结构和错因账本
     database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
-  dev-log.md            # 学习复盘（用户阅读）
+  dev-log(M0-M19).md    # 用户学习复盘（M0~M19）
+  dev-log.md            # 用户学习复盘（M20以后）
   phase3a-plan.md       # 阶段三A模块计划（历史；当前阶段计划见 docs/state/AI_CONTEXT.md「当前状态」）
   phase3b-langfuse-plan-v6.md # 当前阶段（Phase 3B）计划文件
 
