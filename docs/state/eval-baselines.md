@@ -12,7 +12,7 @@
 - 最新候选模型对照：M19 qwen3.7-max formal `8/10`、challenge `12/16`、diagnostic `22/32`。
 - 当前优先改进方向：先看 `schema_context / schema_retrieval`，再看 `result_match / plan_validation / query_plan / sql_generation`。换模型能缓解部分生成失败，但不能替代 schema 上下文修复。
 - 当前结论：Qwen 3.7 max 可作为后续 A/B 组；默认模型、默认 embedding、正式 eval case 集都属于长期基线选择，不在普通实验中自动切换或改写。
-- M20 结论：clean Milvus + Qwen embedding diagnostic 未显示稳定收益；默认 embedding / Milvus 不切换。
+- M20 结论：clean Milvus 链路上 Qwen `qwen3.7-max` diagnostic `21/32`（首次完整 clean Qwen 链路，高于同链路 DeepSeek `17/32`）；`schema_context` 7 仍是主问题；默认 embedding / Milvus / 模型不切换。
 
 ## 如何读这些数字
 
@@ -43,6 +43,7 @@
 | 2026-08-02 | M19 | DeepSeek `deepseek-v4-flash` | 7/10 | 9/16 | 19/32 | M19 triage 验证快照，低于 M13；真实 LLM 有波动。 |
 | 2026-08-02 | M19 follow-up | Qwen `qwen3.7-max` | 8/10 | 12/16 | 22/32 | 本轮优于 DeepSeek flash，但 schema 上下文仍是主问题；不自动切默认。 |
 | 2026-08-02 | M20 clean Milvus | DeepSeek + Milvus + Qwen embedding | 未跑 | 未跑 | 17/32 | clean collection `row_count=193`，低于 M19 污染链路 19/32；不切默认 embedding。 |
+| 2026-08-02 | M20 clean Milvus | Qwen `qwen3.7-max` + Milvus + Qwen embedding | 未跑 | 未跑 | 21/32 | 首次完整 clean Qwen 链路，同链路高于 DeepSeek 17/32；schema_context 7 仍是主问题；不切默认。 |
 
 ## M20 Clean Milvus / Qwen Embedding
 
@@ -94,8 +95,71 @@ M19 polluted DeepSeek + Qwen embedding vs M20 clean DeepSeek + Qwen embedding di
 
 - M20 解决的是索引可信度，不是追求 diagnostic 提分。clean collection 后 diagnostic 为 `17/32`，没有显示 Qwen embedding 稳定收益。
 - M19 的污染链路结果不能再作为 embedding 模型优劣结论；M20 clean run 也不足以直接判定 Qwen embedding “无效”，因为真实 LLM 有波动且 schema doc 粒度未调整。
-- Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 曾尝试运行，但 900s 超时，只产生 21 行 partial trace，没有 final report / triage，不纳入账本结论。
+- Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 已完整跑通：`21/32`（见下方 `M20 Clean Milvus + Qwen 3.7 Max` 子节），这是首次完整的 clean Qwen 链路数据点。
 - 默认仍保持 `inmemory + deterministic`；Milvus / DashScope embedding 继续作为显式实验路径。
+
+### M20 Clean Milvus + Qwen 3.7 Max
+
+配置：
+
+- `LLM_PROVIDER=qwen`
+- `QWEN_MODEL=qwen3.7-max`
+- `SCHEMA_VECTOR_BACKEND=milvus`
+- `SCHEMA_EMBEDDING_PROVIDER=dashscope`
+- `QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding`
+- `QWEN_EMBEDDING_DIMENSIONS=1024`
+- `MILVUS_COLLECTION=datapilot_schema_docs_m20_qwen37max_qwenemb_20260802_214810`（日期+时间戳命名）
+- `LANGFUSE_ENABLED=false`
+
+报告路径：
+
+- Diagnostic report：`.agent_work/temp/m20-qwen37max-qwenemb-diagnostic-report.md`
+- Diagnostic triage：`.agent_work/temp/m20-qwen37max-qwenemb-diagnostic-triage.json`
+- Clean DeepSeek vs Qwen compare：`.agent_work/temp/m20-clean-deepseek-vs-qwen37max-compare.md`
+- M19 polluted vs M20 clean Qwen compare：`.agent_work/temp/m20-polluted-vs-clean-qwen37max-compare.md`
+
+索引卫生：
+
+- `schema_docs_count=193`、`milvus_final_row_count=193`、`schema_vector_index_reuse=run_scoped`、`milvus_dimension=1024`
+- `schema_docs_hash=7b531e073fa0b2dfaae205097b8440c44b745234305396b5f185561dcf9cc644`
+- `result_match_oracle_backend=sqlite_deterministic_seed`
+
+结果：
+
+| 集合 | 命令行通过率 | failure_stage 分布 | needs_action 聚合 |
+|---|---:|---|---|
+| diagnostic | 21/32 | `schema_context=7`、`sql_generation=2`、`result_match=1`、`schema_retrieval=1`、`unknown=2` | `fix_schema_desc=7`、`fix_pipeline=3`、`manual_review=3` |
+
+Clean 链路 DeepSeek vs Qwen（同一 Milvus + Qwen embedding 链路）：
+
+| failure_stage | DeepSeek 17/32 | Qwen 21/32 | Qwen - DeepSeek |
+|---|---:|---:|---:|
+| plan_validation | 2 | 0 | -2 |
+| query_plan | 5 | 0 | -5 |
+| result_match | 1 | 1 | 0 |
+| schema_context | 5 | 7 | +2 |
+| schema_retrieval | 1 | 1 | 0 |
+| sql_generation | 0 | 2 | +2 |
+| sql_guard | 1 | 0 | -1 |
+| unknown | 0 | 2 | +2 |
+
+M19 污染 vs M20 clean（同一 Qwen 模型）：
+
+| failure_stage | M19 polluted 20/32 | M20 clean 21/32 | clean - polluted |
+|---|---:|---:|---:|
+| plan_validation | 1 | 0 | -1 |
+| query_plan | 1 | 0 | -1 |
+| result_match | 1 | 1 | 0 |
+| schema_context | 7 | 7 | 0 |
+| schema_retrieval | 1 | 1 | 0 |
+| sql_generation | 1 | 2 | +1 |
+| unknown | 1 | 2 | +1 |
+
+结论：
+
+- 首次完整 clean Qwen 链路数据点；Qwen `qwen3.7-max` 在同链路上 `21/32` 高于 DeepSeek `17/32`，提升主要来自 query_plan / plan_validation 类失败消失。
+- `schema_context` 从 5 升到 7 仍是最大失败簇，说明换模型不能替代 schema 上下文修复；优化优先级不变。
+- 单次真实 LLM run 有非确定性；不据此切换默认模型 / embedding / Milvus，默认仍为 `inmemory + deterministic`。
 
 ## M19 DeepSeek Flash
 

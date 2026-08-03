@@ -54,7 +54,8 @@ M20 前的旧固定 collection `datapilot_schema_docs` 已确认被重复灌入�
 
 推荐做法：
 
-- 每次实验使用唯一 collection 名，例如 `datapilot_schema_docs_m20_<model>_<embedding>_<date>_<run_id>`。
+- 每次实验使用唯一 collection 名，命名格式固定为 `datapilot_schema_docs_m20_<model>_<embedding>_<YYYYMMDD_HHMMSS>`（日期 + 秒级时间戳），不要手动使用 `_a` / `_b` 序号后缀（2026-08-02 起要求，防止重复 / 误复用）。
+- 示例：`datapilot_schema_docs_m20_qwen37max_qwenemb_20260802_214810`；命名前先用 `date +%Y%m%d_%H%M%S` 取当前时间戳。
 - clean collection 的验收条件至少包括：
   - `schema_docs_count=193`
   - `milvus_final_row_count=193`
@@ -101,13 +102,42 @@ M20 clean 链路：
 
 - Milvus smoke：clean collection `row_count=193`，`schema_docs_hash=7b531e073fa0b2dfaae205097b8440c44b745234305396b5f185561dcf9cc644`。
 - DeepSeek `deepseek-v4-flash` + clean Milvus + DashScope `qwen3.7-text-embedding` diagnostic：`17/32`。
-- Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 曾尝试运行，900s 超时，只生成 partial trace，不纳入结论。
+- Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic：`21/32`（collection `datapilot_schema_docs_m20_qwen37max_qwenemb_20260802_214810`，`row_count=193`、run_scoped）。
 
 当前结论：
 
-- Clean Milvus 后暂未看到 Qwen embedding 对 Text2SQL diagnostic 的稳定收益。
-- 这个结论不等于“Qwen embedding 无效”，因为真实 LLM 有波动，且 schema doc 粒度 / rerank / RAG 场景尚未展开。
-- 默认仍保持 `inmemory + deterministic`；Milvus / DashScope embedding 继续作为显式实验路径。
+- Clean Milvus 链路上 Qwen `qwen3.7-max` 为 `21/32`，高于同链路 DeepSeek `17/32` 和 M19 污染 Qwen `20/32`；差距主要来自 LLM 本身（Qwen 消除 query_plan / plan_validation 失败），不是 embedding 优劣结论。
+- `schema_context` 仍是最大失败簇（7/32），换模型不能替代 schema 上下文修复。
+- 单次真实 LLM run 有非确定性；不据此切换默认 embedding / Milvus / 默认模型，默认仍保持 `inmemory + deterministic`。
+
+## Retrieval-only Benchmark
+
+完整 Text2SQL diagnostic 会混入 LLM 生成能力，所以已新增 retrieval-only benchmark 专门观察 Milvus + embedding 的召回能力：
+
+- 用例集：`eval/cases/schema-retrieval-embedding-benchmark.yaml`
+- Runner：`eval/run_schema_retrieval_benchmark.py`
+- 测试：`tests/test_schema_retrieval_embedding_benchmark.py`
+
+这个 benchmark 不调用 LLM、不执行 SQL，只检查问题能否召回期望的 tables / columns / metrics / relations。报告同时输出三条链路：
+
+| 指标 | 含义 |
+|---|---|
+| `avg_keyword_overall_recall` | 只看关键词召回 hits 构造出的 SchemaGraph。 |
+| `avg_vector_overall_recall` | 只看向量召回 hits 构造出的 SchemaGraph，最能体现 embedding 能力。 |
+| `avg_overall_recall` | 当前真实 pipeline 使用的 merged hits 召回结果。 |
+
+首轮数据：
+
+| 链路 | avg_overall_recall | avg_keyword_overall_recall | avg_vector_overall_recall | 说明 |
+|---|---:|---:|---:|---|
+| `inmemory + deterministic` | 0.738 | 0.738 | 0.787 | 默认基线。 |
+| `Milvus + DashScope qwen3.7-text-embedding` | 0.738 | 0.738 | 0.929 | Qwen embedding 的 vector-only 明显更好，但 merged recall 没变。 |
+
+解读：
+
+- Qwen embedding 在 **vector-only recall** 上确实显示出能力，尤其更容易把 relation / metric 文档放进 vector top docs。
+- 当前完整 merged recall 没提升，说明瓶颈可能在 **keyword + vector 融合策略**：keyword 分数较强时，vector 命中的好文档未必进入最终 merged top_k。
+- 因此下一步如果继续优化检索，不应直接换默认 embedding，而应先单独评估 fusion / RRF / rerank / top_k 策略。
 
 ## 常用命令
 
@@ -129,8 +159,19 @@ $env:SCHEMA_VECTOR_BACKEND='milvus'
 $env:SCHEMA_EMBEDDING_PROVIDER='dashscope'
 $env:QWEN_EMBEDDING_MODEL='qwen3.7-text-embedding'
 $env:QWEN_EMBEDDING_DIMENSIONS='1024'
-$env:MILVUS_COLLECTION='datapilot_schema_docs_m20_deepseek_qwenemb_<run_id>'
+$env:MILVUS_COLLECTION='datapilot_schema_docs_m20_deepseek_qwenemb_<YYYYMMDD_HHMMSS>'  # 时间戳命名，防重复；先用 date +%Y%m%d_%H%M%S 取时间戳
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace .agent_work\temp\<name>-traces.jsonl --report .agent_work\temp\<name>-report.md --triage-json .agent_work\temp\<name>-triage.json
+
+# Retrieval-only deterministic baseline
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report .agent_work\temp\schema-retrieval-embedding-deterministic-report.md --top-k 12
+
+# Retrieval-only Milvus + Qwen embedding
+$env:SCHEMA_VECTOR_BACKEND='milvus'
+$env:SCHEMA_EMBEDDING_PROVIDER='dashscope'
+$env:QWEN_EMBEDDING_MODEL='qwen3.7-text-embedding'
+$env:QWEN_EMBEDDING_DIMENSIONS='1024'
+Remove-Item Env:\MILVUS_COLLECTION -ErrorAction SilentlyContinue
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report .agent_work\temp\schema-retrieval-embedding-qwen-milvus-report.md --top-k 12 --collection-prefix datapilot_schema_retrieval_bench_qwen
 ```
 
 ## 排查菜单

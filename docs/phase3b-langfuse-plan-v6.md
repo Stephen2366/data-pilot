@@ -4,7 +4,7 @@
 >
 > **核心目标**：在不改动 `/api/query` 响应契约、不替代 JSONL 和现有 eval 报告的前提下，新增可选 LangFuse Cloud 写入，并补齐 **L1/L2 规则评分器 + 最小 L3 LLM-as-Judge** 评分能力，最后跑通一次最小 Experiment 验证全链路闭环。LangFuse 自部署不再作为 DataPilot Phase 3B 的默认目标，改为 EvalBench 阶段重点探索。
 >
-> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。
+> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。
 
 ## 灵感来源：一线开发者的 LangFuse 评测实战经验
 
@@ -327,6 +327,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 - M18 合并 smoke、手动 Experiment 和文档收尾，因为这些都是阶段闭环材料，不单独拆模块。
 - M19 不再继续验证“LangFuse 能不能记录”，而是专门回答“LangFuse 比本地 eval 多带来了什么”：把失败 trace 归因成可行动的问题清单，并支持后续跨模型 / 跨版本对比失败分布。
 - M20 是 M19 后续的检索链路修复模块：M19 的真实 LLM + embedding A/B 发现 Qwen embedding 结果不稳定，但排查后确认 Milvus collection 存在重复灌入污染，因此先修 Schema Retrieval / Milvus 索引生命周期，再重新评估 embedding，而不是直接判定 embedding 模型无效。
+- M21 承接 M20 的 clean run 证据：Qwen embedding 在 vector-only 上有明显收益，但 merged context 没吃到收益，因此下一步收敛到 schema retrieval 融合、排序、relation/metric 覆盖修复，而不是继续盲目换模型。
 
 ## 模块总览
 
@@ -339,6 +340,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 | M18 Smoke / Experiment / 阶段收尾 | 4 | M17（基于 M16B） | 一键 smoke、5 条代表性 case 手动 Experiment、阶段档案和学习复盘收尾 | `scripts/smoke_phase3b_langfuse.py`、Experiment 记录、`docs/state/AI_CONTEXT.md` / CHANGELOG / dev-log |
 | M19 Trace Failure Triage / LangFuse-driven Eval Analysis | 5 | M18 | 把 trace/span/score 转成失败阶段、失败原因和下一步动作，形成本地报告 + 可选 LangFuse triage score 的改进闭环 | failure triage summary、triage scorer/heuristics、A/B failure distribution、`.agent_work/temp/m19-notes.md` |
 | M20 Schema Retrieval / Milvus Index Hygiene | 6 | M19 | 修复 Milvus 实验链路的索引生命周期、去重和版本口径，并先校准 eval 的 MySQL ground truth，保证 Qwen embedding / Milvus A/B 结果可信 | MySQL ground truth audit、Milvus collection reset/upsert、run 内 retriever 复用、schema_docs_hash、diagnostic 复测、`.agent_work/temp/m20-notes.md` |
+| M21 Schema Retrieval Fusion / Context Repair | 7 | M20 | 基于 clean Milvus、Qwen LLM diagnostic 和 retrieval-only benchmark 的证据，修复 schema_context 最大失败簇，让 vector 语义召回能进入最终上下文 | retrieval-only baseline、fusion / rerank 对比、relation/metric 覆盖增强方案、diagnostic 复测、`.agent_work/temp/m21-notes.md` |
 
 ## 模块实施明细
 
@@ -1029,6 +1031,92 @@ M19 完成后，用户要求追加真实模型 / embedding 对照：
 
 ---
 
+## M21：Schema Retrieval Fusion / Context Repair
+
+**目标**：在 M20 已经修好 Milvus index hygiene 之后，专门处理 diagnostic 中最大的 `schema_context` 失败簇。M21 不再问“Milvus collection 是否可信”，而是问：**已经召回到的 vector 语义信号，为什么没有稳定进入最终 schema context，以及如何让关系、指标、字段证据更稳定地喂给 Text2SQL。**
+
+### M21 前置实验事实（2026-08-02）
+
+当前证据来自四组实验，不要只看单个总分：
+
+| 实验 | 结果 | 主要结论 |
+|---|---:|---|
+| M19 DeepSeek + 默认检索 diagnostic | `19/32` | 默认链路的失败主要集中在 `schema_context`、`query_plan`、`result_match` 等阶段。 |
+| M20 DeepSeek + clean Milvus + Qwen embedding diagnostic | `17/32` | clean Milvus 后没有带来 Text2SQL 总分提升，说明“修索引污染”本身不是提分手段。 |
+| M20 Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic | `21/32` | Qwen LLM 让 `query_plan` / `plan_validation` 类失败消失，但 `schema_context=7` 仍是最大失败簇；提升主要来自模型，不是 embedding 直接兑现。 |
+| Retrieval-only benchmark：deterministic vs Milvus + Qwen embedding | vector-only `0.787` → `0.929`，merged `0.738` → `0.738` | Qwen embedding 本身有更强语义召回，但当前 keyword/vector merge 没把收益转化为最终上下文收益。 |
+
+初步判断：**M21 的优先级应放在 fusion / rerank / context assembly，而不是继续换 embedding 或把 Milvus 设默认。**
+
+### M21 关键决策点
+
+以下选择会影响后续 RAG / Hybrid 的检索底座，执行前如果需要落地为默认策略，必须先向用户说明方案 / 风险 / 后续影响 / 建议，并等待确认：
+
+- 是否改变 `retrieve_schema()` 的 keyword/vector merge 排序规则。
+- 是否新增 reranker，尤其是需要外部 LLM / embedding API 的 reranker。
+- 是否新增 table-level / metric bundle / relation bundle 等正式 schema docs。
+- 是否调整 `top_k`、context token budget、prompt schema section 结构。
+- 是否把 Milvus + Qwen embedding 从实验配置提升为默认配置。
+- 是否调整正式 eval case 的 `expected_tables` / `expected_columns` / `result_match` 检查强度。
+
+### M21 推荐执行顺序
+
+0. **固化 retrieval-only baseline**
+   - 使用 `eval/cases/schema-retrieval-embedding-benchmark.yaml` 固定 10 条 schema retrieval 用例。
+   - 每次改 fusion / rerank 前后都跑 deterministic 与 Milvus + Qwen embedding 两组。
+   - 报告至少保留 keyword-only、vector-only、merged 三个 recall，避免只看最终 Text2SQL 总分。
+   - 同一轮候选对比必须固定 `schema_docs_hash`、embedding provider/model/dimension、collection / row_count、`top_k`、context token budget 和 case 文件版本；这些运行元数据写入报告，避免把索引、语料或上下文容量变化误判为 fusion 收益。
+
+1. **先做无外部依赖的 fusion 对比**
+   - 对比当前 merge、RRF（Reciprocal Rank Fusion）、加权分数融合、按 doc_type 加权等策略。
+   - 重点观察 relation / metric recall，因为 diagnostic 的 schema_context 失败常常不是表没召回，而是字段、指标口径或 join 关系不完整。
+   - 先用实验参数或显式 benchmark runner 对比，不直接改默认 pipeline。
+
+2. **修 context assembly，而不是只堆 top_k**
+   - 分析失败 case 的 top docs：确认是 vector 已召回但 merge 丢掉，还是根本没召回。
+   - 如果 vector 已召回但最终 context 缺失，优先改 merge / 去重 / 截断策略。
+   - 如果 relation 或 metric 本身召回弱，再考虑补 schema docs 粒度，例如 relation bundle、metric bundle、table summary。
+   - `schema_context` 是 M19 基于 `missing_columns` 等证据给出的启发式归因，不是绝对真因。每个目标 case 都要记录它属于“已召回但 merge/context 丢失”“未召回”还是“schema 描述、SQL alias、scorer strictness 等非检索问题”，不能只按 triage 标签直接改 fusion。
+
+3. **再考虑 reranker**
+   - 先实现本地轻量 rerank：只根据问题文本、可用的 QueryPlan（如已有）、候选文档 metadata、表关系邻近度、指标关键词、字段别名等在线可得信息重排。
+   - `expected_tables`、`expected_columns`、expected relation / metric 或任何 benchmark 标注只能用于离线评分和错误分析，绝不能作为 `retrieve_schema()` / reranker 的线上输入，避免评测标签泄漏。
+   - LLM reranker / cross-encoder reranker 属于长期策略，成本、延迟和可复现性风险更高，不能作为 M21 的默认第一步。
+
+4. **最后回到 diagnostic 复测**
+   - retrieval-only benchmark 有收益后，再跑 DeepSeek / Qwen diagnostic。
+   - 候选与基线 diagnostic 必须固定模型、embedding、schema docs hash、`top_k`、context budget、case 集和 triage 版本；先做同配置 A/B，再决定是否额外跑另一模型。
+   - 复测优先看 `schema_context` 失败数是否下降，再看总分；同时检查是否把失败迁移到 `schema_retrieval`、`result_match` 或其他阶段。总分可能被 SQL 生成和 scorer 波动影响。
+
+### M21 可选方案对比
+
+| 方案 | 做法 | 优点 | 风险 / 后续影响 | 建议 |
+|---|---|---|---|---|
+| A. RRF / 加权 fusion | 用 rank 或归一化分数融合 keyword/vector hits | 无外部依赖，最能验证“vector 信号被 merge 吃掉”这个判断 | 需要小心不同 backend 分数不可比 | M21 首选实验方向 |
+| B. doc_type 加权 | 对 relation / metric / column / table 文档设不同权重 | 针对 schema_context 失败簇，容易解释 | 权重可能过拟合 10 条 benchmark | 可做，但必须配 diagnostic 复测 |
+| C. 补 relation / metric bundle docs | 新增更粗粒度语义文档，例如“退款率商品归因链路” | 能解决单字段召回不足的问题 | 改变 schema docs hash 和长期检索语料，需要重新建基线 | 先列方案，确认后再实施 |
+| D. 直接增大 top_k | 让更多文档进上下文 | 快速、实现简单 | 容易污染 prompt，让 LLM 更困惑，也增加 token | 只作为对照，不建议作为主修复 |
+| E. LLM / cross-encoder reranker | 对候选 schema docs 二次排序 | 理论效果强 | 成本、延迟、非确定性和依赖复杂度高 | M21 不作为默认，除非用户确认 |
+
+### M21 非目标
+
+- ❌ 不把 Milvus 或 Qwen embedding 切成默认。
+- ❌ 不新增 RAG 文档语料或 Hybrid Agent。
+- ❌ 不改正式 Text2SQL scorer / oracle backend。
+- ❌ 不为了单次 diagnostic 提分改 case。
+- ❌ 不用 LLM reranker 作为未经确认的临时替代方案。
+
+### M21 验收
+
+- `.agent_work/temp/m21-notes.md` 记录 fusion / rerank 对比、失败 case 观察和最终建议。
+- retrieval-only benchmark 至少跑 deterministic 与 Milvus + Qwen embedding 两组，并保存包含运行元数据、keyword/vector/merged 总体与 table/column/metric/relation 分项 recall、逐 case top docs 的报告。
+- 候选 fusion 只有在 merged relation / metric recall 不低于同配置基线、逐 case 结果能解释，且收益不是仅靠增大 `top_k` / context budget 获得时，才能进入 diagnostic 复测；若未满足，记录为否定实验，不改默认 pipeline。
+- 如果修改 `retrieve_schema()` 或 context assembly，需要新增/更新 focused tests，覆盖 keyword-only、vector-only、merged 召回顺序。
+- 至少跑一组同配置 baseline-vs-candidate diagnostic，报告 `schema_context`、`schema_retrieval`、`result_match` 等 failure distribution 和总分变化；若总分不涨但 schema_context 降低，也要逐 case 记录原因。
+- 结果同步到 `docs/state/schema-retrieval-milvus-embedding.md`、`docs/state/eval-baselines.md`；若影响当前路线，再摘要同步到 `docs/state/AI_CONTEXT.md`。
+
+---
+
 ## 与独立评测项目（EvalBench）的关系
 
 Phase 3B 是 EvalBench 的**前置探路阶段**，但不是 EvalBench 本身。最通俗的分工：
@@ -1195,6 +1283,7 @@ Phase 3B 完成后，后续阶段的受益：
 
 - **M19 Trace Failure Triage（Phase 3B 价值闭环）**：在 M18 证明 trace / score / smoke 可用之后，优先补 failure triage，把本地 eval + LangFuse trace 变成失败阶段分布、下一步动作和 A/B 改进证据。它比继续手动点 Web UI 更直接服务项目进步，也能为后续 RAG/Hybrid 建立可复用的失败归因口径。
 - **M20 Schema Retrieval / Milvus Index Hygiene（M19 后续检索可信度修复）**：在进入 RAG/Hybrid 前，先修复 Milvus collection 重复灌入、索引版本和 run 内复用问题，避免把 embedding 模型效果和索引污染混在一起。
+- **M21 Schema Retrieval Fusion / Context Repair（M20 后续上下文修复）**：在 clean Milvus 和 retrieval-only benchmark 证明 Qwen embedding 有 vector 召回信号后，优先修 keyword/vector 融合、relation/metric 覆盖和 context assembly，让 schema_context 失败簇下降，再考虑是否进入 RAG/Hybrid。
 - **Phase 3B.1 工具调用容错与重试（可选轻量阶段）**：基于 Phase 3B 的 LangFuse trace 数据，分析当前工具调用失败模式，实现或整理 `ToolResult` 统一结构（status 分类、error_type、是否可重试、重试次数、降级原因），成为面试中回答“工具调用失败怎么办”的直接素材。它不是 Phase 3B 主验收项，只在 trace 暴露出足够失败样本时执行。
 - **M16B Trace Lifecycle 下沉预备分支（并行对照）**：如果用户要验证 LangFuse 的真实排障观测价值，先在独立 M16B 分支做 lifecycle 下沉，而不是等 RAG/Hybrid 一口气叠加检索、生成、工具、judge 等复杂度。M16B 不阻塞 M17/M18 主线；它的产出用于决定后续 RAG/Hybrid 是否采用 lifecycle 底座。
 - **Phase 3 RAG（检索增强生成）**：LangFuse 上看 retrieval span → generation span 的全链路；L1/L2/L3 评分器已就绪，RAG 专用评分器（faithfulness、context_relevancy）可直接启用。⚠️ 同行踩坑预警：retrieval recall 评测时，开源数据集的 reference text 和自己切片后的 chunk 粒度不一致，容易误判 miss。Phase 3 RAG 应设计 **coverage 指标**（将 reference 按句子拆分，计算 chunk 对 reference 的覆盖度）作为 L1 规则评分器，不做 LLM judge
@@ -1204,6 +1293,19 @@ Phase 3B 完成后，后续阶段的受益：
 ---
 
 ## 修订记录
+
+### v6.4（2026-08-02）—— M21 Schema Retrieval Fusion / Context Repair
+
+依据：M20 clean Milvus 复测后，DeepSeek + Qwen embedding diagnostic 仍为 `17/32`；Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 为 `21/32`，提升主要来自 Qwen LLM 消除 `query_plan` / `plan_validation` 失败，而 `schema_context=7` 仍是最大失败簇。进一步 retrieval-only benchmark 显示 Milvus + Qwen embedding 的 vector-only recall 从 deterministic 的 `0.787` 提升到 `0.929`，但 merged recall 同为 `0.738`，说明 vector 语义信号没有被当前融合策略兑现。
+
+| 改动 | 说明 |
+|------|------|
+| 新增 M21 模块 | `Schema Retrieval Fusion / Context Repair`，目标是修复 schema_context 最大失败簇，让 vector 语义召回进入最终上下文 |
+| 固化实验事实 | 记录 M19/M20 diagnostic、Qwen clean run 和 retrieval-only benchmark 的关键数字，避免把 LLM 提升误判成 embedding 提升 |
+| 明确优先方向 | 优先做 RRF / 加权 fusion、doc_type 加权、context assembly 分析；先证明 fusion 有收益，再回到 diagnostic |
+| 收紧边界 | 不默认切 Milvus / Qwen embedding，不直接上 LLM reranker，不改 scorer / oracle / case 口径 |
+| 补充验收 | M21 必须保存 retrieval-only 双基线、focused tests、diagnostic 复测和 state 文档更新 |
+| 吸收审查修正 | M19 默认链路基线修正为 `19/32`；禁止把 benchmark expected 标注输入 reranker；补齐固定运行元数据、逐 case 归因和同配置 A/B 验收门槛 |
 
 ### v6.3（2026-08-02）—— M20 Schema Retrieval / Milvus Index Hygiene
 

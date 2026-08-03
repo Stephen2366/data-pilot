@@ -2126,7 +2126,7 @@ Phase 3A 做的事情，可以概括成两件：
 
 ### 下一阶段怎么接
 
-- **实际执行的下一阶段是 Phase 3B 可观测性（M15-M18）**：进入 RAG / Hybrid 之前，先把"业务 Agent 可被观测、可被评测"补上——**评测基座和 trace_steps 正好是 Phase 3B 的输入**：eval scorer 演化为 L1/L2/L3 分层（M17）、trace_steps 演化为 LangFuse live lifecycle spans（M16B）、实验与对照报告演化为 LangFuse Dataset / Experiment 工作流（M18）。下一阶段的衔接已在 Phase 3B 阶段总结中完整记录。
+- **实际执行的下一阶段是 Phase 3B 可观测性（M15-M19）**：进入 RAG / Hybrid 之前，先把"业务 Agent 可被观测、可被评测、可被归因"补上——**评测基座和 trace_steps 正好是 Phase 3B 的输入**：eval scorer 演化为 L1/L2/L3 分层（M17）、trace_steps 演化为 LangFuse live lifecycle spans（M16B）、实验与对照报告演化为 LangFuse Dataset / Experiment 工作流（M18）、失败报告演化为 failure triage 与 A/B failure distribution（M19）。下一阶段的衔接已在 Phase 3B 上半阶段总结中完整记录。
 - **Phase 3 RAG / Hybrid（计划中的下一模块）**：M14-lite 已把知识库归因题标为 `hybrid_attribution` 预埋；Schema Retrieval 的 Milvus / SiliconFlow / Qwen embedding 可选能力可直接复用（Qwen embedding formal 9/10 略好于 8/10，值得在文档检索上继续验证）；别名漂移问题在更多样化 schema 表示下继续处理。
 - **独立 EvalBench 项目**：Phase 3A 的三层评测基座、对照报告和 eval 口径（expected_value / result_match / issue_tags）是平台化的基础素材。
 - **可复用的阶段级验证命令**：各模块记录里都有完整验证命令；阶段收口时全量 pytest 预期 **84 passed**；真实 LLM 基线入口是 `python -m eval.run_eval --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-new-pipeline.md --trace .agent_work/temp/xxx.jsonl`（预期 formal 10/10，需 DeepSeek key）和 `scripts/run_qwen_ab_experiments.py`（A/B 对照）。
@@ -2676,149 +2676,6 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests -x --b
 
 M18 没有新增 API 端点，体验入口是 smoke CLI 和 LangFuse Cloud UI。先运行默认 smoke，确认本地 API / JSONL 主链路；再按需开启 `LANGFUSE_ENABLED=true` 和代理运行 require smoke。LangFuse UI 侧可以打开本次 trace，查看 `datapilot-query` live spans 和 `rule:m18_smoke` score；Dataset 页面能看到 `datapilot-m18-workflow-smoke-20260730` 的 5 条 workflow items。
 
-
-
-## ★ ★ ★ Phase 3B 阶段总结：LangFuse 可观测性与评测基座（注意：本章节完成于M19之前）
-
-（2026-07-31）
-
-**简述**：Phase 3B 给 DataPilot 装上了"观察自己的眼睛"——在 **不动 `/api/query` 响应契约、不替代 JSONL trace 和现有 eval** 的前提下，验证并落地 LangFuse 可观测性：**trace 双写、live lifecycle span、评分分层与 score 回写、一键 smoke、trace → Dataset 工作流手动验证**（未实现自动 Experiment run）。这个阶段证明了一件事：**"业务 Agent 可被观测、可被评测"**，为下一阶段 RAG / Hybrid 和独立 EvalBench 评测项目铺好底座。trace → Dataset
-
-### 先用大白话讲
-
-Phase 3B 之前，DataPilot 已经能查数据、能评测，但它只回答了两个问题："答得对不对"（eval）和"刚才那次请求做了什么"（JSONL trace）。它还没有回答第三个问题：**系统跑起来以后，到底发生了什么、质量怎么样、能不能持续观察**。
-
-这里有个容易混的点，先分清**记录层和查看层**：M11 起 JSONL trace 里其实已经把每一步写成 **TraceStep**（记录层不缺数据，M12 对照报告就是程序读 trace 生成的）；但"记录在案"和"看得方便"是两回事——LangFuse 之前，eval 报告只给最终 pass/fail，要看单次请求的中间步骤只能自己打开 JSONL 文件翻 `trace_steps` 字段（查看层缺手段）。LangFuse 做的不是"从这一刻开始记录"，而是**把早已记录的中间过程变成可视化 span 视图**。
-
-你可以把 DataPilot 想象成一家餐厅。Phase 3A 之前做的是：**菜品**（Text2SQL 能力）和**菜谱验收**（eval）。Phase 3B 做的是给餐厅装 **后厨监控和顾客评分系统**：每做一道菜，监控系统记下"什么时候下单、谁洗的菜、谁炒的、炒到一半有没有糊锅"；每上一道菜，评分系统记下"菜名对不对、分量够不够、安全有没有违规、味道好不好（LLM judge）"。监控和评分都不影响做菜本身——**监控系统坏了，后厨照样出餐**。
-
-这个阶段最核心的设计思想可以总结成四个字：**旁路观测**。LangFuse 这个外部观测平台在 Phase 3B 里永远不是主链路：默认关闭、SDK 放在可选依赖里、Cloud 不通时 trace 只标记 `failed` 然后继续写本地 JSONL。项目自己的 `trace_id` 继续当主 ID，LangFuse 用独立的 32 位 hex id，两边靠 JSONL 字段建立映射——就像业务订单号和第三方支付流水号，两个都重要，但不能混成一个。
-
-所以 Phase 3B 的核心价值是：**在不绑架主链路的前提下，验证了"外部观测平台 + 本地评测"能组成一套可用的可观测与评测闭环，并把这条链路的真实边界（哪些能做、哪些留给 EvalBench）摸清楚**。
-
-### 这次做了什么
-
-按阶段主线写，不按模块流水账：
-
-1. **先钉边界，再谈接入（M15）**。先单独验证 Cloud key、SDK 4.14.1、span 写入、score 写入、flush 和查询可见性（trace 约 0.6s 可查）。同时把配置纳入 `Settings`：默认 `LANGFUSE_ENABLED=false`，SDK 放进 `observability` optional extra——**观测系统不可用时，主链路照常跑**。这一步把"能不能安全接入"钉死，后续模块不再边查 SDK 行为边改主链路。
-
-2. **再打通双写与降级（M16）**。把 trace recorder 升级成 **TraceRouter 架构**：业务代码只把 trace 交给 router，router 按顺序调用 `LangFuseBackend -> JSONLBackend`。LangFuse 失败会被捕获、标记 `langfuse_write_status=failed`，JSONL 仍然落盘。M16 的 spans 是 **post-hoc flat spans**：请求结束后把 `trace_steps` 一次性平铺上传，不伪造父子嵌套和真实时间线。
-
-3. **然后验证观测底座（M16B）**。在独立分支上做 **live lifecycle 下沉**：新增 DataPilot 自己的 `TraceContext / SpanHandle` 抽象，pipeline 和 SQL tool 只依赖这个抽象，不直接 import LangFuse。SQL Guard 和 SQL Execution 的 span 通过 `run_sql_tool(trace_context=...)` 在 **tool 内部**记录——因为安全检查和数据库执行的真实边界就在 tool 里，事后补 span 只能猜结果。`langfuse_span_mode=live` 显式标记，避免 live spans 和 post-hoc spans 在 Cloud UI 里重复。用户随后决定 **M17/M18 直接在 M16B 分支上继续**，M16 post-hoc 降级为 fallback 对照。
-
-4. **之后做评分分层与回写（M17）**。把 eval 从一个大函数里的 pass/fail 拆成 **L1/L2/L3 分层 scorer**：L1 看结构和安全、L2 看结果匹配固定事实、L3 用 LLM judge 做语义判断（默认关闭）。`_score_case()` 保留为兼容薄壳，旧 Markdown 报告口径不变。评分结果按 JSONL 里的 `langfuse_trace_id` **写回 LangFuse Score**，不等待 Cloud trace 查询可见。
-
-5. **最后收口（M18）**。新增正式一键 smoke 脚本 `scripts/smoke_phase3b_langfuse.py`：默认模式验证 API / JSONL 主链路（LangFuse 检查 SKIP），`--require-langfuse` 模式把 Cloud 作为硬门禁。真实 Cloud smoke 走代理后全链路 PASS（observations=8）。手动验证了 LangFuse **trace → Dataset** 工作流（5 条 case，DeepSeek `4/5`、Qwen `3/5`），并摸清 Experiment run 的真实边界：**UI run 需要项目 LLM key，Webhook run 需要远程实验服务**，当前不临时实现。
-
-6. **收口后再加固两轮（Phase 3B 复审）**。把"能跑通"加固成"边界更可信"：LangFuse SDK import 失败时降级为本地 trace；score 只回写 `langfuse_write_status=ok` 的 trace；**危险 SQL 预检下沉到 `new_text2sql` pipeline 的统一 `sql_guard` lifecycle**（blocked path 也留下 trace step），且发生在 `get_default_llm_client()` 之前，让安全拦截不依赖 LLM 配置健康；`equals` 不再做全 JSON substring、`result_match` 按列名对齐；Markdown report 输出 scorer 明细和 score 写入结果；Dataset CSV 移出 git 跟踪。
-
-### 阶段主线图
-
-一条请求从进来到被评分、被观察的完整链路：
-
-`/api/query`
-→ `TraceContext / TraceRouter`
-→ `JSONL Trace`
-→ `LangFuse Trace`
-→ `EvalScoreDetail`
-→ `LangFuse Score`
-→ `Dataset`
-→ `EvalBench 后续`
-
-**通俗理解**：请求先进业务链路（第 1-2 步），同时把运行记录写给两个地方——本地 JSONL 是"家底"，LangFuse 是"云监控"（第 3-4 步）；eval 跑完把每条评分细节（第 5 步）回写到云监控里的对应 trace（第 6 步）；需要做实验对比时，把样本收成 Dataset（第 7 步）；真正的 Experiment run 编排留给 EvalBench（第 8 步）。
-
-### 关键知识点串联
-
-阶段级概念，不只是某个模块的概念：
-
-- **Trace / Span / Score / Dataset / Experiment**：LangFuse 世界里的五个核心对象。Trace 是一次请求的总记录，Span 是其中的一个步骤，Score 是评测结果，Dataset 是可复用的测试样本集，Experiment 是用 Dataset 跑一组对比实验。Phase 3B 把前四个都跑通了，第五个只验证到边界。
-- **post-hoc vs live lifecycle**：post-hoc 是"请求结束后补写日志"——简单但不真实；live 是"执行过程中实时记录 span"——更像真实调用链，但要处理 SDK 边界、span 去重和 flush 时机。Phase 3B 先用 post-hoc 跑通闭环，再用 M16B 验证 live 是否值得作为后续底座。
-- **记录层 vs 查看层**：TraceStep 写进 JSONL 是"记录"（M11 就有，M12 对照报告就是程序读 trace 生成的），LangFuse span 是"查看"（M16 起才有可视化）。"用 LangFuse 之前看不到中间 span"说的是查看层——**数据一直在，缺的是不翻文件就能看的手段**。读 M11 的记录时不要误以为它和 Phase 3B 矛盾。
-- **旁路观测与降级**：观测系统永远不是主链路。默认关闭、可选依赖、失败标记 + 继续写 JSONL，这三条保证了"监控坏了，业务照跑"。
-- **双 ID 策略**：DataPilot 自己的 `trace_id` 服务 API / JSONL / eval，LangFuse 用独立 32 位 hex id，JSONL 字段做映射。第三方平台不接管内部契约。
-- **L1/L2/L3 评分分层**：能用规则就不用 LLM。L1 结构安全、L2 结果匹配、L3 语义判断（默认关闭，显式传 `--judge-model` 才开）。
-- **兼容薄壳**：旧函数名 / 旧报告口径保留，内部换成新实现。像 SpringBoot 旧 endpoint 不变、内部 service 换了实现。
-
-### 阶段设计取舍
-
-- **Cloud 优先，不默认 self-host**：LangFuse Cloud 够验证能力，本地自部署（Docker / ClickHouse / Redis / MinIO）组件重、容易把阶段拖进运维泥潭，留给 EvalBench 阶段做正式部署 spike。
-- **旁路观测而不是"接了就绑死"**：这是整个阶段的地基。如果观测平台是强依赖，Cloud 抖动会变成业务故障；旁路化之后，观测能力是加分项而不是生命线。
-- **双 ID 不接管**：多维护一个 ID 有映射成本，但保护了 API、响应头、JSONL、eval 四处的内部契约。换观测平台时不需要反向污染历史 trace。
-- **post-hoc → live 渐进，不一步到位**：M16 先证明"双写 + 降级 + 映射"可靠，M16B 再验证"真实执行边界埋点"值不值得。如果一上来就做 lifecycle，SDK 边界、去重、flush 这些坑会和新抽象混在一起，不好定位。
-- **SQL Guard / SQL Execution span 下沉到 tool 内部**：真实安全边界在 `run_sql_tool()` 里，pipeline 事后补只能猜结果。这是用户确认过的方案，M16B 之后成为主链路的 trace 边界。
-- **本地 scorer 单一事实源，而不是 LangFuse 托管 evaluator**：托管 evaluator 会引入 UI 配置、observation target 和调度依赖，容易让本地报告和 Cloud 分数各说各话。M17 先保证同一批 `EvalScoreDetail` 同时服务 Markdown 和 LangFuse。
-- **Experiment run 不临时实现 webhook**：UI 真实验证发现 run 需要 LLM key 或 Webhook runner，临时补一个不完整的 runner 会扩大成 EvalBench adapter 的活。边界先记录，正式设计留给 EvalBench。
-- **风险或边界**：Windows 裸连 LangFuse Cloud 偶发 `WinError 10013`（需要 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897`）；Cloud trace 只传最小 payload，完整 rows 和 PII 不上传，也不把 Cloud trace 当长期数据资产。
-
-### 面试怎么讲
-
-先背/改写这一段阶段级叙述：
-
-"我做过一个 Agent 项目的**可观测性与评测基座阶段**。系统原来只有本地 JSONL trace 和 pass/fail 评测，我分四步把它升级成 trace → score → dataset 的完整闭环：第一步，先验证外部观测平台 LangFuse 的 Cloud、SDK、score 写入和 flush 都可用，并把配置做成默认关闭的可选依赖；第二步，把 trace 写入重构成 TraceRouter 架构，支持本地 JSONL + LangFuse 双写，LangFuse 失败只标记状态、不影响主链路；第三步，做一个 live lifecycle 分支，把埋点下沉到 pipeline 和 SQL tool 的真实执行边界，用 DataPilot 自己的 TraceContext 抽象隔离 LangFuse SDK，并用 span mode 避免 live 和 post-hoc 重复；第四步，把 eval 拆成 L1/L2/L3 分层 scorer，规则评分同时服务 Markdown 报告和 LangFuse Score 回写，最后用一键 smoke 脚本把 API / JSONL / trace mapping / score / visibility 串起来，并手动验证了 trace 到 Dataset 的工作流。整个阶段守住一条底线：**观测系统永远不绑架主链路**——默认关闭、失败降级、双 ID 隔离、最小 payload。同时我也摸清了边界：Experiment run 编排和 LangFuse self-host 留给后续独立的 EvalBench 评测项目。"
-
-1. **[基础追问] 你为什么要专门做一个阶段做可观测性？之前的 JSONL trace 不够用吗？**
-
-   可以答：JSONL trace 够用，但它是"文件"，不是"系统"。先说清楚一点：**中间过程的数据其实一直都有**——M11 起每次请求的每一步（schema_retrieval → chart_decision）就已经以 TraceStep 形式写在 JSONL 里，M12 的对照报告就是程序读这些 trace 生成的。但"记录在案"和"看得方便"是两回事：LangFuse 之前，eval 报告只给最终 pass/fail，要看单次请求的中间步骤只能自己打开 JSONL 翻字段。JSONL 能回答"刚才那次请求发生了什么"，但很难回答"这周请求的质量趋势怎么样""失败集中在哪一步""评测分数和 trace 怎么关联"。Phase 3B 做的事情不是抛弃 JSONL，而是把 LangFuse 作为**旁路增强**：保留 JSONL 主链路，同时把 trace 可视化、score 回写、样本管理这些能力交给专门的观测平台。核心原则是**新增能力，不改契约**——`/api/query` 响应和本地 eval 完全不变。
-
-2. **[基础追问] Trace、Span、Score、Dataset、Experiment 这几个概念在 LangFuse 里是什么关系？**
-
-   可以答：一次请求对应一个 **Trace**，Trace 下面有多个 **Span**（每个 span 是一个步骤，比如 schema retrieval、sql generation、sql guard）；评测跑完后，按 `langfuse_trace_id` 把每个评分项写成 **Score** 挂在 trace 上；需要做实验对比时，把样本收成 **Dataset**（每条 item 包含 input、expected output 和 metadata）；用 Dataset 跑一组对比就叫 **Experiment**。Phase 3B 把前四个都跑通并有验证证据，Experiment 只验证了 UI 边界。
-
-3. **[工程/深挖追问] 为什么保留 DataPilot 自己的 `trace_id`，而不是直接用 `langfuse_trace_id` 当全局 ID？**
-
-   因为 LangFuse 是旁路观测平台，不应该接管 DataPilot 的内部契约。`trace_id` 服务 API、JSONL、本地 eval 和错误排查，是项目自己的主 ID；`langfuse_trace_id` 是第三方平台里的观测 ID。两者靠 JSONL 字段映射。这样即使 LangFuse 关闭、网络失败、未来换平台，DataPilot 的 trace、报告和测试都还能继续工作。这个设计类似业务订单号和第三方支付流水号：可以关联，但不能混用。
-
-4. **[工程/深挖追问] post-hoc flat spans 和 live lifecycle spans 有什么本质区别？你为什么先做前者再做后者？**
-
-   可以答：post-hoc 是请求结束后拿 `TraceRecord` 一次性拆 spans，**没有真实的开始/结束时间**，只有步骤顺序，所以叫 flat spans；live 是在 pipeline 执行过程中真正记录"这步开始、这步结束、这步失败了"，时间线是真实的。先做 post-hoc 是因为它能**最快验证双写、降级和 ID 映射**这些基础设施；live 涉及 SDK 边界、span 去重、flush 时机和错误路径快照，复杂度更高，单独放 M16B 分支验证。最后用 `langfuse_span_mode` 显式区分两种模式，避免同一个步骤在 Cloud UI 出现两次。
-
-5. **[工程/深挖追问] 如果 LangFuse Cloud 完全不可用，你的系统会发生什么？**
-
-   可以答：什么都不会发生——这正是设计的底线。LangFuse 默认关闭（`LANGFUSE_ENABLED=false`），SDK 在 optional extra 里，未启用时根本不会 import；启用后 router 对每个 backend 独立 try/except，LangFuse 失败只把 `langfuse_write_status` 标记为 `failed`，然后继续写 JSONL。M18 的 smoke 专门有一个默认模式：LangFuse 关闭时 API / JSONL 必须 PASS，Cloud 检查显示 SKIP。测试里也覆盖了 fake client 抛异常、缺 key、SDK import 失败这些路径。**观测系统是加分项，不是生命线**。
-
-6. **[工程/深挖追问] 评分为什么要拆 L1/L2/L3？为什么不用 LangFuse 自带的 evaluator？**
-
-   可以答：拆层是因为**成本和质量递减**：L1 看表、列、安全这些结构规则，L2 看结果是否匹配固定事实，都是确定性的、便宜的；L3 的 LLM judge 有费用、延迟和抖动，所以默认关闭、显式开启。不用 LangFuse 托管 evaluator，是因为 DataPilot 已经有 YAML cases、Markdown 报告和一套历史规则评分，托管化会引入 UI 配置和调度依赖，容易让本地报告和 Cloud 分数**两套口径**。M17 让本地 scorer 产出统一的 `EvalScoreDetail`，同时服务 Markdown 和 LangFuse，分数只有一份。
-
-7. **[压力追问] 这个阶段没有让用户多问出一个正确答案，也没有提升模型效果，它是不是偏工程自嗨？**
-
-   可以答：这个质疑有合理的地方——Phase 3B **确实不是模型优化模块**，它不提升通过率。但它解决的是另一类问题：**当系统变复杂以后，你怎么知道它为什么失败、怎么持续改进**。Phase 3A 的教训就是失败归因难：同一道题失败，可能是 schema 没召回、plan 没通过、SQL 生成跑偏，也可能是评测尺子本身错了。Phase 3B 把"失败发生在哪一步"变成可见的（live spans）、把"每个评分项对不对"变成可回写的（score）、把"样本怎么复用"变成可管理的（dataset）。没有这层底座，后续 RAG / Hybrid 多步骤链路一接进来，排障会直接失控。所以我会把它讲成**给后续阶段铺观测地基**，而不是包装成模型效果提升。
-
-8. **[压力追问] LangFuse Cloud 会不会上传业务数据、SQL 结果或敏感信息？**
-
-   Phase 3B 的原则是最小 payload。Cloud 只作为观测旁路，不作为长期数据资产；本地 JSONL 才是主记录。上传到 LangFuse 的内容应该控制在 trace 元信息、步骤摘要、状态、错误类型和评分结果，避免上传完整 rows、PII 和不必要的业务明细。这个取舍是为了证明观测链路可用，同时不把企业数据安全边界交给外部平台。
-
-9. **[压力追问] 怎么证明 LangFuse 关闭、key 缺失、SDK 不可用或网络失败时，本地 eval 仍然可用？**
-
-   我专门把这些当成 Phase 3B 的验收边界。默认配置下 `LANGFUSE_ENABLED=false`，SDK 在 optional extra 里，未启用时不应该影响主链路；启用后 TraceRouter 对每个 backend 独立 try/except，LangFuse 写失败只标记 `langfuse_write_status=failed`，JSONL 仍然落盘。M18 smoke 也分成默认模式和 `--require-langfuse` 模式：默认模式必须证明 API / JSONL / 本地 eval PASS，LangFuse 检查 SKIP；只有 require 模式才把 Cloud 可见性作为硬门。这样观测系统坏了，业务和本地评测仍能跑。
-
-10. **[压力追问] 你们 Experiment 实际上没跑通——UI run 要 LLM key，Webhook 没有实现，这算阶段收口吗？**
-
-   可以答：如果阶段目标定义成"完整自动化 Experiment 平台"，那确实没完成，我会诚实承认。但 Phase 3B 的目标是**验证 LangFuse 是否适合作为 DataPilot 的可观测与评测前置底座**，这个目标完成了：trace 双写、live spans、score 回写、trace visibility、trace → Dataset item 全部有真实 Cloud 验证证据。Experiment 的边界也摸清了：run 需要 LLM key（UI 路径）或远程实验服务（Webhook 路径）。我没有在 M18 临时补一个不完整的 webhook runner，因为那是 EvalBench adapter 的活，临时实现反而会留下半吊子架构。**结论是"DataPilot 侧闭环到 score 和 dataset，run 编排进入 EvalBench 设计"**——这比假装全通更诚实。
-
-### 阶段成果与边界
-
-- 完成了：
-  - **Trace 双写与降级**：TraceRouter + JSONL 主链路 + LangFuse 旁路，失败只标记不阻断，全量 pytest 从 M15 的 **90 passed** 涨到 M18 的 **107 passed, 2 skipped**
-  - **Live lifecycle 观测底座**：`TraceContext / SpanHandle` 抽象、`langfuse_span_mode` 去重、SQL tool 内部记录 guard / execution spans
-  - **评分分层与回写**：`eval/scorers/` L1/L2 规则单一事实源 + 最小 L3 LLM judge（默认关闭），真实 LangFuse score 回写 smoke 通过（baseline 路径 `ok:16`、live 路径 `ok:6`、M18 smoke `ok=1`）
-  - **一键 smoke**：`scripts/smoke_phase3b_langfuse.py`，默认模式主链路 PASS + Cloud SKIP，`--require-langfuse` + 代理下 trace mapping / score / visibility 全 PASS
-  - **手动 Experiment 工作流验证**：trace → Dataset item 可用，5 条 workflow case 两组模型跑出 DeepSeek `4/5`、Qwen `3/5`，scores 全写回
-  - **两轮复审加固**：SDK 降级、score 只回写 ok trace、危险 SQL 预检下沉 pipeline 统一 guard、equals / result_match 修正、report 加 case_id、Dataset CSV 移出 git
-- 没完成 / 刻意不做：
-  - **Experiment run 自动化**（Webhook runner / UI run 编排）——留给 EvalBench
-  - **LangFuse self-host 部署**——组件重，EvalBench 阶段再做 spike
-  - **L3 LLM judge 默认开启**——费用、延迟、抖动，显式配置才启用
-  - **完整 EvalBench 平台**（case 管理、多项目 adapter、实验对比、报告生成）——这是独立项目的定位
-  - **正式 Dataset 从 root trace / case 定义生成**——本次 Dataset 是临时 UI 素材，CSV 里还有 telemetry 噪音和 public key 需要清洗
-  - **Cloud trace 作为长期数据资产**——它只是 Phase 3B 实验记录，不承诺数据保留和迁移
-
-### 下一阶段怎么接
-
-- **Phase 3 RAG / Hybrid（下一模块）**：基于 **M16B live lifecycle 底座**继续评估，多步骤链路直接复用 `TraceContext / SpanHandle` 和统一的 span 命名约定；Schema Retrieval 的 Qwen embedding（`qwen3.7-text-embedding`）在 Phase 3A 已显示 formal 略好，继续在文档检索上验证收益。主模型默认已切换为 `deepseek-v4-flash`，真实 LLM 基线待 Phase 3 评估时重新验证。
-- **独立 EvalBench 项目**：吸收 Phase 3B 的踩坑记录，设计 **LangFuse Webhook / SDK 方式的 DatasetRun runner**、**self-host 部署 spike**，并从 root trace / case 定义统一生成清洗过的 Dataset 样本。
-- **可复用的阶段级验证命令**：M15-M18 的模块记录里都有完整验证命令；阶段收口时的总检查入口是 M18 的 smoke 脚本（默认模式 `D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3b_langfuse.py --trace .agent_work\temp\m18-final-default-traces.jsonl --visibility-timeout-seconds 5`，预期 API / JSONL PASS、LangFuse SKIP）和全量 pytest（预期 **107 passed, 2 skipped**）。
-
 ## ★ M19 Trace Failure Triage：把观测数据变成改进闭环
 
 （2026-08-02）
@@ -2976,6 +2833,154 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cas
 
 **本地启动体验：**本模块没有新增 Web 页面或 API endpoint；它的入口是 eval CLI。用户体验方式是运行 `eval.run_eval` 后打开生成的 Markdown report，看 `Failure Triage Summary` 和 `Case Triage Details`。
 
+## ★ ★ ★ Phase 3B 上半阶段总结：LangFuse 可观测性与评测闭环
+
+（2026-08-02）
+
+**简述**：Phase 3B 上半段给 DataPilot 装上了"观察自己的眼睛"和"失败归因的罗盘"——在 **不动 `/api/query` 响应契约、不替代 JSONL trace 和现有 eval** 的前提下，验证并落地 LangFuse 可观测性与评测闭环：**trace 双写、live lifecycle span、评分分层与 score 回写、一键 smoke、trace → Dataset 工作流手动验证、Failure Triage Summary、A/B failure distribution**（未实现自动 Experiment run）。这个阶段证明了一件事：**"业务 Agent 可被观测、可被评测、可被归因"**，为后续 Schema Retrieval 修复、RAG / Hybrid 和独立 EvalBench 评测项目铺好底座。
+
+### 先用大白话讲
+
+Phase 3B 之前，DataPilot 已经能查数据、能评测，但它只回答了两个问题："答得对不对"（eval）和"刚才那次请求做了什么"（JSONL trace）。它还没有回答第三个问题：**系统跑起来以后，到底发生了什么、质量怎么样、能不能持续观察**。
+
+这里有个容易混的点，先分清**记录层和查看层**：M11 起 JSONL trace 里其实已经把每一步写成 **TraceStep**（记录层不缺数据，M12 对照报告就是程序读 trace 生成的）；但"记录在案"和"看得方便"是两回事——LangFuse 之前，eval 报告只给最终 pass/fail，要看单次请求的中间步骤只能自己打开 JSONL 文件翻 `trace_steps` 字段（查看层缺手段）。LangFuse 做的不是"从这一刻开始记录"，而是**把早已记录的中间过程变成可视化 span 视图**。
+
+你可以把 DataPilot 想象成一家餐厅。Phase 3A 之前做的是：**菜品**（Text2SQL 能力）和**菜谱验收**（eval）。Phase 3B 做的是给餐厅装 **后厨监控和顾客评分系统**：每做一道菜，监控系统记下"什么时候下单、谁洗的菜、谁炒的、炒到一半有没有糊锅"；每上一道菜，评分系统记下"菜名对不对、分量够不够、安全有没有违规、味道好不好（LLM judge）"。监控和评分都不影响做菜本身——**监控系统坏了，后厨照样出餐**。
+
+这个阶段最核心的设计思想可以总结成四个字：**旁路观测**。LangFuse 这个外部观测平台在 Phase 3B 里永远不是主链路：默认关闭、SDK 放在可选依赖里、Cloud 不通时 trace 只标记 `failed` 然后继续写本地 JSONL。项目自己的 `trace_id` 继续当主 ID，LangFuse 用独立的 32 位 hex id，两边靠 JSONL 字段建立映射——就像业务订单号和第三方支付流水号，两个都重要，但不能混成一个。
+
+所以 Phase 3B 的核心价值是：**在不绑架主链路的前提下，验证了"外部观测平台 + 本地评测"能组成一套可用的可观测与评测闭环，并把这条链路的真实边界（哪些能做、哪些留给 EvalBench）摸清楚**。
+
+### 这次做了什么
+
+按阶段主线写，不按模块流水账：
+
+1. **先钉边界，再谈接入（M15）**。先单独验证 Cloud key、SDK 4.14.1、span 写入、score 写入、flush 和查询可见性（trace 约 0.6s 可查）。同时把配置纳入 `Settings`：默认 `LANGFUSE_ENABLED=false`，SDK 放进 `observability` optional extra——**观测系统不可用时，主链路照常跑**。这一步把"能不能安全接入"钉死，后续模块不再边查 SDK 行为边改主链路。
+
+2. **再打通双写与降级（M16）**。把 trace recorder 升级成 **TraceRouter 架构**：业务代码只把 trace 交给 router，router 按顺序调用 `LangFuseBackend -> JSONLBackend`。LangFuse 失败会被捕获、标记 `langfuse_write_status=failed`，JSONL 仍然落盘。M16 的 spans 是 **post-hoc flat spans**：请求结束后把 `trace_steps` 一次性平铺上传，不伪造父子嵌套和真实时间线。
+
+3. **然后验证观测底座（M16B）**。在独立分支上做 **live lifecycle 下沉**：新增 DataPilot 自己的 `TraceContext / SpanHandle` 抽象，pipeline 和 SQL tool 只依赖这个抽象，不直接 import LangFuse。SQL Guard 和 SQL Execution 的 span 通过 `run_sql_tool(trace_context=...)` 在 **tool 内部**记录——因为安全检查和数据库执行的真实边界就在 tool 里，事后补 span 只能猜结果。`langfuse_span_mode=live` 显式标记，避免 live spans 和 post-hoc spans 在 Cloud UI 里重复。用户随后决定 **M17/M18 直接在 M16B 分支上继续**，M16 post-hoc 降级为 fallback 对照。
+
+4. **之后做评分分层与回写（M17）**。把 eval 从一个大函数里的 pass/fail 拆成 **L1/L2/L3 分层 scorer**：L1 看结构和安全、L2 看结果匹配固定事实、L3 用 LLM judge 做语义判断（默认关闭）。`_score_case()` 保留为兼容薄壳，旧 Markdown 报告口径不变。评分结果按 JSONL 里的 `langfuse_trace_id` **写回 LangFuse Score**，不等待 Cloud trace 查询可见。
+
+5. **最后收口（M18）**。新增正式一键 smoke 脚本 `scripts/smoke_phase3b_langfuse.py`：默认模式验证 API / JSONL 主链路（LangFuse 检查 SKIP），`--require-langfuse` 模式把 Cloud 作为硬门禁。真实 Cloud smoke 走代理后全链路 PASS（observations=8）。手动验证了 LangFuse **trace → Dataset** 工作流（5 条 case，DeepSeek `4/5`、Qwen `3/5`），并摸清 Experiment run 的真实边界：**UI run 需要项目 LLM key，Webhook run 需要远程实验服务**，当前不临时实现。
+
+6. **收口后再加固两轮（Phase 3B 复审）**。把"能跑通"加固成"边界更可信"：LangFuse SDK import 失败时降级为本地 trace；score 只回写 `langfuse_write_status=ok` 的 trace；**危险 SQL 预检下沉到 `new_text2sql` pipeline 的统一 `sql_guard` lifecycle**（blocked path 也留下 trace step），且发生在 `get_default_llm_client()` 之前，让安全拦截不依赖 LLM 配置健康；`equals` 不再做全 JSON substring、`result_match` 按列名对齐；Markdown report 输出 scorer 明细和 score 写入结果；Dataset CSV 移出 git 跟踪。
+
+7. **把观测数据变成改进闭环（M19）**。M15-M18 证明了 trace 和 score 能被写入、看见和回放，但还缺"失败后该先修哪"。M19 新增 Failure Triage：把 eval scorer 明细、JSONL trace step 和可选 LangFuse score 结合起来，给每条失败 case 标出 `schema_context / schema_retrieval / query_plan / plan_validation / sql_generation / sql_guard / sql_execution / result_match / scorer_issue / unknown` 等失败阶段，并输出 `fix_schema_desc / fix_pipeline / fix_scorer / manual_review / infra_retry` 这类下一步动作。它不自动修复，也不自动改 case，而是把下一轮优化从"凭感觉挑 case"变成"按失败分布排队修"。
+
+### 阶段主线图
+
+一条请求从进来到被评分、被观察的完整链路：
+
+`/api/query`
+→ `TraceContext / TraceRouter`
+→ `JSONL Trace`
+→ `LangFuse Trace`
+→ `EvalScoreDetail`
+→ `LangFuse Score`
+→ `FailureTriage`
+→ `Dataset`
+→ `EvalBench 后续`
+
+**通俗理解**：请求先进业务链路（第 1-2 步），同时把运行记录写给两个地方——本地 JSONL 是"家底"，LangFuse 是"云监控"（第 3-4 步）；eval 跑完把每条评分细节（第 5 步）回写到云监控里的对应 trace（第 6 步）；M19 再把失败样本做阶段归因（第 7 步）；需要做实验对比时，把样本收成 Dataset（第 8 步）；真正的 Experiment run 编排留给 EvalBench（第 9 步）。
+
+### 关键知识点串联
+
+阶段级概念，不只是某个模块的概念：
+
+- **Trace / Span / Score / Dataset / Experiment**：LangFuse 世界里的五个核心对象。Trace 是一次请求的总记录，Span 是其中的一个步骤，Score 是评测结果，Dataset 是可复用的测试样本集，Experiment 是用 Dataset 跑一组对比实验。Phase 3B 把前四个都跑通了，第五个只验证到边界。
+- **post-hoc vs live lifecycle**：post-hoc 是"请求结束后补写日志"——简单但不真实；live 是"执行过程中实时记录 span"——更像真实调用链，但要处理 SDK 边界、span 去重和 flush 时机。Phase 3B 先用 post-hoc 跑通闭环，再用 M16B 验证 live 是否值得作为后续底座。
+- **记录层 vs 查看层**：TraceStep 写进 JSONL 是"记录"（M11 就有，M12 对照报告就是程序读 trace 生成的），LangFuse span 是"查看"（M16 起才有可视化）。"用 LangFuse 之前看不到中间 span"说的是查看层——**数据一直在，缺的是不翻文件就能看的手段**。读 M11 的记录时不要误以为它和 Phase 3B 矛盾。
+- **旁路观测与降级**：观测系统永远不是主链路。默认关闭、可选依赖、失败标记 + 继续写 JSONL，这三条保证了"监控坏了，业务照跑"。
+- **双 ID 策略**：DataPilot 自己的 `trace_id` 服务 API / JSONL / eval，LangFuse 用独立 32 位 hex id，JSONL 字段做映射。第三方平台不接管内部契约。
+- **L1/L2/L3 评分分层**：能用规则就不用 LLM。L1 结构安全、L2 结果匹配、L3 语义判断（默认关闭，显式传 `--judge-model` 才开）。
+- **Failure Triage / failure distribution**：M19 不只告诉你 case 失败了，还把失败归到阶段、给出下一步动作，并支持两个 run 的失败结构对比。它不是自动判案，而是排障导航：证据不足时保留 `unknown / manual_review`，避免把猜测当真因。
+- **兼容薄壳**：旧函数名 / 旧报告口径保留，内部换成新实现。像 SpringBoot 旧 endpoint 不变、内部 service 换了实现。
+
+### 阶段设计取舍
+
+- **Cloud 优先，不默认 self-host**：LangFuse Cloud 够验证能力，本地自部署（Docker / ClickHouse / Redis / MinIO）组件重、容易把阶段拖进运维泥潭，留给 EvalBench 阶段做正式部署 spike。
+- **旁路观测而不是"接了就绑死"**：这是整个阶段的地基。如果观测平台是强依赖，Cloud 抖动会变成业务故障；旁路化之后，观测能力是加分项而不是生命线。
+- **双 ID 不接管**：多维护一个 ID 有映射成本，但保护了 API、响应头、JSONL、eval 四处的内部契约。换观测平台时不需要反向污染历史 trace。
+- **post-hoc → live 渐进，不一步到位**：M16 先证明"双写 + 降级 + 映射"可靠，M16B 再验证"真实执行边界埋点"值不值得。如果一上来就做 lifecycle，SDK 边界、去重、flush 这些坑会和新抽象混在一起，不好定位。
+- **SQL Guard / SQL Execution span 下沉到 tool 内部**：真实安全边界在 `run_sql_tool()` 里，pipeline 事后补只能猜结果。这是用户确认过的方案，M16B 之后成为主链路的 trace 边界。
+- **本地 scorer 单一事实源，而不是 LangFuse 托管 evaluator**：托管 evaluator 会引入 UI 配置、observation target 和调度依赖，容易让本地报告和 Cloud 分数各说各话。M17 先保证同一批 `EvalScoreDetail` 同时服务 Markdown 和 LangFuse。
+- **Experiment run 不临时实现 webhook**：UI 真实验证发现 run 需要 LLM key 或 Webhook runner，临时补一个不完整的 runner 会扩大成 EvalBench adapter 的活。边界先记录，正式设计留给 EvalBench。
+- **失败归因用确定性证据优先**：M19 没有让 LLM 自由阅读 trace 后判断真因，而是优先使用 trace step、error_type 和 scorer detail。这样结果可复现、成本低，也不会把一个新模型判断层引入到排障基础设施里。
+- **风险或边界**：Windows 裸连 LangFuse Cloud 偶发 `WinError 10013`（需要 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897`）；Cloud trace 只传最小 payload，完整 rows 和 PII 不上传，也不把 Cloud trace 当长期数据资产。
+
+### 面试怎么讲
+
+先背/改写这一段阶段级叙述：
+
+"我做过一个 Agent 项目的**可观测性与评测闭环阶段**。系统原来只有本地 JSONL trace 和 pass/fail 评测，我把它升级成 trace → score → triage → dataset 的闭环：第一步，先验证外部观测平台 LangFuse 的 Cloud、SDK、score 写入和 flush 都可用，并把配置做成默认关闭的可选依赖；第二步，把 trace 写入重构成 TraceRouter 架构，支持本地 JSONL + LangFuse 双写，LangFuse 失败只标记状态、不影响主链路；第三步，做一个 live lifecycle 分支，把埋点下沉到 pipeline 和 SQL tool 的真实执行边界，用 DataPilot 自己的 TraceContext 抽象隔离 LangFuse SDK；第四步，把 eval 拆成 L1/L2/L3 分层 scorer，规则评分同时服务 Markdown 报告和 LangFuse Score 回写；第五步，新增 Failure Triage，把失败 case 按 `schema_context / query_plan / sql_guard / result_match` 等阶段归因，并支持 A/B failure distribution。整个阶段守住一条底线：**观测系统永远不绑架主链路**——默认关闭、失败降级、双 ID 隔离、最小 payload。同时我也摸清了边界：Experiment run 编排和 LangFuse self-host 留给后续独立的 EvalBench 评测项目。"
+
+1. **[基础追问] 你为什么要专门做一个阶段做可观测性？之前的 JSONL trace 不够用吗？**
+
+   可以答：JSONL trace 够用，但它是"文件"，不是"系统"。先说清楚一点：**中间过程的数据其实一直都有**——M11 起每次请求的每一步（schema_retrieval → chart_decision）就已经以 TraceStep 形式写在 JSONL 里，M12 的对照报告就是程序读这些 trace 生成的。但"记录在案"和"看得方便"是两回事：LangFuse 之前，eval 报告只给最终 pass/fail，要看单次请求的中间步骤只能自己打开 JSONL 翻字段。JSONL 能回答"刚才那次请求发生了什么"，但很难回答"这周请求的质量趋势怎么样""失败集中在哪一步""评测分数和 trace 怎么关联"。Phase 3B 做的事情不是抛弃 JSONL，而是把 LangFuse 作为**旁路增强**：保留 JSONL 主链路，同时把 trace 可视化、score 回写、样本管理这些能力交给专门的观测平台。核心原则是**新增能力，不改契约**——`/api/query` 响应和本地 eval 完全不变。
+
+2. **[基础追问] Trace、Span、Score、Dataset、Experiment 这几个概念在 LangFuse 里是什么关系？**
+
+   可以答：一次请求对应一个 **Trace**，Trace 下面有多个 **Span**（每个 span 是一个步骤，比如 schema retrieval、sql generation、sql guard）；评测跑完后，按 `langfuse_trace_id` 把每个评分项写成 **Score** 挂在 trace 上；需要做实验对比时，把样本收成 **Dataset**（每条 item 包含 input、expected output 和 metadata）；用 Dataset 跑一组对比就叫 **Experiment**。Phase 3B 把前四个都跑通并有验证证据，Experiment 只验证了 UI 边界。
+
+3. **[工程/深挖追问] 为什么保留 DataPilot 自己的 `trace_id`，而不是直接用 `langfuse_trace_id` 当全局 ID？**
+
+   因为 LangFuse 是旁路观测平台，不应该接管 DataPilot 的内部契约。`trace_id` 服务 API、JSONL、本地 eval 和错误排查，是项目自己的主 ID；`langfuse_trace_id` 是第三方平台里的观测 ID。两者靠 JSONL 字段映射。这样即使 LangFuse 关闭、网络失败、未来换平台，DataPilot 的 trace、报告和测试都还能继续工作。这个设计类似业务订单号和第三方支付流水号：可以关联，但不能混用。
+
+4. **[工程/深挖追问] post-hoc flat spans 和 live lifecycle spans 有什么本质区别？你为什么先做前者再做后者？**
+
+   可以答：post-hoc 是请求结束后拿 `TraceRecord` 一次性拆 spans，**没有真实的开始/结束时间**，只有步骤顺序，所以叫 flat spans；live 是在 pipeline 执行过程中真正记录"这步开始、这步结束、这步失败了"，时间线是真实的。先做 post-hoc 是因为它能**最快验证双写、降级和 ID 映射**这些基础设施；live 涉及 SDK 边界、span 去重、flush 时机和错误路径快照，复杂度更高，单独放 M16B 分支验证。最后用 `langfuse_span_mode` 显式区分两种模式，避免同一个步骤在 Cloud UI 出现两次。
+
+5. **[工程/深挖追问] 如果 LangFuse Cloud 完全不可用，你的系统会发生什么？**
+
+   可以答：什么都不会发生——这正是设计的底线。LangFuse 默认关闭（`LANGFUSE_ENABLED=false`），SDK 在 optional extra 里，未启用时根本不会 import；启用后 router 对每个 backend 独立 try/except，LangFuse 失败只把 `langfuse_write_status` 标记为 `failed`，然后继续写 JSONL。M18 的 smoke 专门有一个默认模式：LangFuse 关闭时 API / JSONL 必须 PASS，Cloud 检查显示 SKIP。测试里也覆盖了 fake client 抛异常、缺 key、SDK import 失败这些路径。**观测系统是加分项，不是生命线**。
+
+6. **[工程/深挖追问] 评分为什么要拆 L1/L2/L3？为什么不用 LangFuse 自带的 evaluator？**
+
+   可以答：拆层是因为**成本和质量递减**：L1 看表、列、安全这些结构规则，L2 看结果是否匹配固定事实，都是确定性的、便宜的；L3 的 LLM judge 有费用、延迟和抖动，所以默认关闭、显式开启。不用 LangFuse 托管 evaluator，是因为 DataPilot 已经有 YAML cases、Markdown 报告和一套历史规则评分，托管化会引入 UI 配置和调度依赖，容易让本地报告和 Cloud 分数**两套口径**。M17 让本地 scorer 产出统一的 `EvalScoreDetail`，同时服务 Markdown 和 LangFuse，分数只有一份。
+
+7. **[压力追问] 这个阶段没有让用户多问出一个正确答案，也没有提升模型效果，它是不是偏工程自嗨？**
+
+   可以答：这个质疑有合理的地方——Phase 3B **确实不是模型优化模块**，它不提升通过率。但它解决的是另一类问题：**当系统变复杂以后，你怎么知道它为什么失败、怎么持续改进**。Phase 3A 的教训就是失败归因难：同一道题失败，可能是 schema 没召回、plan 没通过、SQL 生成跑偏，也可能是评测尺子本身错了。Phase 3B 把"失败发生在哪一步"变成可见的（live spans）、把"每个评分项对不对"变成可回写的（score）、把"样本怎么复用"变成可管理的（dataset）。没有这层底座，后续 RAG / Hybrid 多步骤链路一接进来，排障会直接失控。所以我会把它讲成**给后续阶段铺观测地基**，而不是包装成模型效果提升。
+
+8. **[压力追问] LangFuse Cloud 会不会上传业务数据、SQL 结果或敏感信息？**
+
+   Phase 3B 的原则是最小 payload。Cloud 只作为观测旁路，不作为长期数据资产；本地 JSONL 才是主记录。上传到 LangFuse 的内容应该控制在 trace 元信息、步骤摘要、状态、错误类型和评分结果，避免上传完整 rows、PII 和不必要的业务明细。这个取舍是为了证明观测链路可用，同时不把企业数据安全边界交给外部平台。
+
+9. **[压力追问] 怎么证明 LangFuse 关闭、key 缺失、SDK 不可用或网络失败时，本地 eval 仍然可用？**
+
+   我专门把这些当成 Phase 3B 的验收边界。默认配置下 `LANGFUSE_ENABLED=false`，SDK 在 optional extra 里，未启用时不应该影响主链路；启用后 TraceRouter 对每个 backend 独立 try/except，LangFuse 写失败只标记 `langfuse_write_status=failed`，JSONL 仍然落盘。M18 smoke 也分成默认模式和 `--require-langfuse` 模式：默认模式必须证明 API / JSONL / 本地 eval PASS，LangFuse 检查 SKIP；只有 require 模式才把 Cloud 可见性作为硬门。这样观测系统坏了，业务和本地评测仍能跑。
+
+10. **[压力追问] 你们 Experiment 实际上没跑通——UI run 要 LLM key，Webhook 没有实现，这算阶段收口吗？**
+
+   可以答：如果阶段目标定义成"完整自动化 Experiment 平台"，那确实没完成，我会诚实承认。但 Phase 3B 的目标是**验证 LangFuse 是否适合作为 DataPilot 的可观测与评测前置底座**，这个目标完成了：trace 双写、live spans、score 回写、trace visibility、trace → Dataset item 全部有真实 Cloud 验证证据。Experiment 的边界也摸清了：run 需要 LLM key（UI 路径）或远程实验服务（Webhook 路径）。我没有在 M18 临时补一个不完整的 webhook runner，因为那是 EvalBench adapter 的活，临时实现反而会留下半吊子架构。**结论是"DataPilot 侧闭环到 score 和 dataset，run 编排进入 EvalBench 设计"**——这比假装全通更诚实。
+
+### 阶段成果与边界
+
+- 完成了：
+  - **Trace 双写与降级**：TraceRouter + JSONL 主链路 + LangFuse 旁路，失败只标记不阻断，全量 pytest 从 M15 的 **90 passed** 涨到 M18 的 **107 passed, 2 skipped**
+  - **Live lifecycle 观测底座**：`TraceContext / SpanHandle` 抽象、`langfuse_span_mode` 去重、SQL tool 内部记录 guard / execution spans
+  - **评分分层与回写**：`eval/scorers/` L1/L2 规则单一事实源 + 最小 L3 LLM judge（默认关闭），真实 LangFuse score 回写 smoke 通过（baseline 路径 `ok:16`、live 路径 `ok:6`、M18 smoke `ok=1`）
+  - **一键 smoke**：`scripts/smoke_phase3b_langfuse.py`，默认模式主链路 PASS + Cloud SKIP，`--require-langfuse` + 代理下 trace mapping / score / visibility 全 PASS
+  - **手动 Experiment 工作流验证**：trace → Dataset item 可用，5 条 workflow case 两组模型跑出 DeepSeek `4/5`、Qwen `3/5`，scores 全写回
+  - **Failure Triage 改进闭环**：Markdown report 新增 Failure Triage Summary / Case Triage Details，支持 `--triage-json`、LangFuse triage scores 和本地 A/B failure distribution 对比；M19 快照把 diagnostic 失败主簇定位到 `schema_context + schema_retrieval`
+  - **两轮复审加固**：SDK 降级、score 只回写 ok trace、危险 SQL 预检下沉 pipeline 统一 guard、equals / result_match 修正、report 加 case_id、Dataset CSV 移出 git
+- 没完成 / 刻意不做：
+  - **Experiment run 自动化**（Webhook runner / UI run 编排）——留给 EvalBench
+  - **LangFuse self-host 部署**——组件重，EvalBench 阶段再做 spike
+  - **L3 LLM judge 默认开启**——费用、延迟、抖动，显式配置才启用
+  - **完整 EvalBench 平台**（case 管理、多项目 adapter、实验编排、报告生成）——这是独立项目的定位
+  - **正式 Dataset 从 root trace / case 定义生成**——本次 Dataset 是临时 UI 素材，CSV 里还有 telemetry 噪音和 public key 需要清洗
+  - **Cloud trace 作为长期数据资产**——它只是 Phase 3B 实验记录，不承诺数据保留和迁移
+
+### 下一阶段怎么接
+
+- **M20 起转入 Schema Retrieval / Milvus 修复线**：M19 的 failure distribution 已经指出最大失败簇在 `schema_context / schema_retrieval`，所以后续不急着进入 RAG / Hybrid，而是先修 Milvus collection hygiene、schema docs hash、run 内 vector index 复用和 clean embedding A/B 证据。也就是说，M20 以后是在给未来 RAG / Hybrid 补检索地基。
+- **Phase 3 RAG / Hybrid（后续模块）**：等 Schema Retrieval 可信后，再基于 **M16B live lifecycle 底座**继续扩展多步骤链路，复用 `TraceContext / SpanHandle`、score 分层和 M19 failure triage 口径。
+- **独立 EvalBench 项目**：吸收 Phase 3B 上半段的踩坑记录，设计 **LangFuse Webhook / SDK 方式的 DatasetRun runner**、**self-host 部署 spike**，并从 root trace / case 定义统一生成清洗过的 Dataset 样本。
+- **可复用的阶段级验证命令**：M15-M19 的模块记录里都有完整验证命令；上半阶段收口时的总检查入口包括 M18 smoke、全量 pytest（M18 时为 **107 passed, 2 skipped**；M19 后为 **121 passed, 2 skipped**）和 M19 triage smoke / diagnostic report。
+
 ## ★ ★ M20 Schema Retrieval / Milvus Index Hygiene
 
 （2026-08-02）
@@ -2999,6 +3004,8 @@ M20 做的事就是先把赛道清干净：每次实验用唯一 collection，co
 代码上，`MilvusVectorIndex` 不再无脑 insert。它会检查已有 collection 的 row_count 和 vector dimension：干净就复用，污染就直接报错，提示使用唯一 collection 或显式 reset。`eval/run_eval.py` 在 Milvus 实验时会预建一次 shared vector index，挂到 `app.state`，让 32 条 diagnostic case 共用同一个索引。报告也新增了 **Eval Runtime Metadata**，能看到 `schema_docs_hash`、collection、row_count 和 oracle backend。
 
 验证上，Milvus smoke 证明 clean collection 下 `row_count=193`。DeepSeek + clean Milvus + Qwen embedding diagnostic 跑出 `17/32`，没有超过 M19 污染链路的 `19/32`。这个结果不是坏消息，而是一个更诚实的结论：之前污染链路不能当证据；clean 链路下 Qwen embedding 暂时没有稳定收益，但也不能因为一次 run 就盖棺定论。
+
+`qwen3.7-max` + clean Milvus + Qwen embedding diagnostic ：diagnostic `21/32`，是 clean Qwen 链路的首个完整数据点。它高于 DeepSeek 的 `17/32`，但看失败结构会发现，提升主要来自 Qwen 让 query_plan / plan_validation 类失败消失了（5→0、2→0），`schema_context` 反而从 5 升到 7，仍是最大失败簇——也就是说 **这部分差距主要来自模型本身，不是 Qwen embedding 的功劳，schema 上下文修复依然是下一步优先级**。
 
 ### 新概念
 
@@ -3065,7 +3072,7 @@ M20 做的事就是先把赛道清干净：每次实验用唯一 collection，co
 
 ### 验证与下一步
 
-- 验证：focused tests `14 passed`；相关回归 `27 passed`；全量 pytest `127 passed`；Milvus smoke `row_count=193`；DeepSeek + clean Milvus + Qwen embedding diagnostic `17/32`。
+- 验证：focused tests `14 passed`；相关回归 `27 passed`；全量 pytest `127 passed`；Milvus smoke `row_count=193`；DeepSeek + clean Milvus + Qwen embedding diagnostic `17/32`；Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic `21/32`（时间戳命名 collection，`row_count=193`、run_scoped）。
 - Warning：只有既有 Starlette/httpx warning 和 Windows LF/CRLF 提示，不影响 M20。
 - 下一步：M20 待 `accept-module`；之后进入 Phase 3 RAG / Hybrid 前置规划，或单独确认是否调整 `result_match` oracle / eval case 口径。
 
@@ -3077,6 +3084,39 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m
 
 # Milvus clean collection smoke：预期 PASS，final_row_count=193
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.smoke_m20_milvus_index --output .agent_work\temp\m20-milvus-index-smoke.md
+```
+
+### M20 补记：Qwen clean diagnostic
+
+（2026-08-02）
+
+另一个会话补跑了 `qwen3.7-max + clean Milvus + Qwen embedding` diagnostic，结果是 `21/32`。它确实高于 DeepSeek clean 链路的 `17/32`，但失败结构更重要：Qwen 让 `query_plan` / `plan_validation` 类失败基本消失，说明主模型本身的规划能力更强；同时 `schema_context` 仍是最大失败簇，甚至从 DeepSeek clean run 的 5 条升到 7 条。
+
+所以这个实验的结论不是“Qwen embedding 已经解决 schema retrieval”，而是：**Qwen LLM 能改善规划失败，但 schema 上下文问题仍要单独修**。这也是后来新增 retrieval-only benchmark 的原因：先把 embedding 检索能力从完整 Text2SQL 链路里拆出来看，再决定下一步修 fusion / rerank。
+
+### M20 补记：Retrieval-only embedding benchmark
+
+（2026-08-02）
+
+M20 收尾后又补了一组更干净的小实验：不让 LLM 写 SQL，只让 schema retrieval 对 10 条专门设计的问题召回表、字段、指标和关系。这样可以单独看 Milvus + embedding 有没有能力，而不是被 SQL 生成、query plan、result_match 一起搅在分数里。
+
+结果很清楚：默认 deterministic embedding 的 `vector-only recall=0.787`，Milvus + Qwen embedding 的 `vector-only recall=0.929`，说明 Qwen embedding 对 schema 语义检索确实更强；但两者 merged recall 都是 `0.738`，说明当前短板不在 Milvus 写入或 embedding 模型本身，而更像在 keyword/vector 融合、排序和 rerank 策略。换句话说，embedding “有信号”，只是现有合并策略没有把这个信号转成最终上下文收益。
+
+面试里可以这样讲：我没有直接根据 Text2SQL 总分判断 embedding 好坏，而是加了一个 retrieval-only benchmark，把检索从生成链路里拆出来。这个实验发现 Qwen embedding 的向量召回明显更好，但最终 merged recall 没变，因此下一步优化方向应该是 fusion / rerank，而不是盲目继续换 embedding 或把 Milvus 切默认。
+
+可复制验证命令：
+
+```powershell
+# 默认 deterministic retrieval-only benchmark
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report .agent_work\temp\schema-retrieval-embedding-deterministic-report.md --top-k 12
+
+# Milvus + Qwen embedding retrieval-only benchmark
+$env:SCHEMA_VECTOR_BACKEND="milvus"
+$env:SCHEMA_EMBEDDING_PROVIDER="dashscope"
+$env:DASHSCOPE_EMBEDDING_MODEL="qwen3.7-text-embedding"
+$env:DASHSCOPE_EMBEDDING_DIMENSIONS="1024"
+Remove-Item Env:\MILVUS_COLLECTION -ErrorAction SilentlyContinue
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report .agent_work\temp\schema-retrieval-embedding-qwen-milvus-report.md --top-k 12 --collection-prefix datapilot_schema_retrieval_bench_qwen
 ```
 
 **本地启动体验：**本模块没有新增页面或 API endpoint；主要入口是 eval CLI 和 smoke 脚本。用户体验方式是运行 smoke 后打开 `.agent_work/temp/m20-milvus-index-smoke.md`，检查 collection、row_count、schema_docs_hash 和 retrieval samples。

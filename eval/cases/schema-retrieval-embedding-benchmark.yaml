@@ -1,0 +1,100 @@
+cases:
+  - id: emb_syn_001
+    question: "哪些入口带来的成交额最高？"
+    category: synonym
+    user_role: ops
+    expected_tables: ["channels", "orders"]
+    expected_columns: ["channel_name", "order_amount", "paid_at", "order_status"]
+    expected_metrics: ["gmv"]
+    expected_relations: ["orders_channel"]
+    notes: "不直接说渠道和 GMV，测试入口/成交额这类业务同义词。"
+
+  - id: emb_syn_002
+    question: "用券最多的是哪个流量来源？"
+    category: synonym
+    user_role: ops
+    expected_tables: ["orders", "order_coupons", "coupons", "channels"]
+    expected_columns: ["coupon_code", "channel_name", "order_id", "coupon_id"]
+    expected_metrics: ["coupon_usage_rate"]
+    expected_relations: ["orders_coupons", "orders_channel"]
+    notes: "流量来源需要落到 channels，用券需要桥表。"
+
+  - id: emb_sem_001
+    question: "客户从加购到付款哪个设备表现最好？"
+    category: semantic
+    user_role: ops
+    expected_tables: ["user_behavior_log"]
+    expected_columns: ["device_type", "event_type"]
+    expected_metrics: ["add_to_pay_conversion_rate"]
+    expected_relations: []
+    notes: "不出现 user_behavior_log 字段名，测试转化率语义召回。"
+
+  - id: emb_sem_002
+    question: "耳机在 6 月当时的平均售价是多少？"
+    category: semantic
+    user_role: ops
+    expected_tables: ["products", "product_price_history"]
+    expected_columns: ["product_name", "price", "valid_from", "valid_to"]
+    expected_metrics: ["avg_selling_price"]
+    expected_relations: ["product_price_history_temporal"]
+    notes: "历史价格/当时售价应召回 temporal relation。"
+
+  - id: emb_relation_001
+    question: "一级大类连同下面子类的销售额怎么查？"
+    category: relation
+    user_role: ops
+    expected_tables: ["product_categories", "products", "order_items", "orders"]
+    expected_columns: ["parent_id", "category_id", "line_amount", "paid_at", "order_status"]
+    expected_metrics: ["item_gmv"]
+    expected_relations: ["product_category_tree", "products_category", "order_items_product", "order_items_order"]
+    notes: "测试类目树、商品、明细和订单成交过滤的关系链。"
+
+  - id: emb_relation_002
+    question: "商品退款率要按明细归因，应该看哪些表？"
+    category: relation
+    user_role: ops
+    expected_tables: ["refunds", "order_items", "products", "orders"]
+    expected_columns: ["order_item_id", "product_id", "product_name", "order_id"]
+    expected_metrics: ["refund_rate"]
+    expected_relations: ["refunds_order_item", "order_items_product", "order_items_order"]
+    notes: "测试 refunds.order_item_id 优先，而不是只走 orders.product_id。"
+
+  - id: emb_hardneg_001
+    question: "退款商品排行不要只看退款表，还要能回到商品明细。"
+    category: hard_negative
+    user_role: ops
+    expected_tables: ["refunds", "order_items", "products"]
+    expected_columns: ["refund_amount", "order_item_id", "product_id", "product_name"]
+    expected_metrics: ["refund_rate"]
+    expected_relations: ["refunds_order_item", "order_items_product"]
+    notes: "问题里明确提示不要只看 refunds，用来观察 relation docs 是否前排。"
+
+  - id: emb_hardneg_002
+    question: "渠道 GMV 看板口径能不能直接用宽表？"
+    category: hard_negative
+    user_role: ops
+    expected_tables: ["orders_wide", "channels"]
+    expected_columns: ["channel_name", "gmv"]
+    expected_metrics: ["gmv"]
+    expected_relations: []
+    notes: "宽表口径挑战；期望召回 orders_wide，而不是只召回 orders。"
+
+  - id: emb_hardneg_003
+    question: "外部源单号能不能拿来和订单编号关联退款？"
+    category: hard_negative
+    user_role: ops
+    expected_tables: ["orders", "refunds"]
+    expected_columns: ["source_order_no", "external_order_no", "order_no", "order_id"]
+    expected_metrics: []
+    expected_relations: ["refunds_order"]
+    notes: "测试 source_order_no 与 order_no 命名空间风险。"
+
+  - id: emb_sem_003
+    question: "哪些商品的售卖金额最高，不按订单主商品算。"
+    category: semantic
+    user_role: ops
+    expected_tables: ["order_items", "products", "orders"]
+    expected_columns: ["line_amount", "product_name", "paid_at", "order_status"]
+    expected_metrics: ["item_gmv"]
+    expected_relations: ["order_items_product", "order_items_order"]
+    notes: "测试商品 GMV 应走明细，不走 orders.product_id。"

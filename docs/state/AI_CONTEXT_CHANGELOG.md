@@ -13,11 +13,32 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
-### [小修] 新增 Schema Retrieval / Milvus / embedding 速查文档（2026-08-02）
+### [实验] 新增 Schema Retrieval embedding-only benchmark（2026-08-02）
+
+- 新增 `eval/cases/schema-retrieval-embedding-benchmark.yaml`、`eval/run_schema_retrieval_benchmark.py`、`tests/test_schema_retrieval_embedding_benchmark.py`，用于只评估 Schema Retrieval 召回，不调用 LLM / 不执行 SQL。
+- 首轮 deterministic baseline：`.agent_work/temp/schema-retrieval-embedding-deterministic-report.md`，`avg_overall_recall=0.738`、`avg_keyword_overall_recall=0.738`、`avg_vector_overall_recall=0.787`。
+- 首轮 Milvus + DashScope `qwen3.7-text-embedding`：`.agent_work/temp/schema-retrieval-embedding-qwen-milvus-report.md`，collection `datapilot_schema_retrieval_bench_qwen_20260802_223456_127f76ab`，`row_count=193`，`avg_overall_recall=0.738`、`avg_keyword_overall_recall=0.738`、`avg_vector_overall_recall=0.929`。
+- 结论：Qwen embedding 的 vector-only recall 明显更好，但当前 merged recall 未提升，说明下一步更应评估 fusion / RRF / rerank / top_k，而不是直接切默认 embedding。
+
+### [实验] M20 Qwen qwen3.7-max + clean Milvus + Qwen embedding diagnostic（2026-08-02）
+
+- 背景：上次同配置 run 900s 超时只有 partial trace；本次用后台长时运行补上完整数据点。
+- 配置：`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-max`、`SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=dashscope`、`QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding`、`QWEN_EMBEDDING_DIMENSIONS=1024`、`MILVUS_COLLECTION=datapilot_schema_docs_m20_qwen37max_qwenemb_20260802_214810`、`LANGFUSE_ENABLED=false`。
+- 用户要求（已落实）：Milvus 实验 collection 命名统一为日期+秒级时间戳 `<YYYYMMDD_HHMMSS>`，不再用 `_a` / `_b` 后缀；已同步到 `docs/state/schema-retrieval-milvus-embedding.md`「Milvus Collection 纪律」。
+- 结果：diagnostic `21/32`；`milvus_final_row_count=193`、`schema_vector_index_reuse=run_scoped`、`schema_docs_hash=7b531e...`、oracle 仍为 `sqlite_deterministic_seed`、`milvus_dimension=1024`。
+- 失败结构：`schema_context=7`、`sql_generation=2`（llm_generation_error）、`result_match=1`、`schema_retrieval=1`、`unknown=2`；needs_action `fix_schema_desc=7`、`fix_pipeline=3`、`manual_review=3`。
+- 对比：同链路 clean DeepSeek `17/32` → Qwen `21/32`，提升主要来自 query_plan 5→0、plan_validation 2→0、sql_guard 1→0；代价是 schema_context 5→7、sql_generation 0→2、unknown 0→2。M19 污染 Qwen `20/32` → M20 clean `21/32`（主要来自 plan 类失败消失）。
+- 结论：首次完整 clean Qwen 链路数据点；Qwen 规划/生成类失败更少，但 `schema_context` 仍是最大失败簇，优化优先级不变（先修 schema 上下文）；单次真实 LLM run 有非确定性，不切换默认模型 / embedding / Milvus。
+- 产物：`.agent_work/temp/m20-qwen37max-qwenemb-diagnostic-report.md`、`-traces.jsonl`、`-triage.json`；对比 `.agent_work/temp/m20-clean-deepseek-vs-qwen37max-compare.md`、`m20-polluted-vs-clean-qwen37max-compare.md`。
+- 长期数字已同步 `docs/state/eval-baselines.md`，速查结论已同步 `docs/state/schema-retrieval-milvus-embedding.md`，摘要已同步 `docs/state/AI_CONTEXT.md`。
+
+### [小修] 新增 Schema Retrieval / Milvus / embedding 速查文档 + Milvus 实验 collection 命名规范（2026-08-02）
 
 - 新增 `docs/state/schema-retrieval-milvus-embedding.md`，集中说明默认 `inmemory + deterministic`、Milvus 显式实验边界、M20 collection hygiene、`schema_docs_hash`、报告字段、常用命令和排查菜单。
 - 文档顶部标注 `更新时间：2026-08-02`，方便后续 AI 判断速查事实的新旧。
 - `docs/state/AI_CONTEXT.md`、`docs/state/runbook.md`、`docs/state/eval-baselines.md` 已加入该文档入口；本次只做文档索引与说明，不改变代码默认值或 eval 口径。
+- 用户要求：唯一 collection 名不再用 `_a` / `_b` 序号后缀，统一为 `datapilot_schema_docs_m20_<model>_<embedding>_<YYYYMMDD_HHMMSS>`，防止重复 / 误复用旧 collection。
+- 已同步到 `docs/state/schema-retrieval-milvus-embedding.md` 的「Milvus Collection 纪律」和「常用命令」示例；命名前先用 `date +%Y%m%d_%H%M%S` 取时间戳。
 
 ### [模块任务] M20 Schema Retrieval / Milvus Index Hygiene（2026-08-02）
 
@@ -65,40 +86,11 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 结论：这轮 Qwen embedding / Milvus 结果不能直接判定 embedding 模型无效，只能说明当前 Milvus 实验链路不可信。已在 `docs/phase3b-langfuse-plan-v6.md` 新增 M20 `Schema Retrieval / Milvus Index Hygiene`，作为 M19 后续模块，先修 collection 生命周期、去重 / upsert、run 内 retriever 复用和 `schema_docs_hash`，再重新评估 embedding。
 - 边界：不自动切默认模型、不自动切默认 embedding / Milvus、不改 eval case、不扩展到 RAG/Hybrid；这些长期影响选择仍需用户确认。
 
-### [小修] AI_CONTEXT 时效性字段补日期（2026-08-02）
+### [小修] AI 续接文档体系重构：state 分文档 + 必读规则（2026-08-02）
 
-- `docs/state/AI_CONTEXT.md` 的「最近验证事实」「当前路线判断」「已知的坑」补充日期列；最近事实和路线判断按实际发生 / 确认日期标注，活跃坑标注首次记录或已知起点，并注明 2026-08-02 仍有效。
-
-### [小修] database-current-state 增强 eval 排障口径（2026-08-02）
-
-- `docs/state/database-current-state.md` 新增「数据异常菜单」和「Eval 失败排查入口」，把未支付订单、取消状态拼写差异、外部单号重复 / 命名空间不兼容、整单退款、负数退款冲销、订单头与明细金额不一致等 seed 设计整理成可排查表。
-- 修正 RBAC / Text2SQL 安全表述：底层 `admin` 可访问全部表，但 Text2SQL 安全口径是敏感字段优先于角色权限，`admin` 也不能直出 `users.email/users.phone`。
-- 将 Phase 3A 和 Phase 2.7 验证数字标为历史使用边界 / 历史验收快照，并指向 `docs/state/eval-baselines.md` 和 `docs/state/runbook.md` 查看当前 eval 基线和运行入口。
-
-### [小修] state 文档增加强制阅读触发规则（2026-08-02）
-
-- `docs/state/AI_CONTEXT.md` 将「续接阅读顺序」改为「必读规则」，明确运行命令 / eval / 数据库事实 / 历史取舍等触发条件下必须继续读取对应 state 文档。
-- `docs/state/runbook.md`、`docs/state/eval-baselines.md`、`docs/state/database-current-state.md`、`docs/state/AI_CONTEXT_CHANGELOG.md` 顶部补充 Trigger；`CLAUDE.md` 顶部同步状态文档阅读规则，降低 AI 只读摘要就开工的风险。
-
-### [小修] AI_CONTEXT 瘦身为续接仪表盘（2026-08-02）
-
-- `docs/state/AI_CONTEXT.md` 重组为当前状态、续接阅读顺序、当前默认值、最近验证事实、当前路线判断、已知坑和索引；删除长篇链路说明，改为指向 `docs/state/runbook.md`、`docs/state/eval-baselines.md`、`docs/state/database-current-state.md` 和 `docs/state/AI_CONTEXT_CHANGELOG.md`。
-- 保留 M19 / Qwen / LangFuse / eval 的最新续接结论，但不再在 AI_CONTEXT 中展开命令矩阵、完整失败分布或历史实验细节。
-
-### [小修] AI 运行入口拆出 runbook（2026-08-02）
-
-- 新增 `docs/state/runbook.md`，承接原 `docs/state/AI_CONTEXT.md` 的模型、Schema Retrieval / embedding、LangFuse / Trace、eval 命令矩阵和运行纪律。
-- `docs/state/AI_CONTEXT.md` 的「AI 运行入口」瘦身为短引用；`docs/state/eval-baselines.md` 的相关文档分工和 `CLAUDE.md` 目录结构同步加入 runbook。
-
-### [小修] 状态文档迁移到 docs/state（2026-08-02）
-
-- 用户已将 `AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md`、`database-current-state.md`、`eval-baselines.md` 移入 `docs/state/`；本次同步当前入口文档、当前阶段计划、eval README 和 state 文档内部引用。
-- 路径口径：AI 续接入口统一为 `docs/state/AI_CONTEXT.md`；完整 changelog 为 `docs/state/AI_CONTEXT_CHANGELOG.md`；数据库状态为 `docs/state/database-current-state.md`；长期评测账本为 `docs/state/eval-baselines.md`。归档目录旧引用保持历史原貌，不批量改。
-
-### [小修] 评测基线拆出独立账本文档（2026-08-02）
-
-- 新增 `docs/state/eval-baselines.md` 作为长期评测账本，集中记录 formal / challenge / diagnostic 基线、模型/embedding A/B、报告路径、failure distribution 和典型错因。
-- `docs/state/AI_CONTEXT.md` 的「最新评测基线」瘦身为续接摘要，并引用 `docs/state/eval-baselines.md`；AI_CONTEXT 继续保留当前默认值、最新结论和操作入口，不再承载长篇历史评测细节。
+- 将 `AI_CONTEXT.md` 瘦身为续接仪表盘（当前状态 / 默认值 / 最近事实 / 路线判断 / 活跃坑，各表补日期列），并按职责拆出独立文档：`docs/state/runbook.md`（模型、embedding、LangFuse、eval 命令矩阵与运行纪律）、`docs/state/eval-baselines.md`（长期评测账本）、`docs/state/database-current-state.md`（数据库事实与 eval 排障口径，含数据异常菜单、RBAC 敏感字段优先于角色权限的表述）。
+- 各文档顶部增加 Trigger 触发条件；`AI_CONTEXT.md` 将「续接阅读顺序」升级为「必读规则」：运行命令 / eval 数字 / 数据库事实 / 历史取舍等场景必须继续读对应文档，`CLAUDE.md` 同步，防止只读摘要就开工。
+- 历史验证数字统一标注为历史快照并指向 eval-baselines / runbook；用户将四份文档移入 `docs/state/` 后同步入口文档和内部引用，归档目录旧引用保持原貌。
 
 ### [实验] M19 qwen3.7-max 三类 eval 对照（2026-08-02）
 
