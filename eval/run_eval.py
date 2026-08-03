@@ -299,8 +299,12 @@ def run_cases(
     pipeline_mode: str | None = None,
     judge_model: str = "",
     judge_client: Any | None = None,
+    schema_fusion_strategy: str = "weighted",
 ) -> list[EvalResult]:
-    """逐条调用 `/api/query` 并收集 pass / fail / error_type。"""
+    """逐条调用 `/api/query` 并收集 pass / fail / error_type。
+
+    M21 的 fusion 仅通过此显式参数进入请求体，默认 ``weighted`` 不改变旧 eval 路径。
+    """
 
     results: list[EvalResult] = []
     for case in cases:
@@ -337,6 +341,7 @@ def run_cases(
         request_body: dict[str, Any] = {"question": case.question, "user_role": case.user_role}
         if actual_pipeline_mode != "baseline":
             request_body["force_new_pipeline"] = True
+            request_body["schema_fusion_strategy"] = schema_fusion_strategy
         response = client.post(
             "/api/query",
             json=request_body,
@@ -376,6 +381,7 @@ def run_cases(
 def _build_eval_schema_vector_index(
     *,
     pipeline_mode: str | None,
+    schema_fusion_strategy: str = "weighted",
 ) -> tuple[VectorIndex | None, dict[str, Any]]:
     """按 M20 规则为一次 eval run 预建可复用的 Schema vector index。
 
@@ -389,6 +395,7 @@ def _build_eval_schema_vector_index(
         "result_match_oracle_backend": "sqlite_deterministic_seed",
         "schema_vector_backend": settings.schema_vector_backend,
         "schema_embedding_provider": settings.schema_embedding_provider,
+        "schema_fusion_strategy": schema_fusion_strategy,
     }
     if pipeline_mode != "new_text2sql" or settings.schema_vector_backend.lower() != "milvus":
         runtime_metadata["schema_vector_index_reuse"] = "not_applicable"
@@ -728,6 +735,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
     parser.add_argument("--extra-cases", type=Path, action="append", default=[])
     parser.add_argument("--pipeline-mode", choices=["baseline", "new_text2sql"], default=None)
+    parser.add_argument(
+        "--schema-fusion-strategy",
+        choices=["weighted", "rrf"],
+        default="weighted",
+        help="M21 显式 fusion 实验；默认 weighted 保持既有 pipeline 行为。",
+    )
     parser.add_argument("--judge-model", default="", help="显式启用 L3 llm:correctness；优先级高于 EVAL_JUDGE_MODEL。")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--trace", type=Path, default=DEFAULT_TRACE_PATH)
@@ -750,14 +763,23 @@ def main(argv: list[str] | None = None) -> int:
 
     cases = load_cases(args.cases, extra_cases=args.extra_cases)
     judge_model = resolve_judge_model(args.judge_model)
-    schema_vector_index, runtime_metadata = _build_eval_schema_vector_index(pipeline_mode=args.pipeline_mode)
+    schema_vector_index, runtime_metadata = _build_eval_schema_vector_index(
+        pipeline_mode=args.pipeline_mode,
+        schema_fusion_strategy=args.schema_fusion_strategy,
+    )
     try:
         with seeded_api_client(
             args.trace,
             schema_vector_index=schema_vector_index,
             schema_vector_index_metadata=runtime_metadata,
         ) as client:
-            results = run_cases(cases, client, pipeline_mode=args.pipeline_mode, judge_model=judge_model)
+            results = run_cases(
+                cases,
+                client,
+                pipeline_mode=args.pipeline_mode,
+                judge_model=judge_model,
+                schema_fusion_strategy=args.schema_fusion_strategy,
+            )
     finally:
         close_index = getattr(schema_vector_index, "close", None)
         if callable(close_index):

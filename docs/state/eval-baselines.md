@@ -13,6 +13,7 @@
 - 当前优先改进方向：先看 `schema_context / schema_retrieval`，再看 `result_match / plan_validation / query_plan / sql_generation`。换模型能缓解部分生成失败，但不能替代 schema 上下文修复。
 - 当前结论：Qwen 3.7 max 可作为后续 A/B 组；默认模型、默认 embedding、正式 eval case 集都属于长期基线选择，不在普通实验中自动切换或改写。
 - M20 结论：clean Milvus 链路上 Qwen `qwen3.7-max` diagnostic `21/32`（首次完整 clean Qwen 链路，高于同链路 DeepSeek `17/32`）；`schema_context` 7 仍是主问题；默认 embedding / Milvus / 模型不切换。
+- M21 结论：RRF 在 retrieval-only 上提高 merged recall，但同配置 DeepSeek diagnostic 从 weighted `21/32` 降至 RRF `18/32`；默认 fusion 保持 weighted，不能只凭 retrieval-only 数字切策略。
 
 ## 如何读这些数字
 

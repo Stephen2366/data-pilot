@@ -1,7 +1,8 @@
-"""Schema Retriever：关键词召回 + 向量召回 + 简单融合。
+"""Schema Retriever：关键词召回 + 向量召回 + 可显式选择的融合实验。
 
-M9 的 P0 要求是两路召回都存在、结果字段稳定；RRF / rerank 暂不做复杂实现，只在数据结构里
-预留分数字段，后续相似字段混淆明显时再升级。
+默认 ``weighted`` 保留 M9 的稳定行为。M21 只增加 ``rrf`` 作为显式实验策略，用 retrieval-only
+benchmark 验证“更好的 vector 召回是否能进入最终上下文”；它不读取任何 eval ``expected_*`` 标签，
+避免把离线答案泄漏到线上排序。
 """
 
 from __future__ import annotations
@@ -75,8 +76,23 @@ def _keyword_search(question: str, documents: list[SchemaDocument], *, top_k: in
     ]
 
 
-def _merge_hits(keyword_hits: list[SchemaHit], vector_hits: list[SchemaHit], *, top_k: int) -> list[SchemaHit]:
-    """简单融合两路召回：同一 doc 取加权分，保留 RRF 扩展位。"""
+def _merge_hits(
+    keyword_hits: list[SchemaHit],
+    vector_hits: list[SchemaHit],
+    *,
+    top_k: int,
+    fusion_strategy: str = "weighted",
+) -> list[SchemaHit]:
+    """合并 keyword/vector hits，并保持默认 weighted 排序不变。
+
+    ``weighted`` 延续既有分数语义：关键词分数乘 1.2 后与向量分数相加；``rrf`` 只看两路名次，
+    可避免不同 backend 的原始相似度尺度不可比。★ 这只是 M21 的实验开关，不能接收 case 的
+    expected table / column / metric 等离线标签。
+    """
+
+    strategy = (fusion_strategy or "weighted").lower()
+    if strategy not in {"weighted", "rrf"}:
+        raise ValueError(f"Unsupported schema fusion strategy={fusion_strategy}.")
 
     by_doc: dict[str, tuple[SchemaDocument, float, float]] = {}
     for hit in keyword_hits:
@@ -86,11 +102,17 @@ def _merge_hits(keyword_hits: list[SchemaHit], vector_hits: list[SchemaHit], *, 
         _doc, score, rrf = by_doc.get(hit.document.doc_id, (hit.document, 0.0, 0.0))
         by_doc[hit.document.doc_id] = (hit.document, score + hit.score, rrf + 1 / (60 + hit.rank))
 
-    ranked = sorted(by_doc.values(), key=lambda item: (-(item[1] + item[2]), item[0].doc_id))[:top_k]
+    # 步骤 1：只在候选 hit 的线上可得分数 / rank 上计算融合分 -------------------------------
+    # weighted 沿用 M9 既有行为；RRF 不混用 keyword 与 vector 的原始分数，便于跨 backend 对照。
+    def fusion_score(item: tuple[SchemaDocument, float, float]) -> float:
+        _document, weighted_score, rrf_score = item
+        return weighted_score + rrf_score if strategy == "weighted" else rrf_score
+
+    ranked = sorted(by_doc.values(), key=lambda item: (-fusion_score(item), item[0].doc_id))[:top_k]
     return [
         SchemaHit(
             document=document,
-            score=score + rrf_score,
+            score=fusion_score((document, score, rrf_score)),
             source="merged",
             rank=index,
             doc_type=document.doc_type,
@@ -202,8 +224,13 @@ def retrieve_schema(
     relations_path: Path = DEFAULT_RELATIONS_PATH,
     vector_index: VectorIndex | None = None,
     schema_retrieval_profile: str = "default",
+    fusion_strategy: str = "weighted",
 ) -> SchemaRetrievalResult:
-    """★ 对一个自然语言问题召回局部 Schema 文档。"""
+    """★ 对一个自然语言问题召回局部 Schema 文档。
+
+    ``fusion_strategy`` 默认 ``weighted``，因此老调用方和默认 pipeline 不变；``rrf`` 必须由
+    benchmark、eval CLI 或 API 请求显式传入，作为 M21 的受控实验路径。
+    """
 
     documents = build_schema_documents(domain_schema, relations_path=relations_path)
     keyword_hits = _keyword_search(question, documents, top_k=top_k)
@@ -212,7 +239,7 @@ def retrieve_schema(
         schema_retrieval_profile=schema_retrieval_profile,
     )
     vector_hits = active_vector_index.search(question, top_k=top_k)
-    merged_hits = _merge_hits(keyword_hits, vector_hits, top_k=top_k)
+    merged_hits = _merge_hits(keyword_hits, vector_hits, top_k=top_k, fusion_strategy=fusion_strategy)
     return SchemaRetrievalResult(
         question=question,
         user_role=user_role,

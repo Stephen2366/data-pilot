@@ -269,6 +269,7 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             db=db,
             trace_id=trace_id,
             schema_retrieval_profile=request_body.schema_retrieval_profile,
+            schema_fusion_strategy=request_body.schema_fusion_strategy,
             schema_vector_index=getattr(request.app.state, "schema_vector_index", None),
         )
         if pipeline_result.tool_result is None or pipeline_result.safety_status != "passed":

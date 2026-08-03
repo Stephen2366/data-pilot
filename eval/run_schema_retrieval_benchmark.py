@@ -24,7 +24,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.core.config import get_settings
 from engine.nl2sql.schema_loader import load_domain_schema
-from engine.schema_retrieval.document_builder import DEFAULT_RELATIONS_PATH
+from engine.schema_retrieval.document_builder import (
+    DEFAULT_RELATIONS_PATH,
+    build_schema_documents,
+    schema_documents_hash,
+)
 from engine.schema_retrieval.graph import build_schema_graph
 from engine.schema_retrieval.retriever import build_configured_schema_vector_index, retrieve_schema
 from engine.schema_retrieval.vector_index import VectorIndex
@@ -144,8 +148,9 @@ def run_benchmark(
     top_k: int,
     schema_retrieval_profile: str = "default",
     vector_index: VectorIndex | None = None,
+    fusion_strategy: str = "weighted",
 ) -> list[RetrievalBenchmarkResult]:
-    """执行 retrieval-only benchmark。"""
+    """执行 retrieval-only benchmark，并把候选 fusion 显式传给 retriever。"""
 
     domain_schema = load_domain_schema()
     results: list[RetrievalBenchmarkResult] = []
@@ -158,6 +163,7 @@ def run_benchmark(
             relations_path=DEFAULT_RELATIONS_PATH,
             vector_index=vector_index,
             schema_retrieval_profile=schema_retrieval_profile,
+            fusion_strategy=fusion_strategy,
         )
         keyword_graph = build_schema_graph(
             retrieval.keyword_hits,
@@ -341,6 +347,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--top-k", type=int, default=12)
     parser.add_argument("--schema-retrieval-profile", default="default")
+    parser.add_argument(
+        "--fusion-strategy",
+        choices=["weighted", "rrf"],
+        default="weighted",
+        help="M21 显式 fusion 实验；默认 weighted 保持现有检索行为。",
+    )
     parser.add_argument("--collection-prefix", default="datapilot_schema_retrieval_bench")
     args = parser.parse_args(argv)
 
@@ -348,12 +360,16 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     cases = load_benchmark_cases(args.cases)
     vector_index: VectorIndex | None = None
-    documents_count: int | None = None
-    docs_hash: str | None = None
+    # ★ 两组 benchmark 都写同一版 schema docs 元数据；否则 deterministic 基线缺少 hash，
+    # 无法证明它和 Milvus 候选使用的是同一份检索语料。
+    domain_schema = load_domain_schema()
+    benchmark_documents = build_schema_documents(domain_schema, relations_path=DEFAULT_RELATIONS_PATH)
+    documents_count = len(benchmark_documents)
+    docs_hash = schema_documents_hash(benchmark_documents)
     try:
         if settings.schema_vector_backend.lower() == "milvus":
             vector_index, documents, docs_hash = build_configured_schema_vector_index(
-                domain_schema=load_domain_schema(),
+                domain_schema=domain_schema,
                 schema_retrieval_profile=args.schema_retrieval_profile,
             )
             documents_count = len(documents)
@@ -362,11 +378,13 @@ def main(argv: list[str] | None = None) -> int:
             top_k=args.top_k,
             schema_retrieval_profile=args.schema_retrieval_profile,
             vector_index=vector_index,
+            fusion_strategy=args.fusion_strategy,
         )
         metadata = {
             "schema_vector_backend": settings.schema_vector_backend,
             "schema_embedding_provider": settings.schema_embedding_provider,
             "schema_retrieval_profile": args.schema_retrieval_profile,
+            "fusion_strategy": args.fusion_strategy,
             "top_k": args.top_k,
             "milvus_collection": collection_name or settings.milvus_collection,
             "milvus_dimension": getattr(vector_index, "dimension", None),

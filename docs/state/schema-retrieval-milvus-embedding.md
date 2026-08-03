@@ -2,7 +2,7 @@
 
 > 本文是 DataPilot 的 Schema Retrieval、Milvus 向量库和 embedding 实验速查。Trigger：只要涉及 `SCHEMA_VECTOR_BACKEND`、`SCHEMA_EMBEDDING_PROVIDER`、Milvus collection、embedding A/B、`schema_docs_hash`、schema retrieval 召回质量或 M20 clean run 结论，必须先读本文。当前运行命令入口仍以 `docs/state/runbook.md` 为准，长期 eval 数字以 `docs/state/eval-baselines.md` 为准。
 
-更新时间：2026-08-02
+更新时间：2026-08-03
 
 ## 一句话结论
 
@@ -138,6 +138,14 @@ M20 clean 链路：
 - Qwen embedding 在 **vector-only recall** 上确实显示出能力，尤其更容易把 relation / metric 文档放进 vector top docs。
 - 当前完整 merged recall 没提升，说明瓶颈可能在 **keyword + vector 融合策略**：keyword 分数较强时，vector 命中的好文档未必进入最终 merged top_k。
 - 因此下一步如果继续优化检索，不应直接换默认 embedding，而应先单独评估 fusion / RRF / rerank / top_k 策略。
+
+## M21 Fusion 实验结论
+
+M21 保持默认 `weighted` merge，新增只可显式传入的 `rrf` 实验策略；它只使用候选 hit 的线上 rank，任何 `expected_*` benchmark 标签都不能进入排序。
+
+- retrieval-only（`top_k=12`）：deterministic merged overall `0.738 → 0.802`；Milvus + Qwen embedding merged `0.738 → 0.929`、metric `0.600 → 0.900`、relation `0.633 → 0.967`。
+- 端到端同配置 DeepSeek diagnostic（Qwen embedding、clean collection `datapilot_schema_docs_m21_qwen_weighted_20260803_001`、row_count `193`、hash `7b531e...`）：weighted `21/32`，RRF `18/32`；RRF 让 `schema_context 5 → 4`，但新增 `plan_validation 0 → 3`、`schema_retrieval 0 → 1`。
+- 结论：**RRF 是否定实验，不切默认。**retrieval-only 覆盖提升不能替代同配置 Text2SQL / triage 验证；下一步先逐 case 看 context assembly 与 QueryPlan 耦合，不能直接增大 top_k 或引入 reranker。
 
 ## 常用命令
 

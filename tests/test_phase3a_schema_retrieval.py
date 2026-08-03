@@ -10,7 +10,8 @@ from eval.run_eval import EvalCase, load_cases
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.schema_retrieval.document_builder import build_schema_documents
 from engine.schema_retrieval.graph import build_schema_graph
-from engine.schema_retrieval.retriever import retrieve_schema
+from engine.schema_retrieval.objects import SchemaDocument, SchemaHit
+from engine.schema_retrieval.retriever import _merge_hits, retrieve_schema
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +75,61 @@ def test_retrieve_schema_returns_keyword_vector_and_merged_hits() -> None:
     assert all(hit.score >= 0 for hit in result.merged_hits)
     assert all(hit.rank >= 1 for hit in result.merged_hits)
     assert all(hit.doc_type in {"field_doc", "metric_doc", "relation_doc"} for hit in result.merged_hits)
+
+
+def test_rrf_fusion_uses_only_online_hit_rank_not_eval_expected_labels() -> None:
+    """M21 的 RRF 应只消费候选 hit 的 rank，且可与默认加权分数产生不同排序。"""
+
+    document_a = SchemaDocument(
+        doc_id="field:orders.order_amount",
+        doc_type="field_doc",
+        table="orders",
+        column="order_amount",
+        metric_key=None,
+        relation=None,
+        keyword_text="订单金额",
+        vector_text="订单金额",
+    )
+    document_b = SchemaDocument(
+        doc_id="metric:gmv",
+        doc_type="metric_doc",
+        table=None,
+        column=None,
+        metric_key="gmv",
+        relation=None,
+        keyword_text="GMV",
+        vector_text="GMV",
+    )
+    keyword_hits = [
+        SchemaHit(document=document_a, score=100.0, source="keyword", rank=1, doc_type="field_doc"),
+        SchemaHit(document=document_b, score=0.5, source="keyword", rank=2, doc_type="metric_doc"),
+    ]
+    vector_hits = [
+        SchemaHit(document=document_b, score=0.9, source="vector", rank=1, doc_type="metric_doc"),
+        SchemaHit(document=document_a, score=0.01, source="vector", rank=10, doc_type="field_doc"),
+    ]
+
+    weighted = _merge_hits(keyword_hits, vector_hits, top_k=2, fusion_strategy="weighted")
+    rrf = _merge_hits(keyword_hits, vector_hits, top_k=2, fusion_strategy="rrf")
+
+    assert [hit.document.doc_id for hit in weighted] == [document_a.doc_id, document_b.doc_id]
+    assert [hit.document.doc_id for hit in rrf] == [document_b.doc_id, document_a.doc_id]
+
+
+def test_retrieve_schema_rejects_unknown_fusion_strategy() -> None:
+    """未知 fusion 不能静默回退，避免报告把配置错误误写成实验结论。"""
+
+    import pytest
+
+    with pytest.raises(ValueError, match="Unsupported schema fusion strategy"):
+        retrieve_schema(
+            question="2026 年 6 月 GMV 是多少？",
+            user_role="ops",
+            top_k=8,
+            domain_schema=load_domain_schema(),
+            relations_path=RELATIONS_PATH,
+            fusion_strategy="not-a-strategy",
+        )
 
 
 def test_retrieve_schema_default_backend_stays_inmemory_deterministic(monkeypatch) -> None:

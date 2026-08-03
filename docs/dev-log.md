@@ -2997,7 +2997,7 @@ M20 做的事就是先把赛道清干净：每次实验用唯一 collection，co
 
 ### 这次做了什么
 
-一开始的问题是：M19 复测发现 Qwen embedding 没带来稳定收益，但继续排查发现固定 collection `datapilot_schema_docs` 的行数远高于 schema docs 数量。当前 schema docs 是 193 条，历史 collection 却有约 1.9 万行，这说明它被重复写入了很多次。
+一开始的问题是：M19 复测发现 Qwen embedding 没带来稳定收益，但继续排查发现固定 collection `datapilot_schema_docs` 的行数远高于 schema docs 数量。当前 schema docs 是 193 条，历史 collection 却有约 1.9 万行，这说明它被**重复写入**了很多次。
 
 这次先做了一个关键取舍：不顺手改默认 embedding、不把 Milvus 设成默认、不改正式 eval case，也不把 `result_match` 的 oracle 直接切 MySQL。因为这些都会改变长期基线。最终只做 M20 范围内的事：**索引卫生 + 标准答案审计 + clean run 复测**。
 
@@ -3006,6 +3006,12 @@ M20 做的事就是先把赛道清干净：每次实验用唯一 collection，co
 验证上，Milvus smoke 证明 clean collection 下 `row_count=193`。DeepSeek + clean Milvus + Qwen embedding diagnostic 跑出 `17/32`，没有超过 M19 污染链路的 `19/32`。这个结果不是坏消息，而是一个更诚实的结论：之前污染链路不能当证据；clean 链路下 Qwen embedding 暂时没有稳定收益，但也不能因为一次 run 就盖棺定论。
 
 `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic ：diagnostic `21/32`，是 clean Qwen 链路的首个完整数据点。它高于 DeepSeek 的 `17/32`，但看失败结构会发现，提升主要来自 Qwen 让 query_plan / plan_validation 类失败消失了（5→0、2→0），`schema_context` 反而从 5 升到 7，仍是最大失败簇——也就是说 **这部分差距主要来自模型本身，不是 Qwen embedding 的功劳，schema 上下文修复依然是下一步优先级**。
+
+所以这个实验的结论不是“Qwen embedding 已经解决 schema retrieval”，而是：**Qwen LLM 能改善规划失败，但 schema 上下文问题仍要单独修**。这也是后来新增 retrieval-only benchmark 的原因：先把 embedding 检索能力从完整 Text2SQL 链路里拆出来看，再决定下一步修 fusion / rerank。
+
+**Retrieval-only embedding benchmark：**M20 收尾后又补了一组更干净的小实验：不让 LLM 写 SQL，只让 schema retrieval 对 10 条专门设计的问题召回表、字段、指标和关系。这样可以单独看 Milvus + embedding 有没有能力，而不是被 SQL 生成、query plan、result_match 一起搅在分数里。
+
+结果：默认 deterministic embedding 的 `vector-only recall=0.787`，Milvus + Qwen embedding 的 `vector-only recall=0.929`，说明 Qwen embedding 对 schema 语义检索确实更强；但两者 merged recall 都是 `0.738`，说明当前短板不在 Milvus 写入或 embedding 模型本身，而更像在 keyword/vector 融合、排序和 rerank 策略。换句话说，embedding “有信号”，只是现有合并策略没有把这个信号转成最终上下文收益。
 
 ### 新概念
 
@@ -3050,13 +3056,12 @@ M20 做的事就是先把赛道清干净：每次实验用唯一 collection，co
 - **唯一 collection 优先**：M20 选了每次实验唯一 collection，而不是固定 collection 反复 reset。这样最隔离、最好复现，也不容易误删别的实验数据。
 - **拒绝污染而不是自动猜修复**：如果已有 collection 行数或维度不匹配，代码直接报错。这里没有临时 upsert，因为 upsert 是更接近长期服务形态的方案，需要单独验证 Milvus API 一致性。
 - **不改 benchmark 口径**：MySQL audit 证明 expected SQL 当前可执行，但 `result_match` 仍保留 SQLite oracle。这样避免 M20 同时改变索引和评分标准，导致结果无法解释。
-- **不为提分改 case**：formal 多表题检查偏弱、退款率和已支付订单题面有口径讨论空间，但 M20 只记录，不修改 YAML。
 
 ### 面试怎么讲
 
-可以这样讲：
+“我在做 Text2SQL 的 schema retrieval A/B 时发现一个评测基础设施问题：Milvus collection 被**重复灌入**，同一批 193 条 schema docs 累积到上万行，导致 embedding A/B 的**检索结果不可信**。我没有直接换模型或改 prompt，而是先做 index hygiene：每次实验使用**唯一 collection**，Milvus adapter 检查 row_count 和向量维度，不匹配就拒绝复用；eval runner 在一个 run 内预建并复用同一个 **vector index**，避免每个 case 重新 insert；报告里写出 schema_docs_hash、collection、row_count 和 oracle backend。最后 clean collection smoke 证明 row_count 回到 193，并用 clean Milvus 重新跑 diagnostic。结果没有提分，但这个结论更可信，也说明不应该自动切默认 embedding。”
 
-“我在做 Text2SQL 的 schema retrieval A/B 时发现一个评测基础设施问题：Milvus collection 被重复灌入，同一批 193 条 schema docs 累积到上万行，导致 embedding A/B 的检索结果不可信。我没有直接换模型或改 prompt，而是先做 index hygiene：每次实验使用唯一 collection，Milvus adapter 检查 row_count 和向量维度，不匹配就拒绝复用；eval runner 在一个 run 内预建并复用同一个 vector index，避免每个 case 重新 insert；报告里写出 schema_docs_hash、collection、row_count 和 oracle backend。最后 clean collection smoke 证明 row_count 回到 193，并用 clean Milvus 重新跑 diagnostic。结果没有提分，但这个结论更可信，也说明不应该自动切默认 embedding。”
+“我没有直接根据 Text2SQL 总分判断 embedding 好坏，而是加了一个 retrieval-only benchmark，把检索从生成链路里拆出来。这个实验发现 Qwen embedding 的向量召回明显更好，但最终 merged recall 没变，因此下一步优化方向应该是 fusion / rerank，而不是盲目继续换 embedding 或把 Milvus 切默认。
 
 1. **[基础追问] 为什么 M20 没有提分也算完成？**
 
@@ -3086,37 +3091,56 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.smoke_m20_milvus_index --output .agent_work\temp\m20-milvus-index-smoke.md
 ```
 
-### M20 补记：Qwen clean diagnostic
+## ★ ★ M21 Schema Retrieval Fusion / Context Repair
 
-（2026-08-02）
+（2026-08-03）
 
-另一个会话补跑了 `qwen3.7-max + clean Milvus + Qwen embedding` diagnostic，结果是 `21/32`。它确实高于 DeepSeek clean 链路的 `17/32`，但失败结构更重要：Qwen 让 `query_plan` / `plan_validation` 类失败基本消失，说明主模型本身的规划能力更强；同时 `schema_context` 仍是最大失败簇，甚至从 DeepSeek clean run 的 5 条升到 7 条。
+**简述**：M21 验证了“检索召回更高”不等于“Text2SQL 更准”：RRF 把更多 relation / metric 文档放进上下文，却在同配置真实 diagnostic 上从 `21/32` 降到 `18/32`，因此保持默认 weighted，不为漂亮的离线指标切策略。
 
-所以这个实验的结论不是“Qwen embedding 已经解决 schema retrieval”，而是：**Qwen LLM 能改善规划失败，但 schema 上下文问题仍要单独修**。这也是后来新增 retrieval-only benchmark 的原因：先把 embedding 检索能力从完整 Text2SQL 链路里拆出来看，再决定下一步修 fusion / rerank。
+### 先用大白话讲
 
-### M20 补记：Retrieval-only embedding benchmark
+M20 证明 Qwen embedding 像一支更灵敏的雷达，能看到更多相关的 schema 文档；但旧的合并方式没有把信号送到驾驶舱。M21 试了 **RRF（Reciprocal Rank Fusion）**：不比较两台雷达分数谁大，而是按各自的名次投票。它在 retrieval-only 测试上确实把 relation recall 从 `0.633` 拉到 `0.967`，但真正让 LLM 写 SQL 时，更多上下文也会改变 QueryPlan 的选择，反而新增了 plan validation 失败。
 
-（2026-08-02）
+所以本模块的核心价值是：**把“检索指标变好”与“端到端能力变好”分开验证，并用否定实验保护默认基线。**
 
-M20 收尾后又补了一组更干净的小实验：不让 LLM 写 SQL，只让 schema retrieval 对 10 条专门设计的问题召回表、字段、指标和关系。这样可以单独看 Milvus + embedding 有没有能力，而不是被 SQL 生成、query plan、result_match 一起搅在分数里。
+### 这次做了什么
 
-结果很清楚：默认 deterministic embedding 的 `vector-only recall=0.787`，Milvus + Qwen embedding 的 `vector-only recall=0.929`，说明 Qwen embedding 对 schema 语义检索确实更强；但两者 merged recall 都是 `0.738`，说明当前短板不在 Milvus 写入或 embedding 模型本身，而更像在 keyword/vector 融合、排序和 rerank 策略。换句话说，embedding “有信号”，只是现有合并策略没有把这个信号转成最终上下文收益。
+代码为 `retrieve_schema()` 增加了默认不变的 `weighted` 与显式 `rrf` 两种 fusion；CLI、eval request 和 trace metadata 都会记录本轮策略。RRF 只使用问题和候选 hit 的分数 / rank，**绝不使用** benchmark 的 `expected_tables` 或 `expected_columns`，否则就像考试时把答案塞给排序器。
 
-面试里可以这样讲：我没有直接根据 Text2SQL 总分判断 embedding 好坏，而是加了一个 retrieval-only benchmark，把检索从生成链路里拆出来。这个实验发现 Qwen embedding 的向量召回明显更好，但最终 merged recall 没变，因此下一步优化方向应该是 fusion / rerank，而不是盲目继续换 embedding 或把 Milvus 切默认。
+离线测试中，deterministic merged recall `0.738 → 0.802`；Milvus + Qwen embedding 则 `0.738 → 0.929`，metric `0.600 → 0.900`、relation `0.633 → 0.967`。但固定同一个 clean collection、embedding、模型和 32 条 diagnostic 后，weighted 是 `21/32`，RRF 是 `18/32`；triage 显示 `schema_context` 少 1 条，却多了 3 条 `plan_validation`。因此 RRF 被记录为**否定实验**，没有改默认策略、top_k、schema docs 或评测口径。
 
-可复制验证命令：
+### 新概念
 
-```powershell
-# 默认 deterministic retrieval-only benchmark
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report .agent_work\temp\schema-retrieval-embedding-deterministic-report.md --top-k 12
+- **RRF**：一种 rank-based fusion。它像两份“推荐名单”按名次累积投票，避免 keyword 分数和 vector 相似度的数值尺度不同，直接相加不公平。
+- **标签泄漏**：把评测集的 expected 表、字段等正确答案交给线上排序逻辑。这样分数会虚高，真实用户请求却没有这些信息；M21 明确禁止这种做法。
+- **否定实验**：结果没有被采用也不是白做。M21 用同配置 A/B 证明 RRF 目前不能稳定改善 Text2SQL，这比把一次离线高分误切为默认更有工程价值。
 
-# Milvus + Qwen embedding retrieval-only benchmark
-$env:SCHEMA_VECTOR_BACKEND="milvus"
-$env:SCHEMA_EMBEDDING_PROVIDER="dashscope"
-$env:DASHSCOPE_EMBEDDING_MODEL="qwen3.7-text-embedding"
-$env:DASHSCOPE_EMBEDDING_DIMENSIONS="1024"
-Remove-Item Env:\MILVUS_COLLECTION -ErrorAction SilentlyContinue
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report .agent_work\temp\schema-retrieval-embedding-qwen-milvus-report.md --top-k 12 --collection-prefix datapilot_schema_retrieval_bench_qwen
-```
+### 代码阅读路线
 
-**本地启动体验：**本模块没有新增页面或 API endpoint；主要入口是 eval CLI 和 smoke 脚本。用户体验方式是运行 smoke 后打开 `.agent_work/temp/m20-milvus-index-smoke.md`，检查 collection、row_count、schema_docs_hash 和 retrieval samples。
+1. **融合核心**：`engine/schema_retrieval/retriever.py`
+   从 `_merge_hits()` 看 weighted 如何保持旧行为、RRF 如何只按 rank 计分；再看 `retrieve_schema()` 的显式参数，理解默认请求为何不会变化。
+2. **实验入口**：`eval/run_schema_retrieval_benchmark.py` 与 `eval/run_eval.py`
+   前者只测 schema graph 召回，后者通过 API 跑真实 Text2SQL；两者都把 fusion strategy 和 schema docs metadata 写入报告，保证 A/B 可追溯。
+3. **请求与 trace 传递**：`app/schemas/agent.py`、`app/api/query.py`、`engine/nl2sql/pipeline.py`
+   `schema_fusion_strategy` 从显式请求传到 retrieval，并进入 trace metadata；它是实验开关，不改变响应体契约。
+
+### 设计要点
+
+- **默认不动**：`weighted` 是已有稳定基线，RRF 必须显式选择；避免一次实验影响所有 API / eval。
+- **先离线、后端到端**：retrieval-only 先证明候选值得继续看，再用同配置 diagnostic 检查是否把失败迁移到别的 pipeline 阶段。
+- **当前边界**：不靠增大 top_k、bundle docs 或 reranker 掩盖问题；这些会改变上下文结构或长期路线，需要单独决定。
+
+### 面试怎么讲
+
+“我做过一次 schema retrieval fusion 实验。Qwen embedding 的 vector recall 明显高，但 merged recall 没提升，所以我加了一个显式 RRF 对照，并严格避免用 benchmark 的 expected 标签参与排序。RRF 在 retrieval-only 上把 Milvus + Qwen 的 merged recall 从 0.738 提到 0.929，relation recall 到 0.967；但同配置的 32 条真实 Text2SQL diagnostic 从 21/32 降到 18/32，plan validation 失败增加。我的结论不是强行把 RRF 切默认，而是保留 weighted、记录否定实验，并把下一步定位到 context assembly 和 QueryPlan 的耦合。”
+
+1. **[压力追问] 你离线 recall 提升这么多却没有收益，是不是 benchmark 没意义？**
+
+   benchmark 仍有意义：它证明向量信号与 fusion 排序本身确实发生了变化。但它不能替代端到端评测，因为 LLM 还会受 prompt 长度、文档顺序和 QueryPlan 约束影响。正确做法是两层都保留：用 retrieval-only 定位检索问题，用 diagnostic 检查系统结果，不能拿其中一层代替另一层。
+
+### 验证与下一步
+
+- 验证：focused `16 passed`、related `22 passed`、全量 `133 passed`；Milvus collection row_count `193`；weighted/RRF diagnostic `21/32 → 18/32`。既有 Starlette/httpx deprecation warning 不影响模块。
+- 下一步：先逐 case 分析 RRF 改变的 context 与 QueryPlan；如需 doc_type weighting、bundle docs、context budget、reranker 或默认策略切换，先单独做长期决策。
+
+**本地启动体验：**本模块没有独立页面；可运行 `python -m eval.run_schema_retrieval_benchmark --top-k 12 --fusion-strategy weighted`，再把策略改为 `rrf` 对比 `.agent_work/temp` 中的报告。

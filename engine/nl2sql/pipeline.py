@@ -134,7 +134,12 @@ def _with_trace_snapshot(
     )
 
 
-def _retrieval_metadata(retrieval_result: SchemaRetrievalResult, *, schema_retrieval_profile: str = "default") -> dict[str, Any]:
+def _retrieval_metadata(
+    retrieval_result: SchemaRetrievalResult,
+    *,
+    schema_retrieval_profile: str = "default",
+    fusion_strategy: str = "weighted",
+) -> dict[str, Any]:
     """把检索详情压成 JSONL 友好的诊断摘要。"""
 
     metric_doc_hits = [
@@ -144,6 +149,7 @@ def _retrieval_metadata(retrieval_result: SchemaRetrievalResult, *, schema_retri
     ]
     return {
         "schema_retrieval_profile": schema_retrieval_profile,
+        "fusion_strategy": fusion_strategy,
         "keyword_hit_count": len(retrieval_result.keyword_hits),
         "vector_hit_count": len(retrieval_result.vector_hits),
         "merged_hit_count": len(retrieval_result.merged_hits),
@@ -219,6 +225,7 @@ def run_text2sql_pipeline(
     domain_schema: DomainSchema | None = None,
     top_k: int = 30,
     schema_retrieval_profile: str = "default",
+    schema_fusion_strategy: str = "weighted",
     schema_vector_index: VectorIndex | None = None,
 ) -> Text2SQLPipelineResult:
     """执行 M11 single-step Text2SQL pipeline。
@@ -283,6 +290,7 @@ def run_text2sql_pipeline(
         top_k=top_k,
         domain_schema=active_domain_schema,
         schema_retrieval_profile=schema_retrieval_profile,
+        fusion_strategy=schema_fusion_strategy,
         vector_index=schema_vector_index,
     )
     span.end(
@@ -290,6 +298,7 @@ def run_text2sql_pipeline(
         metadata=_retrieval_metadata(
             retrieval_result,
             schema_retrieval_profile=schema_retrieval_profile,
+            fusion_strategy=schema_fusion_strategy,
         ),
     )
     if not retrieval_result.merged_hits:

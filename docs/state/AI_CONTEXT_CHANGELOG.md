@@ -13,6 +13,19 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M21 Schema Retrieval Fusion / Context Repair（2026-08-03）
+
+- 改动范围：未提供模块起始 commit，按当前工作树检查；本模块涉及 `engine/schema_retrieval/retriever.py`、`engine/nl2sql/pipeline.py`、`app/schemas/agent.py`、`app/api/query.py`、`eval/run_schema_retrieval_benchmark.py`、`eval/run_eval.py`、两份 retrieval 测试和 `.agent_work/temp/m21-*` 验证素材。`docs/dev-log.md` 存在用户既有未提交改动，未重写其旧内容。
+- 关键记录：
+  - 保持默认 `weighted` merge，不改默认 embedding / Milvus、正式 case、scorer 或 oracle；新增仅显式传入的 `rrf`，并把它写入 benchmark / eval runtime metadata 和 schema retrieval trace metadata。
+  - RRF 只使用线上候选 hit 的 rank；`expected_tables`、`expected_columns`、metric / relation 标注只用于离线评分，不能进入 retriever / reranker，避免评测标签泄漏。
+  - 为 deterministic 和 Milvus 报告统一补齐 `schema_docs_hash` 等运行元数据，确保基线与候选可以确认使用同一份 schema 语料。
+  - retrieval-only：deterministic merged `0.738→0.802`；Milvus + Qwen embedding merged `0.738→0.929`、metric `0.600→0.900`、relation `0.633→0.967`（collection `datapilot_schema_docs_m21_qwen_weighted_20260803_001`，row_count `193`，hash `7b531e...`）。
+  - 同配置 DeepSeek diagnostic：weighted `21/32`，RRF `18/32`。虽然 `schema_context 5→4`，但 `plan_validation 0→3`、`query_plan 3→4`、`schema_retrieval 0→1`；RRF 不具备端到端收益，记录为否定实验，不切默认。
+- 参考资料：无外部资料；依据 M21 计划、M19 triage、M20 clean Milvus 证据与既有 `SchemaHit.rrf_score` 字段，未引入 LLM / cross-encoder reranker。
+- 验证快照：focused `16 passed, 1 warning`；related `22 passed, 1 warning`；全量 pytest 首次 300s 外层超时但无失败栈，使用新 basetemp 复跑为 `133 passed, 1 warning`（376.77s）。真实 retrieval-only 和 diagnostic A/B 报告均已写入 `.agent_work/temp/m21-*`；既有 Starlette/httpx deprecation warning 不影响 M21。
+- 遗留/后续：若继续优化，先按 case 审查 RRF 改变后的 context 与 QueryPlan；relation/metric bundle docs、doc_type weighting、context budget / top_k、reranker 和默认 embedding / Milvus 均为需单独确认的长期选择。
+
 ### [实验] 新增 Schema Retrieval embedding-only benchmark（2026-08-02）
 
 - 新增 `eval/cases/schema-retrieval-embedding-benchmark.yaml`、`eval/run_schema_retrieval_benchmark.py`、`tests/test_schema_retrieval_embedding_benchmark.py`，用于只评估 Schema Retrieval 召回，不调用 LLM / 不执行 SQL。

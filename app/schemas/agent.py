@@ -18,12 +18,15 @@ class QueryRequest(BaseModel):
     模板进入新 Text2SQL pipeline。
     `schema_retrieval_profile` 是本地实验开关：默认不传时沿用环境变量；演示页可显式选择
     Milvus + Qwen embedding，方便 Phase 3 RAG / Hybrid 前手动对比。
+    `schema_fusion_strategy` 是 M21 的受控实验开关：默认 `weighted` 保持既有排序，只有显式
+    传 `rrf` 才会改用 rank-based fusion；它不改变默认检索或响应契约。
     """
 
     question: str = Field(min_length=1)
     user_role: str = Field(default="ops")
     force_new_pipeline: bool = Field(default=False)
     schema_retrieval_profile: Literal["default", "milvus_qwen37"] = Field(default="default")
+    schema_fusion_strategy: Literal["weighted", "rrf"] = Field(default="weighted")
 
 
 class CostInfo(BaseModel):

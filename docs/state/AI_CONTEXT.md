@@ -5,12 +5,12 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M20 Schema Retrieval / Milvus Index Hygiene（已完成，待 accept-module）
-- 下一模块：Phase 3 RAG / Hybrid 前置规划（M20 后续）
-- 当前模块验收：M20 未验收（待 accept-module）
+- 当前模块：M21 Schema Retrieval Fusion / Context Repair（已完成，待 accept-module）
+- 下一模块：Phase 3 RAG / Hybrid 前置规划（M21 后续；RRF 不切默认）
+- 当前模块验收：M21 未验收（待 accept-module）
 - 上一模块验收：M18 已验收（2026-08-02，报告 `.agent_work/temp/accept-M18-20260802.md`）
 - 阻塞项：无
-- 更新时间：2026-08-02
+- 更新时间：2026-08-03
 
 ## 必读规则
 
@@ -50,6 +50,7 @@
 | 2026-08-02 | M20 DeepSeek + clean Milvus + Qwen embedding diagnostic 为 `17/32`，低于 M19 污染链路 `19/32`；说明 clean Milvus 后仍未看到 Qwen embedding 稳定收益，但不自动改默认 embedding。 |
 | 2026-08-02 | M20 Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 完整跑通：`21/32`（row_count=193、run_scoped）；高于同链路 DeepSeek `17/32` 与 M19 污染 Qwen `20/32`；提升来自 query_plan/plan_validation 消失，`schema_context` 7 仍是主失败簇。 |
 | 2026-08-02 | Retrieval-only benchmark 已新增：Qwen embedding vector-only recall `0.929` 高于 deterministic `0.787`，但 merged recall 均为 `0.738`；说明 embedding 有信号，当前瓶颈更像 fusion / rerank。 |
+| 2026-08-03 | M21 新增显式 `rrf` fusion 实验（默认仍为 `weighted`，不读取任何 `expected_*` 标签）。retrieval-only 上，Milvus + Qwen embedding merged recall `0.738 → 0.929`、relation `0.633 → 0.967`；但同配置 DeepSeek diagnostic `21/32 → 18/32`，并新增 `plan_validation 0→3`，故 RRF 记录为否定实验且不切默认。 |
 | 2026-08-02 | `qwen3.8-max` 当前 DashScope 账号/配置不可用，最小调用返回 HTTP 403 `access_denied`；`qwen3.7-max` 可用。 |
 | 2026-07-30 | M18 Experiment 结论：LangFuse UI 的 trace -> Dataset item 可用；UI run 需要项目 LLM key，Webhook run 需要 remote experiment URL，DataPilot 当前不临时实现 webhook runner。 |
 
@@ -64,6 +65,7 @@
 | 2026-08-02 | 默认模型不自动切 Qwen：`qwen3.7-max` 是强候选，但模型切换影响长期基线，需要单独确认和评估。 |
 | 2026-08-02 | 默认 embedding / 向量库不自动切：当前 Milvus collection 已确认重复灌入污染，必须先做 M20 index hygiene，之后再重测 embedding。 |
 | 2026-08-02 | 当前优化优先级：先修 `schema_context / schema_retrieval`，再看 `result_match / plan_validation / query_plan / sql_generation`；换模型不能替代 schema 上下文修复。 |
+| 2026-08-03 | M21 结论：retrieval-only recall 提升不足以证明端到端收益；下一步先逐 case 审查 context assembly / QueryPlan 耦合，不直接调高 `top_k`、新增 bundle docs 或引入 reranker。 |
 | 2026-08-02 | Eval / Trace / LangFuse 的功能解释长文在 `docs/eval-observability-guide.md`；AI 只有在需要讲解设计或写说明时再读。 |
 
 ## 已知的坑（活跃列表）

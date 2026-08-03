@@ -36,6 +36,16 @@ def test_run_schema_retrieval_benchmark_default_backend() -> None:
     assert all(result.merged_top_docs for result in results)
 
 
+def test_run_schema_retrieval_benchmark_can_select_rrf_explicitly() -> None:
+    """M21 的 RRF 仅在显式参数下启用，默认 benchmark 不会悄悄换融合策略。"""
+
+    cases = load_benchmark_cases(DEFAULT_CASES)[:2]
+    results = run_benchmark(cases, top_k=12, fusion_strategy="rrf")
+
+    assert len(results) == 2
+    assert all(0.0 <= result.overall_recall <= 1.0 for result in results)
+
+
 def test_write_schema_retrieval_benchmark_report(tmp_path: Path) -> None:
     """报告要展示 runtime metadata、case summary 和 top docs，方便比较 embedding。"""
 
@@ -49,6 +59,7 @@ def test_write_schema_retrieval_benchmark_report(tmp_path: Path) -> None:
         metadata={
             "schema_vector_backend": "inmemory",
             "schema_embedding_provider": "deterministic",
+            "fusion_strategy": "rrf",
         },
     )
 
@@ -57,3 +68,4 @@ def test_write_schema_retrieval_benchmark_report(tmp_path: Path) -> None:
     assert "Case Summary" in text
     assert "Top Docs" in text
     assert "schema_vector_backend" in text
+    assert "fusion_strategy" in text
