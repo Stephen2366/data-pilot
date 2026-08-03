@@ -28,7 +28,7 @@ accept-module（最终门禁检查）
 - 当前对话
 - `docs/state/AI_CONTEXT.md`
 - `docs/state/AI_CONTEXT_CHANGELOG.md`
-- `.agent_work/temp/<module>-notes.md`
+- `docs/notes/<module>-notes.md`
 - git diff
 - 终端验证输出
 
@@ -57,7 +57,7 @@ accept-module（最终门禁检查）
 4. 收集过程素材：
    - 读取 `docs/state/AI_CONTEXT.md` 当前状态 / 最新事实快照
    - 按需读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 近期变更记录
-   - 读取 `.agent_work/temp/<module>-notes.md`，如果存在
+   - 读取 `docs/notes/<module>-notes.md`，如果存在
    - 查找当前对话中已经跑过的验证命令输出
    - 如果模块中曾向用户确认关键取舍，必须记录当时给出的选项、主要风险、推荐方案和用户最终选择；不要只写最终结论
    - 如果素材缺失，后续日志中明确写“过程细节未记录”
@@ -196,7 +196,7 @@ accept-module（最终门禁检查）
 
 ## 阶段 3：素材固化（本 skill 的收尾，也是 finish-docs 的输入）
 
-把本模块收工所需的全部素材写入 `.agent_work/temp/<module>-notes.md`（文件已存在则更新追加）。**这一步是硬要求**：`finish-docs` 写 AI_CONTEXT / dev-log 时只读 notes.md + git diff + 现有文档，不依赖本对话的记忆——所以素材不落盘，后半程就会写"过程细节未记录"。
+把本模块收工所需的全部素材写入 `docs/notes/<module>-notes.md`（文件已存在则更新追加）。**这一步是硬要求**：`finish-docs` 写 AI_CONTEXT / dev-log 时只读 notes.md + git diff + 现有文档，不依赖本对话的记忆——所以素材不落盘，后半程就会写"过程细节未记录"。
 
 notes.md 必须包含以下小节：
 

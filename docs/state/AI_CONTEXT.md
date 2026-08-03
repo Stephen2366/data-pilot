@@ -80,7 +80,7 @@
 | 2026-07-24 起，2026-08-02 仍有效 | Windows 下 `.agent_work/temp/pytest-tmp` 偶发被旧 pytest 临时目录锁住 | 测试可能因 `PermissionError` 删除 basetemp 失败而假失败 | 不改业务代码，换新的 `--basetemp=.agent_work/temp/<name>` 复跑 |
 | 2026-07-22 起，2026-08-02 仍有效 | DB comment 在 PowerShell 离线 SQL 输出中乱码 | 影响离线 SQL 文件可读性；在线迁移和建表正常 | 暂不改业务；如需导出 SQL 文件，再统一处理输出编码或将 DB comment 改为 ASCII |
 | 2026-07-18 起，2026-08-02 仍有效 | 工作树可能有用户或其他工具留下的未提交改动 | 容易误回滚非本次任务修改 | 动文件前看 `git status --short`，不回滚非本次任务改动 |
-| 2026-07-29 起，2026-08-02 仍有效 | LangFuse SDK 4.14.1 已无旧版 `client.trace()` builder | 按旧博客 / 旧草稿写 smoke 或 M16 backend 会直接 `AttributeError` | 使用 `start_observation(trace_context={"trace_id": uuid4().hex})` / `create_score(trace_id=...)` / `flush()`；细节见 `.agent_work/temp/m15-notes.md` |
+| 2026-07-29 起，2026-08-02 仍有效 | LangFuse SDK 4.14.1 已无旧版 `client.trace()` builder | 按旧博客 / 旧草稿写 smoke 或 M16 backend 会直接 `AttributeError` | 使用 `start_observation(trace_context={"trace_id": uuid4().hex})` / `create_score(trace_id=...)` / `flush()`；细节见 `docs/notes/m15-notes.md` |
 | 2026-07-29 起，2026-08-02 仍有效 | Windows 裸连 LangFuse Cloud 偶发 `WinError 10013` | trace visibility 查询 / OTLP export 可能失败，但 score 写入和 JSONL 主链路可正常 | 真实 Cloud smoke 建议显式设置 `HTTP_PROXY` / `HTTPS_PROXY` 为 `http://127.0.0.1:7897`；脚本将 score write 和 trace visibility 分开显示 |
 | 2026-08-02 起，M20 已加护栏 | 旧固定 Milvus collection `datapilot_schema_docs` 已被历史重复灌入污染 | 旧 collection 的历史 A/B 结果不能直接作为 embedding 优劣结论 | 新 eval/smoke 使用唯一 collection 或 clean collection；`MilvusVectorIndex` 会拒绝行数/维度不匹配的已有 collection |
 

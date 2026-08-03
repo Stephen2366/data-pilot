@@ -23,7 +23,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - Phase 3A 正式回归输入：`eval/cases/phase3a-regression.yaml`（10 条 formal 主硬门）
 - Phase 3A challenge 输入：`eval/cases/database-upgrade-challenge.yaml`（16 条 challenge superset，包含 10 条 formal question）
 - 数据库升级测试：`tests/test_database_upgrade.py`
-- Seed 摘要输出：`.agent_work/temp/database-upgrade-seed-summary.md`
+- Seed 摘要输出：`eval/reports/database-upgrade-seed-summary.md`
 
 ## 当前 14 张物理表
 
@@ -187,7 +187,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.agent_work/temp/pytest-db-current
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\smoke.yaml --report eval\reports\latest.md --trace .agent_work\temp\db-current-smoke-traces.jsonl
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\smoke.yaml --report eval\reports\latest.md --trace eval/reports/db-current-smoke-traces.jsonl
 git diff --check
 ```
 

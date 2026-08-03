@@ -172,7 +172,7 @@ M21 保持默认 `weighted` merge，新增只可显式传入的 `rrf` 实验策�
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 # M20 clean collection smoke：预期 final_row_count=193
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.smoke_m20_milvus_index --output .agent_work\temp\m20-milvus-index-smoke.md
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.smoke_m20_milvus_index --output eval/reports/m20-milvus-index-smoke.md
 
 # MySQL expected_sql audit：只读审查，不改变 scorer
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.audit_m20_eval_ground_truth
@@ -186,10 +186,10 @@ $env:SCHEMA_EMBEDDING_PROVIDER='dashscope'
 $env:QWEN_EMBEDDING_MODEL='qwen3.7-text-embedding'
 $env:QWEN_EMBEDDING_DIMENSIONS='1024'
 $env:MILVUS_COLLECTION='datapilot_schema_docs_m20_deepseek_qwenemb_<YYYYMMDD_HHMMSS>'  # 时间戳命名，防重复；先用 date +%Y%m%d_%H%M%S 取时间戳
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace .agent_work\temp\<name>-traces.jsonl --report .agent_work\temp\<name>-report.md --triage-json .agent_work\temp\<name>-triage.json
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-traces.jsonl --report eval/reports/<name>-report.md --triage-json eval/reports/<name>-triage.json
 
 # Retrieval-only deterministic baseline
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report .agent_work\temp\schema-retrieval-embedding-deterministic-report.md --top-k 12
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report eval/reports/schema-retrieval-embedding-deterministic-report.md --top-k 12
 
 # Retrieval-only Milvus + Qwen embedding
 $env:SCHEMA_VECTOR_BACKEND='milvus'
@@ -197,7 +197,7 @@ $env:SCHEMA_EMBEDDING_PROVIDER='dashscope'
 $env:QWEN_EMBEDDING_MODEL='qwen3.7-text-embedding'
 $env:QWEN_EMBEDDING_DIMENSIONS='1024'
 Remove-Item Env:\MILVUS_COLLECTION -ErrorAction SilentlyContinue
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report .agent_work\temp\schema-retrieval-embedding-qwen-milvus-report.md --top-k 12 --collection-prefix datapilot_schema_retrieval_bench_qwen
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report eval/reports/schema-retrieval-embedding-qwen-milvus-report.md --top-k 12 --collection-prefix datapilot_schema_retrieval_bench_qwen
 ```
 
 ## 排查菜单

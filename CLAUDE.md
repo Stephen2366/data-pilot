@@ -64,6 +64,7 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
     runbook.md          # AI / 本地运行入口，模型、检索、LangFuse、eval 命令矩阵
     eval-baselines.md   # 长期评测基线、A/B 结果、失败结构和错因账本
     database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
+  notes/                # 模块过程素材库（mX-notes.md）
   dev-log(M0-M19).md    # 用户学习复盘（M0~M19）
   dev-log.md            # 用户学习复盘（M20以后）
   phase3a-plan.md       # 阶段三A模块计划（历史；当前阶段计划见 docs/state/AI_CONTEXT.md「当前状态」）
@@ -83,16 +84,16 @@ tests/                  # pytest 测试
 ## 工作约定
 
 - 所有 AI 工具共享同一个临时目录：`.agent_work/temp/`，用于存放脚本中间产物、一次性 JSON、缓存、临时 smoke 摘要等。
-- 可复用运行数据不要放临时目录：模块 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），Agent Trace 写入 `eval/traces/`；smoke 的一次性输出摘要仍放临时目录。
+- 可复用运行数据不要放临时目录：模块 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），Agent Trace 写入 `eval/traces/`，eval 报告（report / triage / compare）写入 `eval/reports/`，开发过程 notes 写入 `docs/notes/`（见「开发素材与收工」）；smoke 的一次性输出摘要仍放临时目录。
 - 路径、验收数字、Schema、命名只保留一个权威定义，优先登记在当前阶段计划文件的“单一事实源”章节。
 - README 只在阶段结束时统一整理和更新。
 
 ## 开发素材与收工
 
-- 开始较完整的模块开发时，先在 `.agent_work/temp/<module>-notes.md` 写几条 implementation checklist。
-- 开发中遇到关键决策/踩坑/验证素材/临时取舍/判断与修正/实验结论/新发现等，先把素材写入 `.agent_work/temp/<module>-notes.md`。提前记录素材是为了供收工流程复用，防止后面记录日志时只能根据代码来。
+- 开始较完整的模块开发时，先在 `docs/notes/<module>-notes.md` 写几条 implementation checklist。
+- 开发中遇到关键决策/踩坑/验证素材/临时取舍/判断与修正/实验结论/新发现等，先把素材写入 `docs/notes/<module>-notes.md`。提前记录素材是为了供收工流程复用，防止后面记录日志时只能根据代码来。
 - 模块开发完成后按两步收工：
-  1. `finish-module`：注释查漏 + 运行验证 + 把决策取舍/验证快照/注释小结固化到 `<module>-notes.md`（开发刚结束时调用，上下文最新鲜）。
+  1. `finish-module`：注释查漏 + 运行验证 + 把决策取舍/验证快照/注释小结固化到 `docs/notes/<module>-notes.md`（开发刚结束时调用，上下文最新鲜）。
   2. `finish-docs`：基于固化的素材/对话记忆/代码，更新 `docs/state/AI_CONTEXT_CHANGELOG.md` / `docs/state/AI_CONTEXT.md` / `docs/dev-log.md`（可稍后或跨会话执行）。
 - 收工完成后用户人工查看验收；最终由 `accept-module` 做验收门禁。
 

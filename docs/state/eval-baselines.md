@@ -68,10 +68,10 @@
 
 报告路径：
 
-- Diagnostic report：`.agent_work/temp/m20-deepseek-qwenemb-diagnostic-report.md`
-- Diagnostic triage：`.agent_work/temp/m20-deepseek-qwenemb-diagnostic-triage.json`
-- M19 polluted vs M20 clean compare：`.agent_work/temp/m20-m19-polluted-vs-clean-deepseek-qwenemb-compare.md`
-- Milvus index smoke：`.agent_work/temp/m20-milvus-index-smoke.md`
+- Diagnostic report：`eval/reports/m20-deepseek-qwenemb-diagnostic-report.md`
+- Diagnostic triage：`eval/reports/m20-deepseek-qwenemb-diagnostic-triage.json`
+- M19 polluted vs M20 clean compare：`eval/reports/m20-m19-polluted-vs-clean-deepseek-qwenemb-compare.md`
+- Milvus index smoke：`eval/reports/m20-milvus-index-smoke.md`
 
 索引卫生：
 
@@ -121,10 +121,10 @@ M19 polluted DeepSeek + Qwen embedding vs M20 clean DeepSeek + Qwen embedding di
 
 报告路径：
 
-- Diagnostic report：`.agent_work/temp/m20-qwen37max-qwenemb-diagnostic-report.md`
-- Diagnostic triage：`.agent_work/temp/m20-qwen37max-qwenemb-diagnostic-triage.json`
-- Clean DeepSeek vs Qwen compare：`.agent_work/temp/m20-clean-deepseek-vs-qwen37max-compare.md`
-- M19 polluted vs M20 clean Qwen compare：`.agent_work/temp/m20-polluted-vs-clean-qwen37max-compare.md`
+- Diagnostic report：`eval/reports/m20-qwen37max-qwenemb-diagnostic-report.md`
+- Diagnostic triage：`eval/reports/m20-qwen37max-qwenemb-diagnostic-triage.json`
+- Clean DeepSeek vs Qwen compare：`eval/reports/m20-clean-deepseek-vs-qwen37max-compare.md`
+- M19 polluted vs M20 clean Qwen compare：`eval/reports/m20-polluted-vs-clean-qwen37max-compare.md`
 
 索引卫生：
 
@@ -191,10 +191,10 @@ M19 污染 vs M20 clean（同一 Qwen 模型）：
 
 fusion A/B 报告：
 
-- deterministic weighted：`.agent_work/temp/m21-baseline-deterministic-weighted.md`
-- deterministic RRF：`.agent_work/temp/m21-candidate-deterministic-rrf.md`
-- Milvus + Qwen embedding weighted：`.agent_work/temp/m21-baseline-qwen-milvus-weighted.md`
-- Milvus + Qwen embedding RRF：`.agent_work/temp/m21-candidate-qwen-milvus-rrf.md`
+- deterministic weighted：`eval/reports/m21-baseline-deterministic-weighted.md`
+- deterministic RRF：`eval/reports/m21-candidate-deterministic-rrf.md`
+- Milvus + Qwen embedding weighted：`eval/reports/m21-baseline-qwen-milvus-weighted.md`
+- Milvus + Qwen embedding RRF：`eval/reports/m21-candidate-qwen-milvus-rrf.md`
 
 ### 同模型端到端 fusion A/B
 
@@ -218,23 +218,23 @@ weighted → RRF 的同模型 triage 变化为：`schema_context 6→5`、`query
 
 报告：
 
-- 本地组：`.agent_work/temp/m21-qwen-plus-local-weighted-report.md`、`.agent_work/temp/m21-qwen-plus-local-weighted-triage.json`
-- Qwen embedding 组：`.agent_work/temp/m21-qwen-plus-qwenemb-weighted-report.md`、`.agent_work/temp/m21-qwen-plus-qwenemb-weighted-triage.json`
-- triage 对比：`.agent_work/temp/m21-qwen-plus-local-vs-qwenemb-triage-compare.md`
+- 本地组：`eval/reports/m21-qwen-plus-local-weighted-report.md`、`eval/reports/m21-qwen-plus-local-weighted-triage.json`
+- Qwen embedding 组：`eval/reports/m21-qwen-plus-qwenemb-weighted-report.md`、`eval/reports/m21-qwen-plus-qwenemb-weighted-triage.json`
+- triage 对比：`eval/reports/m21-qwen-plus-local-vs-qwenemb-triage-compare.md`
 
 fusion A/B 报告：
 
-- weighted report：`.agent_work/temp/m21-qwen-plus-weighted-diagnostic-report.md`
-- weighted triage：`.agent_work/temp/m21-qwen-plus-weighted-diagnostic-triage.json`
-- RRF report：`.agent_work/temp/m21-qwen-plus-rrf-diagnostic-report.md`
-- RRF triage：`.agent_work/temp/m21-qwen-plus-rrf-diagnostic-triage.json`
-- A/B compare：`.agent_work/temp/m21-qwen-plus-weighted-vs-rrf-compare.md`
+- weighted report：`eval/reports/m21-qwen-plus-weighted-diagnostic-report.md`
+- weighted triage：`eval/reports/m21-qwen-plus-weighted-diagnostic-triage.json`
+- RRF report：`eval/reports/m21-qwen-plus-rrf-diagnostic-report.md`
+- RRF triage：`eval/reports/m21-qwen-plus-rrf-diagnostic-triage.json`
+- A/B compare：`eval/reports/m21-qwen-plus-weighted-vs-rrf-compare.md`
 
 ### DeepSeek supplementary fusion A/B
 
 - DeepSeek weighted `21/32` → RRF `18/32`；该轮用于说明 RRF 的端到端负向风险，不替换 M20 clean 链路事实锚点（DeepSeek `17/32`）。
 - RRF 相比 weighted 新增 `plan_validation` 失败，不能只看 retrieval-only recall 决定 fusion。
-- 报告：`.agent_work/temp/m21-deepseek-weighted-diagnostic-report.md`、`.agent_work/temp/m21-deepseek-rrf-diagnostic-report.md`。
+- 报告：`eval/reports/m21-deepseek-weighted-diagnostic-report.md`、`eval/reports/m21-deepseek-rrf-diagnostic-report.md`。
 
 ### M21 失败归因修正
 
@@ -249,7 +249,7 @@ fusion A/B 报告：
 
 只有 SchemaGraph / retrieval trace 明确缺少目标表或字段时，才把问题归入 `schema_retrieval`；`rule:table_hit` 和 `rule:column_recall` 单独不能证明 embedding 或 fusion 失败。旧 `failure_stage` 保留，避免破坏历史报告。
 
-相关审查素材：`.agent_work/temp/m21-context-audit.md`；triage focused tests：`7 passed`。
+相关审查素材：`eval/reports/m21-context-audit.md`；triage focused tests：`7 passed`。
 
 ### M21 当前结论
 
@@ -268,10 +268,10 @@ fusion A/B 报告：
 
 报告路径：
 
-- Formal：`.agent_work/temp/m19-formal-report.md`
-- Challenge：`.agent_work/temp/m19-challenge-report.md`
-- Diagnostic：`.agent_work/temp/m19-diagnostic-report.md`
-- Diagnostic triage：`.agent_work/temp/m19-diagnostic-triage.json`
+- Formal：`eval/reports/m19-formal-report.md`
+- Challenge：`eval/reports/m19-challenge-report.md`
+- Diagnostic：`eval/reports/m19-diagnostic-report.md`
+- Diagnostic triage：`eval/reports/m19-diagnostic-triage.json`
 
 结果：
 
@@ -305,11 +305,11 @@ fusion A/B 报告：
 
 报告路径：
 
-- Formal：`.agent_work/temp/m19-qwen37max-formal-report.md`
-- Challenge：`.agent_work/temp/m19-qwen37max-challenge-report.md`
-- Diagnostic：`.agent_work/temp/m19-qwen37max-diagnostic-report.md`
-- Diagnostic triage：`.agent_work/temp/m19-qwen37max-diagnostic-triage.json`
-- DeepSeek vs Qwen diagnostic 对比：`.agent_work/temp/m19-deepseek-vs-qwen37max-diagnostic-triage-compare.md`
+- Formal：`eval/reports/m19-qwen37max-formal-report.md`
+- Challenge：`eval/reports/m19-qwen37max-challenge-report.md`
+- Diagnostic：`eval/reports/m19-qwen37max-diagnostic-report.md`
+- Diagnostic triage：`eval/reports/m19-qwen37max-diagnostic-triage.json`
+- DeepSeek vs Qwen diagnostic 对比：`eval/reports/m19-deepseek-vs-qwen37max-diagnostic-triage-compare.md`
 
 结果：
 
@@ -378,14 +378,14 @@ Embedding：
 
 ```powershell
 # formal
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\phase3a-regression.yaml --pipeline-mode new_text2sql --trace .agent_work\temp\<name>-formal-traces.jsonl --report .agent_work\temp\<name>-formal-report.md --triage-json .agent_work\temp\<name>-formal-triage.json
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\phase3a-regression.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-formal-traces.jsonl --report eval/reports/<name>-formal-report.md --triage-json eval/reports/<name>-formal-triage.json
 
 # challenge
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --pipeline-mode new_text2sql --trace .agent_work\temp\<name>-challenge-traces.jsonl --report .agent_work\temp\<name>-challenge-report.md --triage-json .agent_work\temp\<name>-challenge-triage.json
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-challenge-traces.jsonl --report eval/reports/<name>-challenge-report.md --triage-json eval/reports/<name>-challenge-triage.json
 
 # diagnostic
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace .agent_work\temp\<name>-diagnostic-traces.jsonl --report .agent_work\temp\<name>-diagnostic-report.md --triage-json .agent_work\temp\<name>-diagnostic-triage.json
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-diagnostic-traces.jsonl --report eval/reports/<name>-diagnostic-report.md --triage-json eval/reports/<name>-diagnostic-triage.json
 
 # failure distribution compare
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --compare-triage-left <left>.json --compare-triage-right <right>.json --compare-triage-report .agent_work\temp\<name>-compare.md
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --compare-triage-left <left>.json --compare-triage-right <right>.json --compare-triage-report eval/reports/<name>-compare.md
 ```

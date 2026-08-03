@@ -21,7 +21,7 @@ accept-module（最终门禁检查）
 
 过程细节未记录就不编；档案编写信息来源：
 
-- `.agent_work/temp/<module>-notes.md`（**首选**，前半程固化的素材）
+- `docs/notes/<module>-notes.md`（**首选**，前半程固化的素材）
 - 会话记忆（开发和收工是同一个会话时可用）
 - `docs/state/AI_CONTEXT.md`
 - `docs/state/AI_CONTEXT_CHANGELOG.md`
@@ -34,7 +34,7 @@ accept-module（最终门禁检查）
 
 ## 阶段 1：读取素材
 
-1. 读取 `.agent_work/temp/<module>-notes.md`——**必读**，包含：改动文件清单、关键决策与取舍（含选项/风险/推荐/用户选择）、注释小结、验证快照、参考资料、遗留。
+1. 读取 `docs/notes/<module>-notes.md`——**必读**，包含：改动文件清单、关键决策与取舍（含选项/风险/推荐/用户选择）、注释小结、验证快照、参考资料、遗留。
 2. 读取 `docs/state/AI_CONTEXT.md` 当前状态 / 最新事实快照，确认当前模块、默认配置、最新基线。
 3. 按需读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 近期变更记录，确认档案格式与最近结论。
 4. 跑 `git status --short` 和 `git diff --name-only` 核对改动范围与 notes.md 一致。
