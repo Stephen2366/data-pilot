@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "reason": "ok",
+  "score_payload_count": 6,
+  "score_write_result": {
+    "ok": 6,
+    "skipped": 0,
+    "failed": 0
+  },
+  "langfuse_span_mode": "live",
+  "langfuse_write_status": "ok",
+  "langfuse_trace_id": "dbcbce212ae74e6cb998642310687dc4"
+}

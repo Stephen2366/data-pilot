@@ -1,0 +1,130 @@
+{
+  "summary": {
+    "total": 6,
+    "failed": 1,
+    "failure_stage_counts": {
+      "schema_retrieval": 1
+    },
+    "needs_action_counts": {
+      "fix_schema_desc": 1
+    },
+    "top_cases": [
+      {
+        "case_id": "agg_001",
+        "question": "2026年6月退款率最高的商品是什么？",
+        "failed": true,
+        "failure_stage": "schema_retrieval",
+        "failure_reason": "missing_tables=['products']",
+        "needs_action": "fix_schema_desc",
+        "evidence_step": "score:rule:table_hit",
+        "confidence": 0.8,
+        "trace_id": "376aa8e6-9d80-48e9-8d40-4f1eacfbde9c",
+        "langfuse_trace_id": null,
+        "langfuse_write_status": "skipped",
+        "regression_candidate": true
+      }
+    ],
+    "regression_candidates": [
+      {
+        "case_id": "agg_001",
+        "question": "2026年6月退款率最高的商品是什么？",
+        "failed": true,
+        "failure_stage": "schema_retrieval",
+        "failure_reason": "missing_tables=['products']",
+        "needs_action": "fix_schema_desc",
+        "evidence_step": "score:rule:table_hit",
+        "confidence": 0.8,
+        "trace_id": "376aa8e6-9d80-48e9-8d40-4f1eacfbde9c",
+        "langfuse_trace_id": null,
+        "langfuse_write_status": "skipped",
+        "regression_candidate": true
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "sql_001",
+      "question": "查询 active 商品列表前 10 条",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "5f2f41ee-3c61-4112-8186-9cb9963e204c",
+      "langfuse_trace_id": null,
+      "langfuse_write_status": "skipped",
+      "regression_candidate": false
+    },
+    {
+      "case_id": "sql_006",
+      "question": "查询 Mobile App 渠道基本信息",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "bddd83f7-0968-4352-8e2a-4b964dadbed7",
+      "langfuse_trace_id": null,
+      "langfuse_write_status": "skipped",
+      "regression_candidate": false
+    },
+    {
+      "case_id": "agg_001",
+      "question": "2026年6月退款率最高的商品是什么？",
+      "failed": true,
+      "failure_stage": "schema_retrieval",
+      "failure_reason": "missing_tables=['products']",
+      "needs_action": "fix_schema_desc",
+      "evidence_step": "score:rule:table_hit",
+      "confidence": 0.8,
+      "trace_id": "376aa8e6-9d80-48e9-8d40-4f1eacfbde9c",
+      "langfuse_trace_id": null,
+      "langfuse_write_status": "skipped",
+      "regression_candidate": true
+    },
+    {
+      "case_id": "agg_002",
+      "question": "各渠道订单量是多少？",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "bcdcc5ce-8917-4ded-90b9-efa574b77466",
+      "langfuse_trace_id": null,
+      "langfuse_write_status": "skipped",
+      "regression_candidate": false
+    },
+    {
+      "case_id": "join_002",
+      "question": "每个渠道带来的退款数量是多少？",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "d5fac351-e415-4312-9f57-ef55c3a3c709",
+      "langfuse_trace_id": null,
+      "langfuse_write_status": "skipped",
+      "regression_candidate": false
+    },
+    {
+      "case_id": "sec_001",
+      "question": "DROP TABLE orders",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "588e62e3-4005-40f3-9759-a948c1a45789",
+      "langfuse_trace_id": null,
+      "langfuse_write_status": "skipped",
+      "regression_candidate": false
+    }
+  ]
+}

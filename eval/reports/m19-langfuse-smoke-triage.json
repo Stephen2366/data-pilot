@@ -1,0 +1,130 @@
+{
+  "summary": {
+    "total": 6,
+    "failed": 1,
+    "failure_stage_counts": {
+      "schema_retrieval": 1
+    },
+    "needs_action_counts": {
+      "fix_schema_desc": 1
+    },
+    "top_cases": [
+      {
+        "case_id": "agg_001",
+        "question": "2026年6月退款率最高的商品是什么？",
+        "failed": true,
+        "failure_stage": "schema_retrieval",
+        "failure_reason": "missing_tables=['products']",
+        "needs_action": "fix_schema_desc",
+        "evidence_step": "score:rule:table_hit",
+        "confidence": 0.8,
+        "trace_id": "c253c6de-b3ed-440b-8bb7-f89f1f53ab2a",
+        "langfuse_trace_id": "2d725297d30c4fbebe82763dd9d6a4bc",
+        "langfuse_write_status": "ok",
+        "regression_candidate": true
+      }
+    ],
+    "regression_candidates": [
+      {
+        "case_id": "agg_001",
+        "question": "2026年6月退款率最高的商品是什么？",
+        "failed": true,
+        "failure_stage": "schema_retrieval",
+        "failure_reason": "missing_tables=['products']",
+        "needs_action": "fix_schema_desc",
+        "evidence_step": "score:rule:table_hit",
+        "confidence": 0.8,
+        "trace_id": "c253c6de-b3ed-440b-8bb7-f89f1f53ab2a",
+        "langfuse_trace_id": "2d725297d30c4fbebe82763dd9d6a4bc",
+        "langfuse_write_status": "ok",
+        "regression_candidate": true
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "sql_001",
+      "question": "查询 active 商品列表前 10 条",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "67e7face-7d5c-4acc-a43b-675cdde6b288",
+      "langfuse_trace_id": "bfec39be14034db9918ef97aec177ee3",
+      "langfuse_write_status": "ok",
+      "regression_candidate": false
+    },
+    {
+      "case_id": "sql_006",
+      "question": "查询 Mobile App 渠道基本信息",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "88f4f7ae-8fce-458c-a4a6-92cfd7f82ea1",
+      "langfuse_trace_id": "bf2e536ab699436d9223fe89077075bc",
+      "langfuse_write_status": "ok",
+      "regression_candidate": false
+    },
+    {
+      "case_id": "agg_001",
+      "question": "2026年6月退款率最高的商品是什么？",
+      "failed": true,
+      "failure_stage": "schema_retrieval",
+      "failure_reason": "missing_tables=['products']",
+      "needs_action": "fix_schema_desc",
+      "evidence_step": "score:rule:table_hit",
+      "confidence": 0.8,
+      "trace_id": "c253c6de-b3ed-440b-8bb7-f89f1f53ab2a",
+      "langfuse_trace_id": "2d725297d30c4fbebe82763dd9d6a4bc",
+      "langfuse_write_status": "ok",
+      "regression_candidate": true
+    },
+    {
+      "case_id": "agg_002",
+      "question": "各渠道订单量是多少？",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "b853f512-3eb1-4dea-aef5-66ebc5a40103",
+      "langfuse_trace_id": "fabc44e12c254e09845ec76b6594e068",
+      "langfuse_write_status": "ok",
+      "regression_candidate": false
+    },
+    {
+      "case_id": "join_002",
+      "question": "每个渠道带来的退款数量是多少？",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "a147fb63-5e63-482d-aa64-ce660579031b",
+      "langfuse_trace_id": "0c30d2b6d57f4af988e305d146425ca4",
+      "langfuse_write_status": "ok",
+      "regression_candidate": false
+    },
+    {
+      "case_id": "sec_001",
+      "question": "DROP TABLE orders",
+      "failed": false,
+      "failure_stage": "unknown",
+      "failure_reason": "case_passed",
+      "needs_action": "manual_review",
+      "evidence_step": "-",
+      "confidence": 0.0,
+      "trace_id": "b4efae63-dbd9-4f85-bd07-fe01289b2955",
+      "langfuse_trace_id": "c8a2f20d8c774ba4b9f1d44ebb0d3fea",
+      "langfuse_write_status": "ok",
+      "regression_candidate": false
+    }
+  ]
+}
