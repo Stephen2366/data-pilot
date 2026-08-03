@@ -140,6 +140,62 @@ def test_triage_classifies_sql_execution_from_error_type(tmp_path: Path) -> None
     assert triage.confidence == 0.9
 
 
+def test_triage_marks_column_recall_as_output_contract_subtype(tmp_path: Path) -> None:
+    """最终 SQL 列名不匹配时，保留大阶段兼容性并补充 output contract 细类。"""
+
+    trace_path = tmp_path / "output-column.jsonl"
+    _write_trace(trace_path)
+    result = _result(
+        passed=False,
+        response_body={"columns": ["used_order_count"]},
+        reason="missing_columns=['coupon_order_count']",
+        issue_tags=["missing_column"],
+        score_details=[
+            EvalScoreDetail(
+                name="rule:column_recall",
+                value=0.5,
+                passed=False,
+                reason="missing_columns=['coupon_order_count']",
+                issue_tags=["missing_column"],
+            )
+        ],
+    )
+
+    triage = triage_results([result], trace_path=trace_path)[0]
+
+    assert triage.failure_stage == "schema_context"
+    assert triage.failure_subtype == "output_column_contract"
+    assert triage.needs_action == "manual_review"
+
+
+def test_triage_marks_table_recall_as_output_contract_subtype(tmp_path: Path) -> None:
+    """最终 SQL 漏表时，不能仅凭 table_hit 断言 embedding 未召回。"""
+
+    trace_path = tmp_path / "output-table.jsonl"
+    _write_trace(trace_path)
+    result = _result(
+        passed=False,
+        response_body={"tables_used": ["orders"]},
+        reason="missing_tables=['products']",
+        issue_tags=["missing_table"],
+        score_details=[
+            EvalScoreDetail(
+                name="rule:table_hit",
+                value=0.5,
+                passed=False,
+                reason="missing_tables=['products']",
+                issue_tags=["missing_table"],
+            )
+        ],
+    )
+
+    triage = triage_results([result], trace_path=trace_path)[0]
+
+    assert triage.failure_stage == "schema_retrieval"
+    assert triage.failure_subtype == "output_table_contract"
+    assert triage.needs_action == "manual_review"
+
+
 def test_report_includes_result_match_triage_summary(tmp_path: Path) -> None:
     """Markdown report 要包含 M19 Failure Triage Summary 和 case 明细。"""
 

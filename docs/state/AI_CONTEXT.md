@@ -6,9 +6,9 @@
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
 - 当前模块：M21 Schema Retrieval Fusion / Context Repair（已完成，待 accept-module）
-- 下一模块：Phase 3 RAG / Hybrid 前置规划（M21 后续；RRF 不切默认）
+- 下一模块：M22 Output Contract / QueryPlan → SQL 稳定性（M21 embedding 对照已收口；RRF 不切默认）
 - 当前模块验收：M21 未验收（待 accept-module）
-- 上一模块验收：M18 已验收（2026-08-02，报告 `.agent_work/temp/accept-M18-20260802.md`）
+- 上一模块验收：M21 未验收（待 `accept-module`）
 - 阻塞项：无
 - 更新时间：2026-08-03
 
@@ -66,6 +66,10 @@
 | 2026-08-02 | 默认 embedding / 向量库不自动切：当前 Milvus collection 已确认重复灌入污染，必须先做 M20 index hygiene，之后再重测 embedding。 |
 | 2026-08-02 | 当前优化优先级：先修 `schema_context / schema_retrieval`，再看 `result_match / plan_validation / query_plan / sql_generation`；换模型不能替代 schema 上下文修复。 |
 | 2026-08-03 | M21 结论：retrieval-only recall 提升不足以证明端到端收益；下一步先逐 case 审查 context assembly / QueryPlan 耦合，不直接调高 `top_k`、新增 bundle docs 或引入 reranker。 |
+| 2026-08-03 | M21 地基体检：plus weighted/RRF trace 对齐后，未发现可明确证明的目标表/字段被 context assembly 丢失案例；当前 `schema_context` triage 过粗，常混入 SQL 输出列、alias、scorer 契约和生成失败。下一模块可在固定基线下尝试 rerank / doc_type weighting / schema docs 方案。 |
+| 2026-08-03 | M21 controlled Qwen-plus 本地 vs Qwen embedding A/B 已完成：两组均为 `21/32`，只有少数 case 的失败阶段互相转移，没有 subtype 或 schema_context 改善；不再继续堆 embedding 参数，下一步按 M22 处理 output contract 与 QueryPlan → SQL。 |
+| 2026-08-03 | M21 triage 已补 `failure_subtype`：输出表/列契约错误与 schema 大阶段分开显示；保留旧 `failure_stage` 兼容性，未改变评分或默认配置。 |
+| 2026-08-03 | M21 controlled A/B：固定 Qwen `qwen3.7-plus` + weighted + 同一 32 题，只比较本地 deterministic 与 clean Milvus/Qwen embedding；两组均为 `21/32`，`schema_context=6`，且 `output_column_contract=6`、`output_table_contract=2`、`result_contract=1` 完全相同。当前没有端到端 embedding 提分证据，后续转 M22。 |
 | 2026-08-02 | Eval / Trace / LangFuse 的功能解释长文在 `docs/eval-observability-guide.md`；AI 只有在需要讲解设计或写说明时再读。 |
 
 ## 已知的坑（活跃列表）

@@ -641,6 +641,21 @@ def _append_failure_triage_summary(
     lines.extend(
         [
             "",
+            "### Failure Subtype Counts",
+            "",
+            "| failure_subtype | count |",
+            "|---|---:|",
+        ]
+    )
+    if summary.get("failure_subtype_counts"):
+        for subtype, count in sorted(summary["failure_subtype_counts"].items()):
+            lines.append(f"| {subtype} | {count} |")
+    else:
+        lines.append("| - | 0 |")
+
+    lines.extend(
+        [
+            "",
             "### Needs Action Counts",
             "",
             "| needs_action | count |",
@@ -658,17 +673,18 @@ def _append_failure_triage_summary(
             "",
             "### Top Cases",
             "",
-            "| case_id | failure_stage | needs_action | confidence | evidence_step | regression_candidate | reason |",
-            "|---|---|---|---:|---|---|---|",
+            "| case_id | failure_stage | failure_subtype | needs_action | confidence | evidence_step | regression_candidate | reason |",
+            "|---|---|---|---:|---|---|---|---|",
         ]
     )
     top_cases = summary["top_cases"]
     if top_cases:
         for item in top_cases:
             lines.append(
-                "| {case_id} | {failure_stage} | {needs_action} | {confidence} | {evidence_step} | {candidate} | {reason} |".format(
+                "| {case_id} | {failure_stage} | {failure_subtype} | {needs_action} | {confidence} | {evidence_step} | {candidate} | {reason} |".format(
                     case_id=item["case_id"],
                     failure_stage=item["failure_stage"],
+                    failure_subtype=item.get("failure_subtype") or "-",
                     needs_action=item["needs_action"],
                     confidence=item["confidence"],
                     evidence_step=item["evidence_step"],
@@ -677,22 +693,23 @@ def _append_failure_triage_summary(
                 )
             )
     else:
-        lines.append("| - | - | - | 0 | - | no | no_failed_cases |")
+        lines.append("| - | - | - | - | 0 | - | no | no_failed_cases |")
 
     lines.extend(
         [
             "",
             "### Case Triage Details",
             "",
-            "| case_id | failed | failure_stage | needs_action | evidence_step | confidence | reason |",
-            "|---|---|---|---|---|---:|---|",
+            "| case_id | failed | failure_stage | failure_subtype | needs_action | evidence_step | confidence | reason |",
+            "|---|---|---|---|---|---|---:|---|",
         ]
     )
     for triage in failed_triages:
         lines.append(
-            "| {case_id} | yes | {stage} | {action} | {evidence} | {confidence} | {reason} |".format(
+            "| {case_id} | yes | {stage} | {subtype} | {action} | {evidence} | {confidence} | {reason} |".format(
                 case_id=triage.case_id,
                 stage=triage.failure_stage,
+                subtype=triage.failure_subtype or "-",
                 action=triage.needs_action,
                 evidence=triage.evidence_step,
                 confidence=triage.confidence,
@@ -700,7 +717,7 @@ def _append_failure_triage_summary(
             )
         )
     if not failed_triages:
-        lines.append("| - | no | - | - | - | 0 | no_failed_cases |")
+        lines.append("| - | no | - | - | - | - | 0 | no_failed_cases |")
 
     if langfuse_triage_write_result is not None:
         lines.extend(

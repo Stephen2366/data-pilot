@@ -64,6 +64,20 @@ M20 前的旧固定 collection `datapilot_schema_docs` 已确认被重复灌入�
   - embedding provider / model / dimension 有记录
 - 如果已有 collection 的 row_count 或 vector dimension 不匹配，当前代码会拒绝复用。不要为了继续跑分临时绕过这个错误。
 
+### clean collection 的安全复用
+
+同一个 clean collection 可以被多个独立 eval run 复用，但必须同时满足：
+
+- `schema_docs_hash` 相同；
+- embedding provider / model / dimension 相同；
+- `milvus_initial_row_count == schema_docs_count`；
+- `milvus_inserted_document_count == 0`；
+- `milvus_final_row_count == schema_docs_count`。
+
+M21 多次复用 `datapilot_schema_docs_m21_qwen_weighted_20260803_001` 时，均满足 `193 → 0 → 193`，因此是复用 clean collection，不是重复灌入。
+
+注意：`schema_vector_index_reuse=run_scoped` 表示“单个 eval run 内只创建并复用一个 vector index”，不表示每次 eval run 都必须新建 collection。
+
 可接受但要说明用途的方案：
 
 | 方案 | 使用场景 | 风险 |
@@ -85,6 +99,8 @@ M20 后，`eval/run_eval.py` 的 Markdown 报告会出现 `Eval Runtime Metadata
 | `schema_docs_count` | 当前 schema docs 数量，M20 为 193。 |
 | `schema_docs_hash` | schema docs 内容指纹，用于复现实验版本。 |
 | `milvus_collection` | 本轮 collection 名；应优先是唯一实验名。 |
+| `milvus_initial_row_count` | 本次 eval 开始时 collection 的行数。 |
+| `milvus_inserted_document_count` | 本次 eval 实际新增的 schema docs 数量；复用 clean collection 时应为 `0`。 |
 | `milvus_final_row_count` | clean collection 应等于 `schema_docs_count`。 |
 | `milvus_dimension` | 当前 embedding 向量维度。 |
 
@@ -108,6 +124,8 @@ M20 clean 链路：
 
 - Clean Milvus 链路上 Qwen `qwen3.7-max` 为 `21/32`，高于同链路 DeepSeek `17/32` 和 M19 污染 Qwen `20/32`；差距主要来自 LLM 本身（Qwen 消除 query_plan / plan_validation 失败），不是 embedding 优劣结论。
 - `schema_context` 仍是最大失败簇（7/32），换模型不能替代 schema 上下文修复。
+- M21 controlled Qwen-plus A/B：固定 `qwen3.7-plus`、weighted、同一 32 题和 oracle，只比较 `inmemory + deterministic` 与 clean Milvus/Qwen embedding；两组均为 `21/32`，`schema_context=6` 和 `failure_subtype` 分布完全相同，没有端到端 embedding 提分证据。
+- M21 collection reuse audit：`datapilot_schema_docs_m21_qwen_weighted_20260803_001` 在多次 Qwen-plus weighted / RRF / embedding A/B 中均记录 `milvus_initial_row_count=193`、`milvus_inserted_document_count=0`、`milvus_final_row_count=193`，且 schema hash 与 embedding 配置一致；这些测试是安全复用 clean collection，不构成 Milvus 污染。
 - 单次真实 LLM run 有非确定性；不据此切换默认 embedding / Milvus / 默认模型，默认仍保持 `inmemory + deterministic`。
 
 ## Retrieval-only Benchmark
@@ -189,12 +207,16 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_ret
 | Milvus 连接失败 | Docker / Milvus 是否启动 | 先 `docker ps`，确认 `milvus-standalone` healthy。 |
 | collection row_count 不是 193 | 旧 collection 污染或 schema docs 变化 | 换唯一 collection；不要直接把结果当 A/B 结论。 |
 | vector dimension mismatch | collection 来自不同 embedding 模型 / 维度 | 换唯一 collection 或显式 reset。 |
+| 不同 embedding 模型复用同一 collection | row_count 和维度可能仍匹配，但向量语义已经不一致 | 更换 provider / model 时必须使用新 collection。 |
+| 多个 eval 进程并发写同一 collection | 可能产生竞态或重复写入 | 不并发写同一实验 collection。 |
+| `milvus_inserted_document_count > 0` | 本次 eval 发生了实际写入，结果可能不可与之前 run 直接比较 | 立即停止并把该 run 标记为不可比较。 |
 | Qwen / DashScope embedding 报 key 错 | `.env` / 环境变量未设置或账号不可用 | 先跑最小 provider smoke；不要改默认 embedding。 |
 | eval 很慢或超时 | 真实 LLM + embedding 调用慢 | 长 run 用更长 timeout 或后台日志方式；partial trace 不纳入结论。 |
 | 总分变好但 failure 分布变差 | 可能只是 LLM 波动或错误转移 | 对比 triage JSON，不只看总分。 |
 
 ## 后续可选改进
 
+- M22 先处理 output table/column contract 与 QueryPlan → SQL 稳定性；M23 再单独评估 RRF / rerank 等 retrieval 方法，每次只改变一个变量。
 - 单独确认是否把 `result_match` oracle 从 SQLite deterministic seed 切到当前 configured database / MySQL。
 - 单独确认是否增强 formal 多表题检查强度，或重写退款率 / 已支付订单题面。
 - 如果 Milvus 要进入长期服务路径，再设计 upsert / delete-by-doc-id 和 collection cleanup。

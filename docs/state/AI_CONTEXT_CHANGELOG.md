@@ -13,6 +13,15 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验] M21 Qwen-plus 本地 vs Qwen embedding controlled A/B（2026-08-03）
+
+- 目的：在不改主模型、fusion、case、oracle 和默认配置的前提下，只比较 Schema Retrieval 的 `inmemory + deterministic` 与 clean Milvus + DashScope Qwen embedding。
+- 固定条件：`QWEN_MODEL=qwen3.7-plus`、`schema_fusion_strategy=weighted`、`new_text2sql`、同一 diagnostic 32 题、`LANGFUSE_ENABLED=false`、`result_match_oracle_backend=sqlite_deterministic_seed`；B 组 collection 为 `datapilot_schema_docs_m21_qwen_weighted_20260803_001`，`milvus_final_row_count=193`，schema hash 为 `7b531e...`，`schema_vector_index_reuse=run_scoped`。
+- 结果：A 本地 deterministic `21/32`；B Milvus + Qwen embedding `21/32`。A 的 failure stage 为 `schema_context=6`、`schema_retrieval=2`、`sql_generation=2`、`result_match=1`、`unknown=2`；B 为 `schema_context=6`、`schema_retrieval=2`、`query_plan=1`、`result_match=1`、`sql_generation=1`、`unknown=1`。
+- 失败细分类：两组 `failure_subtype` 完全一致：`output_column_contract=6`、`output_table_contract=2`、`result_contract=1`。逐 case 只有 `db_hard_001`（schema_retrieval → query_plan）、`db_join_003`（unknown → schema_retrieval）、`db_plan_004`（失败 → 通过）发生形态变化。
+- 结论：本次受控端到端 A/B 没有显示 Qwen embedding 提分，也没有改变 M21 的 `schema_context` / 输出契约瓶颈判断；embedding 保持显式实验路径，不切默认。后续转向 M22 的 output contract 与 QueryPlan → SQL 稳定性。
+- 产物：`.agent_work/temp/m21-qwen-plus-local-weighted-report.md`、`.agent_work/temp/m21-qwen-plus-local-weighted-triage.json`、`.agent_work/temp/m21-qwen-plus-qwenemb-weighted-report.md`、`.agent_work/temp/m21-qwen-plus-qwenemb-weighted-triage.json`、`.agent_work/temp/m21-qwen-plus-local-vs-qwenemb-triage-compare.md`、`.agent_work/temp/m21-plus-local-vs-qwenemb-notes.md`。
+
 ### [实验] Qwen qwen3.7-max M21 follow-up pilot timeout（2026-08-03）
 
 - 配置：固定 M21 clean Milvus collection `datapilot_schema_docs_m21_qwen_weighted_20260803_001`、Qwen embedding 1024 维、`weighted`、`LANGFUSE_ENABLED=false`；先执行 32 条 diagnostic，随后缩小为 16 条 `database-upgrade-challenge` pilot。
@@ -41,6 +50,19 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 结果：weighted `21/32`，RRF `20/32`。triage 对比：`schema_context 6→5`、`query_plan 1→2`、`result_match 1→2`、`unknown 2→1`，`schema_retrieval=2`、`sql_generation=1` 不变。
 - 判断：在同一主模型下，RRF 的离线召回优势没有转化为端到端收益，反而少 1 条通过；M21 保持 `weighted` 默认的结论得到第二个模型证据支持。
 - 产物：`.agent_work/temp/m21-qwen-plus-rrf-diagnostic-report.md`、`-triage.json`、`-traces.jsonl`、`m21-qwen-plus-weighted-vs-rrf-compare.md`。
+
+### [实验] M21 后续 Context 地基体检（2026-08-03）
+
+- 对齐 plus weighted / RRF 的 32 条 trace、triage 和 retrieval metadata，产出 `.agent_work/temp/m21-context-audit.md`。
+- 关键发现：当前 triage 的 `schema_context` 是 schema 相关失败桶；`eval/triage.py` 将 `rule:column_recall` 映射为 `schema_context`，但 scorer 检查的是最终响应 `body.columns`，不是 SchemaGraph 字段是否被召回。
+- weighted 失败样本中，`expected_tables` 均已进入 `schema_context.metadata.tables`；`db_core_002`、`db_multi_001`、`db_prompt_001` 等更像 SQL 输出表 / alias / scorer 契约问题，不能直接归因 embedding 或 context assembly。`build_schema_graph()` 对已选表会补入完整 domain-schema fields。
+- 结论：没有发现可被证据明确证明的“目标物理表 / 字段已召回但被 context assembly 丢掉”的 plus weighted case；M21 地基目标达到，不在 M21 临时实现未定位的 rerank / top_k / doc_type weighting，后续方法实验留给下一模块。
+
+### [小修] M21 triage 输出契约细分类（2026-08-03）
+
+- `eval/triage.py` 新增 `failure_subtype`，把 `rule:table_hit` / `rule:column_recall` 标成 `output_table_contract` / `output_column_contract`；保留原 `failure_stage`，避免破坏旧报告和 A/B 口径。
+- 报告新增 subtype 分布；这只修正诊断解释，不改变 scorer 分数、正式 case、oracle、默认配置或 LangFuse score 数量。
+- 验证：M19 triage focused `7 passed, 1 warning`；与 pipeline 相关回归 `13 passed, 1 warning`。
 
 ### [模块任务] M21 Schema Retrieval Fusion / Context Repair（2026-08-03）
 

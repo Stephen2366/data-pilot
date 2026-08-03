@@ -1115,44 +1115,29 @@ M19 完成后，用户要求追加真实模型 / embedding 对照：
 - 至少跑一组同配置 baseline-vs-candidate diagnostic，报告 `schema_context`、`schema_retrieval`、`result_match` 等 failure distribution 和总分变化；若总分不涨但 schema_context 降低，也要逐 case 记录原因。
 - 结果同步到 `docs/state/schema-retrieval-milvus-embedding.md`、`docs/state/eval-baselines.md`；若影响当前路线，再摘要同步到 `docs/state/AI_CONTEXT.md`。
 
-### M21 后续执行计划（待用户确认）
+### M21 后续执行计划（已执行收口）
 
-当前 M21 已完成 fusion 候选验证，但 **Context Repair 尚未开始实现**。已有同模型证据为：`qwen3.7-plus + weighted = 21/32`，`qwen3.7-plus + RRF = 20/32`；因此下一步不再继续更换 embedding 或重复刷 RRF 分数，而是定位为什么更高的 vector recall 没有稳定进入最终 schema context。
+M21 已完成 fusion 候选验证、Context 地基体检、triage 细分类和一次受控 embedding A/B。此次受用户明确要求，额外执行了“Qwen-plus 本地 vs Qwen embedding”对照；这只是单变量实验，不代表切换默认配置。
 
-#### 目标
+#### 已执行内容
 
-- 找出 `schema_context` 失败的真实类型：未召回、已召回但 merge / 去重 / 截断丢失，还是 schema 描述 / alias / scorer 口径问题。
-- 在不改变正式 eval case、scorer、oracle、默认模型、默认 embedding 和默认 fusion 的前提下，提出并验证一个最小 Context Repair 候选。
-- 用 targeted case 先验证候选是否修复上下文，再决定是否值得跑完整 diagnostic。
+1. 对齐 qwen3.7-plus weighted / RRF trace、retrieval-only 报告和 SchemaGraph，确认没有证据完整的“目标表/字段已召回但被 context assembly 丢失”主要案例。
+2. 将 `schema_context` 中的最终输出契约问题细分为 `output_table_contract`、`output_column_contract`、`result_contract` 和 `scorer_contract`；保留旧 `failure_stage` 兼容性。
+3. 固定 `qwen3.7-plus`、weighted、同一 32 条 diagnostic、同一 oracle、同一 schema hash，只改变 Schema Retrieval：
+   - A：`inmemory + deterministic`，`21/32`
+   - B：clean Milvus + Qwen `qwen3.7-text-embedding`（1024 维），`21/32`
+4. 对照结果：两组 `schema_context=6`，`failure_subtype` 分布完全一致；只有 3 个 case 的失败阶段发生转移，没有可归因的 embedding 端到端提分。
 
-#### 严格范围
+#### M21 收口边界
 
-- 固定当前实验基线：`qwen3.7-plus`、Qwen embedding 1024 维、clean Milvus collection `datapilot_schema_docs_m21_qwen_weighted_20260803_001`、同一 schema docs hash、`top_k`、context budget 和 32 条 case。
-- 只分析和修复 `schema_context` 相关的 retrieval → merge → context assembly 链路；不新增 RAG / Hybrid Agent，不切换默认配置。
-- 不预先决定 doc_type 权重、relation/metric bundle docs、增大 `top_k`、改 context budget 或引入 reranker；这些属于长期方案，先输出选项、风险和建议，等用户确认后再实施。
+- 默认模型、默认 embedding、默认 Milvus、默认 weighted fusion、正式 case、scorer 和 oracle 均未改变。
+- retrieval-only 的 `0.787 → 0.929` vector-only 提升仍保留为有效事实，但不能替代端到端结论。
+- RRF 仍是显式候选，不切默认；不继续在 M21 堆 embedding provider、top_k、context budget、bundle docs 或 reranker 参数。
 
-#### 推荐执行顺序
+#### 后续衔接
 
-1. **离线逐 case 诊断（不改代码）**：读取 plus weighted / RRF 的 trace 和 retrieval-only 报告，建立目标 case 表，记录 keyword hits、vector hits、merged hits、最终 tables / fields / metrics / relations，以及 expected 标注只用于离线对照的位置。
-2. **确认瓶颈类别**：把 case 分为“未召回”“已召回但 merge/context 丢失”“schema 描述或 alias 不足”“非 retrieval 问题”四类；先确认真实证据，再决定修复点。
-3. **提出最小候选方案**：最多选择一个不改变默认行为的候选进行实现；如果候选会改变长期 schema 语料、排序权重、top_k、context budget 或增加外部依赖，暂停并向用户说明可选方案、风险、后续影响和建议。
-4. **轻量验证**：补 focused tests，并只跑受影响 case / retrieval-only 子集；确认候选没有标签泄漏，且没有把失败大规模迁移到 `schema_retrieval`、`query_plan` 或 `result_match`。
-5. **完整复测门禁**：只有轻量验证显示 `schema_context` 有明确改善且结果可解释时，才在同配置下跑完整 32 条 diagnostic；否则记录为否定候选，不改默认 pipeline。
-6. **收口记录**：把逐 case 证据、候选取舍、验证结果和遗留问题写入 `.agent_work/temp/m21-notes.md`，再按 finish-module / finish-docs 更新状态文档。
-
-#### 暂不执行的事项
-
-- 不继续做 embedding provider A/B。
-- 不把 plus / max 的模型差异当作 M21 fusion 结论。
-- 不直接把 RRF 切为默认。
-- 不为了追求单次总分修改正式 case、scorer 或 oracle。
-
-#### 后续验收标准
-
-- 每个目标 case 都有可复核的 context diff 和瓶颈分类，不只引用 triage 标签。
-- 候选修复有 focused tests，且不读取 `expected_tables`、`expected_columns`、metric / relation 标注作为线上排序输入。
-- 若进入完整 diagnostic，必须使用同一模型、embedding、collection、schema hash、case 集和 triage 口径，并同时报告 `schema_context`、`schema_retrieval`、`result_match` 失败分布和总分。
-- 无论候选成功或失败，都不自动改变默认 fusion / embedding / Milvus；长期方案另行确认。
+- M22：先处理 `output_table_contract / output_column_contract`，再处理 `QueryPlan → SQL` 的漏表、alias 和生成稳定性。
+- M23：待 M22 基础事实稳定后，再逐项尝试 RRF、rerank 或其他 retrieval 方法；每次只改变一个变量，并同时保留 retrieval-only 与端到端指标。
 
 ---
 
@@ -1332,6 +1317,17 @@ Phase 3B 完成后，后续阶段的受益：
 ---
 
 ## 修订记录
+
+### v6.5（2026-08-03）—— M21 收口与 Qwen-plus embedding controlled A/B
+
+依据：用户确认在 M21 内补做一次固定 Qwen-plus 的本地 deterministic vs clean Milvus/Qwen embedding 对照，以排除 embedding 链路的基本隐患后再进入 M22。
+
+| 改动 | 说明 |
+|------|------|
+| 固定单变量 A/B | 两组均使用 `qwen3.7-plus`、weighted、同一 32 条 diagnostic、同一 oracle 和 schema hash；只改变 Schema Retrieval backend / embedding |
+| 固化结果 | 本地 `21/32`，Milvus + Qwen embedding `21/32`；`schema_context` 和 `failure_subtype` 分布相同，没有端到端 embedding 提分证据 |
+| 收口路线 | M21 embedding 线不再继续堆参数；M22 先处理 output contract 与 QueryPlan → SQL，M23 再尝试 rerank 等 retrieval 方法 |
+| 保持边界 | 不切默认模型、embedding、Milvus 或 fusion，不修改正式 case、scorer、oracle |
 
 ### v6.4（2026-08-02）—— M21 Schema Retrieval Fusion / Context Repair
 

@@ -2,18 +2,20 @@
 
 > 本文是 DataPilot 长期评测账本：记录 formal / challenge / diagnostic 基线、模型/检索 A/B、失败结构和典型错因。Trigger：只要涉及 eval 数字、模型 A/B、failure_stage、benchmark、pass rate、case 口径或失败归因，必须先读本文。AI 续接时先读 `docs/state/AI_CONTEXT.md`。
 
-更新时间：2026-08-02
+更新时间：2026-08-03
 
 ## 当前摘要
 
 - 当前默认主模型：DeepSeek `deepseek-v4-flash`，配置入口为 `LLM_PROVIDER=deepseek` + `LLM_MODEL=deepseek-v4-flash`。
-- 当前显式候选模型：Qwen `qwen3.7-max`，配置入口为 `LLM_PROVIDER=qwen` + `QWEN_MODEL=qwen3.7-max`。
+- 当前显式候选模型：Qwen `qwen3.7-plus` / `qwen3.7-max`，配置入口为 `LLM_PROVIDER=qwen` + `QWEN_MODEL=...`；M21 当前受控 A/B 使用 `qwen3.7-plus`。
 - 最新默认模型快照：M19 DeepSeek flash formal `7/10`、challenge `9/16`、diagnostic `19/32`。
 - 最新候选模型对照：M19 qwen3.7-max formal `8/10`、challenge `12/16`、diagnostic `22/32`。
-- 当前优先改进方向：先看 `schema_context / schema_retrieval`，再看 `result_match / plan_validation / query_plan / sql_generation`。换模型能缓解部分生成失败，但不能替代 schema 上下文修复。
+- 当前优先改进方向：M22 先看 output table/column contract 和 `QueryPlan → SQL` 的漏表、alias、生成稳定性；retrieval / rerank 留到后续单变量实验。换模型或 embedding 不能替代这些结构性修复。
 - 当前结论：Qwen 3.7 max 可作为后续 A/B 组；默认模型、默认 embedding、正式 eval case 集都属于长期基线选择，不在普通实验中自动切换或改写。
 - M20 结论：clean Milvus 链路上 Qwen `qwen3.7-max` diagnostic `21/32`（首次完整 clean Qwen 链路，高于同链路 DeepSeek `17/32`）；`schema_context` 7 仍是主问题；默认 embedding / Milvus / 模型不切换。
-- M21 结论：RRF 在 retrieval-only 上提高 merged recall，但同配置 DeepSeek diagnostic 从 weighted `21/32` 降至 RRF `18/32`；默认 fusion 保持 weighted，不能只凭 retrieval-only 数字切策略。
+- M21 结论：Qwen embedding 的 vector-only recall 从 deterministic `0.787` 提升到 `0.929`，但 weighted merged recall 仍为 `0.738`；RRF merged recall 为 `0.929`。同模型 Qwen-plus 端到端 weighted `21/32`、RRF `20/32`，因此 RRF 仍是显式候选，不切默认 fusion。
+- M21 controlled embedding A/B：固定 Qwen-plus + weighted 后，本地 deterministic 与 Milvus + Qwen embedding 都为 `21/32`；`schema_context` 和 `failure_subtype` 分布完全相同，当前没有端到端 embedding 提分证据。
+- M21 诊断修正：`failure_stage=schema_context` 过粗，新增 `failure_subtype` 区分 `output_table_contract`、`output_column_contract`、`result_contract` 和 `scorer_contract`；旧 `failure_stage` 保持兼容。
 
 ## 如何读这些数字
 
@@ -45,6 +47,11 @@
 | 2026-08-02 | M19 follow-up | Qwen `qwen3.7-max` | 8/10 | 12/16 | 22/32 | 本轮优于 DeepSeek flash，但 schema 上下文仍是主问题；不自动切默认。 |
 | 2026-08-02 | M20 clean Milvus | DeepSeek + Milvus + Qwen embedding | 未跑 | 未跑 | 17/32 | clean collection `row_count=193`，低于 M19 污染链路 19/32；不切默认 embedding。 |
 | 2026-08-02 | M20 clean Milvus | Qwen `qwen3.7-max` + Milvus + Qwen embedding | 未跑 | 未跑 | 21/32 | 首次完整 clean Qwen 链路，同链路高于 DeepSeek 17/32；schema_context 7 仍是主问题；不切默认。 |
+| 2026-08-03 | M21 retrieval-only | inmemory + deterministic | — | — | — | vector-only `0.787`、weighted merged `0.738`、RRF merged `0.802`；10 题离线基准。 |
+| 2026-08-03 | M21 retrieval-only | clean Milvus + Qwen embedding | — | — | — | vector-only `0.929`、weighted merged `0.738`、RRF merged `0.929`；向量信号存在，但 weighted merge 未兑现。 |
+| 2026-08-03 | M21 diagnostic A/B | Qwen `qwen3.7-plus` + clean Milvus/Qwen embedding | — | — | 21/32 weighted；20/32 RRF | 同模型同 32 题；RRF 未带来端到端提升。 |
+| 2026-08-03 | M21 controlled embedding A/B | Qwen `qwen3.7-plus`：inmemory/deterministic vs clean Milvus/Qwen embedding | weighted | 21/32 vs 21/32 | 同一 32 题、同一 oracle 和 schema hash；failure_subtype 完全相同，不支持 embedding 端到端提分结论。 |
+| 2026-08-03 | M21 supplementary A/B | DeepSeek + clean Milvus/Qwen embedding | — | — | 21/32 weighted → 18/32 RRF | fusion 负向证据；不替换 M20 clean `17/32` 事实锚点。 |
 
 ## M20 Clean Milvus / Qwen Embedding
 
@@ -161,6 +168,95 @@ M19 污染 vs M20 clean（同一 Qwen 模型）：
 - 首次完整 clean Qwen 链路数据点；Qwen `qwen3.7-max` 在同链路上 `21/32` 高于 DeepSeek `17/32`，提升主要来自 query_plan / plan_validation 类失败消失。
 - `schema_context` 从 5 升到 7 仍是最大失败簇，说明换模型不能替代 schema 上下文修复；优化优先级不变。
 - 单次真实 LLM run 有非确定性；不据此切换默认模型 / embedding / Milvus，默认仍为 `inmemory + deterministic`。
+
+## M21 Schema Retrieval Fusion / Context Repair
+
+### 固定实验元数据
+
+- Schema collection：`datapilot_schema_docs_m21_qwen_weighted_20260803_001`
+- `schema_docs_count=193`
+- `schema_docs_hash=7b531e073fa0b2dfaae205097b8440c44b745234305396b5f185561dcf9cc644`
+- Qwen embedding：`qwen3.7-text-embedding`，维度 `1024`
+- retrieval-only `top_k=12`
+- 端到端报告：`result_match_oracle_backend=sqlite_deterministic_seed`，`LANGFUSE_ENABLED=false`
+
+### Retrieval-only benchmark
+
+| backend | embedding | vector-only recall | weighted merged recall | RRF merged recall |
+|---|---|---:|---:|---:|
+| inmemory | deterministic | `0.787` | `0.738` | `0.802` |
+| clean Milvus | Qwen `qwen3.7-text-embedding` | `0.929` | `0.738` | `0.929` |
+
+解读：Qwen embedding 的向量召回有明确提升（`0.787 → 0.929`），但 weighted merge 后整体仍为 `0.738`；RRF 能在离线 benchmark 中保住向量信号，但离线 recall 不能直接等同端到端 Text2SQL 提升。
+
+fusion A/B 报告：
+
+- deterministic weighted：`.agent_work/temp/m21-baseline-deterministic-weighted.md`
+- deterministic RRF：`.agent_work/temp/m21-candidate-deterministic-rrf.md`
+- Milvus + Qwen embedding weighted：`.agent_work/temp/m21-baseline-qwen-milvus-weighted.md`
+- Milvus + Qwen embedding RRF：`.agent_work/temp/m21-candidate-qwen-milvus-rrf.md`
+
+### 同模型端到端 fusion A/B
+
+| 模型 | fusion | diagnostic | failure_stage 摘要 |
+|---|---|---:|---|
+| Qwen `qwen3.7-plus` | weighted | `21/32` | `schema_context=6`、`schema_retrieval=2`、`query_plan=1`、`result_match=1`、`sql_generation=1`、`unknown=2` |
+| Qwen `qwen3.7-plus` | RRF | `20/32` | `schema_context=5`、`schema_retrieval=2`、`query_plan=2`、`result_match=2`、`sql_generation=1`、`unknown=1` |
+
+weighted → RRF 的同模型 triage 变化为：`schema_context 6→5`、`query_plan 1→2`、`result_match 1→2`、`unknown 2→1`、`schema_retrieval 2→2`、`sql_generation 1→1`。总体没有显示 RRF 带来稳定端到端收益，因此默认 fusion 仍保持 weighted。
+
+### Qwen-plus 本地 vs Qwen embedding 对照
+
+固定主模型 `qwen3.7-plus`、`weighted` fusion、`new_text2sql`、同一 diagnostic 32 题、同一 SQLite deterministic oracle、`LANGFUSE_ENABLED=false`，只改变 Schema Retrieval 链路：
+
+| 组别 | Schema Retrieval | 通过率 | failure_stage | failure_subtype |
+|---|---|---:|---|---|
+| A | `inmemory + deterministic` | `21/32` | `schema_context=6`、`schema_retrieval=2`、`sql_generation=2`、`result_match=1`、`unknown=2` | `output_column_contract=6`、`output_table_contract=2`、`result_contract=1` |
+| B | clean Milvus + Qwen `qwen3.7-text-embedding`（1024 维） | `21/32` | `schema_context=6`、`schema_retrieval=2`、`query_plan=1`、`result_match=1`、`sql_generation=1`、`unknown=1` | `output_column_contract=6`、`output_table_contract=2`、`result_contract=1` |
+
+逐 case 只有 3 个失败形态变化：`db_hard_001` 从 `schema_retrieval` 变为 `query_plan`、`db_join_003` 从 `unknown` 变为 `schema_retrieval`、`db_plan_004` 从失败变为通过。两组总分、`schema_context` 数量和全部 `failure_subtype` 数量相同；因此在这一次严格控制的端到端 A/B 中，没有观察到 Qwen embedding 带来可归因的提分，也没有发现新的明确 retrieval 修复证据。
+
+报告：
+
+- 本地组：`.agent_work/temp/m21-qwen-plus-local-weighted-report.md`、`.agent_work/temp/m21-qwen-plus-local-weighted-triage.json`
+- Qwen embedding 组：`.agent_work/temp/m21-qwen-plus-qwenemb-weighted-report.md`、`.agent_work/temp/m21-qwen-plus-qwenemb-weighted-triage.json`
+- triage 对比：`.agent_work/temp/m21-qwen-plus-local-vs-qwenemb-triage-compare.md`
+
+fusion A/B 报告：
+
+- weighted report：`.agent_work/temp/m21-qwen-plus-weighted-diagnostic-report.md`
+- weighted triage：`.agent_work/temp/m21-qwen-plus-weighted-diagnostic-triage.json`
+- RRF report：`.agent_work/temp/m21-qwen-plus-rrf-diagnostic-report.md`
+- RRF triage：`.agent_work/temp/m21-qwen-plus-rrf-diagnostic-triage.json`
+- A/B compare：`.agent_work/temp/m21-qwen-plus-weighted-vs-rrf-compare.md`
+
+### DeepSeek supplementary fusion A/B
+
+- DeepSeek weighted `21/32` → RRF `18/32`；该轮用于说明 RRF 的端到端负向风险，不替换 M20 clean 链路事实锚点（DeepSeek `17/32`）。
+- RRF 相比 weighted 新增 `plan_validation` 失败，不能只看 retrieval-only recall 决定 fusion。
+- 报告：`.agent_work/temp/m21-deepseek-weighted-diagnostic-report.md`、`.agent_work/temp/m21-deepseek-rrf-diagnostic-report.md`。
+
+### M21 失败归因修正
+
+旧版 `failure_stage=schema_context` 会混入最终生成结果缺列、alias 或 scorer 契约问题。当前代码新增 `failure_subtype`：
+
+| failure_subtype | 含义 |
+|---|---|
+| `output_table_contract` | 最终 `tables_used` 未满足 expected table contract |
+| `output_column_contract` | 最终 `columns` 未满足 expected column contract |
+| `result_contract` | SQL 可执行，但结果列、alias、排序、口径或数值不满足 expected |
+| `scorer_contract` | 评分器规则或证据需要人工复核 |
+
+只有 SchemaGraph / retrieval trace 明确缺少目标表或字段时，才把问题归入 `schema_retrieval`；`rule:table_hit` 和 `rule:column_recall` 单独不能证明 embedding 或 fusion 失败。旧 `failure_stage` 保留，避免破坏历史报告。
+
+相关审查素材：`.agent_work/temp/m21-context-audit.md`；triage focused tests：`7 passed`。
+
+### M21 当前结论
+
+- embedding 链路不是完全失效，vector-only 已证明有信号。
+- weighted merge 是当前离线瓶颈，RRF 是合理候选，但目前端到端未提升，不切默认。
+- 尚未发现一个证据完整的“正确召回后被 Context Assembly 丢表/丢字段”案例；不能把所有 `schema_context` 失败继续归因给 embedding。
+- 固定参数的 Qwen-plus 本地 vs Qwen embedding 对照已完成：两组均为 `21/32`，没有 subtype 收益；M21 embedding 线收口，M22 转向 output contract 与 QueryPlan → SQL，M23 再尝试 rerank 等 retrieval 方法。
 
 ## M19 DeepSeek Flash
 

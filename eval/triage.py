@@ -32,6 +32,15 @@ FailureStage = Literal[
     "unknown",
 ]
 
+# ★ `failure_stage` 保持 M19 的大阶段兼容性；subtype 区分“Schema 真缺失”和
+# “最终 SQL 输出契约不匹配”，避免把 scorer 的列名检查误读成 embedding 失败。
+FailureSubtype = Literal[
+    "output_table_contract",
+    "output_column_contract",
+    "result_contract",
+    "scorer_contract",
+]
+
 NeedsAction = Literal[
     "fix_pipeline",
     "fix_schema_desc",
@@ -83,6 +92,7 @@ class FailureTriage:
     needs_action: NeedsAction
     evidence_step: str
     confidence: float
+    failure_subtype: FailureSubtype | None = None
     trace_id: str | None = None
     langfuse_trace_id: str | None = None
     langfuse_write_status: str = "skipped"
@@ -183,13 +193,16 @@ def triage_result(result: Any, trace_record: dict[str, Any] | None = None) -> Fa
     failed_detail = _first_failed_score_detail(result)
     if failed_detail is not None:
         stage = _stage_from_score_detail(failed_detail, result)
+        subtype = _subtype_from_score_detail(failed_detail)
         return _triage(
             result,
             trace_record,
             stage=stage,
+            subtype=subtype,
             reason=failed_detail.reason or f"score_failed={failed_detail.name}",
             evidence=f"score:{failed_detail.name}",
             confidence=0.8 if stage != "unknown" else 0.5,
+            needs_action="manual_review" if subtype in {"output_table_contract", "output_column_contract"} else None,
         )
 
     if result.skipped_due_to_pipeline_mode:
@@ -292,6 +305,9 @@ def triage_summary(triages: list[FailureTriage]) -> dict[str, Any]:
         "total": len(triages),
         "failed": len(failed_triages),
         "failure_stage_counts": dict(Counter(triage.failure_stage for triage in failed_triages)),
+        "failure_subtype_counts": dict(
+            Counter(triage.failure_subtype for triage in failed_triages if triage.failure_subtype)
+        ),
         "needs_action_counts": dict(Counter(triage.needs_action for triage in failed_triages)),
         "top_cases": [asdict(triage) for triage in _top_triage_cases(failed_triages)],
         "regression_candidates": [asdict(triage) for triage in failed_triages if triage.regression_candidate],
@@ -335,6 +351,24 @@ def compare_triage_files(*, left_path: Path, right_path: Path, output_path: Path
         right_value = int(right_counts.get(stage, 0))
         lines.append(f"| {stage} | {left_value} | {right_value} | {right_value - left_value} |")
 
+    left_subtypes = Counter(left.get("summary", {}).get("failure_subtype_counts") or {})
+    right_subtypes = Counter(right.get("summary", {}).get("failure_subtype_counts") or {})
+    subtypes = sorted(set(left_subtypes) | set(right_subtypes))
+    if subtypes:
+        lines.extend(
+            [
+                "",
+                "## Failure Subtype Distribution",
+                "",
+                "| failure_subtype | left | right | delta_right_minus_left |",
+                "|---|---:|---:|---:|",
+            ]
+        )
+        for subtype in subtypes:
+            left_value = int(left_subtypes.get(subtype, 0))
+            right_value = int(right_subtypes.get(subtype, 0))
+            lines.append(f"| {subtype} | {left_value} | {right_value} | {right_value - left_value} |")
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -344,6 +378,7 @@ def _triage(
     trace_record: dict[str, Any],
     *,
     stage: FailureStage,
+    subtype: FailureSubtype | None = None,
     reason: str,
     evidence: str,
     confidence: float,
@@ -363,6 +398,7 @@ def _triage(
         question=result.case.question,
         failed=True,
         failure_stage=stage,
+        failure_subtype=subtype,
         failure_reason=reason,
         needs_action=resolved_action,
         evidence_step=evidence,
@@ -419,6 +455,26 @@ def _stage_from_score_detail(detail: Any, result: Any) -> FailureStage:
     if "safety_mismatch" in detail.issue_tags:
         return "sql_guard"
     return "scorer_issue" if result.review_required else "unknown"
+
+
+def _subtype_from_score_detail(detail: Any) -> FailureSubtype | None:
+    """给 scorer 失败补充细分类，不改变既有 failure_stage 的兼容口径。
+
+    `rule:table_hit` / `rule:column_recall` 比较的是最终响应里的 `tables_used` / `columns`，
+    并不能单独证明 SchemaGraph 或 embedding 缺失。因此把它们标成 output contract，后续
+    必须先核对 SQL 生成和 case alias，再决定是否修 Schema Retrieval。
+    """
+
+    issue_tags = detail.issue_tags or []
+    if detail.name == "rule:table_hit" or "missing_table" in issue_tags:
+        return "output_table_contract"
+    if detail.name == "rule:column_recall" or "missing_column" in issue_tags:
+        return "output_column_contract"
+    if detail.name in {"rule:result_match", "rule:expected_value", "rule:contains", "rule:equals"}:
+        return "result_contract"
+    if str(detail.name).startswith("rule:"):
+        return "scorer_contract"
+    return None
 
 
 def _needs_action(stage: FailureStage, result: Any) -> NeedsAction:

@@ -4,7 +4,7 @@
 >
 > M0 ~ M19 的记录已被拆分到 `docs/dev-log(M0-M19).md`；本文件记录从 M20 开始。
 
-## ★ ★ M20 Schema Retrieval / Milvus Index Hygiene
+## ★ ★ M20 Milvus 修复与 embedding 测试
 
 （2026-08-02）
 
@@ -14,7 +14,7 @@
 
 M19 之后我们发现一个很典型的评测坑：看起来是在比较 **Qwen embedding** 和默认检索，但底层 Milvus collection 其实已经被同一批 schema docs 重复灌了很多次。就像你想比较两位选手跑步，结果赛道上堆了 100 层重复障碍物，最后成绩差异不能说明选手真实能力，只能说明赛道不可信。
 
-M20 做的事就是先把赛道清干净：每次实验用唯一 collection，collection 里应该只有当前 193 条 schema docs；报告里写清楚 collection 名、row_count、embedding 模型、维度和 `schema_docs_hash`；eval 一个 run 内复用同一个 Milvus index，不再每个 case 重复插入。与此同时，M20 也把 eval 的标准答案来源讲清楚：当前 `result_match` 仍是 SQLite deterministic oracle，不冒然切到 MySQL。
+M20 做的事就是先把赛道清干净：每次实验用**唯一 collection**，collection 里应该只有当前 193 条 schema docs；报告里写清楚 collection 名、row_count、embedding 模型、维度和 `schema_docs_hash`；eval 一个 run 内复用同一个 Milvus index，不再每个 case 重复插入。与此同时，M20 也把 eval 的标准答案来源讲清楚：当前 `result_match` 仍是 SQLite deterministic oracle，不冒然切到 MySQL。
 
 所以本模块的核心价值是：**让后续检索/embedding A/B 的证据可信，而不是让一次分数变好看。**
 
@@ -132,11 +132,29 @@ M20 证明 Qwen embedding 像一支更灵敏的雷达，能看到更多相关的
 
 离线测试中，deterministic merged recall `0.738 → 0.802`；Milvus + Qwen embedding 则 `0.738 → 0.929`，metric `0.600 → 0.900`、relation `0.633 → 0.967`。但固定同一个 clean collection、embedding、模型和 32 条 diagnostic 后，weighted 是 `21/32`，RRF 是 `18/32`；triage 显示 `schema_context` 少 1 条，却多了 3 条 `plan_validation`。因此 RRF 被记录为**否定实验**，没有改默认策略、top_k、schema docs 或评测口径。
 
-收工后又做了两次小范围主模型验证，没有修改默认配置：
+**补充1：测试**
 
-- `qwen3.7-max` 健康检查通过，但 32 条重测只有 `11/32`；其中 12 条 `query_plan` 请求撞上客户端固定的 `45s timeout`，所以这个分数不能直接当作模型能力结论。
-- 切换到 `qwen3.7-plus` 后，健康检查约 `5.04s`，完整 diagnostic 为 `21/32`；失败主要转移到 **schema_context / schema_retrieval**，LLM timeout 型失败明显减少。说明：plus 在当前评测链路下更稳定，但总分仍不足以单独触发默认模型切换；后续还要结合重复 run、延迟成本和 schema context 修复一起判断。
-- 前面的 `qwen3.7-plus` 与 `qwen3.7-max` 对比回答的是“模型差异”，不是 M21 的核心问题。随后固定 `qwen3.7-plus`、同一 clean Milvus、同一 embedding 和 32 条 case，只改变 fusion：`weighted=21/32`，`RRF=20/32`。RRF 虽让 `schema_context` 失败少 1 条，却让 `query_plan` 和 `result_match` 各多 1 条，因此 **离线召回提升没有转化为端到端收益**，`weighted` 默认结论得到同模型 A/B 支持。
+- `qwen3.7-max` 通过率仅 `11/32`，因为其中 12 条 `query_plan` 请求撞上客户端固定的 `45s timeout`。
+- `qwen3.7-plus` diagnostic 为 `21/32`；失败主要转移到 **schema_context / schema_retrieval**，LLM timeout 型失败明显减少。说明：plus 在当前评测链路下更稳定，但总分仍不足以单独触发默认模型切换；后续还要结合重复 run、延迟成本和 schema context 修复一起判断。
+
+**补充2：fusion → weighted VS RRF**
+
+固定 `qwen3.7-plus`、同一 clean Milvus、同一 embedding 和 32 条 case，**只改变 fusion**：`weighted=21/32`，`RRF=20/32`。RRF 虽让 `schema_context` 失败少 1 条，却让 `query_plan` 和 `result_match` 各多 1 条，因此 **离线召回提升没有转化为端到端收益**，`weighted` 默认结论得到同模型 A/B 支持。
+
+**补充3：地基体检**
+
+固定 `qwen3.7-plus` 做了两件事：一是 weighted `21/32` 与 RRF `20/32` 的同模型对照；二是逐 case 检查 retrieval、SchemaGraph 和最终 SQL。结果显示，Qwen embedding 的 vector recall 更高，但没有发现明确的“目标表已召回、却被 context assembly 丢掉”的主要失败；不少 `schema_context` 实际是 SQL 漏表、alias 或输出契约问题。
+
+因此补充修正了 triage：保留旧 failure stage，同时增加 `output_table_contract` / `output_column_contract` 等细分类，避免把 SQL 生成问题误判成 embedding 问题。路线收敛为：**M22 先处理输出契约和 QueryPlan → SQL 稳定性，M23 再尝试 rerank 等 retrieval 方法。**
+
+**补充4：本地检索 VS embedding**
+
+为了回答“Qwen embedding 是否真的比本地检索更好”，最后固定 `qwen3.7-plus`、weighted、同一 32 条 diagnostic、同一 oracle，只改变 Schema Retrieval：
+
+- 本地 `inmemory + deterministic`：`21/32`
+- clean Milvus + Qwen `qwen3.7-text-embedding`：`21/32`
+
+两组 `schema_context=6`，输出表/列契约和结果契约的 subtype 分布也完全相同；只有 3 个 case 的失败阶段发生转移。因此这次没有证明 embedding 能带来端到端提分，但证明了对照条件下的瓶颈仍在输出契约、QueryPlan/SQL 生成和少量 retrieval 失败。下一步把地基交给 M22，不再继续无目的堆 embedding 参数。
 
 ### 新概念
 
@@ -173,4 +191,3 @@ M20 证明 Qwen embedding 像一支更灵敏的雷达，能看到更多相关的
 - 下一步：先逐 case 分析 RRF 改变的 context 与 QueryPlan；如需 doc_type weighting、bundle docs、context budget、reranker 或默认策略切换，先单独做长期决策。
 
 **本地启动体验：**本模块没有独立页面；可运行 `python -m eval.run_schema_retrieval_benchmark --top-k 12 --fusion-strategy weighted`，再把策略改为 `rrf` 对比 `.agent_work/temp` 中的报告。
-
