@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M22 Eval Contract / Semantic Output Stabilization（已完成，待 accept-module）
-- 下一模块：M23（在 M22 后 case/scorer 口径上重新建立 retrieval 方法假设；不复用 M21 的 193-doc 对照）
+- 当前模块：M22 Eval Contract / Semantic Output Stabilization（实现完成；Qwen / Milvus / RRF 新口径首轮实验待用户确认）
+- 下一模块：M23（在 M22 实验扩展完成后，再提出新的 retrieval 方法假设；不复用 M21 的 193-doc 对照）
 - 当前模块验收：M22 未验收（待 accept-module）
 - 上一模块验收：M21 未验收（待 `accept-module`）
 - 阻塞项：无
@@ -58,22 +58,11 @@
 
 | 日期 | 判断 |
 |---|---|
-| 2026-08-02 | M19 验收前：只做文档/口径收尾和用户要求的小修，不扩大 eval 结构、不改正式 case、不新增数据库或远程 runner。 |
-| 2026-08-02 | M19 验收后：先执行 M20 修复 Schema Retrieval / Milvus 索引生命周期，再进入 Phase 3 RAG / Hybrid。 |
-| 2026-08-02 | M20 后：Milvus / Qwen embedding 仍只作为显式实验路径；下一步不要因一次 clean run 自动切默认，应先进入 RAG / Hybrid 或单独做 embedding 评估。 |
-| 2026-08-02 | 如果继续验证 embedding 价值，优先跑 `eval/run_schema_retrieval_benchmark.py` 看 keyword/vector/merged 三路 recall；不要直接用完整 Text2SQL 分数判断 embedding。 |
-| 2026-08-02 | 默认模型不自动切 Qwen：`qwen3.7-max` 是强候选，但模型切换影响长期基线，需要单独确认和评估。 |
-| 2026-08-02 | 默认 embedding / 向量库不自动切：当前 Milvus collection 已确认重复灌入污染，必须先做 M20 index hygiene，之后再重测 embedding。 |
-| 2026-08-02 | 当前优化优先级：先修 `schema_context / schema_retrieval`，再看 `result_match / plan_validation / query_plan / sql_generation`；换模型不能替代 schema 上下文修复。 |
-| 2026-08-03 | M21 结论：retrieval-only recall 提升不足以证明端到端收益；下一步先逐 case 审查 context assembly / QueryPlan 耦合，不直接调高 `top_k`、新增 bundle docs 或引入 reranker。 |
-| 2026-08-03 | M21 地基体检：plus weighted/RRF trace 对齐后，未发现可明确证明的目标表/字段被 context assembly 丢失案例；当前 `schema_context` triage 过粗，常混入 SQL 输出列、alias、scorer 契约和生成失败。下一模块可在固定基线下尝试 rerank / doc_type weighting / schema docs 方案。 |
-| 2026-08-03 | M21 controlled Qwen-plus 本地 vs Qwen embedding A/B 已完成：两组均为 `21/32`，只有少数 case 的失败阶段互相转移，没有 subtype 或 schema_context 改善；不再继续堆 embedding 参数，下一步按 M22 处理 output contract 与 QueryPlan → SQL。 |
-| 2026-08-03 | M21 triage 已补 `failure_subtype`：输出表/列契约错误与 schema 大阶段分开显示；保留旧 `failure_stage` 兼容性，未改变评分或默认配置。 |
-| 2026-08-03 | M21 controlled A/B：固定 Qwen `qwen3.7-plus` + weighted + 同一 32 题，只比较本地 deterministic 与 clean Milvus/Qwen embedding；两组均为 `21/32`，`schema_context=6`，且 `output_column_contract=6`、`output_table_contract=2`、`result_contract=1` 完全相同。当前没有端到端 embedding 提分证据，后续转 M22。 |
-| 2026-08-02 | Eval / Trace / LangFuse 的功能解释长文在 `docs/eval-observability-guide.md`；AI 只有在需要讲解设计或写说明时再读。 |
-| 2026-08-04 | M22 已将 Context Contract 改为读取同请求 trace 的 SchemaGraph 元数据，输出/结果/manual 独立展示；`db_plan_002/003/004` 现为带 `blocked_via` 的结构化语义拒绝，非 LLM transport error。 |
-| 2026-08-04 | M22 默认 DeepSeek + local deterministic + weighted diagnostic 最终报告为 `25/32`（自动 `22/27`、人工 `3/5`）；case/scorer 与 schema docs 已变更，不能与 M21 `21/32` 宣称模型提分。`db_core_004` 单 case SQLite oracle 复测已通过排序合同，批量实时 LLM 仍会波动；`db_prompt_002` trace 已验证 SCD overlap。 |
-| 2026-08-04 | 新增 `coupon_order_count` 派生指标使 schema document corpus 从 193 增至 194（hash `58534cb6...`）；默认 retrieval 不变，但后续 retrieval benchmark 必须使用新 hash，不能跨 corpus 比较。 |
+| 2026-08-04 | M22 已校正 Context / Output / Result / Manual 契约：不再使用 M21 的 `schema_context` 失败数直接判断检索质量。后续先按 trace 和 failure subtype 定位，再提出单变量假设。 |
+| 2026-08-04 | 用户已将 Qwen / Milvus / RRF 的新口径对照纳入 M22：C0 已有 `25/32` 默认快照，首轮只运行 C1-C3 与 retrieval-only 组各一次，用于筛选而非因果结论；结果后再确认是否在同一窗口完整跑 C0-C3 三次。仍固定 194-doc corpus、新 case/scorer 与同一 oracle；RRF、rerank、top_k、默认 embedding 或默认 fusion 均不可因旧实验或单次 run 自动切换。 |
+| 2026-08-04 | 默认模型、embedding、向量库和 weighted fusion 保持不变。`db_core_004` 等 SQL plan contract 失败先作为生成链路缺口复核，不预设为 retrieval 问题。 |
+| 2026-08-04 | 当前默认 diagnostic `25/32`（自动 `22/27`、人工/诊断 `3/5`）仅是 M22 新口径快照；M21 的 `21/32` 及 193-doc 实验只作历史证据。 |
+| 2026-08-04 | Eval / Trace / LangFuse 的功能说明见 `docs/eval-observability-guide.md`；历史实验和取舍见 changelog / eval-baselines，不在本仪表盘重复展开。 |
 
 ## 已知的坑（活跃列表）
 

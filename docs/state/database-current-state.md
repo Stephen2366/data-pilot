@@ -76,7 +76,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - `gmv`：`SUM(orders.order_amount)`，过滤 `orders.order_status NOT IN ('cancelled', 'canceled') AND orders.paid_at IS NOT NULL`。
 - `item_gmv`：`SUM(order_items.line_amount)`，关联 `orders` 后套用成交过滤。
 - `net_revenue`：`SUM(orders.actual_amount)`，其中 `actual_amount = order_amount + shipping_amount - discount_amount`。
-- `refund_rate`：退款数 / 订单数；商品维度优先用 `refunds.order_item_id -> order_items.product_id`，兼容 `refunds.product_id`。
+- `refund_rate`：退款数 / 订单数；商品维度的默认指标与 eval reference 必须用 `refunds.order_item_id -> order_items.product_id` 的订单明细归因。`refunds.product_id` 仅是历史兼容字段，不作为默认 SQL / case 口径。
 - `coupon_usage_rate`：`COUNT(DISTINCT order_coupons.order_id) / COUNT(DISTINCT orders.id)`。
 - `add_to_pay_conversion_rate`：从 `user_behavior_log` 计算支付成功事件数 / 加购事件数，可按 `device_type` 分组。
 - `avg_selling_price`：从 `product_price_history` 按时间窗口匹配后聚合。

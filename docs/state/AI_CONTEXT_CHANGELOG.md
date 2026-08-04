@@ -13,6 +13,18 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [范围调整] M22 纳入 Qwen / Milvus / RRF 新口径对照（2026-08-04）
+
+- 改动范围：`docs/notes/m22-notes.md`、state 当前路线与评测账本。
+- 记录：用户确认将这组候选对照归入 M22，不另开 M23。固定 M22 的 194-doc/new case-scorer/oracle 条件；既有 C0 默认快照不重复执行，首轮只运行 C1-C3 与 retrieval-only 组各一次，结果后再由用户确认是否在同一窗口完整运行 C0-C3 三次。默认模型、embedding、Milvus、fusion 不因单次结果切换。
+- 性能事实：M22 默认 32 条 diagnostic 实测总 `512.0s`，其中 QueryPlan LLM 调用占 69.4%、SQL generation LLM 调用占 30.3%；检索和 SQLite 非主耗时。
+
+### [文档口径] State 续接仪表盘收敛（2026-08-04）
+
+- 改动范围：`AI_CONTEXT.md`、`database-current-state.md`、`runbook.md`。
+- 记录：移除仪表盘中已完成 M19/M20 的行动指令，改为 M22 后 194-doc / 新 case-scoring 基线和“先按 trace/failure subtype 定位”的当前路线；明确商品退款率默认 reference 使用订单明细归因，兼容字段不作为默认口径；将 manual/review 说明更新为 M22 通用报告语义。随后将同类 cross-state 审计固化为 `accept-module` 检查 9，验收只报告精确问题，不自动修改 state 文档。
+- 边界：仅收敛文档续接口径，不改代码、数据库、默认模型/检索、安全策略或 eval 规则。
+
 ### [模块任务] M22 Eval Contract / Semantic Output Stabilization（2026-08-04）
 
 - 改动范围：`eval/scorers/rule_scorers.py`、`eval/run_eval.py`、`engine/nl2sql/{semantic_validation,pipeline,generator,prompt}.py`、三份 eval case、`metrics.yaml`、M22 / M20 回归测试及报告；完整清单见 `docs/notes/m22-notes.md`。

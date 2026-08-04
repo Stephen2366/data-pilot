@@ -13,7 +13,7 @@ description: 项目模块验收门禁，在收工整理和用户人工检查之�
 
 > **报告里的每个 ✅ 都必须对应实际执行过的检查动作（命令或读取）及其结论。不允许凭记忆、凭上文、凭推断打勾。**
 
-执行方式：8 项检查全部跑完再汇总，不要在第一个 ❌ 处停下——验收要一次给出全量结果。所有命令假定在项目根目录执行。项目 Python 路径、外部文档（LEARNING_ROADMAP.md、REFERENCE_GUIDE.md）的位置一律以 CLAUDE.md 顶部为准，不要在本文件里另抄一份。
+执行方式：9 项检查全部跑完再汇总，不要在第一个 ❌ 处停下——验收要一次给出全量结果。所有命令假定在项目根目录执行。项目 Python 路径、外部文档（LEARNING_ROADMAP.md、REFERENCE_GUIDE.md）的位置一律以 CLAUDE.md 顶部为准，不要在本文件里另抄一份。
 
 当前阶段计划文件：优先使用用户指定的计划文件；未指定时，先读 `docs/state/AI_CONTEXT.md`「当前状态」里的“当前阶段计划文件”。下文的“当前阶段计划文件”都指这个文件。
 
@@ -28,7 +28,7 @@ rg -n -f .claude/skills/accept-module/deprecated-terms.txt --hidden \
 ```
 
 - 无输出（exit code 1）= ✅；有命中 = ❌，逐条列出 `文件:行` 与命中内容。
-- 排除原因：dev-log.md / docs/state/AI_CONTEXT.md / docs/state/AI_CONTEXT_CHANGELOG.md 是历史记录文件（含旧日志与旧条目），引用的旧路径/旧口径不代表当前状态（AI_CONTEXT「当前状态」「已知的坑」「最新事实快照」的时效性由检查 3 / 8 兜底）；`docs/archive-dormant/` 和 `docs/archive-versions/` 是冻结历史文档，引用的旧路径/旧口径不代表当前项目；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
+- 排除原因：dev-log.md / docs/state/AI_CONTEXT.md / docs/state/AI_CONTEXT_CHANGELOG.md 是历史记录文件（含旧日志与旧条目），引用的旧路径/旧口径不代表当前状态（AI_CONTEXT「当前状态」「已知的坑」「最新事实快照」的时效性由检查 3 / 8 / 9 兜底）；`docs/archive-dormant/` 和 `docs/archive-versions/` 是冻结历史文档，引用的旧路径/旧口径不代表当前项目；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
 - rg 默认跳过 .gitignore 覆盖的文件。若本次模块改过路径类配置，额外人工看一眼本地 `.env`。
 
 ## 检查 2：目录地图一致
@@ -150,11 +150,30 @@ PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:c
    - notes.md 素材缺失（写了"过程细节未记录"）→ ⚠️，不自动判 ❌，提示补素材后复核
 3. 判定依据：续接 AI 只读 `docs/state/AI_CONTEXT.md` 不读 notes.md，影响当前路线的事实漏同步，下一模块就会基于过时快照开工。
 
+## 检查 9：State 文档交叉一致性
+
+检查 8 只确认素材有没有写回仪表盘；本项检查模块完成后 `docs/state/` 的**当前口径是否彼此一致、是否仍给出过期行动指令**。先读本模块 `docs/notes/<module>-notes.md`，再按改动范围选择以下事实源；不得只用关键词搜索代替全文核对相关段落：
+
+- 必读：`AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md`。
+- 跑过真实 LLM eval、A/B、smoke，或改过 case/scorer：读 `eval-baselines.md`。
+- 改过运行命令、模型、LangFuse、trace/eval 开关：读 `runbook.md`。
+- 改过数据库、指标、SQL/reference、字段或关系口径：读 `database-current-state.md`。
+- 改过 schema docs、Milvus、embedding、corpus 数量/hash：读 `schema-retrieval-milvus-embedding.md`。
+
+逐项核对并在报告中给出 `文件:行`：
+
+1. `AI_CONTEXT.md` 的「当前状态」「当前路线判断」「已知的坑」只含当前可执行的指令；已完成模块的过程性“下一步”应留在 changelog / eval-baselines，不得与当前模块路线冲突。
+2. 同一事实（默认配置、corpus 数量/hash、指标默认口径、最新 eval 数字、manual/review 含义、活跃坑）在相关 state 文档中一致。历史数字可以保留，但必须有模块/日期/旧 corpus 等历史边界，不能伪装成当前基线。
+3. 兼容字段、历史关系或诊断题必须明确“不是默认口径 / 自动硬门”；避免后续 case、reference SQL 或 prompt 把兼容路径误当默认事实。
+4. `AI_CONTEXT_CHANGELOG.md` 是完整历史，不因本项发现旧结论就删除；若新模块推翻旧判断，检查原条目是否有 `⚠️ 注` 指向新结论。
+
+判定：实际矛盾、过期行动指令或当前口径缺同步 = ❌；仅有不冲突的冗余、术语不够通用或容易误读的措辞 = ⚠️；无问题 = ✅。本检查**只报告，不在验收过程中自动修复 state 文档**，避免验收门禁擅自改变长期口径；有 ❌ / ⚠️ 时给出精确修复建议，待用户或单独文档小修处理后复检本项。
+
 ## 验收报告
 
 聊天中输出下表（验收报告不落盘，会话即存档；验收事件的持久化靠下方「报告落点」）：
 
-> 验收报告只在聊天中输出，不保存文件：8 项检查的核对结果是会话性内容，核心结论已通过「报告落点」持久化到 `docs/state/AI_CONTEXT.md`。
+> 验收报告只在聊天中输出，不保存文件：9 项检查的核对结果是会话性内容，核心结论已通过「报告落点」持久化到 `docs/state/AI_CONTEXT.md`。
 
 ```markdown
 # 模块验收报告：<模块> / <日期>
@@ -169,6 +188,7 @@ PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:c
 | 6 | 单一事实源 | ✅/❌ | <抽查命令与结论> |
 | 7 | 测试 | ✅/❌ | <pytest 真实输出行> |
 | 8 | 事实快照同步 | ✅/⚠️/❌ | <notes 素材与 AI_CONTEXT 对照结论> |
+| 9 | State 文档交叉一致性 | ✅/⚠️/❌ | <读取文件、核对事实与定位> |
 
 ## ❌ 项修复建议
 - <定位 + 具体改法>

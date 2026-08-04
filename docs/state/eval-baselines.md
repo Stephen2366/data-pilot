@@ -10,7 +10,7 @@
 |---|---|---|
 | 默认主模型 | DeepSeek `deepseek-v4-flash`；不因单轮 A/B 自动切换。 | `M19-E01`、`M19-E02` |
 | 默认检索 | `inmemory + deterministic + weighted`；Milvus、Qwen embedding、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
-| 当前优化方向 | M22 已完成契约拆分与窄 QueryPlan→SQL 合同；M23 需在 194-doc、新 case/scorer 口径上重新验证 retrieval 假设。 | `M22-E01`、`M22-E02` |
+| 当前优化方向 | M22 已完成契约拆分与窄 QueryPlan→SQL 合同；其扩展实验将以 194-doc、新 case/scorer 口径重新验证 Qwen / Milvus / RRF。既有 C0 不重跑，首轮仅 C1-C3 与 retrieval-only 各一次待确认。 | `M22-E01`、`M22-E02` |
 | 已收口的假设 | Qwen embedding 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
 | 不可作决策的证据 | 旧固定 Milvus collection 的重复灌入污染结果只保留作历史对照。 | `M20-E01` |
 
@@ -81,7 +81,7 @@
 3. SCD overlap 已在默认 trace 实际出现；渠道订单量排序以 QueryPlan prompt + SQL plan contract 固化，并在单 case SQLite oracle 中通过。
 4. 32 条 `25/32` 是口径变化后的诊断快照，只可用于下一步定位，不可同 M21 `21/32` 做能力归因。
 
-**当前决策**：M22 收口，M23 如研究 retrieval 必须先固定 194-doc corpus、新 case/scorer 与同一模型条件；RRF、rerank、默认 embedding/Milvus 仍需单独确认。
+**当前决策**：M22 实现部分已收口，但用户已将 Qwen / Milvus / RRF 新口径对照纳入本模块；既有 C0 默认快照不重跑，首轮只运行 C1-C3 与 retrieval-only 各一次，结果后再由用户决定是否在同一窗口完整复测 C0-C3 三次。RRF、rerank、默认 embedding/Milvus 仍不自动切换。
 
 ### M21 — Schema Retrieval Fusion / Context Repair
 
