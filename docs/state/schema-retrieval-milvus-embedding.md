@@ -186,7 +186,7 @@ $env:SCHEMA_EMBEDDING_PROVIDER='dashscope'
 $env:QWEN_EMBEDDING_MODEL='qwen3.7-text-embedding'
 $env:QWEN_EMBEDDING_DIMENSIONS='1024'
 $env:MILVUS_COLLECTION='datapilot_schema_docs_m20_deepseek_qwenemb_<YYYYMMDD_HHMMSS>'  # 时间戳命名，防重复；先用 date +%Y%m%d_%H%M%S 取时间戳
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-traces.jsonl --report eval/reports/<name>-report.md --triage-json eval/reports/<name>-triage.json
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-traces.jsonl --report eval/reports/<name>-report.md --triage-json eval/reports/<name>-triage.json
 
 # Retrieval-only deterministic baseline
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_retrieval_benchmark --report eval/reports/schema-retrieval-embedding-deterministic-report.md --top-k 12

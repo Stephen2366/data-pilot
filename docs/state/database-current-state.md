@@ -187,7 +187,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.agent_work/temp/pytest-db-current
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\smoke.yaml --report eval\reports\latest.md --trace eval/reports/db-current-smoke-traces.jsonl
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\smoke.yaml --report eval\reports\latest.md --trace eval/traces/db-current-smoke-traces.jsonl
 git diff --check
 ```
 

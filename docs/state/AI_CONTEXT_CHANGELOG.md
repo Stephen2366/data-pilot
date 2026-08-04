@@ -17,7 +17,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 - 改动范围：28 个 mX-notes.md → `docs/notes/`（进 git）；72 个 eval 报告（report/triage/compare）→ `eval/reports/`、40 个 traces → `eval/traces/`（jsonl 继续 gitignore）；18 份 accept 验收报告删除（不再落盘）；同步 `CLAUDE.md`、finish-module / finish-docs / accept-module skill 的 notes 路径，及 `runbook.md` eval 命令模板和 `eval-baselines.md` / `schema-retrieval-milvus-embedding.md` / `database-current-state.md` 的产物指针。
 - 关键记录：notes 原在 gitignore 的 temp（跨会话收工素材有被清理风险），迁入 `docs/notes/` 后进 git，可恢复可追溯；验收报告不再保存文件（会话即存档），验收事件状态仍写入 AI_CONTEXT「当前状态」，accept-module 同模块复检改以"上次验收时的提交"界定增量；eval 产物默认归宿 = report/triage/compare → `eval/reports/`、traces → `eval/traces/`，runbook 命令矩阵产物路径已同步指向新位置。
-- 遗留/后续：`.agent_work/temp/` 仍剩约 180 个一次性文件（135 个 pytest basetemp 目录 + 历史 smoke 脚本/摘要），待大扫除；`db-current-smoke-traces.jsonl` 为既有悬空引用，未处理。
+- 遗留/后续：`.agent_work/temp/` 仍剩 176 个一次性文件（129 个 pytest basetemp 目录 + 历史 smoke 脚本/摘要——smoke 一次性产物按口径留 temp，正式 eval trace 已全部收编 `eval/traces/`），待大扫除；`db-current-smoke-traces.jsonl` 为既有悬空引用，未处理。
 
 ### [实验] M21 Qwen-plus 本地 vs Qwen embedding controlled A/B（2026-08-03）
 

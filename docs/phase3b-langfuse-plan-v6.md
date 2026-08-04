@@ -1136,8 +1136,85 @@ M21 已完成 fusion 候选验证、Context 地基体检、triage 细分类和�
 
 #### 后续衔接
 
-- M22：先处理 `output_table_contract / output_column_contract`，再处理 `QueryPlan → SQL` 的漏表、alias 和生成稳定性。
+- M22：执行下方的 Eval Contract / Semantic Output Stabilization 计划；先校正可解释性，再处理 QueryPlan → SQL 稳定性。
 - M23：待 M22 基础事实稳定后，再逐项尝试 RRF、rerank 或其他 retrieval 方法；每次只改变一个变量，并同时保留 retrieval-only 与端到端指标。
+
+### M22 Eval Contract / Semantic Output Stabilization（计划制定完成，待实施）
+
+#### 背景与审计结论
+
+M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前审计已确认：14 条 reference SQL 均能在 `result_match` 同款 deterministic SQLite seed 上执行并返回非空结果，固定业务事实也可复现，因此数据库损坏不是当前主因；但 case 语义、scorer 契约与真实 QueryPlan → SQL 行为混杂，导致一部分失败不能直接归因给 pipeline。
+
+审计素材：`docs/notes/m22-review-notes.md`。
+
+已确认的优先问题：
+
+1. `db_core_002` 的商品退款率 reference SQL 使用 `orders.product_id`，与 `metrics.yaml` 的订单明细优先归因口径冲突。
+2. `db_multi_001` / `db_trace_002` 实际衡量优惠券使用订单数，却标注 `coupon_usage_rate`，并对等价输出 alias 过严。
+3. `db_multi_002` 的“一级类目”使用兼容冗余字段 `products.category`，而不是规范类目树。
+4. `schema_context_size` case 当前从最终响应的 `columns` 评分，混淆“局部 Schema 上下文应包含的字段”和“最终 SQL 应输出的字段”。
+5. 真实 pipeline 仍存在排序丢失、SCD 时间窗口 overlap 缺失、未知字段未结构化阻断，以及语义拒绝与 LLM generation error 混淆的问题。
+
+#### 目标与边界
+
+**目标**：先建立可解释、可比较的评测契约，再修复已证实的 QueryPlan → SQL 语义缺口；M22 结束时能逐 case 区分“reference / scorer 调整造成的重分类”和“pipeline 的真实能力改进”。
+
+**不做**：不切默认主模型、embedding、Milvus 或 fusion；不修改 seed、数据库固定业务事实或正式数据集规模；不以提高总分为理由放宽安全策略、删除困难题或把 manual case 伪装成硬门。
+
+#### 阶段 1：建立 M22 比较口径
+
+1. 固定默认链路、deterministic SQLite oracle 和 case 输入版本，保存 M22 实施前的报告 / triage 快照。
+2. 将 M21 `21/32` 标为**历史快照**；case / scorer 修正后的 M22 分数不直接宣称为模型提分。
+3. 报告新增三类视图：
+   - 可自动评分的能力分；
+   - manual / diagnostic 的人工审查分；
+   - case / scorer 契约修正带来的重分类清单。
+
+验收：报告能说明每个分数变化来自 pipeline、评测契约，还是两者同时变化。
+
+#### 阶段 2：统一 case、reference SQL 与语义事实源
+
+1. `db_core_002`：以订单明细归因为唯一默认商品退款率口径，同步 reference SQL、expected table / column / alias 与描述；允许不必要的维表 join 不再成为唯一正确答案。
+2. `db_multi_001` / `db_trace_002`：把“优惠券使用订单数”建模为明确派生指标或输出契约，不再误用 `coupon_usage_rate`；统一 `coupon_order_count` 及等价 alias，并明确同题的 trace / result 各自测什么。
+3. `db_multi_002`：把“一级类目”改为规范类目树口径；若保留 `products.category`，题面必须明确其是旧兼容类目字段。
+4. `db_hard_001`：统一商品明细 GMV 的 metric key、输出 alias 与 reference SQL。
+5. `db_prompt_003`：明确时间范围与 GMV 口径，内部上下文字段不再充当最终输出字段要求。
+6. 新增 case—metric—reference SQL 一致性测试，覆盖 metric key、表/字段事实、expected SQL 和关键固定事实。
+
+验收：上述 case 的自然语言、`metrics.yaml`、schema descriptions、relations、expected SQL 与评分契约不再互相冲突；reference SQL 仍可在确定性 seed 上执行。
+
+#### 阶段 3：分离 Context Contract 与 Output Contract
+
+1. 将 `schema_context_size` / SchemaGraph 类 case 改为读取 trace 或 SchemaGraph metadata，不再用最终 `body.columns` 代替上下文证据。
+2. 保留 `table_hit` / `column_recall` 用于真正的最终 SQL 输出契约；context、output、result、manual 四类 case 使用独立评分路径。
+3. 调整 scorer 的早返回顺序：专属 contract（例如 plan validation blocked）必须被执行和报告，不能先被无关的输出列检查遮蔽。
+4. 为 `db_prompt_001`、`db_prompt_002`、`db_prompt_003`、`db_plan_002` 等 case 增加 focused regression，证明“正确上下文 / 正确阻断”能通过，而真实缺失仍会失败。
+
+验收：正确使用内部字段但不输出它们的 SQL 不再被当作 context 失败；真实缺表、缺上下文字段、缺输出列和 result mismatch 仍能被分别定位。
+
+#### 阶段 4：修复 QueryPlan → SQL 的真实语义缺口
+
+1. **排序契约**：保证 QueryPlan 的 `order_by` 稳定传递到 SQL generation，覆盖 `db_core_004` 的渠道订单量排序。
+2. **SCD 时间语义**：为 `avg_selling_price` 固化“时间窗口 overlap”约束，覆盖 `db_prompt_002`，避免仅以 `valid_from` 落点过滤。
+3. **未知字段阻断**：`supplier_name` 等不存在字段必须在 QueryPlan / validation 阶段产生结构化 block，不能静默降级为无关 SQL。
+4. **不支持需求的可观测拒绝**：多步骤对比、知识库文档到订单归因等场景，要区分语义上不支持的 `blocked_via / issue_tag` 与 LLM transport / generation error。
+5. 以窄范围的 QueryPlan / SQL contract 和测试实施，避免用泛化 AST 规则误拦合法 SQL。
+
+验收：`db_core_004`、`db_prompt_002`、`db_plan_002` 具有可复现的行为改进；`db_plan_003/004` 的语义拒绝与调用失败能在 trace / triage 中明确区分。
+
+#### 阶段 5：验证、建账与收口
+
+1. 运行 case、schema、scorer、planner、pipeline focused tests，再运行全量 pytest。
+2. 固定默认链路运行一次 diagnostic，输出 M22 后基线、按 case 的重分类说明和 failure subtype 对比。
+3. 将新基线与“不可直接同 M21 总分比较”的原因写入 `docs/state/eval-baselines.md`；将路线结论同步到 `AI_CONTEXT.md` 和 changelog。
+4. 仅在代码、评测和文档全部收口后，按 `finish-module → finish-docs → accept-module` 流程验收。
+
+#### M22 验收门槛
+
+- reference SQL 可执行性、固定数据库事实和 case—metric—reference SQL 一致性测试全部通过。
+- context / output / result / manual 四类失败可独立解释；不会再把最终输出缺列直接判为 retrieval 或 context 缺失。
+- `db_core_004`、`db_prompt_002`、`db_plan_002` 的修复有 deterministic regression 证据。
+- 报告清楚区分评测契约修正和真实 pipeline 改进；不更改默认模型、embedding、Milvus、RRF 或 seed 事实。
 
 ---
 

@@ -114,7 +114,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.smoke_m20_milvus_index --output .agent_work\temp\m20-milvus-index-smoke.md
 ```
 
-## ★ ★ M21 Schema Retrieval Fusion / Context Repair
+## ★ ★ M21 weighted VS RRF / 本地 vs embedding
 
 （2026-08-03）
 
@@ -145,7 +145,7 @@ M20 证明 Qwen embedding 像一支更灵敏的雷达，能看到更多相关的
 
 固定 `qwen3.7-plus` 做了两件事：一是 weighted `21/32` 与 RRF `20/32` 的同模型对照；二是逐 case 检查 retrieval、SchemaGraph 和最终 SQL。结果显示，Qwen embedding 的 vector recall 更高，但没有发现明确的“目标表已召回、却被 context assembly 丢掉”的主要失败；不少 `schema_context` 实际是 SQL 漏表、alias 或输出契约问题。
 
-因此补充修正了 triage：保留旧 failure stage，同时增加 `output_table_contract` / `output_column_contract` 等细分类，避免把 SQL 生成问题误判成 embedding 问题。路线收敛为：**M22 先处理输出契约和 QueryPlan → SQL 稳定性，M23 再尝试 rerank 等 retrieval 方法。**
+因此补充修正了 triage：保留旧 failure stage，同时增加 `output_table_contract` / `output_column_contract` 等细分类，避免把 SQL 生成问题误判成 embedding 问题。路线收敛为：先处理输出契约和 QueryPlan → SQL 稳定性，再尝试 rerank 等 retrieval 方法。
 
 **补充4：本地检索 VS embedding**
 

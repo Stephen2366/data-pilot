@@ -27,7 +27,7 @@
 
 | 目标 | 环境变量 / 命令 | 说明 |
 |---|---|---|
-| 本地 JSONL trace | 默认即可，或在测试中指定 `--trace eval/reports/<name>.jsonl` | 默认不依赖 LangFuse；JSONL 默认不提交。 |
+| 本地 JSONL trace | 默认即可，或在测试中指定 `--trace eval/traces/<name>.jsonl` | 默认不依赖 LangFuse；JSONL 默认不提交。 |
 | 本地 eval + triage | `LANGFUSE_ENABLED=false`；`python -m eval.run_eval ... --triage-json eval/reports/<name>-triage.json` | 生成 Markdown report 和本地 triage JSON；`langfuse_triage_scores` 显示 skipped 属正常。 |
 | LangFuse Cloud trace/score | `LANGFUSE_ENABLED=true`，必要时 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` | Cloud 是旁路增强；写入失败不应影响本地 eval 结果。 |
 | LangFuse smoke | `python scripts\smoke_phase3b_langfuse.py`；Cloud 硬门禁加 `--require-langfuse` | M18 的主验证入口，用于 API / JSONL / trace mapping / score / visibility。 |
@@ -47,10 +47,10 @@
 
 | 目标 | 命令骨架 | 说明 |
 |---|---|---|
-| smoke | `python -m eval.run_eval --cases eval\cases\smoke.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-traces.jsonl --report eval/reports/<name>-report.md --triage-json eval/reports/<name>-triage.json` | 快速确认链路活着，不替代 benchmark。 |
-| formal | `python -m eval.run_eval --cases eval\cases\phase3a-regression.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-formal-traces.jsonl --report eval/reports/<name>-formal-report.md --triage-json eval/reports/<name>-formal-triage.json` | 主线回归对照。 |
-| challenge | `python -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-challenge-traces.jsonl --report eval/reports/<name>-challenge-report.md --triage-json eval/reports/<name>-challenge-triage.json` | 更难的数据库升级题。 |
-| diagnostic | `python -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace eval/reports/<name>-diagnostic-traces.jsonl --report eval/reports/<name>-diagnostic-report.md --triage-json eval/reports/<name>-diagnostic-triage.json` | 定位边界和失败结构，不追满分。 |
+| smoke | `python -m eval.run_eval --cases eval\cases\smoke.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-traces.jsonl --report eval/reports/<name>-report.md --triage-json eval/reports/<name>-triage.json` | 快速确认链路活着，不替代 benchmark。 |
+| formal | `python -m eval.run_eval --cases eval\cases\phase3a-regression.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-formal-traces.jsonl --report eval/reports/<name>-formal-report.md --triage-json eval/reports/<name>-formal-triage.json` | 主线回归对照。 |
+| challenge | `python -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-challenge-traces.jsonl --report eval/reports/<name>-challenge-report.md --triage-json eval/reports/<name>-challenge-triage.json` | 更难的数据库升级题。 |
+| diagnostic | `python -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-diagnostic-traces.jsonl --report eval/reports/<name>-diagnostic-report.md --triage-json eval/reports/<name>-diagnostic-triage.json` | 定位边界和失败结构，不追满分。 |
 | failure distribution 对比 | `python -m eval.run_eval --compare-triage-left <left>.json --compare-triage-right <right>.json --compare-triage-report eval/reports/<name>-compare.md` | M19 A/B 入口，看失败结构变化，不只看总分。 |
 | schema retrieval embedding-only | `python -m eval.run_schema_retrieval_benchmark --report eval/reports/<name>-schema-retrieval-report.md --top-k 12 --fusion-strategy weighted` | M21 的检索隔离评测；`--fusion-strategy rrf` 只作显式候选对比，不调用 LLM / SQL。Milvus + Qwen embedding 版本需先临时设置 `SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=dashscope`、`QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding`、`QWEN_EMBEDDING_DIMENSIONS=1024`，并不要复用旧污染 `MILVUS_COLLECTION`。 |
 
