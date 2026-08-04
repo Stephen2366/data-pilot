@@ -33,6 +33,11 @@ metrics:
     formula: COUNT(orders.id)
     default_time_field: orders.paid_at
     description: 订单事实表中的订单记录数量。
+  coupon_order_count:
+    name: 优惠券使用订单数
+    formula: COUNT(DISTINCT order_coupons.order_id)
+    default_time_field: orders.paid_at
+    description: 指定优惠券或优惠券类型实际使用过的去重订单数；它是计数，不是优惠券使用率。
   refund_count:
     name: 退款量
     formula: COUNT(refunds.id)

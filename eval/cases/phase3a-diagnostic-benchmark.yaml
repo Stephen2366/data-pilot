@@ -55,7 +55,7 @@ cases:
   - id: db_join_002
     task_type: join_path
     pipeline_mode: new_text2sql
-    question: 各优惠券类型带来的 GMV 是多少？
+    question: 2026 年 6 月各优惠券类型带来的 GMV 是多少？
     user_role: ops
     expected_tables: [coupons, order_coupons, orders]
     expected_columns: [coupon_type, gmv]
@@ -204,10 +204,10 @@ cases:
   - id: db_prompt_003
     task_type: local_schema_prompt
     pipeline_mode: new_text2sql
-    question: 各优惠券类型带来的 GMV 是多少？
+    question: 2026 年 6 月各优惠券类型带来的 GMV 是多少？
     user_role: ops
     expected_tables: [coupons, order_coupons, orders]
-    expected_columns: [coupon_type, coupon_code, order_amount, paid_at]
+    expected_columns: [coupon_type, gmv]
     expected_metrics: [gmv]
     expected_schema_context:
       must_include_tables: [coupons, order_coupons, orders]
@@ -218,6 +218,7 @@ cases:
     phase3a_capabilities: [local_schema_prompt, join_path]
     phase3a_blocking: true
     security_expectation: allow
+    contract_adjustment: 明确 2026 年 6 月与 GMV 口径；coupon_code/order_amount/paid_at 仅是内部上下文字段，不是最终输出契约。
     check: {type: schema_context_size}
 
   - id: db_trace_001
@@ -255,8 +256,8 @@ cases:
     expected_tables: [orders, channels, order_coupons, coupons]
     expected_columns: [channel_name, coupon_order_count]
     expected_column_aliases:
-      coupon_order_count: [usage_count]
-    expected_metrics: [coupon_usage_rate]
+      coupon_order_count: [usage_count, used_order_count]
+    expected_metrics: [coupon_order_count]
     expected_trace_steps:
       - {step_type: schema_retrieval, status: success}
       - {step_type: schema_context, status: success}
@@ -269,6 +270,7 @@ cases:
     phase3a_capabilities: [trace_steps, join_path]
     phase3a_blocking: true
     security_expectation: allow
+    contract_adjustment: trace 题与结果题共用 coupon_order_count 指标和等价 alias，trace 本身仍只测步骤完整性。
     check:
       type: trace_steps_complete
       min_required_steps: 8

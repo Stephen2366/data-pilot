@@ -62,6 +62,12 @@ class QueryPlanExtractionError(LLMGenerationError):
     issue_tag = "invalid_query_plan"
 
 
+class SQLPlanContractError(LLMGenerationError):
+    """SQL 没有履行已验证 QueryPlan 的排序 / limit 契约，不能静默交给执行层。"""
+
+    issue_tag = "sql_plan_contract_failed"
+
+
 class LLMClient(Protocol):
     """最小 LLM client 协议，方便测试替换真实 DeepSeek 调用。"""
 
@@ -355,6 +361,7 @@ def generate_sql_from_plan_step(
     schema_graph: SchemaGraph,
     domain_schema: DomainSchema,
     llm_client: LLMClient | None = None,
+    enforce_plan_contract: bool = False,
 ) -> GeneratedSQL:
     """基于已验证的 QueryPlanStep 和局部 Schema 生成 SQL。"""
 
@@ -373,6 +380,31 @@ def generate_sql_from_plan_step(
         system_prompt="你是 DataPilot 的 SQL 生成器。根据已验证的 QueryPlanStep 和局部 Schema 生成安全的只读 SELECT SQL。",
     )
     try:
-        return extract_generated_sql(raw_text)
+        generated = extract_generated_sql(raw_text)
+        if enforce_plan_contract:
+            validate_sql_plan_contract(generated.sql, plan_step=plan_step)
+        return generated
     except LLMGenerationError as exc:
         raise _add_error_context(exc, stage="sql_generation", prompt=prompt, raw_text=raw_text) from exc
+
+
+def validate_sql_plan_contract(sql: str, *, plan_step: QueryPlanStep) -> None:
+    """验证 SQL 是否保留计划里已经明确的排序和行数限制。
+
+    这是 M22 的窄范围输出契约：只检查 QueryPlan 已提供的 `order_by` / `limit`，不试图用
+    正则理解任意 SQL，更不会替 LLM 改写 SQL。缺失时结构化阻断，让问题回到生成层排查。
+    """
+
+    normalized_sql = " ".join(sql.lower().split())
+    if plan_step.order_by:
+        if " order by " not in f" {normalized_sql} ":
+            raise SQLPlanContractError("SQL 未保留 QueryPlan 的 ORDER BY 排序契约。")
+        missing_order_items = [
+            order_item
+            for order_item in plan_step.order_by
+            if " ".join(order_item.lower().split()) not in normalized_sql
+        ]
+        if missing_order_items:
+            raise SQLPlanContractError(f"SQL 缺少 QueryPlan 排序项：{missing_order_items}。")
+    if plan_step.limit is not None and not re.search(rf"\blimit\s+{plan_step.limit}\b", normalized_sql):
+        raise SQLPlanContractError(f"SQL 未保留 QueryPlan 的 LIMIT {plan_step.limit} 契约。")

@@ -73,19 +73,21 @@ cases:
     task_type: core_metric
     question: 2026 年 6 月退款率最高的商品是什么？
     user_role: ops
-    expected_tables: [products, orders, refunds]
+    expected_tables: [products, order_items, orders, refunds]
     expected_columns: [product_name, refund_rate]
     expected_metrics: [refund_rate]
     phase3a_capabilities: [schema_retrieval, query_plan]
     phase3a_blocking: true
     security_expectation: allow
+    contract_adjustment: 商品退款率统一为订单明细归因；不再使用 orders.product_id 兼容关系。
     check: {type: contains, value: Aurora Noise Cancelling Headphones}
     expected_sql: |
       SELECT p.product_name,
              COUNT(DISTINCT r.id) * 1.0 / COUNT(DISTINCT o.id) AS refund_rate
-      FROM products p
-      JOIN orders o ON o.product_id = p.id
-      LEFT JOIN refunds r ON r.order_id = o.id
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      JOIN products p ON p.id = oi.product_id
+      LEFT JOIN refunds r ON r.order_item_id = oi.id
       WHERE o.paid_at >= '2026-06-01 00:00:00' AND o.paid_at < '2026-07-01 00:00:00'
       GROUP BY p.id, p.product_name
       ORDER BY refund_rate DESC, p.product_name ASC
@@ -134,11 +136,12 @@ cases:
     expected_tables: [orders, channels, order_coupons, coupons]
     expected_columns: [channel_name, coupon_order_count]
     expected_column_aliases:
-      coupon_order_count: [usage_count]
-    expected_metrics: [coupon_usage_rate]
+      coupon_order_count: [usage_count, used_order_count]
+    expected_metrics: [coupon_order_count]
     phase3a_capabilities: [schema_retrieval, join_path, query_plan]
     phase3a_blocking: true
     security_expectation: allow
+    contract_adjustment: 优惠券使用题统一为 coupon_order_count；允许 usage_count 和 used_order_count 等价别名。
     check: {type: result_match, tolerance: 0.01}
     expected_sql: |
       SELECT c.channel_name, COUNT(DISTINCT o.id) AS coupon_order_count
@@ -154,26 +157,37 @@ cases:
     task_type: multi_table
     question: 一级类目销售额排名
     user_role: ops
-    expected_tables: [products, order_items, orders]
-    expected_columns: [category, item_gmv]
+    expected_tables: [product_categories, products, order_items, orders]
+    expected_columns: [root_category, item_gmv]
     expected_column_aliases:
-      category: [category_name]
+      root_category: [category, category_name]
       item_gmv: [category_gmv, sales]
     expected_metrics: [item_gmv]
     phase3a_capabilities: [schema_retrieval, join_path, local_schema_prompt]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: SaaS 软件}
+    contract_adjustment: 一级类目改为 product_categories 规范类目树口径，不再使用 products.category 兼容字段。
+    check: {type: contains, value: 数码电子}
     expected_sql: |
-      SELECT p.category, ROUND(SUM(oi.line_amount), 2) AS item_gmv
+      WITH RECURSIVE category_tree AS (
+        SELECT id, name, parent_id, name AS root_category
+        FROM product_categories
+        WHERE parent_id IS NULL
+        UNION ALL
+        SELECT child.id, child.name, child.parent_id, tree.root_category
+        FROM product_categories child
+        JOIN category_tree tree ON child.parent_id = tree.id
+      )
+      SELECT tree.root_category, ROUND(SUM(oi.line_amount), 2) AS item_gmv
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
       JOIN products p ON p.id = oi.product_id
+      JOIN category_tree tree ON tree.id = p.category_id
       WHERE o.paid_at >= '2026-06-01 00:00:00'
         AND o.paid_at < '2026-07-01 00:00:00'
         AND o.order_status NOT IN ('cancelled', 'canceled')
-      GROUP BY p.category
-      ORDER BY item_gmv DESC, p.category ASC
+      GROUP BY tree.root_category
+      ORDER BY item_gmv DESC, tree.root_category ASC
   - id: db_multi_003
     task_type: multi_table
     question: 2026 年 6 月各渠道 GMV 排名
@@ -224,12 +238,13 @@ cases:
     question: 数码电子及其子类目 2026 年 6 月 GMV 是多少？
     user_role: ops
     expected_tables: [product_categories, products, order_items, orders]
-    expected_columns: [root_category, gmv]
+    expected_columns: [root_category, item_gmv]
     expected_metrics: [item_gmv]
     phase3a_capabilities: [join_path]
     phase3a_blocking: false
     case_properties: [manual_review, difficult_diagnosis]
     security_expectation: allow
+    contract_adjustment: 商品明细 GMV 的输出别名统一为 item_gmv，避免与订单 GMV 混用。
     check: {type: manual, value: 递归 CTE，Phase 3A 诊断素材}
     expected_sql: |
       WITH RECURSIVE category_tree AS (
@@ -241,7 +256,7 @@ cases:
         FROM product_categories pc
         JOIN category_tree ct ON pc.parent_id = ct.id
       )
-      SELECT ct.root_category, ROUND(SUM(oi.line_amount), 2) AS gmv
+      SELECT ct.root_category, ROUND(SUM(oi.line_amount), 2) AS item_gmv
       FROM category_tree ct
       JOIN products p ON p.category_id = ct.id
       JOIN order_items oi ON oi.product_id = p.id

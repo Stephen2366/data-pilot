@@ -24,7 +24,7 @@ M20 做的事就是先把赛道清干净：每次实验用**唯一 collection**�
 
 这次先做了一个关键取舍：不顺手改默认 embedding、不把 Milvus 设成默认、不改正式 eval case，也不把 `result_match` 的 oracle 直接切 MySQL。因为这些都会改变长期基线。最终只做 M20 范围内的事：**索引卫生 + 标准答案审计 + clean run 复测**。
 
-代码上，`MilvusVectorIndex` 不再无脑 insert。它会检查已有 collection 的 row_count 和 vector dimension：干净就复用，污染就直接报错，提示使用唯一 collection 或显式 reset。`eval/run_eval.py` 在 Milvus 实验时会预建一次 shared vector index，挂到 `app.state`，让 32 条 diagnostic case 共用同一个索引。报告也新增了 **Eval Runtime Metadata**，能看到 `schema_docs_hash`、collection、row_count 和 oracle backend。
+代码上，`MilvusVectorIndex` 不再无脑 insert。它会检查已有 **collection 的 row_count 和 vector dimension**：干净就复用，污染就直接报错，提示使用唯一 collection 或显式 reset。`eval/run_eval.py` 在 Milvus 实验时会预建一次 shared vector index，挂到 `app.state`，让 32 条 diagnostic case 共用同一个索引。报告也新增了 **Eval Runtime Metadata**，能看到 `schema_docs_hash`、collection、row_count 和 oracle backend。
 
 验证上，Milvus smoke 证明 clean collection 下 `row_count=193`。DeepSeek + clean Milvus + Qwen embedding diagnostic 跑出 `17/32`，没有超过 M19 污染链路的 `19/32`。这个结果不是坏消息，而是一个更诚实的结论：之前污染链路不能当证据；clean 链路下 Qwen embedding 暂时没有稳定收益，但也不能因为一次 run 就盖棺定论。
 
@@ -35,6 +35,70 @@ M20 做的事就是先把赛道清干净：每次实验用**唯一 collection**�
 **Retrieval-only embedding benchmark：**M20 收尾后又补了一组更干净的小实验：不让 LLM 写 SQL，只让 schema retrieval 对 10 条专门设计的问题召回表、字段、指标和关系。这样可以单独看 Milvus + embedding 有没有能力，而不是被 SQL 生成、query plan、result_match 一起搅在分数里。
 
 结果：默认 deterministic embedding 的 `vector-only recall=0.787`，Milvus + Qwen embedding 的 `vector-only recall=0.929`，说明 Qwen embedding 对 schema 语义检索确实更强；但两者 merged recall 都是 `0.738`，说明当前短板不在 Milvus 写入或 embedding 模型本身，而更像在 keyword/vector 融合、排序和 rerank 策略。换句话说，embedding “有信号”，只是现有合并策略没有把这个信号转成最终上下文收益。
+
+### 补课：Milvus + embedding 链路原理
+
+M20 一直在用"embedding 模型" "Milvus collection" "向量检索"这些词。如果对这些概念只有模糊印象，这里补一课，把整条链路从"一段文字"到"生成 SQL"串起来讲清楚。
+
+**第一步：embedding —— 把文字翻译成"坐标"。**
+
+电脑看不懂"退款率""GMV"这些词的含义，但它擅长算数。embedding 模型（比如 Qwen embedding）就是个翻译官：把一段文字翻译成一串数字（叫**向量**），相当于在 N 维空间里给这句话一个坐标点——向量有几个数字就是几维，比如项目默认本地路径是 128 维，真实 embedding 模型通常是几百上千维。
+
+这个翻译有个关键性质：**语义相近的文本，坐标距离就近**。"退款"和"退货"意思接近，坐标就挨得近；"退款"和"发货"就离得远。于是"比较两段文字像不像"就变成了"算两个坐标点的余弦相似度"，一个纯数学问题，模型能力再强也是靠这个坐标决定检索结果。
+
+★ 项目里还有个**默认本地路径**（`deterministic` embedding）：它不做真神经网络，只是按 token 和中文 bigram 拼出一个可重复的向量。虽然"翻译质量"不如真实模型，但完全离线、可复现，所以 pytest 和本地诊断都走它；M20/M21 实验的 Qwen embedding 走的是 DashScope 在线 API。
+
+**第二步：向量检索 —— 找坐标最近的 top-k 条。**
+
+有了"文字 → 坐标"的能力，检索就从"看字面"升级成"看语义"。用户问"哪个渠道卖得最好"，先把问题翻译成查询向量，再和每条 schema 文档的向量算**相似度**，按分数从高到低取**前 k 条（top_k）**。这解决了关键词匹配的硬伤：关键词只有"字面包含"才命中，换个说法就漏（比如问"成交额"匹配不到"GMV"）；向量检索能跨说法命中语义相同的文档。
+
+**第三步：Milvus —— 专门存"坐标"的数据库。**
+
+那 193 条 schema 文档的向量存在 Milvus。可以把它类比成一张特殊的 MySQL 表（collection）：
+
+| MySQL 表       | Milvus collection            |
+| -------------- | ---------------------------- |
+| 一行是一条记录 | 一行是一个文档向量           |
+| 主键           | doc_id（VARCHAR 主键）       |
+| 字段值         | vector（FLOAT_VECTOR，N 维） |
+
+查询时执行一次 `search(collection, query_vector, limit=top_k)`，Milvus 用 COSINE 索引（AUTOINDEX）快速返回"离查询向量最近的 k 行"。为什么不用 Python 手动全量算一遍余弦？数据量一大就慢；Milvus 内部用 ANN（近似最近邻）索引，"先粗筛、再精排"把速度提上去，代价只是一点点精度。这也解释了 M20 为什么死磕维度一致性：向量长度不同根本没法算距离，所以 collection 的维度必须和当前 embedding 模型严格对齐。
+
+**第四步：整条链路串起来，全流程分两段:**
+
+1. **灌库**（实验/启动时做一次）
+
+   domain schema（表 / 字段 / 指标 / 关系）
+
+     → 组装成 193 条 schema docs（document_builder）
+
+     → embedding 模型逐条**翻译成向量**
+
+     → insert 进 Milvus collection + flush（此时才有数据可搜）
+
+     → 顺手算 schema_docs_hash 打版本指纹
+
+2. **召回**（每次提问时做）
+
+   例如用户问题"哪个渠道卖得最好"
+
+     → 用同一个 embedding 模型翻译成**查询向量**
+
+     → Milvus search 召回 top-k 条最相关的 schema docs（**语义路**）
+
+     → keyword 关键词路也同步召回一份（**字面路**）
+
+     → **两路按 weighted 融合排序**，取最终 top-k
+
+     → 拼进 LLM prompt → LLM 生成 SQL
+
+为什么要"先检索再生成"，而不是把所有 schema docs 全塞给 LLM？193 条全塞进去 token 太长、噪声太大还费钱；挑最相关的 k 条，相当于给 LLM"按需翻书"，只递给它当前问题相关的几页。
+
+**这和 M20 修的东西有什么关系？**
+
+一句话：**这条链路里，Milvus collection 是"坐标仓库"，仓库脏了，召回就乱。** M20 发现的污染，就是同一批 193 条文档被反复 insert，仓库里攒了约 1.9 万行重复数据——查询时一堆重复坐标干扰相似度排序，embedding A/B 的分数就不可信了。所以 M20 给仓库装护栏：检查 row_count 是不是 193、维度对不对，脏了直接报错，改用唯一 collection 重建；再靠 `schema_docs_hash` 让每份报告都能追溯"这次搜的是哪版坐标"。仓库干净了，后面 M21 的 weighted / RRF 融合实验才有说服力。
+
+> ⚠️ 注（M22 后更新）：文中"193 条"是 M20 时的 schema docs 数量。M22 新增 `coupon_order_count` 指标后，schema docs 变为 **194 条**；后续检索 / 融合实验都基于新 corpus，分数与 M21 的 `21/32` 不再直接可比。
 
 ### 新概念
 
@@ -156,6 +220,49 @@ M20 证明 Qwen embedding 像一支更灵敏的雷达，能看到更多相关的
 
 两组 `schema_context=6`，输出表/列契约和结果契约的 subtype 分布也完全相同；只有 3 个 case 的失败阶段发生转移。因此这次没有证明 embedding 能带来端到端提分，但证明了对照条件下的瓶颈仍在输出契约、QueryPlan/SQL 生成和少量 retrieval 失败。下一步把地基交给 M22，不再继续无目的堆 embedding 参数。
 
+### 补课：fusion 原理
+
+接 M20 补课里的那张"召回"流程图：每次提问，keyword 路和 vector 路**各排出自己的一份候选名单**。fusion（融合）回答一个问题——**这两份名单怎么合并成最终的一份 top-k**，决定到底把哪几条 schema 文档塞给 LLM。
+
+**问题：两路分数不可比。**
+
+keyword 分是"命中了几个关键词"算出来的，vector 分是余弦相似度（大致 -1~1 之间），两个数的**量纲和给分习惯完全不同**，直接相加不公平。就像两个赛区的选手比跑步，赛道难度不一样，直接比秒数没意义。
+
+**策略一：weighted —— 比总分（默认）。**
+
+keyword 分 × 1.2 + vector 分，按总和排序。思路是"相信两路分数的绝对值，加起来比"。1.2 是给字面命中一点倾斜（更信任精确匹配）。这是 M9 以来的老行为，M21 保留它当默认基线。
+
+**策略二：RRF —— 比名次（实验）。**
+
+完全不看分数大小，只看**名次**：某条文档在名单里排第 r 名，就投 `1/(60+r)` 票。分母加常数 60 是为了把票数压在一个平滑的小范围，避免第一名垄断投票。
+
+| | weighted | RRF |
+|---|---|---|
+| 比什么 | 两路分数的绝对值相加 | 两路名次各投一票 |
+| 最大优点 | 沿用旧行为，稳定可解释 | 绕开"分数不可比"的难题 |
+| 典型后果 | 某一路分数特别高也能进 | 两路都命中的文档天然靠前，带进更多文档 |
+
+RRF 的隐藏副作用：因为"两路都上榜"的文档能拿两份票，它更容易把 relation / metric 等不同类型的文档带进 top-k——这既是它离线 recall 大胜的原因，也是端到端翻车的伏笔（见下）。
+
+**结果：离线大胜，端到端翻车。**
+
+- 离线 retrieval-only：merged recall `0.738 → 0.929`，relation recall `0.633 → 0.967`，全面碾压；
+- 端到端同配置 diagnostic：`21/32 → 18/32`（同模型复测 `20/32`），反而下降，新增失败集中在 plan_validation。
+
+**为什么"召回变好"却没换来"端到端变好"？**
+
+recall 只问"该召回的召回了没"，RRF 把更多文档塞进上下文，这个指标自然好看；但**上下文更全 ≠ 对 LLM 更好**——prompt 变长、文档变多，LLM 的 QueryPlan 选择会被改变，反而更容易选错关系路径，卡在 plan validation。就像地图信息更全了，司机反而看花眼选错路。
+
+所以 M21 的核心教训是：**离线检索指标和端到端能力是两层东西，必须分别验证**；不能因为离线分数漂亮就切默认策略。
+
+> ★ 安全底线：RRF 排序只允许用"问题 + 候选文档的分数/名次"，**绝不允许**用 benchmark 的 expected 表/字段标签参与排序——否则就像考试时把答案塞给判卷人，分数虚高，真实用户请求里根本没有这些信息（标签泄漏）。
+
+**结论。**
+
+RRF 被记录为**否定实验**：保持默认 weighted，不改 top_k、schema docs 或评测口径。fusion 只是排序层，真正瓶颈在 schema_context / 输出契约，交给 M22 处理。
+
+> ⚠️ 注（M22 后更新）：M22 确实按新口径处理了这块——拆出 Context / Output / Result / Manual 契约评分，默认 diagnostic `25/32`（新 case + scorer + 194-doc），是"新口径快照"而非对 `21/32` 的提分；默认 **weighted 未切换**，本节结论仍有效。M23 若再研究 RRF / rerank，需在 194-doc 新基线上重做单变量 A/B，不能复用 M21 的总分结论。
+
 ### 新概念
 
 - **RRF**：一种 rank-based fusion。它像两份“推荐名单”按名次累积投票，避免 keyword 分数和 vector 相似度的数值尺度不同，直接相加不公平。
@@ -191,3 +298,61 @@ M20 证明 Qwen embedding 像一支更灵敏的雷达，能看到更多相关的
 - 下一步：先逐 case 分析 RRF 改变的 context 与 QueryPlan；如需 doc_type weighting、bundle docs、context budget、reranker 或默认策略切换，先单独做长期决策。
 
 **本地启动体验：**本模块没有独立页面；可运行 `python -m eval.run_schema_retrieval_benchmark --top-k 12 --fusion-strategy weighted`，再把策略改为 `rrf` 对比 `.agent_work/temp` 中的报告。
+
+## ★ ★ M22 评测契约与 QueryPlan 输出稳定性
+
+（2026-08-04）
+
+**简述**：M22 先把“Agent 做错了”和“评测题判错了”分开，再用 QueryPlan 合同防止排序等已规划要求在 SQL 生成时悄悄丢失。
+
+### 先用大白话讲
+
+以前的 `schema_context` 题有点像检查厨师有没有拿到食材，却去看端上来的菜里有没有每一种原料；内部 Schema 上下文和最终 SQL 输出其实不是同一件事。M22 改成直接看 trace 里的 SchemaGraph：该有的表和字段是否真的进入了局部上下文，最终结果则继续由 Output / Result Contract 评分。
+
+同时，遇到“供应商名称”“知识库文档带来的订单金额”“先查再对比”这类当前能力边界，系统不再让 LLM 随便改题或把网络错误伪装成业务拒绝，而是留下带原因的结构化 `blocked_via`。所以本模块的核心价值是：**让评测能解释失败、让 pipeline 能诚实拒绝、让下一次优化有可靠起点。**
+
+### 开工前的预审查
+
+M22 不是一上来就改 prompt。先做了一次只读预审查，先证明问题不在数据库：
+
+用和 `result_match` 相同的内存 SQLite seed 重放三套 case。42 条 case 中，36 条允许执行；14 条带 reference SQL 的题全部可执行且非空，GMV、渠道、Aurora 退款率、一级类目等固定业务事实也都能复现。这个结果排除了“数据库坏了、reference SQL 跑不通”作为主因，但**不能**证明自然语言、指标口径、reference SQL 和 scorer 契约一定说的是同一件事。
+
+预审查随即找到了两类混杂问题：一类是**题目/契约自身不一致**，例如退款率 reference 走了兼容关系、优惠券“使用订单数”却标成 `coupon_usage_rate`、一级类目绕过规范类目树；另一类才是**真实 pipeline 缺口**，例如 SCD 时间窗口没有按 overlap 处理、渠道订单量漏排序、未知字段和不支持多步需求没有被结构化阻断。它也发现旧 `schema_context` scorer 实际读取最终 API 输出，而不是 SchemaGraph 上下文——这正是“检索没召回”常被误判的原因。
+
+因此 M22 的实施顺序被定为：**先在用户确认后校正题目和 scorer 的尺子，再处理语义拒绝与 QueryPlan→SQL 缺口**。M21 两组受控实验都为 `21/32`，且失败集中在 output/result contract，进一步说明此时不该继续堆 embedding 参数。预审查的完整证据保留在 `docs/notes/m22-review-notes.md`。
+
+### 这次做了什么
+
+我先确认了四项会影响长期口径的选择：商品退款率统一按**订单明细归因**，一级类目统一按**规范类目树**，优惠券使用订单数单列为 `coupon_order_count`，manual case 不再混入自动能力分。新增 metric 使 schema docs 从 193 变为 194，所以 M22 后分数不能直接和 M21 的 `21/32` 说成模型提分。
+
+代码上，eval 会从同一次 JSONL trace 取 `schema_context` 元数据评分；报告新增自动能力、人工审查、契约重分类三张视图。QueryPlan 已写了 `order_by/limit` 时，SQL 必须保留；若丢失会结构化报 `sql_plan_contract_failed`，但危险 SQL 仍优先进入 SQL Guard。最终默认 diagnostic 为 `25/32`，其中自动 `22/27`、人工 `3/5`；它是新口径快照。`db_plan_002/003/004` 已能结构化拒绝，SCD 平均售价 trace 已使用时间窗口 overlap，渠道订单量在单 case SQLite oracle 复测通过；批量实时 LLM 的结果仍会波动。
+
+### 新概念
+
+- **Contract（契约）**：像 Java DTO/接口约定，先明确“这一层必须交付什么证据”。Context Contract 看内部 SchemaGraph，Output Contract 看 SELECT 返回列，Result Contract 看结果值和顺序，不能混用。
+- **Semantic rejection（语义拒绝）**：不是权限安全拦截，也不是模型超时；它表示“当前产品能力没有可靠的业务关系或字段支撑”，并且把原因写进 trace。
+
+### 代码阅读路线
+
+1. **评测证据分流**：`eval/scorers/rule_scorers.py` 与 `eval/run_eval.py`。先看 trace 如何只作为 scorer 私有证据，再看专属 contract 为何优先于最终列检查。
+2. **能力边界与 SQL 合同**：`engine/nl2sql/semantic_validation.py`、`engine/nl2sql/pipeline.py`、`engine/nl2sql/generator.py`。理解语义拒绝、SQL Guard、QueryPlan contract 三者各守哪一道门。
+3. **业务事实源**：`domain_pack/metrics.yaml` 与 `eval/cases/`。对照商品退款率、优惠券订单数、类目树的 case 改动，理解“题面—指标—reference SQL”必须说同一种业务语言。
+
+### 设计要点
+
+- **先改尺子再量分数**：M22 不把口径校正包装成模型能力提升。
+- **窄合同而非泛化 SQL 解析**：只验证计划中已经声明的排序/limit，不用正则替代 SQL AST 或重写合法 SQL。
+- **默认策略不动**：DeepSeek、local deterministic、weighted、Milvus 选择与 seed 均未切换。
+
+### 面试怎么讲
+
+“我在 Text2SQL 项目里发现，很多所谓 schema context 失败其实来自最终 SQL 列名或 reference 契约，而不是检索漏召回。我把评测拆成 Context、Output、Result、Manual 四类合同：Context 从同请求 trace 的 SchemaGraph 元数据取证，输出和结果继续用确定性规则。对当前不支持的字段、跨知识库归因和多步比较，我增加了结构化 semantic rejection，避免把模型调用失败误当业务拒绝；同时让 QueryPlan 已声明的排序/limit 在 SQL 生成阶段可验证。这样后续优化 retrieval 时不会再拿混杂的总分做结论。”
+
+1. **[压力追问] 你把 case 和 scorer 都改了，25/32 有什么意义？**
+
+它不表示模型从 21/32 提升到 25/32。M22 同时改变了 case、scorer 和 schema docs corpus，所以我把它记录为新口径诊断快照，并在报告中单列自动、人工和契约重分类。真正可比的 retrieval 实验要在 194-doc、新 case/scorer、同模型条件下重新做。
+
+### 验证与下一步
+
+- 验证：focused `42 passed`、pipeline focused `28 passed`、全量 pytest `144 passed, 2 skipped`；最终默认 diagnostic `25/32`，`db_core_004` 单 case `result_match_ok`。
+- 下一步：M22 待 accept-module；M23 若研究 RRF/rerank，要从 194-doc 新基线重新做单变量 A/B，不能复用 M21 的总分结论。

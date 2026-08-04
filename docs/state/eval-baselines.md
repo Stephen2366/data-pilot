@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.7 seconds
-Output:
 # DataPilot Eval Baselines
 
 > 本文是 DataPilot 的长期评测账本，优先回答“当前应据什么决策、哪些结果可直接比较”。完整报告和历史叙事分别保留在 `eval/reports/` 与 `docs/state/AI_CONTEXT_CHANGELOG.md`。
@@ -13,7 +10,7 @@ Output:
 |---|---|---|
 | 默认主模型 | DeepSeek `deepseek-v4-flash`；不因单轮 A/B 自动切换。 | `M19-E01`、`M19-E02` |
 | 默认检索 | `inmemory + deterministic + weighted`；Milvus、Qwen embedding、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
-| 当前优化方向 | M22 优先修 output table/column contract 与 `QueryPlan → SQL` 的漏表、alias、生成稳定性。 | `M21-E03`、`M21-E05` |
+| 当前优化方向 | M22 已完成契约拆分与窄 QueryPlan→SQL 合同；M23 需在 194-doc、新 case/scorer 口径上重新验证 retrieval 假设。 | `M22-E01`、`M22-E02` |
 | 已收口的假设 | Qwen embedding 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
 | 不可作决策的证据 | 旧固定 Milvus collection 的重复灌入污染结果只保留作历史对照。 | `M20-E01` |
 
@@ -66,8 +63,25 @@ Output:
 | `M21-E03` | 08-03 | 受控 A/B | 验证 embedding 的端到端收益 | Qwen-plus + weighted + 32 题 + 同 oracle/hash；唯一变量为 local/Milvus embedding | `21/32 vs 21/32`；subtype 相同 | 同行两组 | 没有 embedding 可归因提分证据。 |
 | `M21-E04` | 08-03 | 补充/负向证据 | 检验 RRF 风险 | DeepSeek + clean Milvus/Qwen embedding；唯一变量为 weighted/RRF | diagnostic `21/32→18/32` | 同行两组 | RRF 有端到端负向风险。 |
 | `M21-E05` | 08-03 | 评测口径修正 | 修正过粗的 schema 归因 | 仅增加 `failure_subtype`，不改评分或默认配置 | output table/column、result、scorer contract 分开显示 | 历史 `failure_stage` 保持兼容 | M22 应先处理输出契约，而非继续归因 retrieval。 |
+| `M22-E01` | 08-04 | 评测口径修正 | 分离 Context / Output / Result / Manual contract | case、scorer 与新增 coupon_order_count metric；schema docs `193→194`，hash `58534cb6...` | trace SchemaGraph 评分、等价 alias、三类报告视图、结构化语义拒绝 | M21 结果只作历史快照 | 不改变默认模型/检索；后续新 benchmark 不可跨 193/194 docs 比较。 |
+| `M22-E02` | 08-04 | 诊断快照 | 验证 M22 后默认链路 | DeepSeek + local deterministic + weighted、32 条、SQLite oracle、LangFuse off | total `25/32`；automated `22/27`；manual `3/5` | M21 `21/32` 不可比较 | `db_plan_002/003/004` 均结构化通过；`db_core_004` 单 case 排序复测通过，但批量实时 LLM 仍波动；不把总分视为模型提升。 |
 
 ## 4. 当前活跃实验卡片
+
+### M22 — Eval Contract / Semantic Output Stabilization
+
+**问题**：怎样让内部 Schema 上下文、最终输出、结果对照、人工诊断各自有证据，并把真实 QueryPlan→SQL 缺口与评测口径调整分开？
+
+**固定边界**：默认模型、embedding、Milvus、weighted fusion、SQLite deterministic oracle 和 seed 均未切换；新增 `coupon_order_count` 因确认的语义事实改变 schema document corpus 至 194。
+
+**结论链**：
+
+1. `schema_context_size` 改从同请求 trace 的 SchemaGraph `tables/fields` 评分，最终 `body.columns` 不再冒充上下文证据。
+2. `db_plan_002/003/004` 用 `blocked_via=semantic_request_validation` 和明确 issue tag 区分不支持需求与 LLM generation error。
+3. SCD overlap 已在默认 trace 实际出现；渠道订单量排序以 QueryPlan prompt + SQL plan contract 固化，并在单 case SQLite oracle 中通过。
+4. 32 条 `25/32` 是口径变化后的诊断快照，只可用于下一步定位，不可同 M21 `21/32` 做能力归因。
+
+**当前决策**：M22 收口，M23 如研究 retrieval 必须先固定 194-doc corpus、新 case/scorer 与同一模型条件；RRF、rerank、默认 embedding/Milvus 仍需单独确认。
 
 ### M21 — Schema Retrieval Fusion / Context Repair
 
@@ -118,6 +132,7 @@ Output:
 | `M21-E03` | `eval/reports/m21-qwen-plus-local-weighted-report.md`；`m21-qwen-plus-qwenemb-weighted-report.md`；`m21-qwen-plus-local-vs-qwenemb-triage-compare.md` |
 | `M21-E04` | `eval/reports/m21-deepseek-weighted-diagnostic-report.md`；`m21-deepseek-rrf-diagnostic-report.md` |
 | `M21-E05` | `eval/reports/m21-context-audit.md` |
+| `M22-E02` | `eval/reports/m22-default-diagnostic-report.md`；`m22-default-diagnostic-triage.json`；`eval/traces/m22-default-diagnostic-traces.jsonl` |
 
 ## 7. 维护规则
 

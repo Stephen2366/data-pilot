@@ -8,6 +8,7 @@ pipeline_mode 覆盖和诊断报告字段，复杂 scorer / 历史库 / HTML 仪
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -87,6 +88,7 @@ class EvalCase:
     security_subtype: str | None = None
     expected_sql: str = ""
     check: dict[str, Any] = field(default_factory=dict)
+    contract_adjustment: str = ""
 
 
 @dataclass(frozen=True)
@@ -175,6 +177,7 @@ def _load_cases_from_path(path: Path) -> list[EvalCase]:
                 security_subtype=item.get("security_subtype"),
                 expected_sql=str(item.get("expected_sql", "")),
                 check=dict(check),
+                contract_adjustment=str(item.get("contract_adjustment", "")),
             )
         )
     return cases
@@ -347,9 +350,12 @@ def run_cases(
             json=request_body,
         )
         body = response.json()
+        # ★ API 响应保持既有契约；eval 从同一次 JSONL trace 取过程证据，仅注入 scorer 私有字段。
+        trace_steps = _read_trace_steps(trace_path=Path(client.app.state.trace_path), trace_id=body.get("trace_id"))
+        score_body = {**body, "_trace_steps": trace_steps}
         score_details = score_case_details(
             case=case,
-            body=body,
+            body=score_body,
             status_code=response.status_code,
             actual_pipeline_mode=actual_pipeline_mode,
             judge_model=judge_model,
@@ -376,6 +382,18 @@ def run_cases(
             )
         )
     return results
+
+
+def _read_trace_steps(*, trace_path: Path, trace_id: str | None) -> list[dict[str, Any]]:
+    """读取刚写入 JSONL 的同 trace 过程证据，供 Context / Plan Contract scorer 使用。"""
+
+    if not trace_id or not trace_path.exists():
+        return []
+    for line in reversed(trace_path.read_text(encoding="utf-8").splitlines()):
+        record = json.loads(line)
+        if record.get("trace_id") == trace_id:
+            return list(record.get("trace_steps") or [])
+    return []
 
 
 def _build_eval_schema_vector_index(
@@ -467,6 +485,7 @@ def write_report(
                 )
     else:
         lines.append("| - | - | - | - | - | no_score_details |")
+    _append_m22_contract_views(lines, results)
     if runtime_metadata is not None:
         lines.extend(
             [
@@ -603,6 +622,30 @@ def write_report(
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _append_m22_contract_views(lines: list[str], results: list[EvalResult]) -> None:
+    """追加 M22 三视图：自动能力、人工审查与本次 case/scorer 契约重分类。"""
+
+    automated = [result for result in results if "manual_review" not in result.case.case_properties and result.case.check_type != "manual"]
+    manual = [result for result in results if result not in automated]
+    auto_passed = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in automated)
+    manual_passed = sum(result.passed and not result.skipped_due_to_pipeline_mode for result in manual)
+    lines.extend([
+        "", "## M22 Contract Views", "",
+        "| view | total | passed | failed_or_review | interpretation |",
+        "|---|---:|---:|---:|---|",
+        f"| automated_capability | {len(automated)} | {auto_passed} | {len(automated) - auto_passed} | 可自动评分的能力分 |",
+        f"| manual_or_diagnostic | {len(manual)} | {manual_passed} | {len(manual) - manual_passed} | 人工审查，不作为稳定硬门 |",
+        "", "### Contract Reclassifications", "",
+        "| case_id | adjustment |",
+        "|---|---|",
+    ])
+    adjusted = [result for result in results if result.case.contract_adjustment]
+    if adjusted:
+        lines.extend(f"| {result.case.case_id} | {result.case.contract_adjustment} |" for result in adjusted)
+    else:
+        lines.append("| - | none |")
 
 
 def _append_failure_triage_summary(

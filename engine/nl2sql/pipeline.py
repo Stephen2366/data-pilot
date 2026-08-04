@@ -16,11 +16,14 @@ from app.schemas.agent import ToolCallTrace
 from engine.nl2sql.generator import (
     LLMGenerationError,
     QueryPlanExtractionError,
+    SQLPlanContractError,
     generate_query_plan,
     generate_sql_from_plan_step,
     get_default_llm_client,
+    validate_sql_plan_contract,
 )
 from engine.nl2sql.planner import QueryPlan, validate_query_plan
+from engine.nl2sql.semantic_validation import validate_request_semantics
 from engine.nl2sql.schema_loader import DomainSchema, load_domain_schema
 from engine.schema_retrieval.graph import build_schema_graph
 from engine.schema_retrieval.objects import SchemaGraph, SchemaRetrievalResult
@@ -164,6 +167,8 @@ def _schema_graph_metadata(schema_graph: SchemaGraph) -> dict[str, Any]:
 
     return {
         "tables": schema_graph.tables,
+        # Context Contract 需要的是局部 SchemaGraph 的真实字段，不是最终 SELECT 的返回列。
+        "fields": [f"{table}.{column}" for table, columns in schema_graph.fields.items() for column in columns],
         "table_count": len(schema_graph.tables),
         "field_count": sum(len(columns) for columns in schema_graph.fields.values()),
         "metrics": schema_graph.metrics,
@@ -328,6 +333,34 @@ def run_text2sql_pipeline(
         metadata=_join_path_metadata(schema_graph),
     )
 
+    # 步骤 2.5：已知不支持需求的语义预检 -----------------------------------------------
+    # ★ 这里不是用关键词替代 LLM，而是把已被 diagnostic 证明会“静默答错”的窄场景提前
+    # 结构化拒绝。这样 trace / triage 能与真正的 LLM transport error 清楚区分。
+    semantic_issue = validate_request_semantics(question, domain_schema=active_domain_schema)
+    if semantic_issue is not None:
+        span = trace_context.start_span(name="plan_validation", step_type="plan_validation")
+        span.end(
+            status="blocked",
+            output_summary=semantic_issue.message,
+            error_type="plan_validation_failed",
+            metadata={
+                "issue_tags": [semantic_issue.issue_tag],
+                "errors": [semantic_issue.message],
+                "blocked_via": semantic_issue.blocked_via,
+            },
+        )
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=None,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=[semantic_issue.issue_tag],
+                blocked_reason="QueryPlan 语义预检未通过：" + semantic_issue.message,
+                error_type="plan_validation_failed",
+            ),
+            trace_context,
+        )
+
     # 步骤 3：QueryPlan 生成与自检 -----------------------------------------------------------
     span = trace_context.start_span(name="query_plan")
     try:
@@ -392,7 +425,7 @@ def run_text2sql_pipeline(
         status="success" if validation.is_valid else "blocked",
         output_summary="valid" if validation.is_valid else "; ".join(validation.errors),
         error_type=None if validation.is_valid else "plan_validation_failed",
-        metadata={"issue_tags": validation.issue_tags, "errors": validation.errors},
+        metadata={"issue_tags": validation.issue_tags, "errors": validation.errors, "blocked_via": "query_plan_validation"},
     )
     if not validation.is_valid:
         return _with_trace_snapshot(
@@ -431,6 +464,26 @@ def run_text2sql_pipeline(
             schema_graph=schema_graph,
             domain_schema=active_domain_schema,
             llm_client=llm_client,
+        )
+        # ★ 先让明显危险 SQL 进入 SQL Guard；只对只读候选执行 M22 的输出合同检查。
+        if not looks_like_dangerous_sql(generated_sql.sql):
+            validate_sql_plan_contract(generated_sql.sql, plan_step=plan_step)
+    except SQLPlanContractError as exc:
+        span.fail(
+            error_type=exc.issue_tag,
+            output_summary=str(exc),
+            metadata=_llm_error_metadata(exc),
+        )
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=None,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=[exc.issue_tag],
+                blocked_reason=f"SQL 未满足 QueryPlan 契约：{exc}",
+                error_type=exc.issue_tag,
+            ),
+            trace_context,
         )
     except LLMGenerationError as exc:
         span.fail(

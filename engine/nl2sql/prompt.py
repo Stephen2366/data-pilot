@@ -139,6 +139,11 @@ def _format_query_plan_notes(question: str, schema_graph: SchemaGraph) -> str:
             "类目销售额排名需要计划 `order_items` + `products` + `product_categories`，通过 "
             "`order_items.product_id = products.id` 后再连类目，按一级类目输出和排序。"
         )
+    if "各渠道订单量" in question and {"channels", "orders"}.issubset(set(schema_graph.tables)):
+        notes.append(
+            "各渠道订单量是可比较的聚合结果：按渠道分组后必须设置 "
+            "`order_count DESC, channels.channel_name ASC`，保证首行和同分时的稳定顺序。"
+        )
     if (
         "active" in question.lower()
         and "商品列表" in question
@@ -166,6 +171,11 @@ def _format_sql_generation_notes(plan_step: QueryPlanStep, schema_graph: SchemaG
         notes.append("商品维度关联必须使用 `order_items.product_id = products.id`；不要用 orders.product_id 关联商品。")
     if "add_to_pay_conversion_rate" in plan_step.metrics:
         notes.append("转化率必须使用浮点除法，例如分子乘 `* 1.0` 或 `CAST(... AS REAL)`，不要让整数除法返回 0。")
+    if "avg_selling_price" in plan_step.metrics:
+        notes.append(
+            "历史售价的时间窗口必须采用 overlap：`valid_from < 窗口结束`，且 "
+            "`(valid_to IS NULL OR valid_to > 窗口开始)`；不能只按 valid_from 落在窗口内过滤。"
+        )
     return "\n".join(f"- {note}" for note in notes) or "无"
 
 

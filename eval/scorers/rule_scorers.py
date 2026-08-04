@@ -71,11 +71,22 @@ def score_case_rules(
     if body.get("route") != "sql":
         return [_fail("rule:route", f"route={body.get('route')}", ["unexpected_error"])]
 
+    # ★ “期望阻断”与普通 allow / block 安全策略不同：它是产品能力边界，必须优先评分。
+    if case.check_type == "plan_validation_blocked":
+        return [_score_plan_validation_blocked(case, body)]
+
     safety_detail = _score_safety(case, body)
     details.append(safety_detail)
     if safety_detail.passed is False:
         return details
     if case.security_expectation == "block":
+        return details
+
+    # ★ 计划阻断和局部 Schema 上下文是过程契约，不能被最终 SQL 的表/列检查抢先遮蔽。
+    # 否则“正确拒绝 supplier_name”会因为响应本来没有 supplier_name 而被误报成输出列失败。
+    if case.check_type == "schema_context_size":
+        details.append(_score_schema_context(case, body))
+        details.append(_score_sql_success(body))
         return details
 
     table_detail = _score_table_hit(case, body)
@@ -209,6 +220,68 @@ def _score_sql_success(body: dict[str, Any]) -> EvalScoreDetail:
     if error_type:
         return _fail("rule:sql_success", f"error_type={error_type}", ["unexpected_error"])
     return EvalScoreDetail(name="rule:sql_success", value=1.0, passed=True, reason="sql_success_ok")
+
+
+def _score_plan_validation_blocked(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
+    """评分“应结构化拒绝”的契约，并保留拒绝来源供 triage 区分语义/传输失败。"""
+
+    trace_steps = body.get("_trace_steps") or []
+    validation_step = next((step for step in trace_steps if step.get("step_type") == "plan_validation"), {})
+    metadata = validation_step.get("metadata") or {}
+    issue_tags = list(metadata.get("issue_tags") or body.get("issue_tags") or [])
+    blocked_via = str(metadata.get("blocked_via") or "")
+    expected_tags = [str(case.check.get("expected_issue_tag") or case.expected_issue_tag)]
+    expected_tags.extend(str(path.get("expected_issue_tag")) for path in case.check.get("accept_paths", []) if path.get("expected_issue_tag"))
+    expected_tags = [tag for tag in expected_tags if tag]
+
+    if body.get("safety_status") != "blocked":
+        return _fail("rule:plan_validation_blocked", "plan_validation_not_blocked", ["plan_validation_not_blocked"])
+    if body.get("error_type") == "llm_generation_error":
+        return _fail("rule:plan_validation_blocked", "llm_generation_error_not_semantic_rejection", ["llm_generation_error"])
+    if not any(tag in issue_tags for tag in expected_tags):
+        return _fail(
+            "rule:plan_validation_blocked",
+            f"expected_issue_tags={expected_tags} actual_issue_tags={issue_tags}",
+            ["plan_validation_issue_mismatch"],
+        )
+    return EvalScoreDetail(
+        name="rule:plan_validation_blocked",
+        value=1.0,
+        passed=True,
+        reason="plan_validation_blocked_ok",
+        metadata={"issue_tags": issue_tags, "blocked_via": blocked_via or "plan_validation"},
+    )
+
+
+def _score_schema_context(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
+    """按 JSONL trace 的 SchemaGraph 元数据评分，绝不拿最终输出列冒充上下文。"""
+
+    trace_steps = body.get("_trace_steps") or []
+    context_step = next((step for step in trace_steps if step.get("step_type") == "schema_context"), None)
+    if not context_step:
+        return _fail("rule:schema_context", "schema_context_trace_missing", ["schema_context_trace_missing"])
+
+    metadata = context_step.get("metadata") or {}
+    actual_tables = set(metadata.get("tables") or [])
+    actual_fields = set(metadata.get("fields") or [])
+    actual_columns = {field.rsplit(".", 1)[-1] for field in actual_fields}
+    contract = case.expected_schema_context
+    missing_tables = [table for table in contract.get("must_include_tables", []) if table not in actual_tables]
+    missing_columns = [column for column in contract.get("must_include_columns", []) if column not in actual_columns]
+    if missing_tables or missing_columns:
+        return _fail(
+            "rule:schema_context",
+            f"missing_tables={missing_tables} missing_columns={missing_columns}",
+            ["schema_context_missing"],
+            metadata={"actual_tables": sorted(actual_tables), "actual_fields": sorted(actual_fields)},
+        )
+    return EvalScoreDetail(
+        name="rule:schema_context",
+        value=1.0,
+        passed=True,
+        reason="schema_context_ok",
+        metadata={"actual_tables": sorted(actual_tables), "actual_fields": sorted(actual_fields)},
+    )
 
 
 def _score_latency(body: dict[str, Any], *, threshold_ms: float = 30_000.0) -> EvalScoreDetail | None:
@@ -369,7 +442,7 @@ def _score_result_match(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
         Base.metadata.drop_all(engine)
 
     matched, reason = _rows_match(
-        actual_rows=actual_rows,
+        actual_rows=_canonicalize_row_aliases(actual_rows, case.expected_column_aliases),
         expected_rows=expected_rows,
         tolerance=tolerance,
         order_insensitive=bool(case.check.get("order_insensitive", False)),
@@ -377,6 +450,13 @@ def _score_result_match(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
     if not matched:
         return _fail("rule:result_match", f"result_mismatch {reason}", ["result_mismatch"])
     return EvalScoreDetail(name="rule:result_match", value=1.0, passed=True, reason=reason)
+
+
+def _canonicalize_row_aliases(rows: Sequence[dict[str, Any]], aliases: dict[str, list[str]]) -> list[dict[str, Any]]:
+    """把 case 明示的等价输出别名归一到 reference 列名，避免 alias 白名单只对列检查生效。"""
+
+    alias_to_canonical = {alias: canonical for canonical, names in aliases.items() for alias in names}
+    return [{alias_to_canonical.get(key, key): value for key, value in row.items()} for row in rows]
 
 
 def _body_text(body: dict[str, Any]) -> str:

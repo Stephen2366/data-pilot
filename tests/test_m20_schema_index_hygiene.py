@@ -71,7 +71,8 @@ def test_eval_run_can_prebuild_shared_milvus_index(monkeypatch) -> None:
 
     assert index is not None
     assert metadata["schema_vector_index_reuse"] == "run_scoped"
-    assert metadata["schema_docs_count"] == 193
+    # M22 新增 coupon_order_count 派生指标，Schema document corpus 因此从 193 增至 194。
+    assert metadata["schema_docs_count"] == 194
     assert metadata["milvus_collection"] == "m20_unit_unique"
     assert metadata["result_match_oracle_backend"] == "sqlite_deterministic_seed"
     assert fake_module.MilvusClient.insert_calls == 1

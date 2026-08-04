@@ -5,12 +5,12 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M21 Schema Retrieval Fusion / Context Repair（已完成，待 accept-module）
-- 下一模块：M22 Output Contract / QueryPlan → SQL 稳定性（M21 embedding 对照已收口；RRF 不切默认）
-- 当前模块验收：M21 未验收（待 accept-module）
+- 当前模块：M22 Eval Contract / Semantic Output Stabilization（已完成，待 accept-module）
+- 下一模块：M23（在 M22 后 case/scorer 口径上重新建立 retrieval 方法假设；不复用 M21 的 193-doc 对照）
+- 当前模块验收：M22 未验收（待 accept-module）
 - 上一模块验收：M21 未验收（待 `accept-module`）
 - 阻塞项：无
-- 更新时间：2026-08-03
+- 更新时间：2026-08-04
 
 ## 必读规则
 
@@ -71,6 +71,9 @@
 | 2026-08-03 | M21 triage 已补 `failure_subtype`：输出表/列契约错误与 schema 大阶段分开显示；保留旧 `failure_stage` 兼容性，未改变评分或默认配置。 |
 | 2026-08-03 | M21 controlled A/B：固定 Qwen `qwen3.7-plus` + weighted + 同一 32 题，只比较本地 deterministic 与 clean Milvus/Qwen embedding；两组均为 `21/32`，`schema_context=6`，且 `output_column_contract=6`、`output_table_contract=2`、`result_contract=1` 完全相同。当前没有端到端 embedding 提分证据，后续转 M22。 |
 | 2026-08-02 | Eval / Trace / LangFuse 的功能解释长文在 `docs/eval-observability-guide.md`；AI 只有在需要讲解设计或写说明时再读。 |
+| 2026-08-04 | M22 已将 Context Contract 改为读取同请求 trace 的 SchemaGraph 元数据，输出/结果/manual 独立展示；`db_plan_002/003/004` 现为带 `blocked_via` 的结构化语义拒绝，非 LLM transport error。 |
+| 2026-08-04 | M22 默认 DeepSeek + local deterministic + weighted diagnostic 最终报告为 `25/32`（自动 `22/27`、人工 `3/5`）；case/scorer 与 schema docs 已变更，不能与 M21 `21/32` 宣称模型提分。`db_core_004` 单 case SQLite oracle 复测已通过排序合同，批量实时 LLM 仍会波动；`db_prompt_002` trace 已验证 SCD overlap。 |
+| 2026-08-04 | 新增 `coupon_order_count` 派生指标使 schema document corpus 从 193 增至 194（hash `58534cb6...`）；默认 retrieval 不变，但后续 retrieval benchmark 必须使用新 hash，不能跨 corpus 比较。 |
 
 ## 已知的坑（活跃列表）
 
@@ -83,6 +86,7 @@
 | 2026-07-29 起，2026-08-02 仍有效 | LangFuse SDK 4.14.1 已无旧版 `client.trace()` builder | 按旧博客 / 旧草稿写 smoke 或 M16 backend 会直接 `AttributeError` | 使用 `start_observation(trace_context={"trace_id": uuid4().hex})` / `create_score(trace_id=...)` / `flush()`；细节见 `docs/notes/m15-notes.md` |
 | 2026-07-29 起，2026-08-02 仍有效 | Windows 裸连 LangFuse Cloud 偶发 `WinError 10013` | trace visibility 查询 / OTLP export 可能失败，但 score 写入和 JSONL 主链路可正常 | 真实 Cloud smoke 建议显式设置 `HTTP_PROXY` / `HTTPS_PROXY` 为 `http://127.0.0.1:7897`；脚本将 score write 和 trace visibility 分开显示 |
 | 2026-08-02 起，M20 已加护栏 | 旧固定 Milvus collection `datapilot_schema_docs` 已被历史重复灌入污染 | 旧 collection 的历史 A/B 结果不能直接作为 embedding 优劣结论 | 新 eval/smoke 使用唯一 collection 或 clean collection；`MilvusVectorIndex` 会拒绝行数/维度不匹配的已有 collection |
+| 2026-08-04 起 | SQL generation 可能丢弃 QueryPlan 已明确的 `order_by/limit` | 结果排序会静默改变；M22 已发现 active 商品列表样本 | 只读候选执行窄 SQL plan contract，缺失则 `sql_plan_contract_failed`；通用列表排序策略留后续单独立项 |
 
 ## 变更记录索引
 

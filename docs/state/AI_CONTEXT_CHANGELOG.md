@@ -13,6 +13,19 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M22 Eval Contract / Semantic Output Stabilization（2026-08-04）
+
+- 改动范围：`eval/scorers/rule_scorers.py`、`eval/run_eval.py`、`engine/nl2sql/{semantic_validation,pipeline,generator,prompt}.py`、三份 eval case、`metrics.yaml`、M22 / M20 回归测试及报告；完整清单见 `docs/notes/m22-notes.md`。
+- 关键记录：用户确认先校正 case/scorer 契约；商品退款率采用订单明细归因，一级类目采用规范类目树，manual/diagnostic 单列。Context Contract 改读同请求 trace 的 SchemaGraph metadata；`plan_validation_blocked` 优先评分；supplier、知识库订单归因、多步对比改为带 `blocked_via` 的语义拒绝。SQL 只检查 QueryPlan 已声明的排序/limit，不改写 SQL，危险 SQL 仍先走 SQL Guard。
+- 评测事实：新增 `coupon_order_count` 使 schema docs `193→194`；最终默认 diagnostic `25/32`（automated `22/27`、manual `3/5`），与 M21 `21/32` 不可比较。报告三视图曾因插入 Score Summary 表中间而破坏 Markdown 表格，已补回归测试并在修复后重跑；`db_prompt_002` trace 已验证 SCD overlap；`db_core_004` 单 case SQLite oracle 复测 `result_match_ok`，但批量实时 LLM 仍会波动。
+- 验证快照：focused `42 passed`、pipeline focused `28 passed`；最终全量 pytest `144 passed, 2 skipped`，均仅有既有 Starlette/httpx warning。
+- 参考资料：无外部资料；依据 M22 plan、`m22-review-notes.md` 和项目现有 trace/scorer/pipeline。
+- 遗留/后续：`db_simple_001` 暴露 SQL generation 丢失已规划排序并被结构化拦截，M22 不扩展为通用列表排序优化；M23 从 194-doc、新 case/scorer 基线重新做 retrieval 假设，默认策略不变。
+
+### [小修] roadmap阶段编号调整（2026-08-04）
+
+阶段三改名为阶段四，其他阶段编号依次后移；阶段三A 后补阶段三B；去掉周次 / 耗时标注。
+
 ### [小修] 产物路径收编：notes / eval 产物迁出 temp（2026-08-03）
 
 - 改动范围：28 个 mX-notes.md → `docs/notes/`（进 git）；72 个 eval 报告（report/triage/compare）→ `eval/reports/`、40 个 traces → `eval/traces/`（jsonl 继续 gitignore）；18 份 accept 验收报告删除（不再落盘）；同步 `CLAUDE.md`、finish-module / finish-docs / accept-module skill 的 notes 路径，及 `runbook.md` eval 命令模板和 `eval-baselines.md` / `schema-retrieval-milvus-embedding.md` / `database-current-state.md` 的产物指针。

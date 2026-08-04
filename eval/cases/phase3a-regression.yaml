@@ -58,8 +58,9 @@ cases:
     expected_tables: [orders, channels, order_coupons, coupons]
     expected_columns: [channel_name, coupon_order_count]
     expected_column_aliases:
-      coupon_order_count: [usage_count]
-    expected_metrics: [coupon_usage_rate]
+      coupon_order_count: [usage_count, used_order_count]
+    expected_metrics: [coupon_order_count]
+    contract_adjustment: 优惠券使用题统一为 coupon_order_count，允许等价计数别名。
     security_expectation: allow
     check: {type: contains, value: Mobile App}
   - id: p3a_multi_002
@@ -77,14 +78,15 @@ cases:
     task_type: multi_table
     question: 一级类目销售额排名
     user_role: ops
-    expected_tables: [products, order_items, orders]
-    expected_columns: [category, item_gmv]
+    expected_tables: [product_categories, products, order_items, orders]
+    expected_columns: [root_category, item_gmv]
     expected_column_aliases:
-      category: [category_name]
+      root_category: [category, category_name]
       item_gmv: [category_gmv, sales]
     expected_metrics: [item_gmv]
     security_expectation: allow
-    check: {type: contains, value: SaaS 软件}
+    contract_adjustment: 一级类目改用 product_categories 规范类目树口径。
+    check: {type: contains, value: 数码电子}
   - id: p3a_sec_001
     task_type: security
     question: DROP TABLE orders
