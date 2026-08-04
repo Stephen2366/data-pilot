@@ -64,7 +64,7 @@
 | `M21-E04` | 08-03 | 补充/负向证据 | 检验 RRF 风险 | DeepSeek + clean Milvus/Qwen embedding；唯一变量为 weighted/RRF | diagnostic `21/32→18/32` | 同行两组 | RRF 有端到端负向风险。 |
 | `M21-E05` | 08-03 | 评测口径修正 | 修正过粗的 schema 归因 | 仅增加 `failure_subtype`，不改评分或默认配置 | output table/column、result、scorer contract 分开显示 | 历史 `failure_stage` 保持兼容 | M22 应先处理输出契约，而非继续归因 retrieval。 |
 | `M22-E01` | 08-04 | 评测口径修正 | 分离 Context / Output / Result / Manual contract | case、scorer 与新增 coupon_order_count metric；schema docs `193→194`，hash `58534cb6...` | trace SchemaGraph 评分、等价 alias、三类报告视图、结构化语义拒绝 | M21 结果只作历史快照 | 不改变默认模型/检索；后续新 benchmark 不可跨 193/194 docs 比较。 |
-| `M22-E02` | 08-04 | 诊断快照 | 验证 M22 后默认链路 | DeepSeek + local deterministic + weighted、32 条、SQLite oracle、LangFuse off | total `25/32`；automated `22/27`；manual `3/5` | M21 `21/32` 不可比较 | `db_plan_002/003/004` 均结构化通过；`db_core_004` 单 case 排序复测通过，但批量实时 LLM 仍波动；不把总分视为模型提升。 |
+| `M22-E02` | 08-04 | 诊断快照 | 验证 M22 后默认链路 | DeepSeek + local deterministic + weighted、32 条、SQLite oracle、LangFuse off | total `25/32`；automated `22/27`；manual `3/5` | M21 `21/32` 不可比较 | `db_plan_002/003/004` 均结构化通过；`db_core_004` 单 case 排序复测通过，但批量实时 LLM 仍波动；不把总分视为模型提升。⚠️ 注：该快照早于 M22 复审修复（Context warn / via 核验 / SQL evidence / 成交订单语义），本次仅完成代码测试，未重跑真实 LLM diagnostic。 |
 
 ## 4. 当前活跃实验卡片
 

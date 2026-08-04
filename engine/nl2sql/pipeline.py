@@ -8,6 +8,7 @@ trace 可观测性，不是重开一个运行时平台。
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -200,6 +201,26 @@ def _llm_error_metadata(exc: LLMGenerationError) -> dict[str, Any]:
     if exc.prompt_length is not None:
         metadata["prompt_length"] = exc.prompt_length
     return metadata
+
+
+def _sql_plan_contract_evidence(sql: str, plan: Any) -> dict[str, Any]:
+    """记录 SQL Plan Contract 的只读证据，帮助区分真实漏排序与字符串等价误拦。
+
+    ★ 这里故意不重写或 AST 化 SQL：M22 当前合同仍是窄范围字符串检查。证据仅写入私有
+    JSONL trace，供失败 triage 看计划、候选 SQL 与观察到的 ORDER BY/LIMIT 是否一致。
+    """
+
+    normalized_sql = " ".join(sql.split())
+    order_match = re.search(r"\border\s+by\s+(.+?)(?:\s+limit\s+|;|$)", normalized_sql, flags=re.IGNORECASE)
+    limit_match = re.search(r"\blimit\s+(\d+)\b", normalized_sql, flags=re.IGNORECASE)
+    return {
+        "candidate_sql_preview": sql[:300],
+        "planned_order_by": list(plan.order_by),
+        "planned_limit": plan.limit,
+        "observed_order_by_clause": order_match.group(1).strip() if order_match else None,
+        "observed_limit": int(limit_match.group(1)) if limit_match else None,
+        "comparison_rule": "normalized_string_contains",
+    }
 
 
 def _first_sql_step(plan: QueryPlan):
@@ -472,7 +493,10 @@ def run_text2sql_pipeline(
         span.fail(
             error_type=exc.issue_tag,
             output_summary=str(exc),
-            metadata=_llm_error_metadata(exc),
+            metadata={
+                **_llm_error_metadata(exc),
+                **_sql_plan_contract_evidence(generated_sql.sql, plan_step),
+            },
         )
         return _with_trace_snapshot(
             _blocked_result(

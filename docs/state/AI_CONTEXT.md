@@ -75,7 +75,7 @@
 | 2026-07-29 起，2026-08-02 仍有效 | LangFuse SDK 4.14.1 已无旧版 `client.trace()` builder | 按旧博客 / 旧草稿写 smoke 或 M16 backend 会直接 `AttributeError` | 使用 `start_observation(trace_context={"trace_id": uuid4().hex})` / `create_score(trace_id=...)` / `flush()`；细节见 `docs/notes/m15-notes.md` |
 | 2026-07-29 起，2026-08-02 仍有效 | Windows 裸连 LangFuse Cloud 偶发 `WinError 10013` | trace visibility 查询 / OTLP export 可能失败，但 score 写入和 JSONL 主链路可正常 | 真实 Cloud smoke 建议显式设置 `HTTP_PROXY` / `HTTPS_PROXY` 为 `http://127.0.0.1:7897`；脚本将 score write 和 trace visibility 分开显示 |
 | 2026-08-02 起，M20 已加护栏 | 旧固定 Milvus collection `datapilot_schema_docs` 已被历史重复灌入污染 | 旧 collection 的历史 A/B 结果不能直接作为 embedding 优劣结论 | 新 eval/smoke 使用唯一 collection 或 clean collection；`MilvusVectorIndex` 会拒绝行数/维度不匹配的已有 collection |
-| 2026-08-04 起 | SQL generation 可能丢弃 QueryPlan 已明确的 `order_by/limit` | 结果排序会静默改变；M22 已发现 active 商品列表样本 | 只读候选执行窄 SQL plan contract，缺失则 `sql_plan_contract_failed`；通用列表排序策略留后续单独立项 |
+| 2026-08-04 起 | SQL generation 可能丢弃 QueryPlan 已明确的 `order_by/limit` | `db_simple_001`、`db_simple_002`、`db_core_004` 已被结构化拦截；需区分真实漏排序与等价表达误拦 | 窄 SQL plan contract 失败 trace 记录候选 SQL 摘要、计划/观察到的排序和 limit；不自动扩大为 AST 或通用列表排序策略 |
 
 ## 变更记录索引
 

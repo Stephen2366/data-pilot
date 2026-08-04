@@ -7,6 +7,9 @@ __pycache__/
 .agent_work/temp/*
 !.agent_work/temp/.gitkeep
 
+# Codex 工具的临时 trace / 缓存只用于本地排障，不应成为版本化评测产物。
+.codex/temp_work/
+
 eval/traces/*.jsonl
 !eval/traces/.gitkeep
 

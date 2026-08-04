@@ -19,7 +19,7 @@ cases:
       LIMIT 10
   - id: db_simple_002
     task_type: simple_sql
-    question: 查询 2026 年 6 月已支付订单
+    question: 查询 2026 年 6 月成交订单
     user_role: ops
     expected_tables: [orders]
     expected_columns: [order_no, order_amount, paid_at]
@@ -31,7 +31,9 @@ cases:
     expected_sql: |
       SELECT order_no, order_amount, paid_at
       FROM orders
-      WHERE paid_at >= '2026-06-01 00:00:00' AND paid_at < '2026-07-01 00:00:00'
+      WHERE paid_at >= '2026-06-01 00:00:00'
+        AND paid_at < '2026-07-01 00:00:00'
+        AND order_status NOT IN ('cancelled', 'canceled')
       ORDER BY paid_at ASC
       LIMIT 10
   - id: db_simple_003

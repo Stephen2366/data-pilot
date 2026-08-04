@@ -944,6 +944,8 @@ M19 完成后，用户要求追加真实模型 / embedding 对照：
 - `db_core_002` 退款率 case 当前用 `orders.product_id + refunds.order_id` 的主商品口径；而指标文档写的是商品维度优先 `refunds.order_item_id -> order_items.product_id`。当前两种口径 Top1 都是 `Aurora Noise Cancelling Headphones`，所以 contains 可过，但没有真正验证订单明细归因口径。
 - `db_simple_002` “已支付订单”使用 `paid_at` 判断，会包含已支付后取消的订单；若题意是“发生过支付”则合理，若题意是“成交订单”则需改题面或 SQL。
 
+  > ⚠️ 注（M22，2026-08-04）：用户已确认本 case 采用“成交订单”口径；题面已改为“2026 年 6 月成交订单”，reference SQL 已排除 `cancelled / canceled`。
+
 结论：M20 不能只修 Milvus 后立刻复测 embedding；必须先做 eval ground truth hygiene，否则 clean Milvus 复测仍可能被 scorer / case 口径干扰。
 
 ### M20 关键决策点
@@ -968,6 +970,8 @@ M19 完成后，用户要求追加真实模型 / embedding 对照：
    - 优先修 `result_match` 标准答案来源：建议让 scorer 使用当前配置数据库执行 `expected_sql`，或至少新增显式配置 / 报告字段说明 oracle backend 是 MySQL 还是 SQLite。
    - 对 formal 中明显过弱的多表题列出升级方案：哪些改成 `result_match`，哪些保持 `contains`，以及会如何影响历史基线。
    - 对 `db_core_002` 退款率、`db_simple_002` 已支付订单这类业务语义题，先写方案 / 风险 / 后续影响 / 建议，等用户确认后再改 case。
+
+     > ⚠️ 注（M22，2026-08-04）：两项均已在 M22 获得确认并完成 case/reference SQL 同步；详情见下方 M22 阶段 2 与 `docs/notes/m22-notes.md`。
    - 这一步不追通过率，只保证“eval 标准答案和当前 MySQL 事实对齐”。
 
 1. **collection 生命周期修复**
@@ -1136,10 +1140,10 @@ M21 已完成 fusion 候选验证、Context 地基体检、triage 细分类和�
 
 #### 后续衔接
 
-- M22：执行下方的 Eval Contract / Semantic Output Stabilization 计划；先校正可解释性，再处理 QueryPlan → SQL 稳定性。
-- M23：待 M22 基础事实稳定后，再逐项尝试 RRF、rerank 或其他 retrieval 方法；每次只改变一个变量，并同时保留 retrieval-only 与端到端指标。
+- M22：已完成核心 Eval Contract / Semantic Output Stabilization 实现；继续收口 Context 全约束、拒绝来源核验、SQL 合同证据与用户确认的 Qwen / Milvus / RRF 新口径对照。
+- M23：待 M22 基础事实与候选实验稳定后，再提出新的 retrieval 方法假设；每次只改变一个变量，并同时保留 retrieval-only 与端到端指标。
 
-### M22 Eval Contract / Semantic Output Stabilization（计划制定完成，待实施）
+### M22 Eval Contract / Semantic Output Stabilization（核心实现已完成；补充收口与候选实验待确认）
 
 #### 背景与审计结论
 
@@ -1154,6 +1158,8 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 3. `db_multi_002` 的“一级类目”使用兼容冗余字段 `products.category`，而不是规范类目树。
 4. `schema_context_size` case 当前从最终响应的 `columns` 评分，混淆“局部 Schema 上下文应包含的字段”和“最终 SQL 应输出的字段”。
 5. 真实 pipeline 仍存在排序丢失、SCD 时间窗口 overlap 缺失、未知字段未结构化阻断，以及语义拒绝与 LLM generation error 混淆的问题。
+
+实施快照（2026-08-04）：已完成 Context / Output / Result / Manual 分层、订单明细退款归因、规范类目树、`coupon_order_count`、SCD overlap、三类语义拒绝与窄 SQL Plan Contract；默认新口径 diagnostic 为 `25/32`（自动 `22/27`、人工/诊断 `3/5`），不可与 M21 `21/32` 直接比较。补充收口持续核验 Context 的 warn 约束、`blocked_via` 来源和 SQL 合同失败证据；候选实验不自动启动或切默认。
 
 #### 目标与边界
 
@@ -1180,6 +1186,7 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 4. `db_hard_001`：统一商品明细 GMV 的 metric key、输出 alias 与 reference SQL。
 5. `db_prompt_003`：明确时间范围与 GMV 口径，内部上下文字段不再充当最终输出字段要求。
 6. 新增 case—metric—reference SQL 一致性测试，覆盖 metric key、表/字段事实、expected SQL 和关键固定事实。
+7. `db_simple_002` 已按用户确认改为“2026 年 6 月成交订单”，reference SQL 显式排除 `cancelled / canceled`；“发生过支付”不再作为该 case 的默认含义。
 
 验收：上述 case 的自然语言、`metrics.yaml`、schema descriptions、relations、expected SQL 与评分契约不再互相冲突；reference SQL 仍可在确定性 seed 上执行。
 
@@ -1189,6 +1196,7 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 2. 保留 `table_hit` / `column_recall` 用于真正的最终 SQL 输出契约；context、output、result、manual 四类 case 使用独立评分路径。
 3. 调整 scorer 的早返回顺序：专属 contract（例如 plan validation blocked）必须被执行和报告，不能先被无关的输出列检查遮蔽。
 4. 为 `db_prompt_001`、`db_prompt_002`、`db_prompt_003`、`db_plan_002` 等 case 增加 focused regression，证明“正确上下文 / 正确阻断”能通过，而真实缺失仍会失败。
+5. `expected_schema_context` 的 `must_include_join_keys` 作为硬合同；`max_tables`、`must_not_include_tables` 按 case 的 `level` 输出 warn 或 error，不能再被 `schema_context_ok` 吞掉。
 
 验收：正确使用内部字段但不输出它们的 SQL 不再被当作 context 失败；真实缺表、缺上下文字段、缺输出列和 result mismatch 仍能被分别定位。
 
@@ -1198,7 +1206,7 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 2. **SCD 时间语义**：为 `avg_selling_price` 固化“时间窗口 overlap”约束，覆盖 `db_prompt_002`，避免仅以 `valid_from` 落点过滤。
 3. **未知字段阻断**：`supplier_name` 等不存在字段必须在 QueryPlan / validation 阶段产生结构化 block，不能静默降级为无关 SQL。
 4. **不支持需求的可观测拒绝**：多步骤对比、知识库文档到订单归因等场景，要区分语义上不支持的 `blocked_via / issue_tag` 与 LLM transport / generation error。
-5. 以窄范围的 QueryPlan / SQL contract 和测试实施，避免用泛化 AST 规则误拦合法 SQL。
+5. 保持窄范围的 QueryPlan / SQL contract；失败 trace 必须保留候选 SQL 摘要、计划排序/limit、观察到的 ORDER BY/LIMIT 与比较规则。是否升级为 AST 比较只在证据显示存在等价误拦后另行确认。
 
 验收：`db_core_004`、`db_prompt_002`、`db_plan_002` 具有可复现的行为改进；`db_plan_003/004` 的语义拒绝与调用失败能在 trace / triage 中明确区分。
 

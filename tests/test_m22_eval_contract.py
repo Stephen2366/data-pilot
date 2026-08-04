@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
-from engine.nl2sql.pipeline import run_text2sql_pipeline
+from engine.nl2sql.pipeline import _sql_plan_contract_evidence, run_text2sql_pipeline
 from eval.run_eval import EvalCase, EvalResult, _score_case, write_report
+from eval.scorers.rule_scorers import score_case_rules
 from engine.nl2sql.generator import SQLPlanContractError, validate_sql_plan_contract
 from engine.nl2sql.planner import QueryPlanStep
 from engine.nl2sql.prompt import build_local_schema_sql_prompt, build_query_plan_prompt
@@ -77,6 +78,43 @@ def test_schema_context_contract_reads_trace_metadata_not_final_output_columns()
     assert score.issue_tags == []
 
 
+def test_schema_context_contract_enforces_join_keys_and_reports_warn_constraints() -> None:
+    """join key 缺失必须失败；warn 级上下文噪音必须可见但不冒充硬失败。"""
+
+    case = _case(
+        check_type="schema_context_size",
+        expected_schema_context={
+            "must_include_tables": ["orders"],
+            "must_include_columns": ["paid_at"],
+            "must_include_join_keys": ["order_id"],
+            "max_tables": {"level": "warn", "value": 1},
+            "must_not_include_tables": {"level": "warn", "tables": ["coupons"]},
+        },
+    )
+    body = {
+        "route": "sql",
+        "safety_status": "passed",
+        "_trace_steps": [{
+            "step_type": "schema_context",
+            "metadata": {"tables": ["orders", "coupons"], "fields": ["orders.paid_at", "coupons.id"]},
+        }],
+    }
+
+    details = score_case_rules(case=case, body=body, status_code=200, actual_pipeline_mode="new_text2sql")
+    warning_detail = next(detail for detail in details if detail.name == "rule:schema_context")
+    assert warning_detail.passed is False
+    assert "missing_join_keys=['order_id']" in warning_detail.reason
+
+    body["_trace_steps"][0]["metadata"]["fields"].append("orders.order_id")
+    details = score_case_rules(case=case, body=body, status_code=200, actual_pipeline_mode="new_text2sql")
+    warning_detail = next(detail for detail in details if detail.name == "rule:schema_context")
+    assert warning_detail.passed is True
+    assert warning_detail.metadata["contract_warnings"] == [
+        "max_tables_exceeded=2>1",
+        "must_not_include_tables_present=['coupons']",
+    ]
+
+
 def test_plan_validation_contract_scores_structured_semantic_block_before_output_columns() -> None:
     """未知 supplier_name 被结构化拒绝时，不能先被空输出列误判为普通 column failure。"""
 
@@ -84,7 +122,11 @@ def test_plan_validation_contract_scores_structured_semantic_block_before_output
         check_type="plan_validation_blocked",
         expected_columns=["supplier_name"],
         expected_issue_tag="missing_column",
-        check={"type": "plan_validation_blocked", "expected_issue_tag": "missing_column"},
+        check={
+            "type": "plan_validation_blocked",
+            "expected_issue_tag": "missing_column",
+            "accept_paths": [{"via": "semantic_request_validation", "expected_issue_tag": "missing_column"}],
+        },
     )
     body = {
         "route": "sql",
@@ -103,6 +145,32 @@ def test_plan_validation_contract_scores_structured_semantic_block_before_output
 
     assert score.passed is True
     assert score.issue_tags == []
+
+
+def test_plan_validation_contract_rejects_right_issue_tag_from_wrong_source() -> None:
+    """issue tag 相同但 blocked_via 不在 case 的 accept_paths 中时，不能误判为正确拒绝。"""
+
+    case = _case(
+        check_type="plan_validation_blocked",
+        check={
+            "type": "plan_validation_blocked",
+            "accept_paths": [{"via": "semantic_request_validation", "expected_issue_tag": "unsupported_relation"}],
+        },
+    )
+    body = {
+        "route": "sql",
+        "safety_status": "blocked",
+        "error_type": "plan_validation_failed",
+        "_trace_steps": [{
+            "step_type": "plan_validation",
+            "metadata": {"issue_tags": ["unsupported_relation"], "blocked_via": "query_plan_validation"},
+        }],
+    }
+
+    score = _score_case(case, body, 200, actual_pipeline_mode="new_text2sql")
+
+    assert score.passed is False
+    assert score.issue_tags == ["plan_validation_via_mismatch"]
 
 
 def test_result_match_accepts_case_declared_equivalent_alias() -> None:
@@ -216,6 +284,23 @@ def test_sql_plan_contract_preserves_order_by_and_rejects_silent_drop() -> None:
             "SELECT channel_name, COUNT(*) AS order_count FROM orders GROUP BY channel_name",
             plan_step=step,
         )
+
+
+def test_sql_plan_contract_evidence_keeps_candidate_and_observed_clause() -> None:
+    """合同失败 trace 必须同时留下候选 SQL、计划排序和实际观察到的排序，便于排查误拦。"""
+
+    step = QueryPlanStep(
+        step_id="step_1", step_index=1, purpose="订单列表", order_by=["orders.paid_at ASC"], limit=10,
+    )
+
+    evidence = _sql_plan_contract_evidence(
+        "SELECT order_no FROM orders ORDER BY paid_at ASC LIMIT 10", step,
+    )
+
+    assert evidence["candidate_sql_preview"].startswith("SELECT order_no")
+    assert evidence["planned_order_by"] == ["orders.paid_at ASC"]
+    assert evidence["observed_order_by_clause"] == "paid_at ASC"
+    assert evidence["observed_limit"] == 10
 
 
 def test_channel_order_count_plan_prompt_requires_stable_sort() -> None:

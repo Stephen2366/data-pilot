@@ -230,8 +230,9 @@ def _score_plan_validation_blocked(case: Any, body: dict[str, Any]) -> EvalScore
     metadata = validation_step.get("metadata") or {}
     issue_tags = list(metadata.get("issue_tags") or body.get("issue_tags") or [])
     blocked_via = str(metadata.get("blocked_via") or "")
+    accept_paths = list(case.check.get("accept_paths") or [])
     expected_tags = [str(case.check.get("expected_issue_tag") or case.expected_issue_tag)]
-    expected_tags.extend(str(path.get("expected_issue_tag")) for path in case.check.get("accept_paths", []) if path.get("expected_issue_tag"))
+    expected_tags.extend(str(path.get("expected_issue_tag")) for path in accept_paths if path.get("expected_issue_tag"))
     expected_tags = [tag for tag in expected_tags if tag]
 
     if body.get("safety_status") != "blocked":
@@ -243,6 +244,18 @@ def _score_plan_validation_blocked(case: Any, body: dict[str, Any]) -> EvalScore
             "rule:plan_validation_blocked",
             f"expected_issue_tags={expected_tags} actual_issue_tags={issue_tags}",
             ["plan_validation_issue_mismatch"],
+        )
+    # ★ issue tag 只能说明“为什么拒绝”，blocked_via 才说明“在哪个能力边界拒绝”。
+    # accept_paths 已把二者成对声明，不能只因 tag 碰巧一致就把错误的拒绝来源判通过。
+    if accept_paths and not any(
+        blocked_via == str(path.get("via"))
+        and str(path.get("expected_issue_tag")) in issue_tags
+        for path in accept_paths
+    ):
+        return _fail(
+            "rule:plan_validation_blocked",
+            f"expected_accept_paths={accept_paths} actual_blocked_via={blocked_via} actual_issue_tags={issue_tags}",
+            ["plan_validation_via_mismatch"],
         )
     return EvalScoreDetail(
         name="rule:plan_validation_blocked",
@@ -268,19 +281,59 @@ def _score_schema_context(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
     contract = case.expected_schema_context
     missing_tables = [table for table in contract.get("must_include_tables", []) if table not in actual_tables]
     missing_columns = [column for column in contract.get("must_include_columns", []) if column not in actual_columns]
-    if missing_tables or missing_columns:
+    missing_join_keys = [key for key in contract.get("must_include_join_keys", []) if key not in actual_columns]
+
+    # warn 级约束不会把 case 判失败，但必须出现在评分明细里；否则 schema_context_ok 会被误读为
+    # “上下文没有噪音”。未来若 case 明确标为 error，则复用同一份结构化信息转为硬失败。
+    contract_warnings: list[str] = []
+    contract_errors: list[str] = []
+    max_tables = contract.get("max_tables") or {}
+    if isinstance(max_tables, dict) and max_tables.get("value") is not None:
+        max_table_value = int(max_tables["value"])
+        if len(actual_tables) > max_table_value:
+            message = f"max_tables_exceeded={len(actual_tables)}>{max_table_value}"
+            (contract_warnings if max_tables.get("level", "error") == "warn" else contract_errors).append(message)
+
+    forbidden_config = contract.get("must_not_include_tables") or {}
+    if isinstance(forbidden_config, dict):
+        forbidden_tables = list(forbidden_config.get("tables") or [])
+        forbidden_level = str(forbidden_config.get("level", "error"))
+    else:
+        forbidden_tables = list(forbidden_config)
+        forbidden_level = "error"
+    forbidden_present = [table for table in forbidden_tables if table in actual_tables]
+    if forbidden_present:
+        message = f"must_not_include_tables_present={forbidden_present}"
+        (contract_warnings if forbidden_level == "warn" else contract_errors).append(message)
+
+    if missing_tables or missing_columns or missing_join_keys or contract_errors:
         return _fail(
             "rule:schema_context",
-            f"missing_tables={missing_tables} missing_columns={missing_columns}",
+            " ".join(
+                [
+                    f"missing_tables={missing_tables}",
+                    f"missing_columns={missing_columns}",
+                    f"missing_join_keys={missing_join_keys}",
+                    *contract_errors,
+                ]
+            ),
             ["schema_context_missing"],
-            metadata={"actual_tables": sorted(actual_tables), "actual_fields": sorted(actual_fields)},
+            metadata={
+                "actual_tables": sorted(actual_tables),
+                "actual_fields": sorted(actual_fields),
+                "contract_warnings": contract_warnings,
+            },
         )
     return EvalScoreDetail(
         name="rule:schema_context",
         value=1.0,
         passed=True,
-        reason="schema_context_ok",
-        metadata={"actual_tables": sorted(actual_tables), "actual_fields": sorted(actual_fields)},
+        reason=("schema_context_ok" if not contract_warnings else f"schema_context_ok warnings={contract_warnings}"),
+        metadata={
+            "actual_tables": sorted(actual_tables),
+            "actual_fields": sorted(actual_fields),
+            "contract_warnings": contract_warnings,
+        },
     )
 
 

@@ -99,3 +99,13 @@
 - 从 `eval/traces/m22-default-diagnostic-traces.jsonl` 的 32 条实际 trace 汇总：总 wall time `512.0s`（约 8.5 分钟），单 case p50 `13.19s`、p95 `45.32s`。
 - `query_plan` 共 `355.3s`（69.4%，p50 `11.04s`、p95 `40.09s`），`sql_generation` 共 `155.3s`（30.3%，p50 `4.55s`、p95 `18.81s`）；Schema Retrieval、schema context、SQLite SQL execution、SQL Guard、评分和报告合计不足 0.3%。
 - 结论：当前耗时几乎完全来自一次请求通常需要两次远程 LLM 调用，且 case 在 eval runner 中串行执行；不能通过优化 Milvus、SQLite 或 rule scorer 获得实质缩短。首轮实验采用“一次一组”，待用户根据结果确认后再做第 2、3 次，避免在稳定性尚未确认前放大远程调用成本。
+
+### 复审修复素材（2026-08-04）
+
+- 用户确认 `db_simple_002` 的“已支付订单”按“成交订单”解释：题面改为“2026 年 6 月成交订单”，reference SQL 显式排除 `cancelled / canceled`。
+- Context Contract 补齐 `must_include_join_keys` 硬检查，以及 `max_tables` / `must_not_include_tables` 的 warn 记录；warn 仍不改变 pass/fail，避免把诊断噪音误作硬门失败。
+- `plan_validation_blocked` 改为将 `accept_paths[].via` 与 issue tag 成对核验；`db_plan_002/003/004` 统一声明 M22 的 `semantic_request_validation` 来源。
+- SQL Plan Contract 暂不升级 AST：失败 trace 记录候选 SQL preview、计划排序/limit、观察到的 ORDER BY/LIMIT 和当前字符串比较规则；先根据真实证据判断是否存在等价误拦。
+- 聚焦测试首次 `13 passed, 1 failed`：失败是测试错误取到 `rule:safety_compliance` 而非随后产生的 `rule:schema_context`，不涉及业务实现；已改为按 scorer 名称取 detail 后复跑。
+- 复跑验证：M22 专属 `14 passed, 1 warning`；相关 eval / planner / pipeline / database / schema-index 回归 `64 passed, 1 warning`；全量 `147 passed, 2 skipped, 1 warning`。warning 均为既有 Starlette/httpx `TestClient` deprecation。
+- 本次复审修复后未重跑真实 LLM default diagnostic：`25/32` 仍是修复前的 C0 快照，只用于首轮候选筛选参照，不被标注为本次代码修复后的新结果；Qwen / Milvus / RRF 实验继续待用户确认。

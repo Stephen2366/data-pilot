@@ -123,6 +123,8 @@ cases:
     check:
       type: plan_validation_blocked
       expected_issue_tag: missing_column
+      accept_paths:
+        - {via: semantic_request_validation, expected_issue_tag: missing_column}
 
   - id: db_plan_003
     task_type: plan_diagnosis
@@ -140,8 +142,7 @@ cases:
     check:
       type: plan_validation_blocked
       accept_paths:
-        - {via: llm_rejected, expected_issue_tag: unsupported_relation}
-        - {via: plan_validated, expected_issue_tag: invalid_join_path}
+        - {via: semantic_request_validation, expected_issue_tag: unsupported_relation}
       report_field: blocked_via
 
   - id: db_plan_004
@@ -161,6 +162,8 @@ cases:
     check:
       type: plan_validation_blocked
       expected_issue_tag: unsupported_multi_step_plan
+      accept_paths:
+        - {via: semantic_request_validation, expected_issue_tag: unsupported_multi_step_plan}
 
   - id: db_prompt_001
     task_type: local_schema_prompt

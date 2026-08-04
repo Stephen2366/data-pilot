@@ -13,6 +13,14 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [修复] M22 契约完整性与收口证据（2026-08-04）
+
+- 改动范围：Context scorer、plan-validation scorer/case、SQL contract trace、`db_simple_002`、M22 计划与临时产物纪律。
+- 记录：补齐 Context 的 join key 硬检查，以及表数/禁表 warn；`accept_paths` 现按 `(blocked_via, issue_tag)` 成对验证，三类 M22 语义拒绝统一声明 `semantic_request_validation`。SQL Plan Contract 暂不改 AST，只在失败 trace 写候选 SQL 摘要与计划/观察到的排序、limit，先积累误拦证据。用户确认“已支付订单”case 使用“成交订单”口径并排除取消状态。
+- 产物：`.codex/temp_work/m22-db-core-004-trace.jsonl` 已取消 Git 跟踪并加入 ignore；历史 commit 不重写，本地一次性文件可保留供本机排障。
+- 验证：M22 专属 `14 passed, 1 warning`；相关回归 `64 passed, 1 warning`；全量 `147 passed, 2 skipped, 1 warning`，均仅有既有 Starlette/httpx warning。
+- 遗留/后续：三条默认快照 SQL contract failure 的真实/误拦比例需以后续 trace 判断；是否采用 AST 比较需单独确认。真实 LLM default diagnostic 未因本次修复重跑，`25/32` 仍是修复前 C0 快照。Qwen/Milvus/RRF 新口径实验仍待用户确认，不在本修复中执行。
+
 ### [范围调整] M22 纳入 Qwen / Milvus / RRF 新口径对照（2026-08-04）
 
 - 改动范围：`docs/notes/m22-notes.md`、state 当前路线与评测账本。

@@ -313,17 +313,20 @@ RRF 被记录为**否定实验**：保持默认 weighted，不改 top_k、schema
 
 ### 开工前的预审查
 
-M22 不是一上来就改 prompt。先做了一次只读预审查，先证明问题不在数据库：
+M22 先做了一次预审查，先证明问题不在数据库：
 
 用和 `result_match` 相同的内存 SQLite seed 重放三套 case。42 条 case 中，36 条允许执行；14 条带 reference SQL 的题全部可执行且非空，GMV、渠道、Aurora 退款率、一级类目等固定业务事实也都能复现。这个结果排除了“数据库坏了、reference SQL 跑不通”作为主因，但**不能**证明自然语言、指标口径、reference SQL 和 scorer 契约一定说的是同一件事。
 
-预审查随即找到了两类混杂问题：一类是**题目/契约自身不一致**，例如退款率 reference 走了兼容关系、优惠券“使用订单数”却标成 `coupon_usage_rate`、一级类目绕过规范类目树；另一类才是**真实 pipeline 缺口**，例如 SCD 时间窗口没有按 overlap 处理、渠道订单量漏排序、未知字段和不支持多步需求没有被结构化阻断。它也发现旧 `schema_context` scorer 实际读取最终 API 输出，而不是 SchemaGraph 上下文——这正是“检索没召回”常被误判的原因。
+预审查随即找到了两类混杂问题：
+
+1. **题目/契约自身不一致**，例如退款率 reference 走了兼容关系、优惠券“使用订单数”却标成 `coupon_usage_rate`、一级类目绕过规范类目树；
+2. **真实 pipeline 缺口**，例如 SCD 时间窗口没有按 overlap 处理、渠道订单量漏排序、未知字段和不支持多步需求没有被结构化阻断。它也发现旧 `schema_context` scorer 实际读取最终 API 输出，而不是 SchemaGraph 上下文——这正是“检索没召回”常被误判的原因。
 
 因此 M22 的实施顺序被定为：**先在用户确认后校正题目和 scorer 的尺子，再处理语义拒绝与 QueryPlan→SQL 缺口**。M21 两组受控实验都为 `21/32`，且失败集中在 output/result contract，进一步说明此时不该继续堆 embedding 参数。预审查的完整证据保留在 `docs/notes/m22-review-notes.md`。
 
 ### 这次做了什么
 
-我先确认了四项会影响长期口径的选择：商品退款率统一按**订单明细归因**，一级类目统一按**规范类目树**，优惠券使用订单数单列为 `coupon_order_count`，manual case 不再混入自动能力分。新增 metric 使 schema docs 从 193 变为 194，所以 M22 后分数不能直接和 M21 的 `21/32` 说成模型提分。
+我先确认了五项会影响长期口径的选择：商品退款率统一按**订单明细归因**，一级类目统一按**规范类目树**，优惠券使用订单数单列为 `coupon_order_count`，manual case 不再混入自动能力分，“已支付订单”在该 case 中明确按**成交订单**处理并排除取消状态。新增 metric 使 schema docs 从 193 变为 194，所以 M22 后分数不能直接和 M21 的 `21/32` 说成模型提分。
 
 代码上，eval 会从同一次 JSONL trace 取 `schema_context` 元数据评分；报告新增自动能力、人工审查、契约重分类三张视图。QueryPlan 已写了 `order_by/limit` 时，SQL 必须保留；若丢失会结构化报 `sql_plan_contract_failed`，但危险 SQL 仍优先进入 SQL Guard。最终默认 diagnostic 为 `25/32`，其中自动 `22/27`、人工 `3/5`；它是新口径快照。`db_plan_002/003/004` 已能结构化拒绝，SCD 平均售价 trace 已使用时间窗口 overlap，渠道订单量在单 case SQLite oracle 复测通过；批量实时 LLM 的结果仍会波动。
 
