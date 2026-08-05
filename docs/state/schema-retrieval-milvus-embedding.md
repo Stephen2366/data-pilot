@@ -2,13 +2,13 @@
 
 > 本文是 DataPilot 的 Schema Retrieval、Milvus 向量库和 embedding 实验速查。Trigger：只要涉及 `SCHEMA_VECTOR_BACKEND`、`SCHEMA_EMBEDDING_PROVIDER`、Milvus collection、embedding A/B、`schema_docs_hash`、schema retrieval 召回质量或 M20 clean run 结论，必须先读本文。当前运行命令入口仍以 `docs/state/runbook.md` 为准，长期 eval 数字以 `docs/state/eval-baselines.md` 为准。
 
-更新时间：2026-08-03
+更新时间：2026-08-05
 
 ## 一句话结论
 
 默认链路仍是 **`inmemory + deterministic`**，Milvus / SiliconFlow / DashScope-Qwen embedding 只作为显式实验路径。M20 已修复“固定 Milvus collection 被重复灌入”的实验污染问题：后续 clean 实验必须使用唯一 collection 或干净 collection，并在报告中检查 `schema_docs_hash`、row_count、embedding 配置和 `schema_vector_index_reuse`。
 
-> M22 更新（2026-08-04）：新增 `coupon_order_count` 派生指标后，当前 Schema document corpus 从 193 变为 194，hash 为 `58534cb68ec4264d4b75579d9f5a6f08bb1908475d89bbab63941e558cb92a6f`。M20/M21 的 193-doc 结果仍是有效历史事实，但新 retrieval-only 或端到端 A/B 必须使用 194-doc 的新 hash，不得跨 corpus 直接比较。
+> M23 更新（2026-08-05）：字段 / 指标 / 关系语义更新后，新增 `net_refund_amount` 指标使当前 Schema document corpus 从 194 增至 195 条，hash 为 `ce04fe4fefc1cfb9226562f55154a1ed59eb91e9e41c3a83823c53ea491061b1`。M22 的 `58534c...` 与 M20/M21 的 193-doc 结果都是历史事实；新 retrieval-only 或端到端 A/B 必须使用当前 hash，不得跨 corpus 直接比较。
 
 ## 当前默认与边界
 
@@ -32,8 +32,8 @@
 
 | 文件 | 作用 | 阅读重点 |
 |---|---|---|
-| `engine/schema_retrieval/document_builder.py` | 构建 field / metric / relation 三类 schema docs | `build_schema_documents()` 当前生成 194 条文档（M22 新增 `coupon_order_count` metric）；`schema_documents_hash()` 给文档版本打指纹。 |
-| `engine/schema_retrieval/vector_index.py` | In-memory 与 Milvus vector index | `MilvusVectorIndex` 会检查 collection row_count / vector dimension，拒绝污染 collection。 |
+| `engine/schema_retrieval/document_builder.py` | 构建 field / metric / relation 三类 schema docs | `build_schema_documents()` 当前生成 195 条文档（M23 新增 `net_refund_amount` metric）；`schema_documents_hash()` 给文档版本打指纹。 |
+| `engine/schema_retrieval/vector_index.py` | In-memory 与 Milvus vector index | `MilvusVectorIndex` 会检查 collection row_count / vector dimension / schema docs hash，拒绝污染或语义错配 collection。 |
 | `engine/schema_retrieval/retriever.py` | keyword + vector + merged hits | `build_configured_schema_vector_index()` 供 eval run 内复用 index。 |
 | `engine/nl2sql/pipeline.py` | Text2SQL pipeline 调用 retrieval | 可接收外部 `schema_vector_index`，不改变默认调用。 |
 | `eval/run_eval.py` | Eval runner / Markdown 报告 | Milvus eval 时预建 run-scoped index，并写 `Eval Runtime Metadata`。 |
@@ -59,12 +59,13 @@ M20 前的旧固定 collection `datapilot_schema_docs` 已确认被重复灌入�
 - 每次实验使用唯一 collection 名，命名格式固定为 `datapilot_schema_docs_m20_<model>_<embedding>_<YYYYMMDD_HHMMSS>`（日期 + 秒级时间戳），不要手动使用 `_a` / `_b` 序号后缀（2026-08-02 起要求，防止重复 / 误复用）。
 - 示例：`datapilot_schema_docs_m20_qwen37max_qwenemb_20260802_214810`；命名前先用 `date +%Y%m%d_%H%M%S` 取当前时间戳。
 - clean collection 的验收条件至少包括：
-  - `schema_docs_count=194`
-  - `milvus_final_row_count=194`
+  - `schema_docs_count=195`
+  - `milvus_final_row_count=195`
   - `schema_vector_index_reuse=run_scoped`
   - `schema_docs_hash` 有记录
   - embedding provider / model / dimension 有记录
-- 如果已有 collection 的 row_count 或 vector dimension 不匹配，当前代码会拒绝复用。不要为了继续跑分临时绕过这个错误。
+- 如果已有 collection 的 row_count、vector dimension 或 schema docs hash 不匹配，当前代码会拒绝复用。不要为了继续跑分临时绕过这个错误。
+- M23 前创建的 collection 没有把 hash 写入 collection schema description；即使 row_count 和 dimension 恰好相同，也会被拒绝。请换唯一 collection，或明确设置 `MILVUS_RESET_COLLECTION=true` 后重建。
 
 ### clean collection 的安全复用
 
@@ -75,6 +76,8 @@ M20 前的旧固定 collection `datapilot_schema_docs` 已确认被重复灌入�
 - `milvus_initial_row_count == schema_docs_count`；
 - `milvus_inserted_document_count == 0`；
 - `milvus_final_row_count == schema_docs_count`。
+
+代码还会读取 collection schema description 中保存的同一 hash；报告里“恰好相同”的 hash 不能代替这个运行时校验。
 
 M21 多次复用 `datapilot_schema_docs_m21_qwen_weighted_20260803_001` 时，均满足 `193 → 0 → 193`，因此是复用 clean collection，不是重复灌入。
 
@@ -98,7 +101,7 @@ M20 后，`eval/run_eval.py` 的 Markdown 报告会出现 `Eval Runtime Metadata
 | `schema_vector_backend` | 本轮是否真的走 Milvus。 |
 | `schema_embedding_provider` | 本轮 embedding provider。 |
 | `schema_vector_index_reuse` | `run_scoped` 表示一个 eval run 内复用同一个 index。 |
-| `schema_docs_count` | 当前 schema docs 数量为 194；M20 / M21 历史实验为 193，不能跨 corpus 比较。 |
+| `schema_docs_count` | 当前 schema docs 数量为 195；M20 / M21 历史实验为 193、M22 为 194，不能跨 corpus 比较。 |
 | `schema_docs_hash` | schema docs 内容指纹，用于复现实验版本。 |
 | `milvus_collection` | 本轮 collection 名；应优先是唯一实验名。 |
 | `milvus_initial_row_count` | 本次 eval 开始时 collection 的行数。 |
@@ -173,7 +176,7 @@ M21 保持默认 `weighted` merge，新增只可显式传入的 `rrf` 实验策�
 # 检查 Milvus 容器是否运行
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-# 当前 clean collection smoke：预期 final_row_count=194
+# 当前 clean collection smoke：预期 final_row_count=195
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.smoke_m20_milvus_index --output eval/reports/m20-milvus-index-smoke.md
 
 # MySQL expected_sql audit：只读审查，不改变 scorer
@@ -207,7 +210,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_ret
 | 现象 | 优先判断 | 处理 |
 |---|---|---|
 | Milvus 连接失败 | Docker / Milvus 是否启动 | 先 `docker ps`，确认 `milvus-standalone` healthy。 |
-| collection row_count 不是当前 194 | 旧 collection 污染或 schema docs 变化 | 换唯一 collection；不要直接把结果当 A/B 结论。 |
+| collection row_count 不是当前 195，或报 schema docs hash mismatch | 旧 collection 污染、schema docs 变化，或缺少 M23 hash 标记 | 换唯一 collection；不要直接把结果当 A/B 结论。 |
 | vector dimension mismatch | collection 来自不同 embedding 模型 / 维度 | 换唯一 collection 或显式 reset。 |
 | 不同 embedding 模型复用同一 collection | row_count 和维度可能仍匹配，但向量语义已经不一致 | 更换 provider / model 时必须使用新 collection。 |
 | 多个 eval 进程并发写同一 collection | 可能产生竞态或重复写入 | 不并发写同一实验 collection。 |

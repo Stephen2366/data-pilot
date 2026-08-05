@@ -22,11 +22,15 @@ def test_schema_documents_hash_is_stable_for_same_documents() -> None:
     assert len(schema_documents_hash(documents)) == 64
 
 
-def test_milvus_index_skips_insert_when_existing_collection_is_clean(monkeypatch) -> None:
-    """已有干净 collection 时复用，不再把同一批 doc_id 重复 insert。"""
+def test_milvus_index_skips_insert_when_existing_collection_hash_is_clean(monkeypatch) -> None:
+    """已有 collection 只有内容 hash 也一致时，才能复用且不重复 insert。"""
 
     documents = build_schema_documents(load_domain_schema())[:2]
-    fake_module = _install_fake_pymilvus(monkeypatch, row_count=len(documents))
+    fake_module = _install_fake_pymilvus(
+        monkeypatch,
+        row_count=len(documents),
+        schema_docs_hash=schema_documents_hash(documents),
+    )
 
     index = MilvusVectorIndex(
         documents=documents,
@@ -39,11 +43,29 @@ def test_milvus_index_skips_insert_when_existing_collection_is_clean(monkeypatch
     assert index.inserted_document_count == 0
 
 
+def test_milvus_index_refuses_same_count_but_stale_schema_docs(monkeypatch) -> None:
+    """M23：不能只因行数相同，就把旧业务语义向量误映射为当前文档。"""
+
+    documents = build_schema_documents(load_domain_schema())[:2]
+    _install_fake_pymilvus(
+        monkeypatch,
+        row_count=len(documents),
+        schema_docs_hash="stale-schema-docs-hash",
+    )
+
+    with pytest.raises(RuntimeError, match="content hash does not match"):
+        MilvusVectorIndex(
+            documents=documents,
+            embedding_provider=DeterministicEmbeddingProvider(),
+            collection_name="stale_same_count_collection",
+        )
+
+
 def test_milvus_index_refuses_polluted_existing_collection(monkeypatch) -> None:
     """已有 collection 行数与 schema docs 不一致时直接失败，避免继续污染实验。"""
 
     documents = build_schema_documents(load_domain_schema())[:2]
-    _install_fake_pymilvus(monkeypatch, row_count=99)
+    _install_fake_pymilvus(monkeypatch, row_count=99, schema_docs_hash=None)
 
     with pytest.raises(RuntimeError, match="not clean"):
         MilvusVectorIndex(
@@ -71,14 +93,14 @@ def test_eval_run_can_prebuild_shared_milvus_index(monkeypatch) -> None:
 
     assert index is not None
     assert metadata["schema_vector_index_reuse"] == "run_scoped"
-    # M22 新增 coupon_order_count 派生指标，Schema document corpus 因此从 193 增至 194。
-    assert metadata["schema_docs_count"] == 194
+    # M23 新增 net_refund_amount 指标，Schema document corpus 因此从 194 增至 195。
+    assert metadata["schema_docs_count"] == 195
     assert metadata["milvus_collection"] == "m20_unit_unique"
     assert metadata["result_match_oracle_backend"] == "sqlite_deterministic_seed"
     assert fake_module.MilvusClient.insert_calls == 1
 
 
-def _install_fake_pymilvus(monkeypatch, *, row_count: int | None):
+def _install_fake_pymilvus(monkeypatch, *, row_count: int | None, schema_docs_hash: str | None = None):
     """安装最小 fake pymilvus 模块，避免单元测试依赖 Docker。"""
 
     class FakeDataType:
@@ -121,6 +143,19 @@ def _install_fake_pymilvus(monkeypatch, *, row_count: int | None):
             if row_count is None:
                 return {"row_count": 0 if collection_name in self.collections else 0}
             return {"row_count": row_count}
+
+        def describe_collection(self, collection_name: str) -> dict[str, object]:
+            description = (
+                f"datapilot_schema_docs_hash={schema_docs_hash}"
+                if schema_docs_hash is not None
+                else ""
+            )
+            return {
+                "schema": {
+                    "description": description,
+                    "fields": [{"name": "vector", "params": {"dim": 128}}],
+                }
+            }
 
         def insert(self, collection_name: str, data: list[dict[str, object]]) -> None:
             type(self).insert_calls += 1

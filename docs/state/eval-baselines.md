@@ -12,7 +12,7 @@
 |---|---|---|
 | 默认主模型 | Qwen `qwen3.7-plus`；本次基于 M22 三次 C1 稳定性结果切换。 | `M22-E04` |
 | 默认检索 | `inmemory + deterministic + weighted`；Milvus、DashScope `qwen3.7-text-embedding`、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
-| 当前优化方向 | M22 已完成契约拆分、窄 QueryPlan→SQL 合同、C0-C3 三次重复及 Qwen 3.8/3.7 追加对照；下一步优先检查 SQL 合同的别名/等价表达误拦，再区分生成缺口与检索缺口。数据库异常彩蛋覆盖仍有明确边界。 | `M22-E01`、`M22-E02`、`M22-E03`、`M22-E04`、`M22-E05`、`M22-E06` |
+| 当前优化方向 | M23 已收口退款率、订单量、运行时语义事实、自动 reference 判分，并新增异常数据专项；下一步先以 M23 新合同重建真实 LLM 基线，再区分 SQL 合同、生成与检索缺口。异常专项不等于全部企业数据质量场景。 | `M23-E01`、`M22-E01`、`M22-E04` |
 | 已收口的假设 | DashScope `qwen3.7-text-embedding` 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
 | 不可作决策的证据 | 旧固定 Milvus collection 的重复灌入污染结果只保留作历史对照。 | `M20-E01` |
 
@@ -46,6 +46,48 @@
 - `triage summary failed` 可能高于由命令行 `passed` 推算的失败数：`review_required / manual_review` 会进入待处理清单。
 - 总分不是唯一信号。`schema_context` 下降但 `result_match` 上升时，不能简单判为改进。
 
+## 2.5 数据库异常彩蛋：处理原则、覆盖边界与专项评测
+
+> 这是跨模块的数据库 / 评测知识，不属于某一次 M22 模型实验。查 SQL 结果争议、reference SQL、数据质量、异常 case 或后续会话续接时，优先读本节，并结合 `docs/state/database-current-state.md` 的异常菜单。
+
+评测使用确定性 SQLite seed。`result_match` 只执行某条 case 自己的 `expected_sql`，再比较结果；它不会因为数据库里存在异常数据，就自动检查模型是否正确处理了全部异常。因此，不能只问“case 有没有碰到彩蛋”，还要问：**这类数据在该业务问题中该保留、该排除，还是该作为异常查出来。**
+
+M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 连接，漏掉整单退款，也没有成交订单过滤。M23 已修正该 reference；M22 的 C0-C3 分数仍是旧合同历史快照，不能拿来证明 M23 对异常数据的鲁棒性。
+
+### 处理原则与当前三类评测覆盖
+
+| 数据异常 / 业务边界 | 普通经营分析的正确处理 | formal（主线回归） | challenge（业务口径） | diagnostic（定位工具） | 当前结论 |
+|---|---|---|---|---|---|
+| 未支付、`cancelled` / `canceled` 两种拼写 | 对成交 GMV、净收入、成交订单排除；对“订单状态分布”应保留并统计 | GMV / 净收入的 expected value 已受正确成交口径约束 | `db_simple_002`、GMV、净收入、商品/渠道 GMV reference 显式过滤 | 多为 schema / plan / trace 检查，不能证明最终数值 | 已覆盖成交类口径；不是所有“订单查询”都应过滤 |
+| 一单多券 | 保留订单，但通过 `COUNT(DISTINCT order_id)` 防止桥接表放大订单数 | `p3a_multi_001` 自动结果校验 | `db_multi_001` 自动结果校验 | `db_trace_002` 只检查流程步骤 | 已覆盖“用券订单数”去重 |
+| 整单退款 `order_item_id IS NULL` | 不应丢弃；商品归因时明细退款优先，整单退款回退 `refunds.product_id`，不能复制给订单每个商品 | 无独立题 | M23 后 `db_core_002` 自动结果校验该 fallback 和成交过滤 | `db_join_003` 仍为人工归因素材 | 已覆盖一个明确的商品退款率口径；不是“把空值绕开” |
+| 外部单号重复、`SRC-*` 与 `ORD-*` 命名空间不同 | 不把外部单号当主键，也不能跨命名空间 join；订单关联走真实外键 `refunds.order_id -> orders.id` | 无 | 无 | 无 | 未覆盖；当前只有语义文档提示，不能证明模型不会错误 join |
+| 负数退款冲销 | 金额分析保留正负号，不能默认取绝对值或直接删除；是否计入退款“笔数/率”必须先定义业务含义 | 无 | 无退款金额题 | 无 | 未覆盖，且当前 `refund_rate` 对 requested / rejected / 冲销记录的计数边界尚未确认 |
+| 订单头金额与明细金额不一致 | 不强行把两张表算成相等：订单 GMV 用 `orders.order_amount`，商品 GMV 用 `order_items.line_amount`；需要时另做对账诊断 | 已分别使用正确粒度，但不验证差异 | 已分别使用正确粒度，但不验证差异 | 无专门对账题 | 仅间接覆盖，未验证“发现 5 条不一致订单” |
+| SCD `valid_to IS NULL` | 按生效时间窗口保留当前版本，不是要过滤的脏数据 | 无 | `db_hard_003` 有 reference，但为 manual | 有 schema context / manual 素材 | 有参考素材，非自动硬门 |
+
+### 三类测评各自该负责什么
+
+- **formal**：验证日常、稳定的业务查询没有回归。异常只在它会直接改变常用指标时进入，例如成交状态和一单多券；不应把所有对账题都塞入 formal。
+- **challenge**：验证“看起来能跑、但会因真实数据边界而算错”的 SQL，是整单退款 fallback、错误 join、退款冲销等口径题的主要落点。
+- **diagnostic**：验证系统在哪一层理解错、选表错、连表错或被拦截；它可以保留人工诊断题，但不能拿“流程成功”替代异常结果的自动正确性证明。
+
+### 异常数据专项评测（M23）
+
+专项清单是 `eval/cases/database-exception-suite.yaml`，通过 `python -m eval.run_eval --case-set ...` 从原文件挑选 case；它不复制 formal / challenge / diagnostic 的 YAML，避免同一题因重复定义被重复计分或日后 reference 漂移。
+
+| 类型 | case | 判定 |
+|---|---|---|
+| 已有成交口径 | `db_simple_002` | 自动：未支付和两种取消拼写不进入成交订单。 |
+| 已有桥接去重 | `db_multi_001` | 自动：一单多券不放大订单数。 |
+| 已有整单退款 | `db_core_002` | 自动：成交订单过滤 + 明细优先 / `refunds.product_id` fallback。 |
+| 既有归因诊断 | `db_join_003` | 人工：检查商品退款率的 join / grain 理解，不计入自动能力分。 |
+| 新增带符号退款金额 | `db_anomaly_001` | 自动：只统计 `completed`、按 `processed_at` 过滤、`SUM(refund_amount)` 保留负数冲销。 |
+| 新增真实外键关联 | `db_anomaly_002` | 自动：渠道退款金额只能经 `refunds.order_id -> orders.id -> channels.id`。 |
+| 新增金额对账 | `db_anomaly_003` | 自动：报告订单头与明细金额不一致的订单数，而不篡改数据。 |
+
+当前专项为 **6 条自动 + 1 条人工素材**。它已覆盖当前 seed 的关键异常边界，但仍不代表完整企业数据质量能力；例如外部源系统“重复单号应如何按业务幂等去重”仍需具体接入语义，不能由本地 seed 擅自定义。
+
 ## 3. 权威基线与实验矩阵
 
 > “固定条件”只列影响可比性的关键项；完整配置和原始数字见“报告索引”。`—` 表示该实验未运行该集合，不表示失败。
@@ -68,6 +110,7 @@
 | `M22-E01` | 08-04 | 评测口径修正 | 分离 Context / Output / Result / Manual contract | case、scorer 与新增 coupon_order_count metric；schema docs `193→194`，hash `58534cb6...` | trace SchemaGraph 评分、等价 alias、三类报告视图、结构化语义拒绝 | M21 结果只作历史快照 | 不改变默认模型/检索；后续新 benchmark 不可跨 193/194 docs 比较。 |
 | `M22-E02` | 08-04 | 诊断快照 | 验证 M22 后默认链路 | DeepSeek `deepseek-v4-flash` + local deterministic + weighted、32 条、SQLite oracle、LangFuse off | total `25/32`；automated `22/27`；manual `3/5` | M21 `21/32` 不可比较 | `db_plan_002/003/004` 均结构化通过；`db_core_004` 单 case 排序复测通过，但批量实时 LLM 仍波动；不把总分视为模型提升。⚠️ 注：该快照早于 M22 复审修复（Context warn / via 核验 / SQL evidence / 成交订单语义），本次仅完成代码测试，未重跑真实 LLM diagnostic。 |
 | `M22-E03` | 08-05 | 首轮受控候选 + 异常覆盖审计 | 在 194-doc、新 case/scorer 口径下筛选 Qwen / Milvus / RRF，并审计数据库异常彩蛋覆盖 | C0-refresh `24/32`；C1 `27/32`；C2 `25/32`；C3 `24/32`；retrieval-only local weighted `0.738`、Milvus weighted `0.738`、Milvus RRF `0.929` | C0-C3 只作同口径首轮筛选，不是稳定性结论；M21 的 193-doc 结果不可混比 | C1 单次最高但不切默认；C2 未显示可归因端到端收益；C3 召回提高但端到端未提高。成交类过滤、优惠券去重、SCD 窗口已覆盖；外部单号、负数退款、金额对账无独立 case；`db_core_002` 排除整单退款且未显式排除取消订单，退款率口径待确认。 |
+| `M23-E01` | 08-05 | 评测/语义基线修正 | 先治理非 pipeline 因素，再建立下一轮 retrieval 基线 | 退款率改为成交订单 + 明细优先 / 整单退款回退；订单量去重；formal 8 条、challenge 12 条自动 SQL case 均为 result/value 对照；新增不复制既有 YAML 的 7 条异常专项（6 自动 + 1 人工）；SQLite + MySQL 双端审计 | M22 所有真实 LLM 分数均属旧 case/scorer 合同，不可直接比较 | 原 20 条与新增 3 条 reference SQL 两端均可执行；专项 focused `32 passed`。需从此合同重新跑真实 LLM 基线，默认模型/检索不变。 |
 
 ## 4. 当前活跃实验卡片
 
@@ -82,25 +125,7 @@
 1. `schema_context_size` 改从同请求 trace 的 SchemaGraph `tables/fields` 评分，最终 `body.columns` 不再冒充上下文证据。
 2. `db_plan_002/003/004` 用 `blocked_via=semantic_request_validation` 和明确 issue tag 区分不支持需求与 LLM generation error。
 3. SCD overlap 已在默认 trace 实际出现；渠道订单量排序以 QueryPlan prompt + SQL plan contract 固化，并在单 case SQLite oracle 中通过。
-4. 复审后 C0-refresh 为 `24/32`；C1/C2/C3 首轮分别为 `27/32`、`25/32`、`24/32`。这些是同一 194-doc 新口径下的单次筛选结果，不能据此证明稳定收益。数据库异常彩蛋覆盖审计见下节。
-
-### M22 异常彩蛋覆盖审计
-
-评测使用确定性 SQLite seed；`result_match` 执行 case 自己的 `expected_sql`，再按行、列、数值容差和显式 alias 比较，不会自动为所有数据异常生成额外规则。当前覆盖边界如下：
-
-| 数据异常 | 当前 case / 判定 | 覆盖结论 |
-|---|---|---|
-| 未支付订单、`cancelled` / `canceled` | GMV、净收入、商品 GMV、渠道 GMV 的 reference SQL 显式过滤 | 已覆盖成交类口径 |
-| 一单多券 | `db_multi_001`、`db_trace_002` 使用 `COUNT(DISTINCT orders.id)` | 已覆盖去重 |
-| `valid_to IS NULL` 价格版本 | `db_hard_003` reference 使用 SCD 时间窗口；本题为 manual review | 有 reference 素材，非自动硬门 |
-| 外部单号重复 / `SRC-*` 与 `ORD-*` 不同命名空间 | 无专门 case | 未覆盖 |
-| 整单退款 `refunds.order_item_id IS NULL` | `db_core_002` 只按 `order_item_id` 连接；`db_join_003` 为 manual | 当前 reference 排除整单退款，未验证 fallback |
-| 负数退款冲销 | 无 `refund_amount` 汇总 case | 未覆盖 |
-| 订单头 / 明细金额不一致 | 订单级 GMV 与商品明细 GMV 分用不同事实表，但无对账 case | 仅间接覆盖粒度，不验证异常本身 |
-
-因此，第 2/3 次重复若保持当前 case/scorer，结果仍然可比，但只能回答“当前 M22 合同下的单次波动”；不能宣称覆盖全部企业异常数据。若要补齐退款率或异常数据 case，必须先确认口径，再将当前首轮标为修订前快照并重新建立基线。
-
-**当前决策**：默认主模型已切换为 Qwen `qwen3.7-plus`；默认 embedding、Milvus、weighted fusion 保持不变。用户确认暂不扩展异常彩蛋 case，C0-C3 三次重复仍只用于当前合同下的稳定性统计。
+4. 复审后 C0-refresh 为 `24/32`；C1/C2/C3 首轮分别为 `27/32`、`25/32`、`24/32`。这些是同一 194-doc 新口径下的单次筛选结果，不能据此证明稳定收益。数据库异常彩蛋边界与当前专项见本文 §2.5。
 
 ### M22-E04 — C0-C3 三次重复稳定性（2026-08-05）
 

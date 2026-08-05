@@ -202,6 +202,46 @@ def load_cases(path: Path = DEFAULT_CASES_PATH, extra_cases: list[Path] | None =
     return cases
 
 
+def load_case_set(path: Path) -> list[EvalCase]:
+    """按清单从多个既有 YAML 挑选 case，而不复制原始定义。
+
+    专项评测往往要复用 formal / challenge / diagnostic 中已经存在的题。若把题目复制到新 YAML，
+    后续 reference SQL 或口径修改时很容易只改到其中一份。case set 只保存“选哪份文件的哪些 ID”，
+    原 case 文件仍是唯一事实源。
+    """
+
+    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    sources = list(payload.get("sources") or [])
+    if not sources:
+        raise ValueError(f"eval case set has no sources: {path}")
+
+    cases: list[EvalCase] = []
+    seen_ids: set[str] = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            raise ValueError(f"eval case set source must be a mapping: {path}")
+        raw_path = source.get("path")
+        requested_ids = [str(case_id) for case_id in source.get("case_ids") or []]
+        if not raw_path or not requested_ids:
+            raise ValueError(f"eval case set source needs path and case_ids: {path}")
+        source_path = Path(str(raw_path))
+        if not source_path.is_absolute():
+            source_path = PROJECT_ROOT / source_path
+        available_cases = {case.case_id: case for case in _load_cases_from_path(source_path)}
+        missing_ids = [case_id for case_id in requested_ids if case_id not in available_cases]
+        if missing_ids:
+            raise ValueError(
+                "eval case set refers to missing case IDs: "
+                f"source={source_path} missing={missing_ids}"
+            )
+        for case_id in requested_ids:
+            if case_id in seen_ids:
+                raise ValueError(f"duplicate eval case id in case set: {case_id}")
+            seen_ids.add(case_id)
+            cases.append(available_cases[case_id])
+    return cases
+
+
 def _prepare_sqlite_seed() -> Any:
     """创建带 M1 确定性 seed 的内存 SQLite engine。
 
@@ -794,6 +834,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run DataPilot M6 EvalOps-lite smoke cases.")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
     parser.add_argument("--extra-cases", type=Path, action="append", default=[])
+    parser.add_argument(
+        "--case-set",
+        type=Path,
+        default=None,
+        help="专项评测清单；只引用既有 case，不复制其 YAML 定义。不能与 --extra-cases 同用。",
+    )
     parser.add_argument("--pipeline-mode", choices=["baseline", "new_text2sql"], default=None)
     parser.add_argument(
         "--schema-fusion-strategy",
@@ -821,7 +867,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"triage_compare_report={args.compare_triage_report}")
         return 0
 
-    cases = load_cases(args.cases, extra_cases=args.extra_cases)
+    if args.case_set is not None and args.extra_cases:
+        parser.error("--case-set cannot be combined with --extra-cases")
+    cases = load_case_set(args.case_set) if args.case_set is not None else load_cases(args.cases, extra_cases=args.extra_cases)
     judge_model = resolve_judge_model(args.judge_model)
     schema_vector_index, runtime_metadata = _build_eval_schema_vector_index(
         pipeline_mode=args.pipeline_mode,

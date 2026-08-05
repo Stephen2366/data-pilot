@@ -82,7 +82,7 @@ relations:
     join_type: left
     when_to_use: 商品退款率、明细退款归因时优先使用
     avoid_when: 整单退款 order_item_id 为空时回退 refunds.order_id / refunds.product_id
-    aggregation_warning: order_item_id 可空，不能用 inner join 丢掉整单退款
+    aggregation_warning: order_item_id 可空，不能用 inner join 丢掉整单退款；为空时仅可按 refunds.product_id 做兼容商品归因，不能把整单退款复制归因给订单的每个明细商品
   - id: refunds_order
     relation_type: foreign_key
     grain: refund_to_order
@@ -104,7 +104,7 @@ relations:
     to_column: id
     cardinality: many_to_one
     join_type: left
-    when_to_use: 历史兼容退款商品归因或 order_item_id 为空时使用
+    when_to_use: 历史兼容退款商品归因，或整单退款 order_item_id 为空时的唯一商品回退路径
     avoid_when: 明细归因完整时优先使用 refunds.order_item_id -> order_items.product_id
     aggregation_warning: refunds.product_id 是兼容口径，商品维度 GMV 仍默认走 order_items
   - id: refunds_user

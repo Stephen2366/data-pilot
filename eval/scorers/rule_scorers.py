@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -537,6 +538,10 @@ def _normalize_result_value(value: Any) -> Any:
 
     if value is None:
         return None
+    # SQL Tool 会把数据库日期时间序列化为 ISO 8601；reference SQL 则直接保留 SQLAlchemy
+    # datetime。这里统一成同一格式，避免“结果相同、表示法不同”把列表 case 误判失败。
+    if isinstance(value, datetime | date):
+        return value.isoformat()
     try:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):

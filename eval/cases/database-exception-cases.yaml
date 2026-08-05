@@ -1,0 +1,69 @@
+# 数据库异常彩蛋的新增自动 case。已有题不在此复制，见 database-exception-suite.yaml 的引用清单。
+cases:
+  - id: db_anomaly_001
+    task_type: anomaly_metric
+    question: 截至 2026 年 7 月 31 日，实际净退款金额是多少？只统计已完成退款，负数冲销需要保留负号。
+    user_role: ops
+    expected_tables: [refunds]
+    expected_columns: [net_refund_amount]
+    expected_column_aliases:
+      net_refund_amount: [actual_net_refund_amount, total_refund_amount]
+    expected_metrics: [net_refund_amount]
+    phase3a_capabilities: [schema_retrieval, query_plan]
+    phase3a_blocking: true
+    case_properties: [data_anomaly, signed_refund_amount]
+    security_expectation: allow
+    check: {type: result_match, tolerance: 0.01}
+    expected_sql: |
+      SELECT ROUND(SUM(refund_amount), 2) AS net_refund_amount
+      FROM refunds
+      WHERE refund_status = 'completed'
+        AND processed_at < '2026-08-01 00:00:00'
+
+  - id: db_anomaly_002
+    task_type: anomaly_join
+    question: 按退款处理完成时间统计，2026 年 6 月各渠道实际净退款金额是多少？退款关联订单必须使用内部关联关系。
+    user_role: ops
+    expected_tables: [refunds, orders, channels]
+    expected_columns: [channel_name, net_refund_amount]
+    expected_column_aliases:
+      net_refund_amount: [actual_net_refund_amount, total_refund_amount]
+    expected_metrics: [net_refund_amount]
+    phase3a_capabilities: [schema_retrieval, join_path, query_plan]
+    phase3a_blocking: true
+    case_properties: [data_anomaly, foreign_key_join]
+    security_expectation: allow
+    check: {type: result_match, tolerance: 0.01}
+    expected_sql: |
+      SELECT c.channel_name, ROUND(SUM(r.refund_amount), 2) AS net_refund_amount
+      FROM refunds r
+      JOIN orders o ON o.id = r.order_id
+      JOIN channels c ON c.id = o.channel_id
+      WHERE r.refund_status = 'completed'
+        AND r.processed_at >= '2026-06-01 00:00:00'
+        AND r.processed_at < '2026-07-01 00:00:00'
+      GROUP BY c.id, c.channel_name
+      ORDER BY net_refund_amount DESC, c.channel_name ASC
+
+  - id: db_anomaly_003
+    task_type: data_quality_diagnosis
+    question: 找出订单总金额与商品明细金额合计不一致的订单，共有多少笔？
+    user_role: ops
+    expected_tables: [orders, order_items]
+    expected_columns: [mismatch_order_count]
+    expected_metrics: []
+    phase3a_capabilities: [schema_retrieval, join_path, query_plan]
+    phase3a_blocking: true
+    case_properties: [data_anomaly, reconciliation]
+    security_expectation: allow
+    check: {type: result_match}
+    expected_sql: |
+      WITH item_totals AS (
+        SELECT order_id, ROUND(SUM(line_amount), 2) AS item_amount
+        FROM order_items
+        GROUP BY order_id
+      )
+      SELECT COUNT(*) AS mismatch_order_count
+      FROM orders o
+      JOIN item_totals it ON it.order_id = o.id
+      WHERE ROUND(o.order_amount, 2) <> it.item_amount

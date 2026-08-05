@@ -8,8 +8,9 @@ metrics:
     formula: refund_count / order_count
     numerator: COUNT(DISTINCT refunds.id)
     denominator: COUNT(DISTINCT orders.id)
+    filter: orders.order_status NOT IN ('cancelled', 'canceled') AND orders.paid_at IS NOT NULL
     default_time_field: orders.paid_at
-    description: 按商品等维度统计退款订单数占订单数的比例；商品维度优先用 refunds.order_item_id / order_items.product_id，兼容 refunds.product_id。
+    description: 按成交订单统计退款单数占订单数的比例；商品维度优先用 refunds.order_item_id -> order_items.product_id，整单退款在 order_item_id 为空时回退 refunds.product_id，不能用 INNER JOIN 静默丢弃。
   gmv:
     name: GMV
     formula: SUM(orders.order_amount)
@@ -30,19 +31,25 @@ metrics:
     description: 实付金额口径，actual_amount = order_amount + shipping_amount - discount_amount。
   order_count:
     name: 订单量
-    formula: COUNT(orders.id)
+    formula: COUNT(DISTINCT orders.id)
     default_time_field: orders.paid_at
-    description: 订单事实表中的订单记录数量。
+    description: 订单事实表中的去重订单数；直接查询 orders 时 COUNT(orders.id) 等价，但 join 明细、退款或优惠券后必须 COUNT(DISTINCT orders.id)。未明确“成交”时默认统计全部订单，成交订单量另加 paid_at 和取消状态过滤。
   coupon_order_count:
     name: 优惠券使用订单数
     formula: COUNT(DISTINCT order_coupons.order_id)
     default_time_field: orders.paid_at
-    description: 指定优惠券或优惠券类型实际使用过的去重订单数；它是计数，不是优惠券使用率。
+    description: 指定优惠券或优惠券类型已关联 order_coupons 的去重订单数；它是计数，不是优惠券使用率。除非题面明确“成交后使用”，否则不默认排除取消或未支付订单。
   refund_count:
     name: 退款量
     formula: COUNT(refunds.id)
     default_time_field: refunds.requested_at
     description: 退款事实表中的退款记录数量。
+  net_refund_amount:
+    name: 实际净退款金额
+    formula: SUM(refunds.refund_amount)
+    filter: refunds.refund_status = 'completed'
+    default_time_field: refunds.processed_at
+    description: 已完成退款按处理完成时间统计的带符号金额；负数 refund_amount 是冲销修正，必须保留负号，requested、approved、rejected 不计入实际退款金额。
   coupon_usage_rate:
     name: 优惠券使用率
     formula: COUNT(DISTINCT order_coupons.order_id) / COUNT(DISTINCT orders.id)

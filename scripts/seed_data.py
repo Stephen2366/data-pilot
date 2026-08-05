@@ -131,17 +131,41 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
         select(func.round(func.sum(Order.order_amount), 2)).where(*valid_order_filter)
     ).scalar_one()
 
+    # ★ 商品退款率不能走 orders.product_id：一单多商品时会把退款归给“主商品”。
+    # 明细退款按 order_item 归因；整单退款没有明细时，只能使用退款表保存的 product_id 回退。
+    eligible_order_items = (
+        select(OrderItem.order_id, OrderItem.product_id)
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(*valid_order_filter)
+        .cte("eligible_order_items")
+    )
+    refunds_by_product = (
+        select(
+            func.coalesce(OrderItem.product_id, Refund.product_id).label("product_id"),
+            func.count(func.distinct(Refund.id)).label("refund_count"),
+        )
+        .join(Order, Order.id == Refund.order_id)
+        .outerjoin(OrderItem, OrderItem.id == Refund.order_item_id)
+        .where(*valid_order_filter, func.coalesce(OrderItem.product_id, Refund.product_id).is_not(None))
+        .group_by(func.coalesce(OrderItem.product_id, Refund.product_id))
+        .cte("refunds_by_product")
+    )
     refund_rate_stmt = (
         select(
             Product.product_name,
-            (func.count(func.distinct(Refund.id)) * 1.0 / func.count(func.distinct(Order.id))).label("refund_rate"),
+            (
+                func.coalesce(refunds_by_product.c.refund_count, 0) * 1.0
+                / func.count(func.distinct(eligible_order_items.c.order_id))
+            ).label("refund_rate"),
         )
-        .join(Order, Order.product_id == Product.id)
-        .outerjoin(Refund, Refund.order_id == Order.id)
-        .where(Order.paid_at >= june_start, Order.paid_at < july_start)
-        .group_by(Product.id, Product.product_name)
+        .join(eligible_order_items, eligible_order_items.c.product_id == Product.id)
+        .outerjoin(refunds_by_product, refunds_by_product.c.product_id == Product.id)
+        .group_by(Product.id, Product.product_name, refunds_by_product.c.refund_count)
         .order_by(
-            (func.count(func.distinct(Refund.id)) * 1.0 / func.count(func.distinct(Order.id))).desc(),
+            (
+                func.coalesce(refunds_by_product.c.refund_count, 0) * 1.0
+                / func.count(func.distinct(eligible_order_items.c.order_id))
+            ).desc(),
             Product.product_name.asc(),
         )
         .limit(1)

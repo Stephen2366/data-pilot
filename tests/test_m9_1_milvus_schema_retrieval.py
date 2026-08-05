@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 
 from engine.nl2sql.schema_loader import load_domain_schema
-from engine.schema_retrieval.document_builder import build_schema_documents
+from engine.schema_retrieval.document_builder import build_schema_documents, schema_documents_hash
 from engine.schema_retrieval.graph import build_schema_graph
 from engine.schema_retrieval.retriever import retrieve_schema
 from engine.schema_retrieval.vector_index import DeterministicEmbeddingProvider, MilvusVectorIndex
@@ -96,3 +96,31 @@ def test_retrieve_schema_can_use_explicit_milvus_index_without_changing_default(
     assert {hit.source for hit in result.vector_hits} == {"milvus"}
     assert {"orders", "channels"} <= set(graph.tables)
     assert graph.join_paths
+
+
+def test_milvus_reuse_requires_and_reads_schema_docs_hash() -> None:
+    """M23：真实 Milvus 必须能读回 collection 的内容版本标记后才允许复用。"""
+
+    documents = build_schema_documents(load_domain_schema(), relations_path=RELATIONS_PATH)
+    collection_name = f"datapilot_m23_hash_reuse_{uuid4().hex[:8]}"
+    first_index = MilvusVectorIndex(
+        documents=documents,
+        embedding_provider=DeterministicEmbeddingProvider(),
+        collection_name=collection_name,
+        uri=MILVUS_URI,
+        reset_collection=True,
+    )
+
+    try:
+        reused_index = MilvusVectorIndex(
+            documents=documents,
+            embedding_provider=DeterministicEmbeddingProvider(),
+            collection_name=collection_name,
+            uri=MILVUS_URI,
+        )
+    finally:
+        first_index.drop_collection()
+
+    assert reused_index.schema_docs_hash == schema_documents_hash(documents)
+    assert reused_index.initial_row_count == len(documents)
+    assert reused_index.inserted_document_count == 0

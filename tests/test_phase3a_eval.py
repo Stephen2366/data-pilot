@@ -7,15 +7,22 @@ baseline 报告冻结下来。后续 M9-M12 才在这个基准上证明新 Text2
 from pathlib import Path
 
 import yaml
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
-from eval.run_eval import EvalCase, EvalResult, _score_case, load_cases, write_report
+from app.db.base import Base
+from eval.run_eval import EvalCase, EvalResult, _score_case, load_case_set, load_cases, write_report
 from eval.scorers.base import EvalScoreDetail
+from engine.tools.sql_tool import run_sql_tool
+from engine.nl2sql.schema_loader import load_domain_schema
+from scripts.seed_data import seed_database
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PHASE3A_CASES = PROJECT_ROOT / "eval" / "cases" / "phase3a-regression.yaml"
 CHALLENGE_CASES = PROJECT_ROOT / "eval" / "cases" / "database-upgrade-challenge.yaml"
 DIAGNOSTIC_CASES = PROJECT_ROOT / "eval" / "cases" / "phase3a-diagnostic-benchmark.yaml"
+EXCEPTION_SUITE_CASES = PROJECT_ROOT / "eval" / "cases" / "database-exception-suite.yaml"
 SMOKE_CASES = PROJECT_ROOT / "eval" / "cases" / "smoke.yaml"
 
 
@@ -465,6 +472,17 @@ def test_load_cases_merges_extra_files_and_keeps_source_file() -> None:
     assert any(case.case_id == "db_plan_001" for case in cases)
 
 
+def test_load_case_set_keeps_source_case_as_single_truth() -> None:
+    """M23 异常专项从原文件选题，不复制 YAML，也不重复计算相同能力。"""
+
+    cases = load_case_set(EXCEPTION_SUITE_CASES)
+
+    assert len(cases) == 7
+    assert cases[0].case_id == "db_simple_002"
+    assert cases[-1].case_id == "db_anomaly_003"
+    assert cases[3].check_type == "manual"
+
+
 def test_diagnostic_linked_and_multi_answer_cases_are_explicit() -> None:
     """共享问题和多答案 case 要结构化标注，避免 M12 对照时口径漂移。"""
 
@@ -485,7 +503,7 @@ def test_diagnostic_linked_and_multi_answer_cases_are_explicit() -> None:
 
 
 def test_challenge_enables_minimal_result_match_for_core_sql_cases() -> None:
-    """M14-lite 至少让 5 条核心 SQL case 走 expected_sql 结果对照。"""
+    """M23：challenge 中所有自动 SQL case 都走 expected_sql 结果对照。"""
 
     cases = load_cases(CHALLENGE_CASES)
     result_match_cases = [
@@ -494,8 +512,44 @@ def test_challenge_enables_minimal_result_match_for_core_sql_cases() -> None:
         if case.check_type == "result_match" and "manual_review" not in case.case_properties
     ]
 
-    assert len(result_match_cases) >= 5
+    assert len(result_match_cases) == 12
     assert all(case.expected_sql.strip() for case in result_match_cases)
+
+
+def test_result_match_normalizes_sql_tool_datetime_rows() -> None:
+    """SQL Tool 的 ISO 时间字符串要能与 reference SQL 的 datetime 正确对照。"""
+
+    case = {case.case_id: case for case in load_cases(CHALLENGE_CASES)}["db_simple_002"]
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            seed_database(session, reset_existing=True)
+            tool_result = run_sql_tool(
+                db=session,
+                sql=case.expected_sql,
+                parameters={},
+                user_role="ops",
+                trace_id="m23-datetime-result-match",
+                domain_schema=load_domain_schema(),
+            )
+        score = _score_case(
+            case,
+            {
+                "route": "sql",
+                "safety_status": tool_result.safety_status,
+                "tables_used": tool_result.tables_used,
+                "columns": tool_result.columns,
+                "rows": tool_result.rows,
+            },
+            200,
+            actual_pipeline_mode="new_text2sql",
+        )
+    finally:
+        Base.metadata.drop_all(engine)
+
+    assert score.passed is True
+    assert score.reason == "result_match_ok"
 
 
 def test_diagnostic_out_of_scope_hybrid_attribution_is_non_blocking_manual_review() -> None:

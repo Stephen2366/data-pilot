@@ -13,6 +13,16 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M23 Eval / Semantic / Database Baseline Hygiene（2026-08-05）
+
+- 改动范围：`metrics.yaml`、订单/退款 schema descriptions、`relations.yaml`、seed 固定事实、formal / challenge cases、`result_match` 日期归一化及 focused tests；完整素材见 `docs/notes/m23-notes.md`。
+- 关键记录：商品退款率统一为成交订单内“订单明细优先、整单退款回退 `refunds.product_id`”，不再用 `orders.product_id` 或 INNER JOIN 静默丢失整单退款；`order_count` 统一为 `COUNT(DISTINCT orders.id)`。状态枚举、SRC/ORD 命名空间不可 join 和退款归因边界写入运行时 field / relation schema documents。
+- 评测合同：challenge 12 条与 formal 8 条自动 SQL case 均使用 `result_match` 或 `expected_value`；递归类目、SCD 价格两题保留 manual，不把 reference SQL 仅作为关键词检查的旁注。`result_match` 统一 SQL Tool 的 ISO 时间与 reference datetime 表示，避免相同结果因序列化格式误判。
+- 验证：20 条 reference SQL 在当前 MySQL 与 deterministic SQLite 均可执行、逐条行数一致；focused `42 passed, 1 warning`；全量 pytest `152 passed, 1 warning`。warning 均为既有 Starlette/httpx `TestClient` deprecation。
+- Milvus 复用补丁：M23 语义文本改变后发现，旧实现只校验 row_count / dimension，194 条旧向量会被错误映射为 194 条新文档。现将 `schema_docs_hash` 写入 collection schema description，复用时强制校验；随后新增 `net_refund_amount` 使当前 corpus 进一步变为 195 条 / `ce04fe4f...`，缺少标记或 hash 不同的 M20/M22 collection 必须新建或显式 reset。
+- 异常专项：将异常彩蛋规则从 M22 实验卡片提升为 `eval-baselines.md` §2.5 长期章节；新增 `net_refund_amount` 指标和 `db_anomaly_001/002/003`，并由 `database-exception-suite.yaml` 引用既有 case，避免 formal / challenge / diagnostic 的重复 YAML。专项为 6 条自动 + 1 条人工素材；新增三条 reference SQL 已在 SQLite 与当前 MySQL 执行成功，相关 focused `32 passed, 1 warning`。
+- 遗留/后续：SQLite 仍是离线 oracle，MySQL 仍仅做只读审计；外部单号、负数退款和订单头/明细金额对账尚无独立自动 case。M22 真实 LLM 总分属于旧合同历史快照，下一轮 retrieval 假设必须从 M23 新合同重新建基线。
+
 ### [评测审计] M22 数据库异常彩蛋覆盖边界（2026-08-05）
 
 - 审计范围：对照 `database-current-state.md` 的异常菜单，逐项核对 M22 challenge / diagnostic case、reference SQL 和 scorer 判定。

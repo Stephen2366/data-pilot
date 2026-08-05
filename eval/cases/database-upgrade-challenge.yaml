@@ -10,7 +10,7 @@ cases:
     phase3a_capabilities: [schema_retrieval]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: active}
+    check: {type: result_match}
     expected_sql: |
       SELECT product_name, category, status
       FROM products
@@ -27,7 +27,7 @@ cases:
     phase3a_capabilities: [schema_retrieval]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: 2026-06}
+    check: {type: result_match}
     expected_sql: |
       SELECT order_no, order_amount, paid_at
       FROM orders
@@ -46,7 +46,7 @@ cases:
     phase3a_capabilities: [schema_retrieval]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: JUNE_FIXED_50}
+    check: {type: result_match}
     expected_sql: |
       SELECT coupon_code, coupon_name, coupon_type
       FROM coupons
@@ -81,17 +81,34 @@ cases:
     phase3a_capabilities: [schema_retrieval, query_plan]
     phase3a_blocking: true
     security_expectation: allow
-    contract_adjustment: 商品退款率统一为订单明细归因；不再使用 orders.product_id 兼容关系。
-    check: {type: contains, value: Aurora Noise Cancelling Headphones}
+    contract_adjustment: 商品退款率统一为成交订单内的明细优先归因；整单退款回退 refunds.product_id，不再使用 orders.product_id 兼容关系。
+    check: {type: result_match, tolerance: 0.0001}
     expected_sql: |
+      WITH eligible_order_items AS (
+        SELECT oi.order_id, oi.product_id
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE o.paid_at >= '2026-06-01 00:00:00'
+          AND o.paid_at < '2026-07-01 00:00:00'
+          AND o.order_status NOT IN ('cancelled', 'canceled')
+      ), refunds_by_product AS (
+        SELECT COALESCE(oi.product_id, r.product_id) AS product_id,
+               COUNT(DISTINCT r.id) AS refund_count
+        FROM refunds r
+        JOIN orders o ON o.id = r.order_id
+        LEFT JOIN order_items oi ON oi.id = r.order_item_id
+        WHERE o.paid_at >= '2026-06-01 00:00:00'
+          AND o.paid_at < '2026-07-01 00:00:00'
+          AND o.order_status NOT IN ('cancelled', 'canceled')
+          AND COALESCE(oi.product_id, r.product_id) IS NOT NULL
+        GROUP BY COALESCE(oi.product_id, r.product_id)
+      )
       SELECT p.product_name,
-             COUNT(DISTINCT r.id) * 1.0 / COUNT(DISTINCT o.id) AS refund_rate
-      FROM order_items oi
-      JOIN orders o ON o.id = oi.order_id
-      JOIN products p ON p.id = oi.product_id
-      LEFT JOIN refunds r ON r.order_item_id = oi.id
-      WHERE o.paid_at >= '2026-06-01 00:00:00' AND o.paid_at < '2026-07-01 00:00:00'
-      GROUP BY p.id, p.product_name
+             COALESCE(rb.refund_count, 0) * 1.0 / COUNT(DISTINCT eoi.order_id) AS refund_rate
+      FROM products p
+      JOIN eligible_order_items eoi ON eoi.product_id = p.id
+      LEFT JOIN refunds_by_product rb ON rb.product_id = p.id
+      GROUP BY p.id, p.product_name, rb.refund_count
       ORDER BY refund_rate DESC, p.product_name ASC
       LIMIT 1
   - id: db_core_003
@@ -169,7 +186,7 @@ cases:
     phase3a_blocking: true
     security_expectation: allow
     contract_adjustment: 一级类目改为 product_categories 规范类目树口径，不再使用 products.category 兼容字段。
-    check: {type: contains, value: 数码电子}
+    check: {type: result_match, tolerance: 0.01}
     expected_sql: |
       WITH RECURSIVE category_tree AS (
         SELECT id, name, parent_id, name AS root_category
@@ -200,7 +217,7 @@ cases:
     phase3a_capabilities: [join_path, query_plan, trace_steps]
     phase3a_blocking: true
     security_expectation: allow
-    check: {type: contains, value: Mobile App}
+    check: {type: result_match, tolerance: 0.01}
     expected_sql: |
       SELECT c.channel_name, ROUND(SUM(o.order_amount), 2) AS gmv
       FROM channels c
@@ -280,7 +297,7 @@ cases:
     phase3a_blocking: true
     case_properties: [difficult_diagnosis, stable_hard]
     security_expectation: allow
-    check: {type: contains, value: mobile_app}
+    check: {type: result_match, tolerance: 0.0001}
     expected_sql: |
       SELECT device_type,
              SUM(CASE WHEN event_type = 'payment_success' THEN 1 ELSE 0 END) * 1.0

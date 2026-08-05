@@ -15,10 +15,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from engine.schema_retrieval.objects import SchemaDocument, SchemaHit
+from engine.schema_retrieval.document_builder import schema_documents_hash
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
 DEFAULT_MILVUS_URI = "http://127.0.0.1:19530"
 DEFAULT_MILVUS_DIMENSION = 128
+SCHEMA_DOCS_HASH_DESCRIPTION_PREFIX = "datapilot_schema_docs_hash="
 EmbeddingVector = dict[str, float] | list[float]
 
 
@@ -131,6 +133,9 @@ class MilvusVectorIndex:
         self.embedding_provider = embedding_provider
         self.collection_name = collection_name
         self._documents_by_id = {document.doc_id: document for document in documents}
+        # ★ 行数只能发现“少写 / 重复写”，不能发现“文档数量没变但业务语义已变”。
+        # 把内容 hash 放进 collection schema 的 description，才能安全复用同名 collection。
+        self.schema_docs_hash = schema_documents_hash(documents)
         document_vectors = self._embed_texts([document.vector_text for document in documents])
         inferred_dimension = len(document_vectors[0]) if document_vectors and isinstance(document_vectors[0], list) else dimension
         self.dimension = inferred_dimension
@@ -143,7 +148,11 @@ class MilvusVectorIndex:
             self._client.drop_collection(collection_name)
         collection_exists = self._client.has_collection(collection_name)
         if not collection_exists:
-            schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
+            schema = MilvusClient.create_schema(
+                auto_id=False,
+                enable_dynamic_field=False,
+                description=f"{SCHEMA_DOCS_HASH_DESCRIPTION_PREFIX}{self.schema_docs_hash}",
+            )
             schema.add_field("doc_id", DataType.VARCHAR, is_primary=True, max_length=512)
             schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self.dimension)
             index_params = MilvusClient.prepare_index_params()
@@ -162,22 +171,29 @@ class MilvusVectorIndex:
                     f"collection={collection_name} dimension={existing_dimension} expected={self.dimension}. "
                     "Use a unique MILVUS_COLLECTION or set MILVUS_RESET_COLLECTION=true."
                 )
-
-        # 步骤 1：写入向量并 flush，确保后续 search 能立即看到本轮实验文档。-------------
-        # M20 索引卫生：固定 collection 如果已经有正确数量的文档，就复用而不是再次 insert；
-        # 如果行数不等于当前 schema docs 数量，说明 collection 可能来自旧模型、旧 schema 或重复灌入，
-        # 直接拒绝复用，要求调用方换唯一 collection 或显式 reset。
-        should_insert = True
-        if self.initial_row_count is not None:
-            if self.initial_row_count == len(documents):
-                should_insert = False
-            else:
+            if self.initial_row_count is not None and self.initial_row_count != len(documents):
                 raise RuntimeError(
                     "Milvus collection is not clean for current schema docs: "
                     f"collection={collection_name} row_count={self.initial_row_count} "
                     f"expected={len(documents)}. Use a unique MILVUS_COLLECTION or set "
                     "MILVUS_RESET_COLLECTION=true for an explicit rebuild."
                 )
+            existing_schema_docs_hash = self._collection_schema_docs_hash()
+            if existing_schema_docs_hash != self.schema_docs_hash:
+                raise RuntimeError(
+                    "Milvus collection schema document content hash does not match current documents: "
+                    f"collection={collection_name} stored_hash={existing_schema_docs_hash or '<missing>'} "
+                    f"expected_hash={self.schema_docs_hash}. Use a unique MILVUS_COLLECTION or set "
+                    "MILVUS_RESET_COLLECTION=true for an explicit rebuild."
+                )
+
+        # 步骤 1：写入向量并 flush，确保后续 search 能立即看到本轮实验文档。-------------
+        # M20/M23 索引卫生：只有“向量维度、文档内容 hash、行数”都匹配时才能复用。
+        # 其中 hash 专门拦截“文档数量相同但语义文本已更新”的静默错配。
+        should_insert = True
+        if self.initial_row_count is not None:
+            if self.initial_row_count == len(documents):
+                should_insert = False
         elif collection_exists:
             raise RuntimeError(
                 "Milvus collection already exists but row_count is unavailable: "
@@ -226,7 +242,11 @@ class MilvusVectorIndex:
         if not callable(describe):
             return None
         payload = describe(collection_name=self.collection_name)
-        fields = payload.get("schema", {}).get("fields", []) if isinstance(payload, dict) else []
+        if not isinstance(payload, dict):
+            return None
+        # pymilvus 版本差异：有的版本返回 ``schema.fields``，有的直接把 ``fields`` 放顶层。
+        schema = payload.get("schema")
+        fields = schema.get("fields", []) if isinstance(schema, dict) else payload.get("fields", [])
         for field in fields:
             if not isinstance(field, dict) or field.get("name") != "vector":
                 continue
@@ -234,6 +254,26 @@ class MilvusVectorIndex:
             raw_dim = params.get("dim")
             return int(raw_dim) if raw_dim is not None else None
         return None
+
+    def _collection_schema_docs_hash(self) -> str | None:
+        """从 collection schema description 读取写入时的 Schema 文档内容 hash。
+
+        M23 前创建的 collection 没有这个标记，即使行数和维度相同也必须视为不可安全复用；
+        调用方可使用唯一 collection，或显式 reset 后由当前代码重建。
+        """
+
+        describe = getattr(self._client, "describe_collection", None)
+        if not callable(describe):
+            return None
+        payload = describe(collection_name=self.collection_name)
+        if not isinstance(payload, dict):
+            return None
+        # 同上，collection description 在不同 SDK 返回结构中的位置不同。
+        schema = payload.get("schema")
+        description = schema.get("description", "") if isinstance(schema, dict) else payload.get("description", "")
+        if not isinstance(description, str) or not description.startswith(SCHEMA_DOCS_HASH_DESCRIPTION_PREFIX):
+            return None
+        return description.removeprefix(SCHEMA_DOCS_HASH_DESCRIPTION_PREFIX) or None
 
     def _embed_texts(self, texts: list[str]) -> list[EmbeddingVector]:
         """优先使用 provider 的 batch API，降低真实 embedding 请求次数。"""

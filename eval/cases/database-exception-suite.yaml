@@ -1,0 +1,10 @@
+# 异常数据专项清单：引用既有 case，避免 formal / challenge / diagnostic 的重复定义和口径漂移。
+name: database_exception_suite
+description: 覆盖成交状态、桥接去重、整单退款、带符号退款金额、真实外键关联与金额对账。
+sources:
+  - path: eval/cases/database-upgrade-challenge.yaml
+    case_ids: [db_simple_002, db_multi_001, db_core_002]
+  - path: eval/cases/phase3a-diagnostic-benchmark.yaml
+    case_ids: [db_join_003]
+  - path: eval/cases/database-exception-cases.yaml
+    case_ids: [db_anomaly_001, db_anomaly_002, db_anomaly_003]

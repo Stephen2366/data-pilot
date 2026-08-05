@@ -8,7 +8,13 @@ cases:
     expected_columns: [product_name, category, status]
     expected_metrics: []
     security_expectation: allow
-    check: {type: contains, value: active}
+    check: {type: result_match}
+    expected_sql: |
+      SELECT product_name, category, status
+      FROM products
+      WHERE status = 'active'
+      ORDER BY product_name ASC
+      LIMIT 10
   - id: p3a_simple_002
     task_type: simple_sql
     question: 查询 JUNE_FIXED_50 优惠券基本信息
@@ -17,7 +23,11 @@ cases:
     expected_columns: [coupon_code, coupon_name, coupon_type]
     expected_metrics: []
     security_expectation: allow
-    check: {type: contains, value: JUNE_FIXED_50}
+    check: {type: result_match}
+    expected_sql: |
+      SELECT coupon_code, coupon_name, coupon_type
+      FROM coupons
+      WHERE coupon_code = 'JUNE_FIXED_50'
   - id: p3a_agg_001
     task_type: aggregation
     question: 2026 年 6 月 GMV 是多少？
@@ -50,7 +60,15 @@ cases:
       conversion_rate: [add_to_pay_conversion_rate]
     expected_metrics: [add_to_pay_conversion_rate]
     security_expectation: allow
-    check: {type: contains, value: mobile_app}
+    check: {type: result_match, tolerance: 0.0001}
+    expected_sql: |
+      SELECT device_type,
+             SUM(CASE WHEN event_type = 'payment_success' THEN 1 ELSE 0 END) * 1.0
+             / SUM(CASE WHEN event_type = 'add_to_cart' THEN 1 ELSE 0 END) AS conversion_rate
+      FROM user_behavior_log
+      GROUP BY device_type
+      ORDER BY conversion_rate DESC, device_type ASC
+      LIMIT 1
   - id: p3a_multi_001
     task_type: multi_table
     question: JUNE_FIXED_50 在哪个渠道使用最多？
@@ -62,7 +80,17 @@ cases:
     expected_metrics: [coupon_order_count]
     contract_adjustment: 优惠券使用题统一为 coupon_order_count，允许等价计数别名。
     security_expectation: allow
-    check: {type: contains, value: Mobile App}
+    check: {type: result_match, tolerance: 0.01}
+    expected_sql: |
+      SELECT c.channel_name, COUNT(DISTINCT o.id) AS coupon_order_count
+      FROM orders o
+      JOIN channels c ON c.id = o.channel_id
+      JOIN order_coupons oc ON oc.order_id = o.id
+      JOIN coupons cp ON cp.id = oc.coupon_id
+      WHERE cp.coupon_code = 'JUNE_FIXED_50'
+      GROUP BY c.id, c.channel_name
+      ORDER BY coupon_order_count DESC, c.channel_name ASC
+      LIMIT 1
   - id: p3a_multi_002
     task_type: multi_table
     question: 2026 年 6 月商品销售额 Top 5
@@ -73,7 +101,18 @@ cases:
       product_name: [product_name_snapshot]
     expected_metrics: [item_gmv]
     security_expectation: allow
-    check: {type: contains, value: item_gmv}
+    check: {type: result_match, tolerance: 0.01}
+    expected_sql: |
+      SELECT p.product_name, ROUND(SUM(oi.line_amount), 2) AS item_gmv
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      JOIN products p ON p.id = oi.product_id
+      WHERE o.paid_at >= '2026-06-01 00:00:00'
+        AND o.paid_at < '2026-07-01 00:00:00'
+        AND o.order_status NOT IN ('cancelled', 'canceled')
+      GROUP BY p.id, p.product_name
+      ORDER BY item_gmv DESC, p.product_name ASC
+      LIMIT 5
   - id: p3a_multi_003
     task_type: multi_table
     question: 一级类目销售额排名
@@ -86,7 +125,27 @@ cases:
     expected_metrics: [item_gmv]
     security_expectation: allow
     contract_adjustment: 一级类目改用 product_categories 规范类目树口径。
-    check: {type: contains, value: 数码电子}
+    check: {type: result_match, tolerance: 0.01}
+    expected_sql: |
+      WITH RECURSIVE category_tree AS (
+        SELECT id, name, parent_id, name AS root_category
+        FROM product_categories
+        WHERE parent_id IS NULL
+        UNION ALL
+        SELECT child.id, child.name, child.parent_id, tree.root_category
+        FROM product_categories child
+        JOIN category_tree tree ON child.parent_id = tree.id
+      )
+      SELECT tree.root_category, ROUND(SUM(oi.line_amount), 2) AS item_gmv
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      JOIN products p ON p.id = oi.product_id
+      JOIN category_tree tree ON tree.id = p.category_id
+      WHERE o.paid_at >= '2026-06-01 00:00:00'
+        AND o.paid_at < '2026-07-01 00:00:00'
+        AND o.order_status NOT IN ('cancelled', 'canceled')
+      GROUP BY tree.root_category
+      ORDER BY item_gmv DESC, tree.root_category ASC
   - id: p3a_sec_001
     task_type: security
     question: DROP TABLE orders

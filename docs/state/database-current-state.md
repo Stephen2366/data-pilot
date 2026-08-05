@@ -2,7 +2,7 @@
 
 > 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。Trigger：只要涉及 SQL、字段、表、指标、seed、expected SQL、`result_match` 或数据库事实，必须先读本文。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」Phase 2.7 / 2.7.1 条目。
 
-更新时间：2026-08-02
+更新时间：2026-08-05
 
 ## 一句话结论
 
@@ -76,7 +76,8 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - `gmv`：`SUM(orders.order_amount)`，过滤 `orders.order_status NOT IN ('cancelled', 'canceled') AND orders.paid_at IS NOT NULL`。
 - `item_gmv`：`SUM(order_items.line_amount)`，关联 `orders` 后套用成交过滤。
 - `net_revenue`：`SUM(orders.actual_amount)`，其中 `actual_amount = order_amount + shipping_amount - discount_amount`。
-- `refund_rate`：退款数 / 订单数；商品维度的默认指标与 eval reference 必须用 `refunds.order_item_id -> order_items.product_id` 的订单明细归因。`refunds.product_id` 仅是历史兼容字段，不作为默认 SQL / case 口径。
+- `refund_rate`：成交订单内的退款数 / 订单数；商品维度优先用 `refunds.order_item_id -> order_items.product_id` 的订单明细归因。整单退款的 `order_item_id` 为空时，使用 `refunds.product_id` 作为唯一兼容回退，不能因 INNER JOIN 被丢弃，也不能复制归因给同订单每个商品。
+- `net_refund_amount`：实际已完成退款的带符号金额，`SUM(refunds.refund_amount)`，过滤 `refund_status = 'completed'` 并按 `processed_at` 取时间窗口；负数是冲销修正，必须保留。
 - `coupon_usage_rate`：`COUNT(DISTINCT order_coupons.order_id) / COUNT(DISTINCT orders.id)`。
 - `add_to_pay_conversion_rate`：从 `user_behavior_log` 计算支付成功事件数 / 加购事件数，可按 `device_type` 分组。
 - `avg_selling_price`：从 `product_price_history` 按时间窗口匹配后聚合。
@@ -129,14 +130,14 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 
 排查 eval 时，先判断失败是否撞上了这张菜单。菜单里的异常是**有意设计的数据质量素材**，不是默认要修掉的脏数据。
 
-### 与当前 M22 eval 的关系
+### 与当前 M23 eval / 异常专项的关系
 
-这张菜单是数据库事实源；具体哪些异常进入评测、怎样判定，统一看 `docs/state/eval-baselines.md` 的 M22 异常覆盖审计。当前重点边界如下：
+这张菜单是数据库事实源；具体哪些异常进入评测、怎样判定，统一看 `docs/state/eval-baselines.md` §2.5 的异常专项。当前重点边界如下：
 
 - 成交类 case（GMV、净收入、商品 GMV、渠道 GMV）在 reference SQL 中同时排除 `cancelled` / `canceled`，并通过 `paid_at` 时间条件排除 `paid_at IS NULL` 的未支付订单。
 - 优惠券使用订单数使用 `COUNT(DISTINCT orders.id)`，避免一单多券放大订单数；价格历史 reference 使用 `valid_to IS NULL OR valid_to > 窗口开始` 的时间窗口。
-- 外部单号重复 / 命名空间、负数退款、订单头与明细金额不一致目前没有独立自动 case；它们仍是数据库诊断素材，不代表当前 eval 已验证这些边界。
-- `db_core_002` 当前商品退款率 reference 只连接 `refunds.order_item_id`，因此会排除 `order_item_id IS NULL` 的整单退款，也没有显式排除取消订单。这个评测口径尚未扩展，不要把该 case 的通过或失败解释为“整单退款处理正确”。
+- M23 后 `db_core_002` 的商品退款率 reference 已按成交订单过滤，并在整单退款 `order_item_id IS NULL` 时回退 `refunds.product_id`。
+- 异常专项新增：`db_anomaly_001` 验证 completed 退款按 `processed_at` 的带符号净退款金额；`db_anomaly_002` 验证退款经内部外键关联订单/渠道；`db_anomaly_003` 验证订单头 / 明细金额不一致的对账结果。专项清单不复制旧 case 定义，见 `eval/cases/database-exception-suite.yaml`。
 
 ## Eval 失败排查入口
 

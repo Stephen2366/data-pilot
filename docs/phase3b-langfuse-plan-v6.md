@@ -4,7 +4,7 @@
 >
 > **核心目标**：在不改动 `/api/query` 响应契约、不替代 JSONL 和现有 eval 报告的前提下，新增可选 LangFuse Cloud 写入，并补齐 **L1/L2 规则评分器 + 最小 L3 LLM-as-Judge** 评分能力，最后跑通一次最小 Experiment 验证全链路闭环。LangFuse 自部署不再作为 DataPilot Phase 3B 的默认目标，改为 EvalBench 阶段重点探索。
 >
-> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。
+> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。v6.5 追加 M23：在提出下一轮 retrieval 假设前，先治理仍会污染分数解释的 eval、语义层与数据库事实边界。
 
 ## 灵感来源：一线开发者的 LangFuse 评测实战经验
 
@@ -1141,7 +1141,7 @@ M21 已完成 fusion 候选验证、Context 地基体检、triage 细分类和�
 #### 后续衔接
 
 - M22：已完成核心 Eval Contract / Semantic Output Stabilization 实现；继续收口 Context 全约束、拒绝来源核验、SQL 合同证据与用户确认的 Qwen / Milvus / RRF 新口径对照。
-- M23：待 M22 基础事实与候选实验稳定后，再提出新的 retrieval 方法假设；每次只改变一个变量，并同时保留 retrieval-only 与端到端指标。
+- M23：先完成 eval / 语义层 / 数据库事实的最小基线治理；只有基线边界可解释后，才提出新的 retrieval 方法假设。每次仍只改变一个变量，并同时保留 retrieval-only 与端到端指标。
 
 ### M22 Eval Contract / Semantic Output Stabilization（核心实现已完成；补充收口与候选实验待确认）
 
@@ -1225,6 +1225,44 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 - context / output / result / manual 四类失败可独立解释；不会再把最终输出缺列直接判为 retrieval 或 context 缺失。
 - `db_core_004`、`db_prompt_002`、`db_plan_002` 的修复有 deterministic regression 证据。
 - 报告清楚区分评测契约修正和真实 pipeline 改进；不更改默认模型、embedding、Milvus、RRF 或 seed 事实。
+
+---
+
+## M23：Eval / Semantic / Database Baseline Hygiene（先行环节，已实现待验收）
+
+**定位**：M23 不是新的 retrieval 优化模块，而是下一轮 pipeline / retrieval 实验前的最小基线治理。目标是避免把“参考答案未真正判分、指标口径不一致、语义事实未进入运行时上下文、SQLite 与 MySQL 边界”误判成模型或检索能力问题。
+
+### 已确认问题（2026-08-05 审查）
+
+1. **退款率口径尚未收口**：`db_core_002` 已改为订单明细归因，但 reference SQL 未排除 `cancelled / canceled`，且会排除 `refunds.order_item_id IS NULL` 的整单退款；实库 Top1 未变化，但退款率数值会变化。必须先明确“商品退款率是否只统计成交订单、整单退款如何归因”，不能把当前通过解释为异常数据处理正确。
+2. **部分 reference SQL 没有实际参与结果判分**：当前有带 `expected_sql` 的 `contains` / `manual` case；它们只能检查关键词或人工审查，不能证明数值、排序、TopN、过滤条件或行集正确。尤其是退款率、类目销售额、渠道 GMV、转化率等题不能继续把 reference SQL 仅作为说明文字。
+3. **语义事实源仍有冲突或缺口**：`order_count` 在 `metrics.yaml` 与 `orders.md` 的去重口径不一致；运行时 Schema Loader 不会把 Markdown 的“指标口径 / 数据质量说明”整体送入 SchemaGraph，因此外部单号命名空间不可 join、负数退款冲销、完整订单状态枚举等事实不能稳定被检索或进入 prompt。
+4. **oracle 边界仍需显式保留**：eval 的实际执行和 `result_match` 都基于确定性 SQLite seed，生产主路径为 MySQL。当前 MySQL migration、14 表行数和固定业务事实已复核正常；这不是“数据库坏了”，但 SQLite 分数不能自动证明 MySQL 方言与真实库运行也正确。
+
+### 最小执行内容
+
+1. **先写清业务口径，再改 case**：为商品退款率、订单量、优惠券“使用”是否要求成交订单、整单退款归因建立单一语义定义；同步 `metrics.yaml`、`relations.yaml`、相关 schema description、case 题面与 expected SQL。对有意保留的异常数据，明确它是“当前自动覆盖”还是“仅诊断素材”。
+2. **加固评分而不偷换历史分数**：逐条审查带 `expected_sql` 却未使用 `result_match` 的 case；可确定性比较的题升级为 `result_match` / `expected_value`，确需人工判断的题保留 `manual` 并从自动能力分中单列。任何检查强度变化都记录为新合同，不与 M22 旧快照直接比较。
+3. **让关键事实进入运行时语义层**：消除 `order_count` 等冲突；将会影响 SQL 选择、join 或过滤的事实写入 `metrics.yaml` / `relations.yaml` 或可检索的结构化 schema docs，避免只存在于给人阅读的 Markdown 段落。外部单号不可作为 join、状态枚举和退款归因边界至少要有 focused test。
+4. **保留双 oracle 审计**：不自动把 eval oracle 从 SQLite 切到 MySQL；继续保持确定性 SQLite 回归，同时为所有 `expected_sql` 提供 MySQL 只读审计。报告必须明确 oracle backend；若两端出现差异，先分类为方言、seed 漂移或 reference SQL 问题，再决定是否调整长期口径。
+
+### 最小验收
+
+- 商品退款率、订单量等已识别指标在语义事实源、reference SQL、case 和测试中没有互相矛盾的定义。
+- 每条带 `expected_sql` 的自动 case 都能说明 SQL 是否参与判分；不能自动判定的 case 明确标为 manual / diagnostic。
+- 关键数据异常的覆盖矩阵可追溯：已覆盖、故意不覆盖、仅人工诊断三种状态不混淆。
+- SQLite deterministic seed 与当前 MySQL 的 expected SQL 审计均通过，报告明确两者的用途和边界。
+- 仅完成上述基线治理后，才开始提出 M23 后续 retrieval 假设；不在本先行环节切换模型、embedding、Milvus、RRF 或清洗 seed 数据。
+
+### 实施快照（2026-08-05）
+
+- 已统一商品退款率为“成交订单 + 明细优先、整单退款回退 `refunds.product_id`”；`order_count` 统一为 `COUNT(DISTINCT orders.id)`。
+- challenge 12 条与 formal 8 条自动 SQL case 均已使用 `result_match` 或 `expected_value`，两条递归 / SCD 困难题仍明确为 manual。
+- 状态枚举、SRC/ORD 不能 join、整单退款归因边界已进入 field / relation schema documents；新增 focused tests 防止这些事实再次只停留在 Markdown 阅读层。
+- 20 条 reference SQL 已通过 MySQL 与 deterministic SQLite 双端只读审计，逐条行数一致。focused `42 passed, 1 warning`；全量 pytest `152 passed, 1 warning`。
+- 这些 case / scorer 强化形成 M23 新评测合同；M22 的真实 LLM 总分只能作为旧合同历史快照，后续 retrieval 假设必须从此新合同重新建立基线。
+- M23 还补齐 Milvus collection 的内容版本门禁：collection schema description 保存 `schema_docs_hash`，复用时同时校验行数、向量维度和内容 hash；M20/M22 历史 collection 因缺少该标记不得直接复用。
+- 异常彩蛋不再只挂在 M22 实验记录下：新增 `database-exception-suite.yaml`，引用 3 条既有自动 case、1 条既有人工归因素材和 3 条新增自动异常 case。新增题明确实际净退款只算 `completed` 且保留负数冲销、退款到渠道必须走内部外键、订单头/明细金额差异应被报告而非清洗；专项通过 `eval.run_eval --case-set` 组合，不复制既有 YAML。
 
 ---
 
