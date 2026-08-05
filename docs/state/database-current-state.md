@@ -129,6 +129,15 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 
 排查 eval 时，先判断失败是否撞上了这张菜单。菜单里的异常是**有意设计的数据质量素材**，不是默认要修掉的脏数据。
 
+### 与当前 M22 eval 的关系
+
+这张菜单是数据库事实源；具体哪些异常进入评测、怎样判定，统一看 `docs/state/eval-baselines.md` 的 M22 异常覆盖审计。当前重点边界如下：
+
+- 成交类 case（GMV、净收入、商品 GMV、渠道 GMV）在 reference SQL 中同时排除 `cancelled` / `canceled`，并通过 `paid_at` 时间条件排除 `paid_at IS NULL` 的未支付订单。
+- 优惠券使用订单数使用 `COUNT(DISTINCT orders.id)`，避免一单多券放大订单数；价格历史 reference 使用 `valid_to IS NULL OR valid_to > 窗口开始` 的时间窗口。
+- 外部单号重复 / 命名空间、负数退款、订单头与明细金额不一致目前没有独立自动 case；它们仍是数据库诊断素材，不代表当前 eval 已验证这些边界。
+- `db_core_002` 当前商品退款率 reference 只连接 `refunds.order_item_id`，因此会排除 `order_item_id IS NULL` 的整单退款，也没有显式排除取消订单。这个评测口径尚未扩展，不要把该 case 的通过或失败解释为“整单退款处理正确”。
+
 ## Eval 失败排查入口
 
 | failure_stage / 现象 | 优先查什么 | 不要先做什么 |

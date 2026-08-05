@@ -1161,6 +1161,8 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 
 实施快照（2026-08-04）：已完成 Context / Output / Result / Manual 分层、订单明细退款归因、规范类目树、`coupon_order_count`、SCD overlap、三类语义拒绝与窄 SQL Plan Contract；默认新口径 diagnostic 为 `25/32`（自动 `22/27`、人工/诊断 `3/5`），不可与 M21 `21/32` 直接比较。补充收口持续核验 Context 的 warn 约束、`blocked_via` 来源和 SQL 合同失败证据；候选实验不自动启动或切默认。
 
+后续决策快照（2026-08-05）：M22 C0-C3 三次重复已完成，C1（Qwen `qwen3.7-plus` + 本地 deterministic + weighted）为 `27/28/28`，用户确认将其切为默认主模型。默认检索仍为 `inmemory + deterministic + weighted`，embedding、Milvus、RRF、case、scorer 与 oracle 不变；原“不切默认”是本模块实验边界，现由用户在实验收口后明确覆盖。
+
 #### 目标与边界
 
 **目标**：先建立可解释、可比较的评测契约，再修复已证实的 QueryPlan → SQL 语义缺口；M22 结束时能逐 case 区分“reference / scorer 调整造成的重分类”和“pipeline 的真实能力改进”。

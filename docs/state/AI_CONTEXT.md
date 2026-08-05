@@ -5,12 +5,12 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M22 Eval Contract / Semantic Output Stabilization（实现完成；Qwen / Milvus / RRF 新口径首轮实验待用户确认）
+- 当前模块：M22 Eval Contract / Semantic Output Stabilization（实现完成；C0-refresh 与 Qwen / Milvus / RRF 三次重复已完成）
 - 下一模块：M23（在 M22 实验扩展完成后，再提出新的 retrieval 方法假设；不复用 M21 的 193-doc 对照）
 - 当前模块验收：M22 未验收（待 accept-module）
 - 上一模块验收：M21 未验收（待 `accept-module`）
 - 阻塞项：无
-- 更新时间：2026-08-04
+- 更新时间：2026-08-05
 
 ## 必读规则
 
@@ -29,8 +29,8 @@
 - 数据库：MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic；SQLite 仅用于测试 / smoke。
 - 数据底座：Phase 2.7 后 14 张物理表，固定业务事实和指标口径以 `docs/state/database-current-state.md` 为准。
 - NL2SQL：M3 模板 SQL 优先；模板未命中走 LLM + Schema Retrieval + QueryPlan + SQL Guard。
-- 主模型默认：DeepSeek `deepseek-v4-flash`，配置入口为 `LLM_PROVIDER=deepseek` + `LLM_MODEL=deepseek-v4-flash`。
-- Qwen 主模型：只作为显式候选 / A/B，对应 `LLM_PROVIDER=qwen` + `QWEN_MODEL=...`；当前不读 `LLM_MODEL`。
+- 主模型默认：Qwen `qwen3.7-plus`，配置入口为 `LLM_PROVIDER=qwen` + `QWEN_MODEL=qwen3.7-plus`。
+- DeepSeek 主模型：显式切换时使用 `LLM_PROVIDER=deepseek` + `LLM_MODEL=deepseek-v4-flash`；Qwen provider 不读取 `LLM_MODEL`。
 - Schema Retrieval 默认：`inmemory + deterministic`；`milvus` / `siliconflow` / `dashscope(qwen3.7-text-embedding)` 只通过环境变量显式开启。
 - SQL 安全：sqlglot AST 只读检查 + 表级 RBAC + 敏感字段策略；`admin` 也不能通过 Text2SQL 直出 `users.email/users.phone`。
 - Trace / Eval：默认 JSONL trace；LangFuse 默认关闭，仅作为旁路观测和 score 回写增强；eval 入口和开关见 `docs/state/runbook.md`。
@@ -59,7 +59,12 @@
 | 日期 | 判断 |
 |---|---|
 | 2026-08-04 | M22 已校正 Context / Output / Result / Manual 契约：不再使用 M21 的 `schema_context` 失败数直接判断检索质量。后续先按 trace 和 failure subtype 定位，再提出单变量假设。 |
-| 2026-08-04 | 用户已将 Qwen / Milvus / RRF 的新口径对照纳入 M22：C0 已有 `25/32` 默认快照，首轮只运行 C1-C3 与 retrieval-only 组各一次，用于筛选而非因果结论；结果后再确认是否在同一窗口完整跑 C0-C3 三次。仍固定 194-doc corpus、新 case/scorer 与同一 oracle；RRF、rerank、top_k、默认 embedding 或默认 fusion 均不可因旧实验或单次 run 自动切换。 |
+| 2026-08-05 | M22 C0-refresh/C1/C2/C3 首轮分别为 `24/32`、`27/32`、`25/32`、`24/32`；retrieval-only local weighted `0.738`、Milvus weighted `0.738`、Milvus RRF `0.929`。这些只用于同一 194-doc 新口径下的首轮筛选。异常彩蛋审计发现外部单号、负数退款、金额对账无独立 case；`db_core_002` 排除整单退款且未显式排除取消订单。 |
+| 2026-08-05 | M22 C0-C3 三次重复完成：C0 `24/24/25`、C1 `27/28/28`、C2 `25/27/25`、C3 `24/26/27`（32 条总分）。C1 三次均最高或并列最高；C2/C3 无稳定端到端收益，不切默认。C2 第2次有效结果使用 `r2b` 文件名，首次启动中断未计入。 |
+| 2026-08-05 | Qwen `qwen3.8-max` + 本地 deterministic + weighted 追加快照为 `22/32`；模型可用，未执行备用 `qwen3.7-max`，不改变默认模型。 |
+| 2026-08-05 | Qwen `qwen3.7-max` + 本地 deterministic + weighted 追加快照为 `26/32`；高于同条件 Qwen 3.8 的 `22/32`，但仍是单次证据，不改变默认模型。 |
+| 2026-08-05 | 用户确认将默认主模型切换为 Qwen `qwen3.7-plus`；检索仍为 `inmemory + deterministic + weighted`，不切 embedding、Milvus 或 RRF。 |
+| 2026-08-05 | 默认切换后的路线：优先观察 Qwen `qwen3.7-plus` 在 SQL Contract 别名/等价表达、QueryPlan→SQL 信息保真和延迟上的表现；DeepSeek `deepseek-v4-flash` 保留为显式回退对照。 |
 | 2026-08-04 | 默认模型、embedding、向量库和 weighted fusion 保持不变。`db_core_004` 等 SQL plan contract 失败先作为生成链路缺口复核，不预设为 retrieval 问题。 |
 | 2026-08-04 | 当前默认 diagnostic `25/32`（自动 `22/27`、人工/诊断 `3/5`）仅是 M22 新口径快照；M21 的 `21/32` 及 193-doc 实验只作历史证据。 |
 | 2026-08-04 | Eval / Trace / LangFuse 的功能说明见 `docs/eval-observability-guide.md`；历史实验和取舍见 changelog / eval-baselines，不在本仪表盘重复展开。 |
@@ -76,6 +81,7 @@
 | 2026-07-29 起，2026-08-02 仍有效 | Windows 裸连 LangFuse Cloud 偶发 `WinError 10013` | trace visibility 查询 / OTLP export 可能失败，但 score 写入和 JSONL 主链路可正常 | 真实 Cloud smoke 建议显式设置 `HTTP_PROXY` / `HTTPS_PROXY` 为 `http://127.0.0.1:7897`；脚本将 score write 和 trace visibility 分开显示 |
 | 2026-08-02 起，M20 已加护栏 | 旧固定 Milvus collection `datapilot_schema_docs` 已被历史重复灌入污染 | 旧 collection 的历史 A/B 结果不能直接作为 embedding 优劣结论 | 新 eval/smoke 使用唯一 collection 或 clean collection；`MilvusVectorIndex` 会拒绝行数/维度不匹配的已有 collection |
 | 2026-08-04 起 | SQL generation 可能丢弃 QueryPlan 已明确的 `order_by/limit` | `db_simple_001`、`db_simple_002`、`db_core_004` 已被结构化拦截；需区分真实漏排序与等价表达误拦 | 窄 SQL plan contract 失败 trace 记录候选 SQL 摘要、计划/观察到的排序和 limit；不自动扩大为 AST 或通用列表排序策略 |
+| 2026-08-05 起 | M22 eval 对数据库异常彩蛋不是全覆盖 | 当前首轮仍可做同合同比较，但不能据此证明异常鲁棒性；退款率 case 排除整单退款且未显式排除取消订单 | 事实菜单保留在 `database-current-state.md`；case 覆盖和重复实验影响保留在 `eval-baselines.md`；是否扩展口径待确认 |
 
 ## 变更记录索引
 

@@ -4,7 +4,7 @@
 >
 > M0 ~ M19 的记录已被拆分到 `docs/dev-log(M0-M19).md`；本文件记录从 M20 开始。
 
-## ★ ★ M20 Milvus 修复与 embedding 测试
+## ★ ★ M20 Milvus collection 修复与 embedding 测试
 
 （2026-08-02）
 
@@ -178,7 +178,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.smoke_m20_milvus_index --output .agent_work\temp\m20-milvus-index-smoke.md
 ```
 
-## ★ ★ M21 weighted VS RRF / 本地 vs embedding
+## ★ M21 weighted VS RRF / 本地 vs embedding
 
 （2026-08-03）
 
@@ -328,7 +328,11 @@ M22 先做了一次预审查，先证明问题不在数据库：
 
 我先确认了五项会影响长期口径的选择：商品退款率统一按**订单明细归因**，一级类目统一按**规范类目树**，优惠券使用订单数单列为 `coupon_order_count`，manual case 不再混入自动能力分，“已支付订单”在该 case 中明确按**成交订单**处理并排除取消状态。新增 metric 使 schema docs 从 193 变为 194，所以 M22 后分数不能直接和 M21 的 `21/32` 说成模型提分。
 
-代码上，eval 会从同一次 JSONL trace 取 `schema_context` 元数据评分；报告新增自动能力、人工审查、契约重分类三张视图。QueryPlan 已写了 `order_by/limit` 时，SQL 必须保留；若丢失会结构化报 `sql_plan_contract_failed`，但危险 SQL 仍优先进入 SQL Guard。最终默认 diagnostic 为 `25/32`，其中自动 `22/27`、人工 `3/5`；它是新口径快照。`db_plan_002/003/004` 已能结构化拒绝，SCD 平均售价 trace 已使用时间窗口 overlap，渠道订单量在单 case SQLite oracle 复测通过；批量实时 LLM 的结果仍会波动。
+代码上，eval 会从同一次 JSONL trace 取 `schema_context` 元数据评分；报告新增自动能力、人工审查、契约重分类三张视图。QueryPlan 已写了 `order_by/limit` 时，SQL 必须保留；若丢失会结构化报 `sql_plan_contract_failed`，但危险 SQL 仍优先进入 SQL Guard。默认 diagnostic 曾得到 `25/32`，其中自动 `22/27`、人工 `3/5`；它是修复前的新口径快照。`db_plan_002/003/004` 已能结构化拒绝，SCD 平均售价 trace 已使用时间窗口 overlap，渠道订单量在单 case SQLite oracle 复测通过；批量实时 LLM 的结果仍会波动。
+
+### 复审后的补强
+
+复审又验证了一点：**评测器本身也要接受合同检查。** Context Contract 现在会核对 join key，并把“表过多、混入无关表”明确显示为 warning；结构化拒绝必须同时匹配“拒绝原因”和“拒绝来源”，不能只因错误标签相同就通过。SQL Plan Contract 被拦截时，trace 会保留候选 SQL 摘要、计划排序/limit 与实际观察到的子句，先用证据判断是否真的漏排序，再决定是否值得升级为 SQL AST 比较。一次性 trace 也取消版本跟踪，只保留结论。
 
 ### 新概念
 
@@ -353,9 +357,26 @@ M22 先做了一次预审查，先证明问题不在数据库：
 
 1. **[压力追问] 你把 case 和 scorer 都改了，25/32 有什么意义？**
 
-它不表示模型从 21/32 提升到 25/32。M22 同时改变了 case、scorer 和 schema docs corpus，所以我把它记录为新口径诊断快照，并在报告中单列自动、人工和契约重分类。真正可比的 retrieval 实验要在 194-doc、新 case/scorer、同模型条件下重新做。
+它不表示模型从 21/32 提升到 25/32。M22 同时改变了 case、scorer 和 schema docs corpus，所以我把它记录为新口径诊断快照，并在报告中单列自动、人工和契约重分类。复审后又明确了“成交订单”的取消订单排除口径，因此 `25/32` 也不能直接充当修复后的严格 C0；真正可比的 retrieval 实验要先刷新一次默认 C0，再在 194-doc、新 case/scorer、同模型条件下重新做。
 
 ### 验证与下一步
 
-- 验证：focused `42 passed`、pipeline focused `28 passed`、全量 pytest `144 passed, 2 skipped`；最终默认 diagnostic `25/32`，`db_core_004` 单 case `result_match_ok`。
-- 下一步：M22 待 accept-module；M23 若研究 RRF/rerank，要从 194-doc 新基线重新做单变量 A/B，不能复用 M21 的总分结论。
+- 验证：复审后 M22 专属 `14 passed, 1 warning`，相关回归 `64 passed, 1 warning`，全量 pytest `147 passed, 2 skipped, 1 warning`；`25/32` 是修复前 C0 快照，尚未重跑真实 LLM diagnostic。
+- 下一步：先确认是否只刷新一次修复后的默认 C0；之后再决定是否启动 Qwen / Milvus / RRF 的首轮单次对照。M22 尚未 accept-module；M23 若研究 RRF/rerank，要从刷新后的 194-doc 基线重新做单变量 A/B，不能复用 M21 的总分结论。
+
+### M22 追加模型补测
+
+在相同的本地 deterministic + weighted 条件下，追加测试了两个 Qwen 主模型：`qwen3.8-max` 为 `22/32`，随后 `qwen3.7-max` 为 `26/32`。3.7-max 本次高 4 分，但都只是单次快照，所以没有据此替换默认 DeepSeek `deepseek-v4-flash`；完整报告和 trace 保留在 `eval/reports/`、`eval/traces/`。
+
+| 组   | 配置                                             |  首轮 | 第2次 | 第3次 |  范围 | 平均通过率 |
+| ---- | ------------------------------------------------ | ----: | ----: | ----: | ----: | ---------- |
+| C0   | DeepSeek `deepseek-v4-flash` + Milvus + DashScope `qwen3.7-text-embedding` + weighted | 24/32 | 24/32 | 25/32 | 24–25 | 76.0%      |
+| C1   | Qwen `qwen3.7-plus` + inmemory/deterministic + weighted | 27/32 | 28/32 | 28/32 | 27–28 | 86.5%      |
+| C2   | Qwen `qwen3.7-plus` + Milvus + DashScope `qwen3.7-text-embedding` + weighted | 25/32 | 27/32 | 25/32 | 25–27 | 80.2%      |
+| C3   | Qwen `qwen3.7-plus` + Milvus + DashScope `qwen3.7-text-embedding` + RRF | 24/32 | 26/32 | 27/32 | 24–27 | 80.2%      |
+|      | Qwen `qwen3.8-max` + 本地 deterministic + weighted | 22/32 |       |       |       |            |
+|      | Qwen `qwen3.7-max` + 本地 deterministic + weighted | 26/32 |       |       |       |            |
+
+### 默认主模型切换
+
+M22 三次重复后，用户确认将默认主模型切换为 Qwen `qwen3.7-plus`。检索仍保持本地 deterministic + weighted；DeepSeek `deepseek-v4-flash` 保留为显式切换选项。配置解析和相关测试已通过。

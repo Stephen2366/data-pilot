@@ -214,6 +214,15 @@ EvalOps-lite 后续按行读取即可。
 LLM 配置示例：
 
 ```powershell
+$env:LLM_PROVIDER='qwen'
+$env:QWEN_MODEL='qwen3.7-plus'
+$env:DASHSCOPE_API_KEY='<your_key>'
+$env:DASHSCOPE_BASE_URL='https://dashscope.aliyuncs.com/compatible-mode/v1'
+```
+
+如需显式切换到 DeepSeek `deepseek-v4-flash`：
+
+```powershell
 $env:LLM_PROVIDER='deepseek'
 $env:LLM_MODEL='deepseek-v4-flash'
 $env:DEEPSEEK_API_KEY='<your_key>'

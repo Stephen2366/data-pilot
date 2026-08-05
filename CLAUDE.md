@@ -65,6 +65,7 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
     eval-baselines.md   # 长期评测基线、A/B 结果、失败结构和错因账本
     database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
   notes/                # 模块过程素材库（mX-notes.md）
+  ref-discussion/       # 网上技术讨论原文收集（未筛选素材）
   dev-log(M0-M19).md    # 用户学习复盘（M0~M19）
   dev-log.md            # 用户学习复盘（M20以后）
   phase3a-plan.md       # 阶段三A模块计划（历史；当前阶段计划见 docs/state/AI_CONTEXT.md「当前状态」）

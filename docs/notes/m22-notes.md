@@ -109,3 +109,38 @@
 - 聚焦测试首次 `13 passed, 1 failed`：失败是测试错误取到 `rule:safety_compliance` 而非随后产生的 `rule:schema_context`，不涉及业务实现；已改为按 scorer 名称取 detail 后复跑。
 - 复跑验证：M22 专属 `14 passed, 1 warning`；相关 eval / planner / pipeline / database / schema-index 回归 `64 passed, 1 warning`；全量 `147 passed, 2 skipped, 1 warning`。warning 均为既有 Starlette/httpx `TestClient` deprecation。
 - 本次复审修复后未重跑真实 LLM default diagnostic：`25/32` 仍是修复前的 C0 快照，只用于首轮候选筛选参照，不被标注为本次代码修复后的新结果；Qwen / Milvus / RRF 实验继续待用户确认。
+- C0-refresh 已获确认并启动一次，但在评测初始化阶段因现有 `milvus-standalone` / `milvus-minio` 容器停止而失败；进一步确认 Windows 当前排除了宿主机端口 `9001`、`9091`，导致原端口映射无法恢复。该次没有进入 LLM case，也不计入实验结果；改宿主机端口或重建容器属于基础设施变更，待单独确认。
+- 电脑重启后 Milvus 三个容器均恢复 healthy；C0-refresh 首次真正连接时发现旧 collection 仍是 M21 的 193-doc，而 M22 当前 corpus 为 194-doc，索引卫生检查按设计拒绝复用。后续使用唯一的 M22 collection 重建，保留旧 collection 不动。
+- C0-refresh 最终完成：DeepSeek `deepseek-v4-flash` + Milvus + DashScope Qwen embedding + weighted，194 rows / 当前 corpus hash，32 条通过 `24/32`，自动能力 `20/27`、manual/diagnostic `4/5`，耗时约 536 秒。报告：`eval/reports/m22-c0-refresh-report.md`，trace：`eval/traces/m22-c0-refresh-traces.jsonl`，triage：`eval/reports/m22-c0-refresh-triage.json`。8 个未通过/需审查项中，3 个为 `sql_plan_contract_failed`（`db_simple_001/002`、`db_core_004`），其余主要为 schema context / retrieval 和人工审查；不把它与修复前 `25/32` 直接解释为分数下降，需按失败结构对照。
+- M22 首轮端到端候选已各跑 1 次：C1 Qwen `qwen3.7-plus` + inmemory/deterministic + weighted 为 `27/32`；C2 同主模型 + clean Milvus/Qwen embedding + weighted 为 `25/32`；C3 同 C2 但 RRF 为 `24/32`。三者均固定当前 194-doc corpus/scorer，结果只作候选筛选，不宣称稳定收益或默认切换。对应报告/trace/triage 以 `m22-c1-qwen-local-weighted-*`、`m22-c2-qwen-milvus-weighted-*`、`m22-c3-qwen-milvus-rrf-*` 命名。
+- 首轮 retrieval-only 也完成：local deterministic + weighted `overall=0.738`；Milvus/Qwen embedding + weighted `0.738`（vector `0.929`）；Milvus/Qwen embedding + RRF `0.929`（table `0.925`、column `0.925`、metric `0.900`、relation `0.967`）。这再次说明 RRF / embedding 能改善隔离召回，但端到端 C3 未超过 C2；不据此切换默认 fusion。
+- 在开始第 2/3 次重复前补做异常彩蛋审计：eval 每次在同一份确定性 SQLite seed 上运行，`result_match` 只比较 case `expected_sql` 的结果；取消状态 / `paid_at IS NULL` 已在 GMV、净收入、商品 GMV、渠道 GMV 等成交类 reference 中显式处理；优惠券桥接用 `COUNT(DISTINCT order_id)`，SCD 价格用 `valid_to IS NULL OR valid_to > 窗口开始`。但外部单号重复/命名空间、负数退款、金额头明细不一致没有独立 case；`db_core_002` 的商品退款率 reference 只接 `order_item_id`，会排除 `order_item_id IS NULL` 的整单退款，且未显式排除取消状态。该边界会影响是否直接复测，待用户确认是否保持当前合同或先扩展 case 口径。
+- 用户确认暂不处理异常彩蛋口径，继续当前 M22 case/scorer 的 C0-C3 第 2、3 次重复；重复只用于同一现有合同下的稳定性统计，不宣称异常数据鲁棒性。
+
+### C0-C3 三次重复结果（2026-08-05）
+
+- C0（DeepSeek + Milvus/Qwen embedding + weighted）：首轮 `24/32`，第2次 `24/32`，第3次 `25/32`；范围 `24–25`。
+- C1（Qwen-plus + inmemory/deterministic + weighted）：首轮 `27/32`，第2次 `28/32`，第3次 `28/32`；范围 `27–28`。
+- C2（Qwen-plus + Milvus/Qwen embedding + weighted）：首轮 `25/32`，第2次有效复测 `27/32`，第3次 `25/32`；范围 `25–27`。第2次首次启动因工具 120 秒上限中断，未计入；有效结果写入 `m22-c2-qwen-milvus-weighted-r2b-*`。
+- C3（Qwen-plus + Milvus/Qwen embedding + RRF）：首轮 `24/32`，第2次 `26/32`，第3次 `27/32`；范围 `24–27`。
+- 重复结论：C1 在三次中均为最高或并列最高，C2/C3 没有稳定超过 C1 的证据；C3 的 retrieval-only 优势未转化为端到端稳定优势。当前不切换默认模型、Milvus 或 RRF。
+- 运行约束：所有 Milvus 复测使用独立 collection，194 rows 和同一 schema hash；LangFuse disabled、SQLite deterministic oracle、32 条 diagnostic、`new_text2sql` 不变。上述结果仍只代表当前 case/scorer 合同，不代表对数据库异常彩蛋的鲁棒性。
+
+### Qwen 3.8 追加测试（2026-08-05）
+
+- 按用户要求执行 `qwen3.8-max + inmemory/deterministic + weighted`，其余保持 32 条 diagnostic、`new_text2sql`、SQLite deterministic oracle、LangFuse disabled 和当前 M22 scorer/case。
+- 结果：`22/32`。模型调用可用，因此没有继续执行备用的 `qwen3.7-max`；该快照仅作候选证据，不改变默认模型。
+- 报告：`eval/reports/m22-qwen38-local-weighted-report.md`；trace：`eval/traces/m22-qwen38-local-weighted-traces.jsonl`；triage：`eval/reports/m22-qwen38-local-weighted-triage.json`。
+
+### Qwen 3.7 Max 追加测试（2026-08-05）
+
+- 按用户后续要求执行 `qwen3.7-max + inmemory/deterministic + weighted`，其余条件与 Qwen 3.8 及当前 M22 diagnostic 保持一致。
+- 结果：`26/32`。这是单次追加对照，不纳入 C0-C3 三次重复稳定性矩阵，也不改变默认模型。
+- 报告：`eval/reports/m22-qwen37max-local-weighted-report.md`；trace：`eval/traces/m22-qwen37max-local-weighted-traces.jsonl`；triage：`eval/reports/m22-qwen37max-local-weighted-triage.json`。
+
+### C1 本地 vs C2 embedding 逐 case 初步审计（2026-08-05）
+
+- 三次配对中，C1→C2 的通过数为 `27→25`、`28→27`、`28→25`。C2 并非每题都更差：首轮 `db_core_002` 反而由 C1 失败、C2 通过；净差主要来自少数下游生成/合同失败。
+- C2 相对 C1 的额外失败：首轮 `db_core_004`、`db_plan_001`、`db_prompt_002`；第2次 `db_join_003`；第3次 `db_core_004`、`db_schema_003`、`db_trace_002`。
+- 已见证据：`db_core_004` 的 C2 trace 上下文仍含相同 7 张表/101 个字段，但候选 SQL 使用 `c.channel_name`，QueryPlan 写的是 `channels.channel_name ASC`，被当前字符串比较规则误拦；`db_plan_001` 的 `` `gmv` DESC``、`db_prompt_002` 的 `p.product_name`、`db_trace_002` 的 `used_order_count DESC` 也属于计划表达与 SQL 别名/引用形式差异。`db_schema_003` 出现 `GMV` 与 expected `gmv` 的大小写列名差异；`db_join_003` 一次生成 SQL 未使用 expected 的 `products` 表。
+- 初步判断：当前 1–3 分差不能直接归因于 embedding 召回下降；Milvus weighted retrieval-only 与本地 weighted 总体同为 `0.738`，且多项失败发生在 schema context 已包含目标表之后。更可能是远程 LLM 生成波动、文档排序改变提示输入，以及 SQL Plan/Output Contract 对别名和大小写的敏感共同作用。后续先按 trace 分阶段隔离，再决定是否需要合同规范化或检索策略改动。

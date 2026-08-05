@@ -2,14 +2,14 @@
 
 > 本文是 DataPilot 的运行入口：只说明“怎么开启哪条链路、怎么跑命令、哪些默认不能随手改”。Trigger：只要要运行命令、切模型、开 LangFuse、跑 eval、改环境变量，必须先读本文。当前状态先读 `docs/state/AI_CONTEXT.md`，评测数字和错因追溯读 `docs/state/eval-baselines.md`，Milvus / embedding 细节读 `docs/state/schema-retrieval-milvus-embedding.md`。
 
-更新时间：2026-08-04
+更新时间：2026-08-05
 
 ## 模型链路
 
 | 目标 | 环境变量 | 说明 |
 |---|---|---|
-| 默认 DeepSeek 主链路 | `LLM_PROVIDER=deepseek`；`LLM_MODEL=deepseek-v4-flash` | 当前默认。`LLM_MODEL` 在现有代码语义里主要服务 DeepSeek provider；不要把它误读成所有 provider 的统一模型名。 |
-| Qwen 主模型对照 | `LLM_PROVIDER=qwen`；`QWEN_MODEL=qwen3.7-max` 或 `qwen3.7-plus` | Qwen provider 当前读取 `QWEN_MODEL`，不是 `LLM_MODEL`。`.env` 里保留 `LLM_MODEL=deepseek-v4-flash` 不会影响 Qwen run。 |
+| 默认 Qwen 主链路 | `LLM_PROVIDER=qwen`；`QWEN_MODEL=qwen3.7-plus` | 当前默认。Qwen provider 读取 `QWEN_MODEL`，不是 `LLM_MODEL`。`.env` 中的 `LLM_MODEL=deepseek-v4-flash` 仅作为显式切回 DeepSeek 时的备用入口。 |
+| DeepSeek 主模型对照 | `LLM_PROVIDER=deepseek`；`LLM_MODEL=deepseek-v4-flash` | 显式切换时使用；`LLM_MODEL` 在现有代码语义里主要服务 DeepSeek provider。 |
 | L3 judge | `EVAL_JUDGE_MODEL=<模型名>` 或 CLI `--judge-model <模型名>` | 默认关闭；只影响 eval 追加的 L3 judge，不改变业务 NL2SQL 主模型。 |
 
 ## Schema Retrieval / Embedding 链路
@@ -57,5 +57,5 @@
 ## 运行纪律
 
 - `.env` 的默认模型、默认 embedding、默认向量库属于长期基线选择；实验时优先在当前 shell 临时设置环境变量，不直接改默认。
-- `LLM_MODEL` 当前保留，不取消；它是 DeepSeek 默认模型入口。若后续要统一成所有 provider 共用 `LLM_MODEL`，需要做兼容迁移：Qwen 先读 `QWEN_MODEL`，缺省再 fallback 到 `LLM_MODEL`，并同步 `.env.example` / 文档 / 测试。
+- `LLM_MODEL` 当前保留，不取消；它是 DeepSeek provider 的显式模型入口。若后续要统一成所有 provider 共用 `LLM_MODEL`，需要做兼容迁移：Qwen 先读 `QWEN_MODEL`，缺省再 fallback 到 `LLM_MODEL`，并同步 `.env.example` / 文档 / 测试。
 - 报告中的 `review_required` / `manual_review` 可能不等同命令行 failed 数；它表示“待处理 / 待人工判断”，用于闭环排队。M22 的 `manual_or_diagnostic` 视图会单列这类 case：请求仍会运行并记录 trace，但不把无法稳定自动判分的复杂语义题伪装成自动能力硬门。

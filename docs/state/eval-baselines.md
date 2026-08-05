@@ -2,16 +2,18 @@
 
 > 本文是 DataPilot 的长期评测账本，优先回答“当前应据什么决策、哪些结果可直接比较”。完整报告和历史叙事分别保留在 `eval/reports/` 与 `docs/state/AI_CONTEXT_CHANGELOG.md`。
 
-更新时间：2026-08-04
+更新时间：2026-08-05
+
+> 模型名称统一写完整标识：主模型写 provider + exact model id（例如 `DeepSeek deepseek-v4-flash`、`Qwen qwen3.7-plus`、旧入口 `Qwen qwen-plus`）；embedding 写 provider + exact embedding model（例如 `DashScope qwen3.7-text-embedding`）。实验矩阵不再使用 `Qwen-plus`、`DeepSeek`、`Qwen embedding` 等容易混淆的简称。
 
 ## 1. 当前决策摘要
 
 | 项目 | 当前结论 | 证据 |
 |---|---|---|
-| 默认主模型 | DeepSeek `deepseek-v4-flash`；不因单轮 A/B 自动切换。 | `M19-E01`、`M19-E02` |
-| 默认检索 | `inmemory + deterministic + weighted`；Milvus、Qwen embedding、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
-| 当前优化方向 | M22 已完成契约拆分与窄 QueryPlan→SQL 合同；其扩展实验将以 194-doc、新 case/scorer 口径重新验证 Qwen / Milvus / RRF。既有 C0 不重跑，首轮仅 C1-C3 与 retrieval-only 各一次待确认。 | `M22-E01`、`M22-E02` |
-| 已收口的假设 | Qwen embedding 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
+| 默认主模型 | Qwen `qwen3.7-plus`；本次基于 M22 三次 C1 稳定性结果切换。 | `M22-E04` |
+| 默认检索 | `inmemory + deterministic + weighted`；Milvus、DashScope `qwen3.7-text-embedding`、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
+| 当前优化方向 | M22 已完成契约拆分、窄 QueryPlan→SQL 合同、C0-C3 三次重复及 Qwen 3.8/3.7 追加对照；下一步优先检查 SQL 合同的别名/等价表达误拦，再区分生成缺口与检索缺口。数据库异常彩蛋覆盖仍有明确边界。 | `M22-E01`、`M22-E02`、`M22-E03`、`M22-E04`、`M22-E05`、`M22-E06` |
+| 已收口的假设 | DashScope `qwen3.7-text-embedding` 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
 | 不可作决策的证据 | 旧固定 Milvus collection 的重复灌入污染结果只保留作历史对照。 | `M20-E01` |
 
 运行命令、环境变量和执行纪律以 `docs/state/runbook.md` 为准；Schema Retrieval 的 collection、hash、维度与排查菜单以 `docs/state/schema-retrieval-milvus-embedding.md` 为准。
@@ -50,21 +52,22 @@
 
 | ID | 日期 | 证据类型 | 目的 | 固定条件 / 唯一变量 | 结果 | 可比对象 | 决策 |
 |---|---|---|---|---|---|---|---|
-| `M13-E01` | 07-26 | 事实锚点 | Phase 3A 稳定回归快照 | DeepSeek + local retrieval | formal `10/10`；challenge `14/16`；diagnostic `23/32` | — | 上一轮稳定基线。 |
-| `M14-E01` | 07-27 | 诊断快照 | 更严格口径下复测默认链路 | DeepSeek + local retrieval | formal `8/10`；challenge `12/16`；diagnostic `24/32` | `M13-E01` 不可直接比较 | 口径收紧，不能据此判退化。 |
-| `M14-E02` | 07-27 | 补充证据 | 模型候选初筛 | Qwen `qwen3.7-plus` | formal `9/10`；challenge `13/16`；diagnostic `21/32` | 同轮 DeepSeek 快照 | 保留候选，不切默认。 |
+| `M13-E01` | 07-26 | 事实锚点 | Phase 3A 稳定回归快照 | DeepSeek `deepseek-v4-flash` + local retrieval | formal `10/10`；challenge `14/16`；diagnostic `23/32` | — | 上一轮稳定基线。 |
+| `M14-E01` | 07-27 | 诊断快照 | 更严格口径下复测默认链路 | DeepSeek `deepseek-v4-flash` + local retrieval | formal `8/10`；challenge `12/16`；diagnostic `24/32` | `M13-E01` 不可直接比较 | 口径收紧，不能据此判退化。 |
+| `M14-E02` | 07-27 | 补充证据 | 模型候选初筛 | Qwen `qwen3.7-plus` | formal `9/10`；challenge `13/16`；diagnostic `21/32` | 同轮 DeepSeek `deepseek-v4-flash` 快照 | 保留候选，不切默认。 |
 | `M14-E03` | 07-27 | 补充证据 | 模型候选初筛 | Qwen `qwen3.7-max` | diagnostic `22/32` | 同轮快照 | 保留候选，不切默认。 |
-| `M19-E01` | 08-02 | 诊断快照 | 验证 triage 闭环 | DeepSeek flash | formal `7/10`；challenge `9/16`；diagnostic `19/32` | `M19-E02` 仅作同轮模型参考 | 不单独判定默认能力下降。 |
+| `M19-E01` | 08-02 | 诊断快照 | 验证 triage 闭环 | DeepSeek `deepseek-v4-flash` | formal `7/10`；challenge `9/16`；diagnostic `19/32` | `M19-E02` 仅作同轮模型参考 | 不单独判定默认能力下降。 |
 | `M19-E02` | 08-02 | 补充证据 | 主模型候选对照 | Qwen `qwen3.7-max` | formal `8/10`；challenge `12/16`；diagnostic `22/32` | `M19-E01` | 生成类失败较少，但 schema 问题未解；不切默认。 |
-| `M20-E01` | 08-02 | 事实锚点 | 修复索引卫生并重测 | DeepSeek + clean Milvus/Qwen embedding；193 docs、run-scoped | diagnostic `17/32` | 旧污染结果不可比 | 证明 clean 链路可信，不证明 embedding 无效。 |
-| `M20-E02` | 08-02 | 补充证据 | clean 链路模型对照 | `M20-E01` 同检索链路，唯一变量为 Qwen `qwen3.7-max` | diagnostic `21/32` | `M20-E01` | 同链路高于 DeepSeek，但单次 run 不切默认。 |
+| `M20-E01` | 08-02 | 事实锚点 | 修复索引卫生并重测 | DeepSeek `deepseek-v4-flash` + clean Milvus + DashScope `qwen3.7-text-embedding`；193 docs、run-scoped | diagnostic `17/32` | 旧污染结果不可比 | 证明 clean 链路可信，不证明 embedding 无效。 |
+| `M20-E02` | 08-02 | 补充证据 | clean 链路模型对照 | `M20-E01` 同检索链路，唯一变量为 Qwen `qwen3.7-max` | diagnostic `21/32` | `M20-E01` | 同链路高于 DeepSeek `deepseek-v4-flash`，但单次 run 不切默认。 |
 | `M21-E01` | 08-03 | 受控 A/B | 检查 embedding 与 fusion 的离线召回 | 10 题、`top_k=12`；变量为 backend/embedding/fusion | vector `0.787→0.929`；weighted merged 均 `0.738`；RRF `0.802→0.929` | 两行 benchmark 同口径 | embedding 有信号；RRF 是候选，不能推导端到端收益。 |
-| `M21-E02` | 08-03 | 受控 A/B | 验证 fusion 的端到端收益 | Qwen-plus + clean Milvus/Qwen embedding；唯一变量为 weighted/RRF | diagnostic `21/32→20/32` | 同行两组 | RRF 不切默认。 |
-| `M21-E03` | 08-03 | 受控 A/B | 验证 embedding 的端到端收益 | Qwen-plus + weighted + 32 题 + 同 oracle/hash；唯一变量为 local/Milvus embedding | `21/32 vs 21/32`；subtype 相同 | 同行两组 | 没有 embedding 可归因提分证据。 |
-| `M21-E04` | 08-03 | 补充/负向证据 | 检验 RRF 风险 | DeepSeek + clean Milvus/Qwen embedding；唯一变量为 weighted/RRF | diagnostic `21/32→18/32` | 同行两组 | RRF 有端到端负向风险。 |
+| `M21-E02` | 08-03 | 受控 A/B | 验证 fusion 的端到端收益 | Qwen `qwen3.7-plus` + clean Milvus + DashScope `qwen3.7-text-embedding`；唯一变量为 weighted/RRF | diagnostic `21/32→20/32` | 同行两组 | RRF 不切默认。 |
+| `M21-E03` | 08-03 | 受控 A/B | 验证 embedding 的端到端收益 | Qwen `qwen3.7-plus` + weighted + 32 题 + 同 oracle/hash；唯一变量为 local/Milvus + DashScope `qwen3.7-text-embedding` | `21/32 vs 21/32`；subtype 相同 | 同行两组 | 没有 embedding 可归因提分证据。 |
+| `M21-E04` | 08-03 | 补充/负向证据 | 检验 RRF 风险 | DeepSeek `deepseek-v4-flash` + clean Milvus + DashScope `qwen3.7-text-embedding`；唯一变量为 weighted/RRF | diagnostic `21/32→18/32` | 同行两组 | RRF 有端到端负向风险。 |
 | `M21-E05` | 08-03 | 评测口径修正 | 修正过粗的 schema 归因 | 仅增加 `failure_subtype`，不改评分或默认配置 | output table/column、result、scorer contract 分开显示 | 历史 `failure_stage` 保持兼容 | M22 应先处理输出契约，而非继续归因 retrieval。 |
 | `M22-E01` | 08-04 | 评测口径修正 | 分离 Context / Output / Result / Manual contract | case、scorer 与新增 coupon_order_count metric；schema docs `193→194`，hash `58534cb6...` | trace SchemaGraph 评分、等价 alias、三类报告视图、结构化语义拒绝 | M21 结果只作历史快照 | 不改变默认模型/检索；后续新 benchmark 不可跨 193/194 docs 比较。 |
-| `M22-E02` | 08-04 | 诊断快照 | 验证 M22 后默认链路 | DeepSeek + local deterministic + weighted、32 条、SQLite oracle、LangFuse off | total `25/32`；automated `22/27`；manual `3/5` | M21 `21/32` 不可比较 | `db_plan_002/003/004` 均结构化通过；`db_core_004` 单 case 排序复测通过，但批量实时 LLM 仍波动；不把总分视为模型提升。⚠️ 注：该快照早于 M22 复审修复（Context warn / via 核验 / SQL evidence / 成交订单语义），本次仅完成代码测试，未重跑真实 LLM diagnostic。 |
+| `M22-E02` | 08-04 | 诊断快照 | 验证 M22 后默认链路 | DeepSeek `deepseek-v4-flash` + local deterministic + weighted、32 条、SQLite oracle、LangFuse off | total `25/32`；automated `22/27`；manual `3/5` | M21 `21/32` 不可比较 | `db_plan_002/003/004` 均结构化通过；`db_core_004` 单 case 排序复测通过，但批量实时 LLM 仍波动；不把总分视为模型提升。⚠️ 注：该快照早于 M22 复审修复（Context warn / via 核验 / SQL evidence / 成交订单语义），本次仅完成代码测试，未重跑真实 LLM diagnostic。 |
+| `M22-E03` | 08-05 | 首轮受控候选 + 异常覆盖审计 | 在 194-doc、新 case/scorer 口径下筛选 Qwen / Milvus / RRF，并审计数据库异常彩蛋覆盖 | C0-refresh `24/32`；C1 `27/32`；C2 `25/32`；C3 `24/32`；retrieval-only local weighted `0.738`、Milvus weighted `0.738`、Milvus RRF `0.929` | C0-C3 只作同口径首轮筛选，不是稳定性结论；M21 的 193-doc 结果不可混比 | C1 单次最高但不切默认；C2 未显示可归因端到端收益；C3 召回提高但端到端未提高。成交类过滤、优惠券去重、SCD 窗口已覆盖；外部单号、负数退款、金额对账无独立 case；`db_core_002` 排除整单退款且未显式排除取消订单，退款率口径待确认。 |
 
 ## 4. 当前活跃实验卡片
 
@@ -79,15 +82,59 @@
 1. `schema_context_size` 改从同请求 trace 的 SchemaGraph `tables/fields` 评分，最终 `body.columns` 不再冒充上下文证据。
 2. `db_plan_002/003/004` 用 `blocked_via=semantic_request_validation` 和明确 issue tag 区分不支持需求与 LLM generation error。
 3. SCD overlap 已在默认 trace 实际出现；渠道订单量排序以 QueryPlan prompt + SQL plan contract 固化，并在单 case SQLite oracle 中通过。
-4. 32 条 `25/32` 是口径变化后的诊断快照，只可用于下一步定位，不可同 M21 `21/32` 做能力归因。
+4. 复审后 C0-refresh 为 `24/32`；C1/C2/C3 首轮分别为 `27/32`、`25/32`、`24/32`。这些是同一 194-doc 新口径下的单次筛选结果，不能据此证明稳定收益。数据库异常彩蛋覆盖审计见下节。
 
-**当前决策**：M22 实现部分已收口，但用户已将 Qwen / Milvus / RRF 新口径对照纳入本模块；既有 C0 默认快照不重跑，首轮只运行 C1-C3 与 retrieval-only 各一次，结果后再由用户决定是否在同一窗口完整复测 C0-C3 三次。RRF、rerank、默认 embedding/Milvus 仍不自动切换。
+### M22 异常彩蛋覆盖审计
+
+评测使用确定性 SQLite seed；`result_match` 执行 case 自己的 `expected_sql`，再按行、列、数值容差和显式 alias 比较，不会自动为所有数据异常生成额外规则。当前覆盖边界如下：
+
+| 数据异常 | 当前 case / 判定 | 覆盖结论 |
+|---|---|---|
+| 未支付订单、`cancelled` / `canceled` | GMV、净收入、商品 GMV、渠道 GMV 的 reference SQL 显式过滤 | 已覆盖成交类口径 |
+| 一单多券 | `db_multi_001`、`db_trace_002` 使用 `COUNT(DISTINCT orders.id)` | 已覆盖去重 |
+| `valid_to IS NULL` 价格版本 | `db_hard_003` reference 使用 SCD 时间窗口；本题为 manual review | 有 reference 素材，非自动硬门 |
+| 外部单号重复 / `SRC-*` 与 `ORD-*` 不同命名空间 | 无专门 case | 未覆盖 |
+| 整单退款 `refunds.order_item_id IS NULL` | `db_core_002` 只按 `order_item_id` 连接；`db_join_003` 为 manual | 当前 reference 排除整单退款，未验证 fallback |
+| 负数退款冲销 | 无 `refund_amount` 汇总 case | 未覆盖 |
+| 订单头 / 明细金额不一致 | 订单级 GMV 与商品明细 GMV 分用不同事实表，但无对账 case | 仅间接覆盖粒度，不验证异常本身 |
+
+因此，第 2/3 次重复若保持当前 case/scorer，结果仍然可比，但只能回答“当前 M22 合同下的单次波动”；不能宣称覆盖全部企业异常数据。若要补齐退款率或异常数据 case，必须先确认口径，再将当前首轮标为修订前快照并重新建立基线。
+
+**当前决策**：默认主模型已切换为 Qwen `qwen3.7-plus`；默认 embedding、Milvus、weighted fusion 保持不变。用户确认暂不扩展异常彩蛋 case，C0-C3 三次重复仍只用于当前合同下的稳定性统计。
+
+### M22-E04 — C0-C3 三次重复稳定性（2026-08-05）
+
+固定条件：32 条 diagnostic、`new_text2sql`、SQLite deterministic oracle、LangFuse disabled、194-doc corpus/hash；Milvus 每次使用独立 collection。
+
+| 组 | 配置 | 首轮 | 第2次 | 第3次 | 范围 | 决策 |
+|---|---|---:|---:|---:|---:|---|
+| C0 | DeepSeek `deepseek-v4-flash` + Milvus + DashScope `qwen3.7-text-embedding` + weighted | 24/32 | 24/32 | 25/32 | 24–25 | 基线 |
+| C1 | Qwen `qwen3.7-plus` + inmemory/deterministic + weighted | 27/32 | 28/32 | 28/32 | 27–28 | 当前最稳定候选，不自动切换 |
+| C2 | Qwen `qwen3.7-plus` + Milvus + DashScope `qwen3.7-text-embedding` + weighted | 25/32 | 27/32 | 25/32 | 25–27 | 未稳定超过 C1 |
+| C3 | Qwen `qwen3.7-plus` + Milvus + DashScope `qwen3.7-text-embedding` + RRF | 24/32 | 26/32 | 27/32 | 24–27 | 未稳定超过 C1 |
+
+第2次 C2 首次启动被工具 120 秒上限中断，未计入；重启后的有效结果写入 `m22-c2-qwen-milvus-weighted-r2b-*`。实验结论：C1 三次均为最高或并列最高；C2/C3 无稳定端到端收益，不切换默认 embedding、Milvus 或 RRF。随后用户基于 C1 三次结果确认切换默认主模型为 Qwen `qwen3.7-plus`。该实验仍不代表对数据库异常彩蛋的鲁棒性。
+
+### M22-E05 — Qwen 3.8 追加对照（2026-08-05）
+
+固定条件：`qwen3.8-max`、`inmemory + deterministic`、`weighted`、32 条 diagnostic、`new_text2sql`、SQLite deterministic oracle、LangFuse disabled。
+
+- 结果：`22/32`。
+- 模型调用可用，因此没有执行备用 `qwen3.7-max`。
+- 结论：单次结果低于 C1 三次重复的 `27–28/32`，仅作候选记录，不改变默认模型。
+
+### M22-E06 — Qwen 3.7 Max 追加对照（2026-08-05）
+
+固定条件：`qwen3.7-max`、`inmemory + deterministic`、`weighted`、32 条 diagnostic、`new_text2sql`、SQLite deterministic oracle、LangFuse disabled。
+
+- 结果：`26/32`，高于同条件 Qwen 3.8 的 `22/32`。
+- 这是单次追加快照，不纳入 C0-C3 三次重复矩阵，不改变默认模型。
 
 ### M21 — Schema Retrieval Fusion / Context Repair
 
 **问题**：embedding 或 fusion 是否修复 Schema Retrieval，并转化为端到端收益？
 
-**固定实验边界**：`schema_docs_count=193`、`schema_docs_hash=7b531e073fa0b2dfaae205097b8440c44b745234305396b5f185561dcf9cc644`、Qwen embedding `qwen3.7-text-embedding`（1024 维）；端到端使用 SQLite deterministic oracle 且关闭 LangFuse。
+**固定实验边界**：`schema_docs_count=193`、`schema_docs_hash=7b531e073fa0b2dfaae205097b8440c44b745234305396b5f185561dcf9cc644`、DashScope `qwen3.7-text-embedding`（1024 维）；端到端使用 SQLite deterministic oracle 且关闭 LangFuse。
 
 **结论链**：
 
@@ -133,6 +180,9 @@
 | `M21-E04` | `eval/reports/m21-deepseek-weighted-diagnostic-report.md`；`m21-deepseek-rrf-diagnostic-report.md` |
 | `M21-E05` | `eval/reports/m21-context-audit.md` |
 | `M22-E02` | `eval/reports/m22-default-diagnostic-report.md`；`m22-default-diagnostic-triage.json`；`eval/traces/m22-default-diagnostic-traces.jsonl` |
+| `M22-E04` | `m22-c0-refresh[-r2/-r3]-report.md`；`m22-c1-qwen-local-weighted[-r2/-r3]-report.md`；`m22-c2-qwen-milvus-weighted[-r2b/-r3]-report.md`；`m22-c3-qwen-milvus-rrf[-r2/-r3]-report.md` |
+| `M22-E05` | `eval/reports/m22-qwen38-local-weighted-report.md`；`eval/reports/m22-qwen38-local-weighted-triage.json`；`eval/traces/m22-qwen38-local-weighted-traces.jsonl` |
+| `M22-E06` | `eval/reports/m22-qwen37max-local-weighted-report.md`；`eval/reports/m22-qwen37max-local-weighted-triage.json`；`eval/traces/m22-qwen37max-local-weighted-traces.jsonl` |
 
 ## 7. 维护规则
 
