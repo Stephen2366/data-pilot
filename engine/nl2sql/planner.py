@@ -45,7 +45,20 @@ class QueryPlanStep(BaseModel):
     group_by: list[str] = Field(default_factory=list, description="分组字段，推荐写成 table.column。")
     order_by: list[str] = Field(default_factory=list, description="排序字段或输出别名，例如 item_gmv DESC。")
     limit: int | None = Field(default=None, ge=1, description="结果条数上限；没有 TopN 需求时可为空。")
-    output_columns: list[str] = Field(default_factory=list, description="期望输出列或别名；不承担最终图表展示决策。")
+    output_columns: list[str] = Field(
+        default_factory=list,
+        description=(
+            "SQL 结果/API 展示列的精确集合与顺序；只写用户需要的列或显式别名，"
+            "但不承担最终图表类型决策。"
+        ),
+    )
+    output_expressions: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "输出别名到可信表达式的显式绑定，例如 order_count -> COUNT(orders.id)；"
+            "ORDER BY 使用聚合别名时必须填写，禁止让候选 SQL 自己解释计划别名。"
+        ),
+    )
 
 
 class QueryPlan(BaseModel):
@@ -130,7 +143,15 @@ def _check_table_and_column_scope(
     # 直接按 table.column 比对会误判为缺失字段。这里拆成两步：先把纯 table.column 挑出来，
     # 再从表达式里提取 table.column，两个集合合并后再校验。
     plain_columns = {col for col in step.columns if QUALIFIED_COLUMN_RE.fullmatch(col)}
-    expr_columns = _qualified_refs(step.columns + step.filters + step.aggregations + step.group_by + step.order_by + step.output_columns)
+    expr_columns = _qualified_refs(
+        step.columns
+        + step.filters
+        + step.aggregations
+        + step.group_by
+        + step.order_by
+        + step.output_columns
+        + list(step.output_expressions.values())
+    )
     explicit_columns = plain_columns | expr_columns
     for column in sorted(explicit_columns):
         if column not in graph_columns:
@@ -161,6 +182,33 @@ def _check_join_scope(*, step: QueryPlanStep, schema_graph: SchemaGraph, result:
             _append_issue(result, "invalid_join_path", f"{step.step_id} 引用了不可用 JoinPath：{join_id}")
 
 
+def _check_output_bindings(*, step: QueryPlanStep, schema_graph: SchemaGraph, result: PlanValidationResult) -> None:
+    """校验输出 alias 绑定来自计划本身，避免后续让候选 SQL 反过来解释计划。"""
+
+    if step.step_type == "sql_query" and not step.output_columns:
+        _append_issue(result, "invalid_query_plan", f"{step.step_id} 缺少精确输出列 output_columns。")
+        return
+
+    output_names = {value.rsplit(".", 1)[-1] for value in step.output_columns}
+    physical_names = {column for columns in schema_graph.fields.values() for column in columns}
+    for alias in step.output_expressions:
+        if alias not in output_names:
+            _append_issue(result, "invalid_query_plan", f"{step.step_id} 的输出绑定 {alias} 不在 output_columns 中。")
+
+    simple_order_pattern = re.compile(r"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:ASC|DESC)?\s*$", re.IGNORECASE)
+    for order_item in step.order_by:
+        match = simple_order_pattern.fullmatch(order_item)
+        if match is None:
+            continue
+        name = match.group(1)
+        if name in output_names and name not in physical_names and name not in step.output_expressions:
+            _append_issue(
+                result,
+                "invalid_query_plan",
+                f"{step.step_id} 的 ORDER BY 输出别名 {name} 缺少 output_expressions 绑定。",
+            )
+
+
 def _check_sensitive_fields(
     *,
     step: QueryPlanStep,
@@ -177,7 +225,14 @@ def _check_sensitive_fields(
     if role_policy.allow_sensitive_fields:
         return
 
-    referenced_columns = set(step.columns) | _qualified_refs(step.filters + step.aggregations + step.group_by + step.order_by + step.output_columns)
+    referenced_columns = set(step.columns) | _qualified_refs(
+        step.filters
+        + step.aggregations
+        + step.group_by
+        + step.order_by
+        + step.output_columns
+        + list(step.output_expressions.values())
+    )
     sensitive_hits = sorted(referenced_columns & domain_schema.sensitive_fields)
     if sensitive_hits:
         _append_issue(
@@ -214,6 +269,7 @@ def validate_query_plan(
         _check_table_and_column_scope(step=step, schema_graph=schema_graph, result=result)
         _check_metric_scope(step=step, schema_graph=schema_graph, domain_schema=domain_schema, result=result)
         _check_join_scope(step=step, schema_graph=schema_graph, result=result)
+        _check_output_bindings(step=step, schema_graph=schema_graph, result=result)
         _check_sensitive_fields(step=step, domain_schema=domain_schema, user_role=user_role, result=result)
 
     return result

@@ -25,6 +25,7 @@ FailureStage = Literal[
     "sql_generation",
     "sql_guard",
     "sql_execution",
+    "output_contract",
     "result_match",
     "answer_synthesis",
     "scorer_issue",
@@ -32,7 +33,7 @@ FailureStage = Literal[
     "unknown",
 ]
 
-# ★ `failure_stage` 保持 M19 的大阶段兼容性；subtype 区分“Schema 真缺失”和
+# ★ M24 新增独立 `output_contract` 大阶段；subtype 继续细分“Schema 真缺失”和
 # “最终 SQL 输出契约不匹配”，避免把 scorer 的列名检查误读成 embedding 失败。
 FailureSubtype = Literal[
     "output_table_contract",
@@ -59,6 +60,7 @@ TRACE_STAGE_BY_STEP_TYPE: dict[str, FailureStage] = {
     "sql_generation": "sql_generation",
     "sql_guard": "sql_guard",
     "sql_execution": "sql_execution",
+    "output_contract": "output_contract",
 }
 
 STAGE_BY_ERROR_TYPE: dict[str, FailureStage] = {
@@ -73,6 +75,9 @@ STAGE_BY_ERROR_TYPE: dict[str, FailureStage] = {
     "sql_guard_blocked": "sql_guard",
     "sql_execution_error": "sql_execution",
     "llm_generation_error": "sql_generation",
+    "sql_plan_contract_failed": "sql_generation",
+    "sql_plan_contract_indeterminate": "sql_generation",
+    "output_projection_contract_failed": "output_contract",
 }
 
 
@@ -167,10 +172,15 @@ def triage_result(result: Any, trace_record: dict[str, Any] | None = None) -> Fa
     failed_step = _first_failed_trace_step(trace_record)
     if failed_step is not None:
         stage = TRACE_STAGE_BY_STEP_TYPE.get(str(failed_step.get("step_type") or failed_step.get("name")), "unknown")
+        error_type = str(failed_step.get("error_type") or "")
+        subtype: FailureSubtype | None = (
+            "output_column_contract" if error_type == "output_projection_contract_failed" else None
+        )
         return _triage(
             result,
             trace_record,
             stage=stage,
+            subtype=subtype,
             reason=f"trace_step_status={failed_step.get('status')} error_type={failed_step.get('error_type')}",
             evidence=f"trace:{failed_step.get('name') or failed_step.get('step_type')}",
             confidence=1.0,
@@ -202,7 +212,11 @@ def triage_result(result: Any, trace_record: dict[str, Any] | None = None) -> Fa
             reason=failed_detail.reason or f"score_failed={failed_detail.name}",
             evidence=f"score:{failed_detail.name}",
             confidence=0.8 if stage != "unknown" else 0.5,
-            needs_action="manual_review" if subtype in {"output_table_contract", "output_column_contract"} else None,
+            needs_action=(
+                "manual_review"
+                if result.review_required and subtype in {"output_table_contract", "output_column_contract"}
+                else None
+            ),
         )
 
     if result.skipped_due_to_pipeline_mode:
@@ -433,13 +447,15 @@ def _stage_from_score_detail(detail: Any, result: Any) -> FailureStage:
     """把 scorer 名称和 issue tag 映射到失败阶段。"""
 
     if detail.name == "rule:table_hit":
-        return "schema_retrieval"
+        return "output_contract"
     if detail.name == "rule:column_recall":
-        return "schema_context"
+        return "output_contract"
     if detail.name == "rule:safety_compliance":
         return "sql_guard"
     if detail.name == "rule:sql_success":
         return "sql_execution" if result.error_type == "sql_execution_error" else "unknown"
+    if "output_projection_mismatch" in detail.issue_tags:
+        return "output_contract"
     if detail.name in {"rule:result_match", "rule:expected_value", "rule:contains", "rule:equals"}:
         return "result_match"
     if detail.name == "llm:correctness":
@@ -449,9 +465,9 @@ def _stage_from_score_detail(detail: Any, result: Any) -> FailureStage:
     if "result_mismatch" in detail.issue_tags:
         return "result_match"
     if "missing_table" in detail.issue_tags:
-        return "schema_retrieval"
+        return "output_contract"
     if "missing_column" in detail.issue_tags:
-        return "schema_context"
+        return "output_contract"
     if "safety_mismatch" in detail.issue_tags:
         return "sql_guard"
     return "scorer_issue" if result.review_required else "unknown"
@@ -466,6 +482,8 @@ def _subtype_from_score_detail(detail: Any) -> FailureSubtype | None:
     """
 
     issue_tags = detail.issue_tags or []
+    if "output_projection_mismatch" in issue_tags:
+        return "output_column_contract"
     if detail.name == "rule:table_hit" or "missing_table" in issue_tags:
         return "output_table_contract"
     if detail.name == "rule:column_recall" or "missing_column" in issue_tags:
@@ -494,6 +512,7 @@ def _needs_action(stage: FailureStage, result: Any) -> NeedsAction:
         "sql_generation",
         "sql_guard",
         "sql_execution",
+        "output_contract",
         "result_match",
         "answer_synthesis",
     }:
@@ -507,16 +526,17 @@ def _top_triage_cases(triages: list[FailureTriage], *, limit: int = 10) -> list[
     priority = {
         "sql_guard": 0,
         "sql_execution": 1,
-        "schema_retrieval": 2,
-        "schema_context": 3,
-        "query_plan": 4,
-        "plan_validation": 5,
-        "sql_generation": 6,
-        "result_match": 7,
-        "answer_synthesis": 8,
-        "scorer_issue": 9,
-        "judge_unavailable": 10,
-        "unknown": 11,
+        "output_contract": 2,
+        "schema_retrieval": 3,
+        "schema_context": 4,
+        "query_plan": 5,
+        "plan_validation": 6,
+        "sql_generation": 7,
+        "result_match": 8,
+        "answer_synthesis": 9,
+        "scorer_issue": 10,
+        "judge_unavailable": 11,
+        "unknown": 12,
     }
     return sorted(triages, key=lambda item: (priority[item.failure_stage], -item.confidence, item.case_id))[:limit]
 

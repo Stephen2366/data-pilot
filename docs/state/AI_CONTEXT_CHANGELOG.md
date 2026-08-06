@@ -13,6 +13,13 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验] M23 同合同 clean Milvus / Qwen embedding 单次诊断补登记（2026-08-06）
+
+- 配置：Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted；32 条 M23 diagnostic、195 docs/hash `ce04fe4f...`、1024 维、SQLite deterministic oracle、LangFuse off。collection 为 `datapilot_schema_docs_m23_qwen_plus_qwenemb_20260806_154117`，本轮 `None → inserted 195 → final 195`。
+- 结果：total `21/32`；automated `20/27`；manual_or_diagnostic `1/5`。local M23-E03 为 `23/32`、automated 同为 `20/27`，两组总分差来自人工/诊断项。
+- 解释边界：两组各仅一次真实 LLM run；旧 triage 的 `schema_context/retrieval` 桶混入最终 `tables_used/body.columns` 证据。该结果只证明同合同 clean embedding 链路已跑通，不证明 embedding 退化，也不改变默认 `inmemory + deterministic + weighted`。
+- 产物：`eval/reports/m23-qwen-milvus-qwenemb-diagnostic-{report.md,triage.json}`、`eval/traces/m23-qwen-milvus-qwenemb-diagnostic-traces.jsonl`。
+
 ### [实验] M23 新合同 32 条全量 diagnostic 首跑（2026-08-06）
 
 - 配置：Qwen `qwen3.7-plus` + `new_text2sql` + local `inmemory + deterministic + weighted`、32 条 diagnostic、195-doc corpus / hash `ce04fe4f...`、SQLite deterministic oracle、LangFuse off、代理。
@@ -22,9 +29,9 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
   - 6 条生成 / 计划失败（SQL 为空被拦）：`db_core_002`、`db_multi_001`、`db_trace_002`（sql_plan_contract_failed）、`db_multi_002`、`db_hard_001`、`db_join_003`（llm_generation_error）。其中 `db_core_002`、`db_join_003` 与 M23-E02 异常专项失败点重合，属稳定失败点。
   - 1 条人工待核：`db_hard_003`（SCD 窗口平均售价，SQL 已正确生成）。
 - 亮点：安全 4/4 全拦（sql_guard 2 + plan_validation 2）；M23 收口口径生效（`db_core_004` 各渠道订单量 COUNT DISTINCT + 排序、`db_join_001` 渠道退款率、`db_schema_003` 宽表题均通过）；检索层零失败（schema_retrieval 32/32 success，table_hit / column_recall 全过）。
-- 结论：9 个自动失败全部落在生成 / 计划链路（6 生成失败 + 3 契约不保真），与 M22 路线判断一致；下一步先查 QueryPlan→SQL 保真缺口（排序 / limit / 列契约），不归因 retrieval。
+- 结论：硬失败共 9 条，其中自动失败 7 条、人工/诊断失败 2 条；failed-or-review 为 10 条，额外一条是 `db_hard_003` review-only。自动失败进一步分为 3 条结果/输出不保真、2 条生成/计划错误、2 条字符串 SQL plan contract 误拦；目标 schema 均已进入 Context，不归因 retrieval。
 - 验证快照：报告 `eval/reports/m23-qwen-local-weighted-diagnostic-report.md`、triage `eval/reports/m23-qwen-local-weighted-diagnostic-triage.json`、traces `eval/traces/m23-qwen-local-weighted-diagnostic-traces.jsonl`。
-- 遗留/后续：Milvus + Qwen embedding 同合同端到端对比待跑（M23 下一条）；跑完才能判断 embedding 是否在新合同下带来可归因提分。
+- ⚠️ 注：同合同 Milvus + Qwen embedding 已补登记为上方单次诊断快照 `21/32`（自动同为 `20/27`）；它不能单次给出 embedding 结论。后续先完成 M24 合同前置关卡，再做交错重复 A/B。
 
 ### [模块任务] M23 Eval / Semantic / Database Baseline Hygiene（2026-08-05）
 

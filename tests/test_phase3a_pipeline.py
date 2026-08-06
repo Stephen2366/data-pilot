@@ -75,9 +75,10 @@ class _FakeM11LLMClient:
                             "joins": ["orders_channel"],
                             "aggregations": ["COUNT(orders.id)"],
                             "group_by": ["channels.channel_name"],
-                            "order_by": ["order_count DESC"],
+                            "order_by": ["order_count DESC", "channels.channel_name ASC"],
                             "limit": None,
                             "output_columns": ["channels.channel_name", "order_count"],
+                            "output_expressions": {"order_count": "COUNT(orders.id)"},
                         }
                     ]
                 },
@@ -126,6 +127,32 @@ class _FakeBrokenSQLClient(_FakeM11LLMClient):
         if "QueryPlan JSON Schema" in prompt:
             return super().complete(prompt=prompt)
         return "我无法稳定返回 JSON，也没有 SELECT。"
+
+
+class _FakeExtraProjectionClient(_FakeM11LLMClient):
+    """计划只要两列，SQL 故意额外输出 channel_code，验证精确投影在执行前阻断。"""
+
+    def complete(self, *, prompt: str) -> str:
+        if "QueryPlan JSON Schema" in prompt:
+            return super().complete(prompt=prompt)
+        return json.dumps(
+            {
+                "sql": """
+SELECT
+  c.channel_name,
+  COUNT(o.id) AS order_count,
+  c.channel_code
+FROM channels c
+JOIN orders o ON o.channel_id = c.id
+GROUP BY c.id, c.channel_name, c.channel_code
+ORDER BY order_count DESC, c.channel_name ASC
+""".strip(),
+                "tables_used": ["channels", "orders"],
+                "confidence": 0.9,
+                "reasoning_summary": "故意增加计划外投影。",
+            },
+            ensure_ascii=False,
+        )
 
 
 def _patch_m11_llm(monkeypatch) -> None:
@@ -184,6 +211,12 @@ def test_force_new_pipeline_bypasses_template_and_writes_required_trace_steps(tm
     assert sql_generation_step["metadata"]["plan_step_metrics"] == ["order_count"]
     assert sql_generation_step["metadata"]["plan_step_joins"] == ["orders_channel"]
     assert sql_generation_step["metadata"]["plan_step_output_columns"] == ["channels.channel_name", "order_count"]
+    assert sql_generation_step["metadata"]["contract_status"] == "passed"
+    assert sql_generation_step["metadata"]["candidate_sql"] == body["sql"]
+    assert sql_generation_step["metadata"]["query_plan_step"]["step_id"] == "step_1"
+    output_step = next(step for step in trace["trace_steps"] if step["name"] == "output_projection")
+    assert output_step["status"] == "success"
+    assert output_step["metadata"]["expected_columns"] == body["columns"]
     assert trace["trace_steps"][-1]["name"] == "chart_generation"
     assert trace["langfuse_span_mode"] == "live"
     assert trace["langfuse_write_status"] == "skipped"
@@ -212,6 +245,35 @@ def test_new_pipeline_generated_sql_still_goes_through_sql_guard(tmp_path: Path,
     assert body["error_type"] == "sql_guard_blocked"
     assert body["tool_calls"][0]["tool_name"] == "sql_guard"
     assert guard_step["status"] == "blocked"
+    sql_generation_step = next(step for step in trace["trace_steps"] if step["name"] == "sql_generation")
+    assert sql_generation_step["metadata"]["sql_guard_precheck_status"] == "blocked"
+    assert not any(step["name"] == "sql_execution" for step in trace["trace_steps"])
+
+
+def test_pipeline_blocks_extra_projection_before_sql_execution(tmp_path: Path, monkeypatch) -> None:
+    """精确投影属于 QueryPlan→SQL fidelity；额外非敏感列也不能静默执行。"""
+
+    from engine.nl2sql import pipeline as text2sql_pipeline
+
+    monkeypatch.setattr(text2sql_pipeline, "get_default_llm_client", lambda: _FakeExtraProjectionClient())
+    trace_path = tmp_path / "projection-traces.jsonl"
+
+    with _seeded_test_client(trace_path) as client:
+        response = client.post(
+            "/api/query",
+            json={"question": "各渠道订单量是多少？", "user_role": "ops", "force_new_pipeline": True},
+        )
+
+    body = response.json()
+    trace = json.loads(trace_path.read_text(encoding="utf-8").strip())
+    generation_step = next(step for step in trace["trace_steps"] if step["name"] == "sql_generation")
+
+    assert response.status_code == 200
+    assert body["safety_status"] == "blocked"
+    assert body["error_type"] == "output_projection_contract_failed"
+    assert generation_step["metadata"]["reason_code"] == "projection_set_mismatch"
+    assert generation_step["metadata"]["candidate_sql"].startswith("SELECT")
+    assert generation_step["metadata"]["sql_guard_precheck_status"] == "passed"
     assert not any(step["name"] == "sql_execution" for step in trace["trace_steps"])
 
 

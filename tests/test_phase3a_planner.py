@@ -82,6 +82,7 @@ def _valid_step(**overrides: object) -> QueryPlanStep:
         "order_by": ["item_gmv DESC"],
         "limit": 10,
         "output_columns": ["products.name", "item_gmv"],
+        "output_expressions": {"item_gmv": "SUM(order_items.line_amount)"},
     }
     payload.update(overrides)
     return QueryPlanStep(**payload)
@@ -105,6 +106,26 @@ def test_query_plan_step_parses_from_json_and_validates_against_schema_graph() -
     assert result.errors == []
 
 
+def test_prompts_declare_exact_output_projection_and_mysql_contract() -> None:
+    """M24 的严格校验必须在计划和生成提示中预先说明，不能只在事后拦截。"""
+
+    graph = _sample_schema_graph()
+    plan_prompt = build_query_plan_prompt(question="查询商品销售额", schema_graph=graph, metrics={})
+    sql_prompt = build_local_schema_sql_prompt(
+        question="查询商品销售额",
+        user_role="ops",
+        plan_step=_valid_step(),
+        schema_graph=graph,
+        metrics={},
+    )
+
+    assert "精确合同" in plan_prompt
+    assert "output_expressions" in plan_prompt
+    assert "不得添加排序键、辅助列" in sql_prompt
+    assert "MySQL 兼容语法" in sql_prompt
+    assert "SQLite 只用于本地结果核对" in sql_prompt
+
+
 def test_multiple_sql_query_steps_are_rejected_for_phase3a() -> None:
     """结构预留多 step，但 Phase 3A 不能真的执行多条 SQL。"""
 
@@ -118,6 +139,36 @@ def test_multiple_sql_query_steps_are_rejected_for_phase3a() -> None:
 
     assert not result.is_valid
     assert "unsupported_multi_step_plan" in result.issue_tags
+
+
+def test_plan_rejects_unbound_aggregate_output_alias_used_for_ordering() -> None:
+    """聚合输出 alias 必须由计划显式绑定，不能留给候选 SQL 自己定义语义。"""
+
+    plan = QueryPlan(steps=[_valid_step(output_expressions={})])
+    result = validate_query_plan(
+        plan,
+        schema_graph=_sample_schema_graph(),
+        domain_schema=load_domain_schema(),
+        user_role="ops",
+    )
+
+    assert not result.is_valid
+    assert any("缺少 output_expressions 绑定" in error for error in result.errors)
+
+
+def test_plan_rejects_sql_step_without_exact_output_columns() -> None:
+    """自动 SQL 链路不能用空 output_columns 绕过 M24 精确投影合同。"""
+
+    plan = QueryPlan(steps=[_valid_step(output_columns=[], output_expressions={})])
+    result = validate_query_plan(
+        plan,
+        schema_graph=_sample_schema_graph(),
+        domain_schema=load_domain_schema(),
+        user_role="ops",
+    )
+
+    assert not result.is_valid
+    assert any("缺少精确输出列 output_columns" in error for error in result.errors)
 
 
 @pytest.mark.parametrize(

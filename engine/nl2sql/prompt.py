@@ -198,7 +198,8 @@ def build_query_plan_prompt(
 2. 不要输出原始推理过程；每个 step 只用 `purpose` 写一句话意图摘要。
 3. 表、字段、指标和 joins 必须只来自下面的局部 Schema；字段推荐写成 `table.column`。
 4. Phase 3A 只允许一个 `step_type="sql_query"` 的可执行步骤；不要规划多个 SQL 查询。
-5. 展示方式不在本步骤决定，不要输出 display_type。
+5. `output_columns` 是 SQL 结果/API 展示列的精确合同：按用户需要的显示顺序填写，不能添加辅助列；ORDER BY 使用聚合输出别名时，必须在 `output_expressions` 写明 alias 到聚合表达式的绑定。
+6. 展示图表类型不在本步骤决定，不要输出 display_type。
 
 QueryPlan JSON Schema：
 {query_plan_prompt_schema()}
@@ -239,9 +240,10 @@ def build_local_schema_sql_prompt(
     return f"""你是 DataPilot 的局部 Schema SQL 生成器。请严格遵守：
 1. 只生成单条 SELECT 查询；禁止 DROP/DELETE/UPDATE/INSERT/ALTER/TRUNCATE。
 2. 只能使用下面局部 Schema、指标和 JoinPath 中出现的表字段；不得编造表、字段或关联关系。
-3. 必须服务于 QueryPlanStep 的 `purpose`、`filters`、`aggregations`、`group_by`、`order_by` 和 `limit`。
-4. SQL 使用 MySQL 兼容语法，并尽量保持 SQLite 测试路径也能运行；日期范围使用明确字面值。
-5. 只返回 JSON：{{"sql": "...", "tables_used": ["..."], "confidence": 0.0-1.0, "reasoning_summary": "一句话说明"}}。
+3. 必须服务于 QueryPlanStep 的 `purpose`、`filters`、`aggregations`、`group_by`、`order_by` 和 `limit`；排序项、方向、先后顺序和条数上限都不能静默省略或改写。
+4. SELECT 必须严格按照 `output_columns` 的集合与顺序输出；不得添加排序键、辅助列或其他未计划列，聚合结果应使用计划中的显式别名。
+5. SQL 使用 MySQL 兼容语法；SQLite 只用于本地结果核对，不是生成方言合同。日期范围使用明确字面值。
+6. 只返回 JSON：{{"sql": "...", "tables_used": ["..."], "confidence": 0.0-1.0, "reasoning_summary": "一句话说明"}}。
 
 用户角色：{user_role}
 用户问题：{question}

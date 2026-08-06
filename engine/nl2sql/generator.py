@@ -16,6 +16,7 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from engine.nl2sql.fidelity_contract import SQLPlanFidelityResult, evaluate_sql_plan_fidelity
 from engine.nl2sql.planner import QueryPlan, QueryPlanStep
 from engine.nl2sql.prompt import build_local_schema_sql_prompt, build_query_plan_prompt, build_sql_prompt
 from engine.nl2sql.schema_loader import DomainSchema
@@ -63,9 +64,18 @@ class QueryPlanExtractionError(LLMGenerationError):
 
 
 class SQLPlanContractError(LLMGenerationError):
-    """SQL 没有履行已验证 QueryPlan 的排序 / limit 契约，不能静默交给执行层。"""
+    """SQL 没有履行已验证 QueryPlan 的排序 / limit / projection 契约。"""
 
     issue_tag = "sql_plan_contract_failed"
+
+    def __init__(self, message: str, *, contract_result: SQLPlanFidelityResult) -> None:
+        super().__init__(message, stage="sql_generation")
+        self.contract_result = contract_result
+        categories = {issue.category for issue in contract_result.issues}
+        if contract_result.status == "indeterminate":
+            self.issue_tag = "sql_plan_contract_indeterminate"
+        elif categories == {"projection"}:
+            self.issue_tag = "output_projection_contract_failed"
 
 
 class LLMClient(Protocol):
@@ -382,29 +392,32 @@ def generate_sql_from_plan_step(
     try:
         generated = extract_generated_sql(raw_text)
         if enforce_plan_contract:
-            validate_sql_plan_contract(generated.sql, plan_step=plan_step)
+            validate_sql_plan_contract(
+                generated.sql,
+                plan_step=plan_step,
+                domain_schema=domain_schema,
+            )
         return generated
     except LLMGenerationError as exc:
         raise _add_error_context(exc, stage="sql_generation", prompt=prompt, raw_text=raw_text) from exc
 
 
-def validate_sql_plan_contract(sql: str, *, plan_step: QueryPlanStep) -> None:
-    """验证 SQL 是否保留计划里已经明确的排序和行数限制。
+def validate_sql_plan_contract(
+    sql: str,
+    *,
+    plan_step: QueryPlanStep,
+    domain_schema: DomainSchema,
+    dialect: str = "mysql",
+) -> SQLPlanFidelityResult:
+    """通过 M24 深 module interface 验证 SQL；兼容旧 caller 的异常式控制流。"""
 
-    这是 M22 的窄范围输出契约：只检查 QueryPlan 已提供的 `order_by` / `limit`，不试图用
-    正则理解任意 SQL，更不会替 LLM 改写 SQL。缺失时结构化阻断，让问题回到生成层排查。
-    """
-
-    normalized_sql = " ".join(sql.lower().split())
-    if plan_step.order_by:
-        if " order by " not in f" {normalized_sql} ":
-            raise SQLPlanContractError("SQL 未保留 QueryPlan 的 ORDER BY 排序契约。")
-        missing_order_items = [
-            order_item
-            for order_item in plan_step.order_by
-            if " ".join(order_item.lower().split()) not in normalized_sql
-        ]
-        if missing_order_items:
-            raise SQLPlanContractError(f"SQL 缺少 QueryPlan 排序项：{missing_order_items}。")
-    if plan_step.limit is not None and not re.search(rf"\blimit\s+{plan_step.limit}\b", normalized_sql):
-        raise SQLPlanContractError(f"SQL 未保留 QueryPlan 的 LIMIT {plan_step.limit} 契约。")
+    result = evaluate_sql_plan_fidelity(
+        plan_step=plan_step,
+        candidate_sql=sql,
+        domain_schema=domain_schema,
+        dialect=dialect,
+    )
+    if result.passed:
+        return result
+    message = "；".join(issue.message for issue in result.issues) or "SQL 保真合同无法确认。"
+    raise SQLPlanContractError(message, contract_result=result)

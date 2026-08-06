@@ -2,7 +2,7 @@
 
 > 本文是 DataPilot 的长期评测账本，优先回答“当前应据什么决策、哪些结果可直接比较”。完整报告和历史叙事分别保留在 `eval/reports/` 与 `docs/state/AI_CONTEXT_CHANGELOG.md`。
 
-更新时间：2026-08-05
+更新时间：2026-08-06
 
 > 模型名称统一写完整标识：主模型写 provider + exact model id（例如 `DeepSeek deepseek-v4-flash`、`Qwen qwen3.7-plus`、旧入口 `Qwen qwen-plus`）；embedding 写 provider + exact embedding model（例如 `DashScope qwen3.7-text-embedding`）。实验矩阵不再使用 `Qwen-plus`、`DeepSeek`、`Qwen embedding` 等容易混淆的简称。
 
@@ -12,7 +12,7 @@
 |---|---|---|
 | 默认主模型 | Qwen `qwen3.7-plus`；本次基于 M22 三次 C1 稳定性结果切换。 | `M22-E04` |
 | 默认检索 | `inmemory + deterministic + weighted`；Milvus、DashScope `qwen3.7-text-embedding`、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
-| 当前优化方向 | M23 已收口退款率、订单量、运行时语义事实、自动 reference 判分，并新增异常数据专项；下一步先以 M23 新合同重建真实 LLM 基线，再区分 SQL 合同、生成与检索缺口。异常专项不等于全部企业数据质量场景。 | `M23-E01`、`M22-E01`、`M22-E04` |
+| 当前优化方向 | M23 新合同的 local / clean Milvus 单次诊断均已建立；M24 先清理 SQL 合同误拦、真实 order/limit 丢失和输出投影边界，再做重复交错 A/B。两组单次分数不能作为 embedding 结论。 | `M23-E03`、`M23-E04` |
 | 已收口的假设 | DashScope `qwen3.7-text-embedding` 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
 | 不可作决策的证据 | 旧固定 Milvus collection 的重复灌入污染结果只保留作历史对照。 | `M20-E01` |
 
@@ -112,7 +112,8 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 | `M22-E03` | 08-05 | 首轮受控候选 + 异常覆盖审计 | 在 194-doc、新 case/scorer 口径下筛选 Qwen / Milvus / RRF，并审计数据库异常彩蛋覆盖 | C0-refresh `24/32`；C1 `27/32`；C2 `25/32`；C3 `24/32`；retrieval-only local weighted `0.738`、Milvus weighted `0.738`、Milvus RRF `0.929` | C0-C3 只作同口径首轮筛选，不是稳定性结论；M21 的 193-doc 结果不可混比 | C1 单次最高但不切默认；C2 未显示可归因端到端收益；C3 召回提高但端到端未提高。成交类过滤、优惠券去重、SCD 窗口已覆盖；外部单号、负数退款、金额对账无独立 case；`db_core_002` 排除整单退款且未显式排除取消订单，退款率口径待确认。 |
 | `M23-E01` | 08-05 | 评测/语义基线修正 | 先治理非 pipeline 因素，再建立下一轮 retrieval 基线 | 退款率改为成交订单 + 明细优先 / 整单退款回退；订单量去重；formal 8 条、challenge 12 条自动 SQL case 均为 result/value 对照；新增不复制既有 YAML 的 7 条异常专项（6 自动 + 1 人工）；SQLite + MySQL 双端审计 | M22 所有真实 LLM 分数均属旧 case/scorer 合同，不可直接比较 | 原 20 条与新增 3 条 reference SQL 两端均可执行；专项 focused `32 passed`。需从此合同重新跑真实 LLM 基线，默认模型/检索不变。 |
 | `M23-E02` | 08-06 | 诊断快照 | 首次运行 7 条数据库异常专项，确认新 case 能否进入真实 Text2SQL 链路 | Qwen `qwen3.7-plus`、`new_text2sql`、`inmemory + deterministic + weighted`、SQLite deterministic oracle、LangFuse off、HTTP/HTTPS proxy；195-doc corpus | total `1/7`；自动 `1/6`；人工 `0/1 review`。唯一通过为 `db_anomaly_001`：completed + `processed_at` + signed refund amount。 | 无同合同重复 run；不能与 M22 194-doc 总分比较 | 有效首轮暴露成交订单 limit、coupon 输出列、退款率口径、内部外键关联和金额对账输出缺口；`db_join_003` 为 Qwen generation error。无代理启动的 `WinError 10013` 未计入结果。 |
-| `M23-E03` | 08-06 | 事实锚点 | M23 新合同 32 条全量首跑基线 | Qwen `qwen3.7-plus` + `inmemory/deterministic` + weighted、32 条 diagnostic、195-doc corpus/hash `ce04fe4f...`、SQLite deterministic oracle、LangFuse off、proxy | total `23/32`；automated `20/27`；manual `3/5`（review 3：`db_hard_003`） | M23-E02 为 7 条专项（不同 case 集）；M22 194-doc 分数不可比 | 新合同首个全量基线。失败全部落在生成/计划链路：3 条 result_contract（`db_simple_001` 缺 ORDER BY、`db_simple_002` 丢 LIMIT 10 返 6681 行、`db_simple_003` 列超量）+ 6 条生成失败（`db_core_002`、`db_multi_001/002`、`db_hard_001`、`db_join_003`、`db_trace_002`）+ 1 人工；检索层零失败。 |
+| `M23-E03` | 08-06 | 事实锚点 | M23 新合同 32 条 local 首跑基线 | Qwen `qwen3.7-plus` + `inmemory/deterministic` + weighted、32 条 diagnostic、195-doc corpus/hash `ce04fe4f...`、SQLite deterministic oracle、LangFuse off、proxy | total `23/32`；automated `20/27`；manual/diagnostic `3/5`；硬失败 9，failed-or-review 10 | M23-E02 为 7 条专项（不同 case 集）；M22 194-doc 分数不可比 | 自动硬失败 7 条：3 条 result/output fidelity、2 条 generation/plan error、2 条 SQL plan contract false block；另有 2 条人工/诊断硬失败。`db_hard_003` 是额外 review-only，不是硬失败。Context 无目标 schema 缺失证据。 |
+| `M23-E04` | 08-06 | 单次诊断快照 | 在 M23 同合同下核对 clean Milvus / Qwen embedding 链路 | Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted；32 条、195 docs/hash `ce04fe4f...`、1024 维、final row count 195、SQLite oracle、LangFuse off | total `21/32`；automated `20/27`；manual/diagnostic `1/5` | `M23-E03` 只作同合同单次参照；两组均未重复 | 自动能力与 local 同为 `20/27`；总分差来自人工/诊断项。旧 triage 的 `schema_context/retrieval` 中含最终表列合同，不能据 `23→21` 判断 embedding 退化；默认检索不变。 |
 
 ## 4. 当前活跃实验卡片
 
@@ -211,6 +212,7 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 | `M22-E05` | `eval/reports/m22-qwen38-local-weighted-report.md`；`eval/reports/m22-qwen38-local-weighted-triage.json`；`eval/traces/m22-qwen38-local-weighted-traces.jsonl` |
 | `M22-E06` | `eval/reports/m22-qwen37max-local-weighted-report.md`；`eval/reports/m22-qwen37max-local-weighted-triage.json`；`eval/traces/m22-qwen37max-local-weighted-traces.jsonl` |
 | `M23-E03` | `eval/reports/m23-qwen-local-weighted-diagnostic-report.md`；`eval/reports/m23-qwen-local-weighted-diagnostic-triage.json`；`eval/traces/m23-qwen-local-weighted-diagnostic-traces.jsonl` |
+| `M23-E04` | `eval/reports/m23-qwen-milvus-qwenemb-diagnostic-report.md`；`eval/reports/m23-qwen-milvus-qwenemb-diagnostic-triage.json`；`eval/traces/m23-qwen-milvus-qwenemb-diagnostic-traces.jsonl` |
 
 ## 7. 维护规则
 

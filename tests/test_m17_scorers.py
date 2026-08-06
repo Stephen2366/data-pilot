@@ -233,11 +233,11 @@ def test_result_match_fails_when_column_name_differs_even_if_value_matches() -> 
 
     assert details[-1].name == "rule:result_match"
     assert details[-1].passed is False
-    assert "columns expected" in details[-1].reason
+    assert "result_projection_mismatch" in details[-1].reason
 
 
-def test_result_match_aligns_values_by_column_name() -> None:
-    """列顺序不同但列名和值一致时，result_match 应按列名通过。"""
+def test_result_match_rejects_display_column_reordering() -> None:
+    """行值仍按列名对齐，但 body.columns 展示顺序必须与自动 case 合同一致。"""
 
     case = _case(
         check_type="result_match",
@@ -256,7 +256,9 @@ def test_result_match_aligns_values_by_column_name() -> None:
     details = score_case_rules(case=case, body=body, status_code=200, actual_pipeline_mode="new_text2sql")
 
     assert details[-1].name == "rule:result_match"
-    assert details[-1].passed is True
+    assert details[-1].passed is False
+    assert "result_projection_mismatch" in details[-1].reason
+    assert details[-1].issue_tags == ["output_projection_mismatch"]
 
 
 def test_langfuse_score_writer_degrades_when_disabled() -> None:

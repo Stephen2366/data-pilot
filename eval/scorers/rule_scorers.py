@@ -473,10 +473,21 @@ def _score_expected_value(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
 
 
 def _score_result_match(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
-    """执行 expected_sql 并与 generated SQL 的返回结果做最小对照。"""
+    """执行 expected_sql，并校验精确投影 / 展示顺序与行值结果。"""
 
     if not case.expected_sql.strip():
         return _fail("rule:result_match", "result_match_expected_sql_empty", ["unexpected_error"])
+    actual_columns = body.get("columns") or []
+    if not isinstance(actual_columns, list):
+        return _fail("rule:result_match", "result_match_actual_columns_invalid", ["unexpected_error"])
+    canonical_columns = _canonicalize_column_aliases(actual_columns, case.expected_column_aliases)
+    if canonical_columns != list(case.expected_columns):
+        return _fail(
+            "rule:result_match",
+            f"result_projection_mismatch expected={list(case.expected_columns)} actual={canonical_columns}",
+            ["output_projection_mismatch"],
+            metadata={"expected_columns": list(case.expected_columns), "actual_columns": canonical_columns},
+        )
     actual_rows = body.get("rows") or []
     if not isinstance(actual_rows, list) or any(not isinstance(row, dict) for row in actual_rows):
         return _fail("rule:result_match", "result_match_actual_rows_invalid", ["unexpected_error"])
@@ -511,6 +522,13 @@ def _canonicalize_row_aliases(rows: Sequence[dict[str, Any]], aliases: dict[str,
 
     alias_to_canonical = {alias: canonical for canonical, names in aliases.items() for alias in names}
     return [{alias_to_canonical.get(key, key): value for key, value in row.items()} for row in rows]
+
+
+def _canonicalize_column_aliases(columns: Sequence[str], aliases: dict[str, list[str]]) -> list[str]:
+    """把展示列 alias 归一为 canonical 名，同时保留原顺序供精确投影合同判断。"""
+
+    alias_to_canonical = {alias: canonical for canonical, names in aliases.items() for alias in names}
+    return [alias_to_canonical.get(column, column) for column in columns]
 
 
 def _body_text(body: dict[str, Any]) -> str:

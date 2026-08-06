@@ -8,7 +8,6 @@ trace 可观测性，不是重开一个运行时平台。
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -31,6 +30,7 @@ from engine.schema_retrieval.objects import SchemaGraph, SchemaRetrievalResult
 from engine.schema_retrieval.retriever import retrieve_schema
 from engine.schema_retrieval.vector_index import VectorIndex
 from engine.sql_guard.guard import validate_readonly_sql
+from engine.sql_guard.policy import validate_sql_policy
 from engine.sql_guard.precheck import looks_like_dangerous_sql
 from engine.tools.chart_tool import build_chart_spec
 from engine.tools.sql_tool import SQLToolResult, run_sql_tool
@@ -201,26 +201,6 @@ def _llm_error_metadata(exc: LLMGenerationError) -> dict[str, Any]:
     if exc.prompt_length is not None:
         metadata["prompt_length"] = exc.prompt_length
     return metadata
-
-
-def _sql_plan_contract_evidence(sql: str, plan: Any) -> dict[str, Any]:
-    """记录 SQL Plan Contract 的只读证据，帮助区分真实漏排序与字符串等价误拦。
-
-    ★ 这里故意不重写或 AST 化 SQL：M22 当前合同仍是窄范围字符串检查。证据仅写入私有
-    JSONL trace，供失败 triage 看计划、候选 SQL 与观察到的 ORDER BY/LIMIT 是否一致。
-    """
-
-    normalized_sql = " ".join(sql.split())
-    order_match = re.search(r"\border\s+by\s+(.+?)(?:\s+limit\s+|;|$)", normalized_sql, flags=re.IGNORECASE)
-    limit_match = re.search(r"\blimit\s+(\d+)\b", normalized_sql, flags=re.IGNORECASE)
-    return {
-        "candidate_sql_preview": sql[:300],
-        "planned_order_by": list(plan.order_by),
-        "planned_limit": plan.limit,
-        "observed_order_by_clause": order_match.group(1).strip() if order_match else None,
-        "observed_limit": int(limit_match.group(1)) if limit_match else None,
-        "comparison_rule": "normalized_string_contains",
-    }
 
 
 def _first_sql_step(plan: QueryPlan):
@@ -486,29 +466,6 @@ def run_text2sql_pipeline(
             domain_schema=active_domain_schema,
             llm_client=llm_client,
         )
-        # ★ 先让明显危险 SQL 进入 SQL Guard；只对只读候选执行 M22 的输出合同检查。
-        if not looks_like_dangerous_sql(generated_sql.sql):
-            validate_sql_plan_contract(generated_sql.sql, plan_step=plan_step)
-    except SQLPlanContractError as exc:
-        span.fail(
-            error_type=exc.issue_tag,
-            output_summary=str(exc),
-            metadata={
-                **_llm_error_metadata(exc),
-                **_sql_plan_contract_evidence(generated_sql.sql, plan_step),
-            },
-        )
-        return _with_trace_snapshot(
-            _blocked_result(
-                sql=None,
-                answer_hint=answer_hint,
-                trace_steps=trace_context.trace_steps,
-                issue_tags=[exc.issue_tag],
-                blocked_reason=f"SQL 未满足 QueryPlan 契约：{exc}",
-                error_type=exc.issue_tag,
-            ),
-            trace_context,
-        )
     except LLMGenerationError as exc:
         span.fail(
             error_type="llm_generation_error",
@@ -527,6 +484,45 @@ def run_text2sql_pipeline(
             trace_context,
         )
 
+    # ★ 安全策略必须先于语义合同。这里做纯只读预检查；真正执行时 SQL Tool 仍会再验一次，
+    # 形成 defense in depth，避免未来 caller 绕过 SQL Tool 的安全 seam。
+    guard_precheck = validate_sql_policy(
+        generated_sql.sql,
+        user_role=user_role,
+        domain_schema=active_domain_schema,
+    )
+    fidelity_result = None
+    if guard_precheck.is_allowed:
+        try:
+            fidelity_result = validate_sql_plan_contract(
+                generated_sql.sql,
+                plan_step=plan_step,
+                domain_schema=active_domain_schema,
+                dialect="mysql",
+            )
+        except SQLPlanContractError as exc:
+            span.fail(
+                error_type=exc.issue_tag,
+                output_summary=str(exc),
+                metadata={
+                    **_llm_error_metadata(exc),
+                    "sql_guard_precheck_status": "passed",
+                    "query_plan_step": plan_step.model_dump(mode="json"),
+                    **exc.contract_result.to_trace_metadata(),
+                },
+            )
+            return _with_trace_snapshot(
+                _blocked_result(
+                    sql=None,
+                    answer_hint=answer_hint,
+                    trace_steps=trace_context.trace_steps,
+                    issue_tags=[exc.issue_tag, exc.contract_result.reason_code],
+                    blocked_reason=f"SQL 未满足 QueryPlan 保真合同：{exc}",
+                    error_type=exc.issue_tag,
+                ),
+                trace_context,
+            )
+
     span.end(
         output_summary=generated_sql.reasoning_summary,
         metadata={
@@ -539,6 +535,10 @@ def run_text2sql_pipeline(
             "plan_step_metrics": plan_step.metrics,
             "plan_step_joins": plan_step.joins,
             "plan_step_output_columns": plan_step.output_columns,
+            "query_plan_step": plan_step.model_dump(mode="json"),
+            "sql_guard_precheck_status": "passed" if guard_precheck.is_allowed else "blocked",
+            "sql_guard_precheck_reason": guard_precheck.blocked_reason,
+            **(fidelity_result.to_trace_metadata() if fidelity_result is not None else {}),
         },
     )
 
@@ -569,7 +569,41 @@ def run_text2sql_pipeline(
             trace_context,
         )
 
-    # 步骤 6：图表决策只做附加观察，不影响 SQL 答案。-----------------------------------------
+    # 步骤 6：核对真实 driver 返回的 body.columns，固定 API 表格 / chart 展示顺序。-----------
+    output_span = trace_context.start_span(
+        name="output_projection",
+        step_type="output_contract",
+        parent_step_id=plan_step.step_id,
+    )
+    expected_output = list(fidelity_result.planned_output_columns) if fidelity_result is not None else []
+    if expected_output and tool_result.columns != expected_output:
+        output_span.fail(
+            error_type="output_projection_contract_failed",
+            output_summary="SQL 执行结果列与 QueryPlan 展示顺序不一致。",
+            metadata={
+                "expected_columns": expected_output,
+                "actual_columns": tool_result.columns,
+                "reason_code": "body_columns_order_or_set_mismatch",
+            },
+        )
+        return _with_trace_snapshot(
+            _blocked_result(
+                sql=generated_sql.sql,
+                answer_hint=answer_hint,
+                trace_steps=trace_context.trace_steps,
+                issue_tags=["output_projection_contract_failed", "body_columns_order_or_set_mismatch"],
+                blocked_reason="SQL 执行结果列未满足 QueryPlan 的精确投影与展示顺序。",
+                error_type="output_projection_contract_failed",
+                tool_call=tool_result.tool_call,
+            ),
+            trace_context,
+        )
+    output_span.end(
+        output_summary="output projection matched",
+        metadata={"expected_columns": expected_output, "actual_columns": tool_result.columns},
+    )
+
+    # 步骤 7：图表决策只做附加观察，不影响 SQL 答案。-----------------------------------------
     span = trace_context.start_span(name="chart_generation", step_type="chart_generation")
     chart_spec = build_chart_spec(columns=tool_result.columns, rows=tool_result.rows, question=question)
     span.end(

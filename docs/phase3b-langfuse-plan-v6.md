@@ -4,7 +4,7 @@
 >
 > **核心目标**：在不改动 `/api/query` 响应契约、不替代 JSONL 和现有 eval 报告的前提下，新增可选 LangFuse Cloud 写入，并补齐 **L1/L2 规则评分器 + 最小 L3 LLM-as-Judge** 评分能力，最后跑通一次最小 Experiment 验证全链路闭环。LangFuse 自部署不再作为 DataPilot Phase 3B 的默认目标，改为 EvalBench 阶段重点探索。
 >
-> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。v6.5 追加 M23：在提出下一轮 retrieval 假设前，先治理仍会污染分数解释的 eval、语义层与数据库事实边界；v6.6 追加 M24，先清理 SQL 合同格式噪音和 QueryPlan→SQL 保真缺口，再重新解释 retrieval A/B。
+> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。v6.5 追加 M23：在提出下一轮 retrieval 假设前，先治理仍会污染分数解释的 eval、语义层与数据库事实边界；v6.6 追加 M24，先清理 SQL 合同格式噪音和 QueryPlan→SQL 保真缺口；v6.7 为 M24 加入事实收口、历史失败定性、输出政策与可复现门禁，之后才重新解释 retrieval A/B。
 
 ## 灵感来源：一线开发者的 LangFuse 评测实战经验
 
@@ -327,7 +327,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 | M21 Schema Retrieval Fusion / Context Repair | 7 | M20 | 基于 clean Milvus、Qwen LLM diagnostic 和 retrieval-only benchmark 的证据，修复 schema_context 最大失败簇，让 vector 语义召回能进入最终上下文 | retrieval-only baseline、fusion / rerank 对比、relation/metric 覆盖增强方案、diagnostic 复测、`.agent_work/temp/m21-notes.md` |
 | M22 Eval Contract / Semantic Output Stabilization | 8 | M21 | 分离 Context / Output / Result / Manual 契约，暴露 QueryPlan→SQL 的排序、limit 等真实缺口 | 窄 SQL Plan Contract、结构化语义拒绝、trace 合同证据、194-doc 历史对照 |
 | M23 Eval / Semantic / Database Baseline Hygiene | 9 | M22 | 固化数据库语义、reference 与 oracle 边界，形成 195-doc 新合同 | 结果校验 case、异常专项、MySQL/SQLite 审计、schema docs hash 门禁 |
-| M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity | 10 | M23 新合同基线 | 以 M23 的 195-doc / 新 case-scoring 合同为固定基线，消除 SQL 计划合同的格式误拦，并让 QueryPlan 已声明的排序、limit 和输出投影可验证地保真 | 只读语义比较 module、合同/输出证据、分层回归测试、M23 新合同下的重复 A/B |
+| M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity | 10 | M23 新合同基线 | 先收口 M23 新合同的失败事实与输出政策，再消除 SQL 计划合同的格式误拦，并让 QueryPlan 已声明的排序、limit 和输出投影可验证地保真 | 逐 case 定性表、只读语义比较 module、合同/输出证据、分层回归测试、M23 新合同下交错重复 A/B |
 
 ## 模块实施明细
 
@@ -1262,42 +1262,64 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 ### M24 前置事实与边界（2026-08-06）
 
 1. M22 trace 已确认当前 SQL Plan Contract 是 `normalized_string_contains`。它会把下列 SQL 等价形式误判为“漏排序”：表别名（`c.channel_name` vs `channels.channel_name`）、反引号（`` `gmv` ``）、限定名省略（`SUM(actual_amount)` vs `SUM(orders_wide.actual_amount)`）和用 SELECT 输出别名排序（`used_order_count DESC` vs `COUNT(DISTINCT orders.id) DESC`）。这些属于合同误拦，不是 retrieval miss。
-2. M23 新合同的本地首次全量基线为 Qwen `qwen3.7-plus` + `inmemory/deterministic` + weighted，195 docs / hash `ce04fe4f...`，`23/32`（自动 `20/27`）。其 9 个自动失败全部已有 trace 证据落在 QueryPlan→SQL：缺 `ORDER BY`、丢 `LIMIT 10`、输出列超量，或 query-plan / SQL generation error；检索层零失败。
-3. 紧随其后的 Milvus + DashScope Qwen embedding 单次对照使用相同 195-doc hash、1024 维、run-scoped clean collection、weighted、32 条 diagnostic 与 SQLite oracle，结果 `21/32`。两组共同失败 `db_simple_001/002/003`、`db_core_002`、`db_join_003`；embedding 单次额外失败主要是 `sql_plan_contract_failed`、输出别名/列契约和严格 table contract。它**支持优先修合同与生成保真**，但每组仅一次真实 LLM run，不能把 `23→21` 定性为 embedding 退化，也不改变默认 retrieval。
-4. 归因纪律保持不变：只有目标表/字段没有进入 `schema_context`，才可归因 retrieval；若 Context 已有而 QueryPlan/SQL 未采用，归因 query-plan / SQL generation；若 SQL 语义等价却被拒，归因 contract/scorer。
+2. M23 新合同的本地首次全量基线为 Qwen `qwen3.7-plus` + `inmemory/deterministic` + weighted，195 docs / hash `ce04fe4f...`，总计 `23/32`，其中自动能力 `20/27`、人工/诊断 `3/5`。因此本轮是**自动失败 7 条、总 failed 9 条**（后者含 2 条人工/诊断失败），不得再写成“9 个自动失败”。3 条为已证实的输出/结果不保真（缺 `ORDER BY`、丢 `LIMIT 10`、输出列超量）；其余需要按 trace 区分合同误拦、生成/计划错误和人工诊断，不能先合并归因为同一层。local run 的 SchemaGraph 评分没有 retrieval 失败证据。
+3. 同合同的 Milvus + DashScope Qwen embedding 单次诊断**已经完成**：相同 195-doc hash、1024 维、run-scoped clean collection、weighted、32 条 diagnostic 与 SQLite oracle，结果 `21/32`。报告为 `eval/reports/m23-qwen-milvus-qwenemb-diagnostic-report.md`，trace / triage 同名文件在 `eval/traces/` / `eval/reports/`。状态账本若仍写“待跑”，应在 M24 起步时先同步为“已完成的单次诊断快照”。两组各仅一次真实 LLM run，`23→21` 不能定性为 embedding 退化，也不改变默认 retrieval。
+   - 前置审计补充：Milvus 自动能力同样是 `20/27`，人工/诊断为 `1/5`；local 与 Milvus 的自动能力分相同，总分差来自人工/诊断项。
+4. 归因纪律保持不变：只有目标表/字段没有进入 `schema_context`，才可归因 retrieval；若 Context 已有而 QueryPlan/SQL 未采用，归因 query-plan / SQL generation；若 SQL 语义等价却被拒，归因 contract/scorer。`table_hit` / `column_recall` 若检查的是最终 `tables_used` / `body.columns`，必须标为 output contract，不能仅凭旧桶名判为 schema_context / retrieval。
+5. 旧 trace 常只有 `candidate_sql_preview` 和计划摘要，未稳定保存完整候选 SQL 与结构化 QueryPlan；它不足以让未来 AST 判定可逐条复演。因此 M24 的第一步必须补齐逐 case 证据，而不是假设历史 trace 已能支撑全部规则。
+
+### M24 开工前置关卡（必须先完成，不改默认配置）
+
+1. **统一事实账本与基线读数**
+   - 将上述 Milvus `21/32` 记录为单次诊断快照，同步 `AI_CONTEXT.md`、`eval-baselines.md`、`AI_CONTEXT_CHANGELOG.md` 的“待跑”残留表述。
+   - 基线和后续报告固定并列：`total`、`automated_capability`、`manual/review`、`contract_false_block`、`true_fidelity_failure`；禁止只用一个 `passed/32` 解释效果。
+2. **建立 M22/M23 历史失败逐条定性表**
+   - 每条记录完整 QueryPlan step、完整 candidate SQL、SQL Guard 结果、执行 / `result_match` 结果、目标 schema 是否在 Context，以及人工结论。
+   - 结论只能是：`semantic_false_block`、`true_order_or_limit_loss`、`projection_mismatch`、`generation_or_plan_error` 或 `insufficient_evidence`。没有候选 SQL 的 LLM error 不能被 AST 合同模块“修好”。
+   - `db_trace_002` 是已知 SELECT alias 排序的正例；`db_simple_002` 是真漏 `LIMIT 10`、必须拒绝的反例。旧 trace 资料不足的 case 用固定输入重新采样，但该采样不计入能力分。
+3. **先完成两项小实验，再接入 pipeline**
+   - 离线合同回放 spike：以正例（表别名、反引号、限定名省略、SELECT alias 排序）和反例（方向相反、排序顺序变更、真缺 `ORDER BY` / `LIMIT`）验证纯比较原型；歧义或无法解析必须保守失败。
+   - 输出投影政策审计：对所有自动 `result_match` case 对照计划列、SQL SELECT 列、实际 `body.columns` 与期望列，明确自动 case 是否采用“列名 + 顺序 + 集合完全一致”；敏感列无论如何不得因额外投影政策放行。未完成该产品语义决策前，沿用当前精确投影合同。
 
 ### 目标与深模块设计
 
-新增一个深模块，暂称 `SQLPlanFidelityContract`：调用方只传入已验证的 `QueryPlanStep` 和候选只读 SQL，得到统一的 `passed / failed` 与可读证据；别名解析、反引号处理、限定名解析、输出别名回溯和失败分类都隐藏在 module 内部。它的 interface 必须同时成为 pipeline 与测试的唯一 seam，避免 `generator.py`、`pipeline.py` 和 scorer 各自维护一套“什么算等价”的局部规则。
+新增一个深模块，暂称 `SQLPlanFidelityContract`：调用方传入已验证的 `QueryPlanStep`、候选只读 SQL、可信 `DomainSchema` 与显式生成 dialect，得到统一的 `passed / failed / indeterminate` 与可读证据；别名解析、反引号处理、限定名解析、输出别名回溯、投影顺序和失败分类都隐藏在 module 内部。它的 interface 必须同时成为 pipeline 与测试的唯一 seam，避免 `generator.py`、`pipeline.py` 和 scorer 各自维护一套“什么算等价”的局部规则。
 
-该 module 只做**验证与证据归一化**，不改写 LLM SQL、不补写排序/limit、不放宽 SQL Guard。SQL Guard 仍先检查只读与安全；不能解析或存在歧义的候选 SQL 维持保守失败并留下证据。
+该 module 只做**验证与证据归一化**，不改写 LLM SQL、不补写排序/limit、不放宽 SQL Guard。SQL Guard 仍先检查只读与安全；不能解析或存在歧义的候选 SQL 返回 `indeterminate` 并按保守失败处理，同时留下证据。
 
 ### 最小执行内容
 
 1. **替换窄字符串比较，保持窄合同范围**
-   - 复用项目已有 `sqlglot` AST 能力，将候选 SQL 与 QueryPlan 的 `order_by` / `limit` 解析为可比较的规范形式。
+   - 复用项目已有 `sqlglot` AST 能力，将候选 SQL 与 QueryPlan 的 `order_by` / `limit` 解析为可比较的规范形式；首版生成合同固定使用 MySQL dialect，SQLite 继续只承担 deterministic result oracle。未来若允许 SQLite 方言生成，再显式增加 dialect 分支与对应测试。
    - 支持已由 M22/M23 trace 证明的等价形式：表别名与原表名映射、标识符反引号、唯一可解析的限定名省略，以及 `ORDER BY` 引用 SELECT 输出别名。
-   - 仍严格比较排序方向、排序项顺序和 limit；不把 `ASC` 当 `DESC`，不因为 SQL 有额外排序项而静默忽略计划项，也不将不可证明等价的表达式放行。
+   - SELECT alias 只允许在同一个 SELECT scope 内回溯；跨 CTE / 子查询、歧义无前缀列、ordinal order（如 `ORDER BY 1`）一律保守失败，除非后续单独定义规则并加回归。
+   - 仍严格比较排序方向、排序项顺序和 limit；不把 `ASC` 当 `DESC`，不因为 SQL 有额外排序项而静默忽略计划项，也不将不可证明等价的表达式放行。`LIMIT` 需区分数值、参数和 offset 形式。
 2. **把“SQL 合同”与“输出合同”拆开记录**
    - SQL Plan Contract 只判断已声明的 `order_by` / `limit` 是否保留。
-   - QueryPlan→SQL Fidelity 另记录表、字段/表达式和 `output_columns` 的保真情况，区分“漏投影”“额外投影”“别名等价”“大小写/序列化差异”。
+   - QueryPlan→SQL Fidelity 另记录表、字段/表达式和 `output_columns` 的保真情况，区分“漏投影”“额外投影”“别名等价”“大小写/序列化差异”。可执行 SQL step 的 `output_columns` 不得为空；聚合输出 alias 通过 `output_expressions` 显式绑定到可信表达式，禁止候选 SQL 自己解释计划 alias。
+   - 用户已确认自动 case 采用“精确投影 + 显式 alias 白名单 + 严格展示顺序”：列集合不允许 extra/missing，alias 只接受已声明白名单，`body.columns` 顺序必须与计划 / expected columns 一致；行值仍按列名对齐。人工 case 只报告投影差异，不作为自动能力硬门；敏感列始终由 SQL Guard 硬拒绝。
    - 修正 triage 的归因：最终 `body.columns` 或 `result_match` 的失败不得再标为 `schema_context`；Context 证据与最终输出证据分别保留。
 3. **以 M23 失败簇建立最小回归集**
-   - 误拦回归：`db_core_004`、`db_plan_001`、`db_prompt_002`、`db_trace_002`、SCD 手工题的别名/限定名形式。
+   - 误拦回归：`db_core_004`、`db_plan_001`、`db_prompt_002`、`db_trace_002`、SCD 手工题的别名/限定名形式。同一 case 的不同历史观察分别定性，例如 `db_simple_001/002` 在 M22 是限定名字符串误拦、在 M23 是真实 order/limit 丢失，不能给 case 永久贴单一标签。
    - 真漏失回归：`db_simple_001` 必须保留稳定排序、`db_simple_002` 必须保留 `LIMIT 10`、`db_simple_003` 必须不超出计划输出列。
    - 生成保真诊断：`db_core_002`、`db_multi_001/002`、`db_hard_001`、`db_join_003`；先由 trace 判断是 QueryPlan 未表达、SQL 未采用，还是 case/scorer 需要人工确认。
-4. **合同修复后再做受控实验**
+   - 每个由“阻断”变成“放行”的历史 case，除合同比较证据外，自动 case 还必须有 SQL Guard 通过和正确 `result_match`；合同通过本身不等于回答正确。
+4. **让新 trace 可复演**
+   - 新 trace 用独立结构化字段记录完整可解析的 candidate SQL，并另保留短 preview 供报告展示；同时记录完整结构化 QueryPlan step、parser dialect、计划 / SQL AST 摘要、别名绑定、比较结果与拒绝原因。如需脱敏，必须保留可复演 AST 摘要与稳定 hash，不能只剩截断 preview。
+   - 报告中的 `contract_false_block` / `true_fidelity_failure` 必须由明确的 reason code + evidence level 聚合；前置 notes 的人工标签不能直接冒充 runner 原生统计。
+   - 报告中每条失败明确给出证据等级；`insufficient_evidence` 不得硬塞入 retrieval 或 SQL generation。
+5. **合同修复后再做受控实验**
    - 先完成 deterministic unit / pipeline regression，不用真实 LLM 分数证明逻辑正确。
    - 再固定 M23 的 195-doc hash、32 条 diagnostic、Qwen `qwen3.7-plus`、weighted、SQLite deterministic oracle、LangFuse off 与同一代理设置，分别运行 local 与 clean Milvus/Qwen embedding。
-   - 每组至少 3 次，记录每 case 的通过次数、failure stage、Context 是否含目标 schema、合同误拦数量和自动能力分的中位数/范围；不要仅凭单次 `23/32 vs 21/32` 改默认 embedding 或 retrieval backend。
+   - 每组至少 3 次，并采用 `local → Milvus → local → Milvus → local → Milvus` 的交错顺序；记录 run 时间、完整 runtime metadata、每 case 的通过次数、failure stage、Context 是否含目标 schema、合同误拦数量和自动能力分的中位数/范围。不要仅凭单次 `23/32 vs 21/32` 改默认 embedding 或 retrieval backend。
 
 ### 验收门槛
 
 - 已证实的别名、反引号、限定名和输出别名等价 SQL 不再被 SQL Plan Contract 拦截；每个放行都有 AST 规范化证据。
-- 真正丢失的排序、limit 或计划输出投影仍被阻断或明确标为 QueryPlan→SQL fidelity failure，不能因“放宽合同”而静默通过。
-- 新 trace 同时记录计划表达、SQL 观察表达、规范化表达、等价判定和无法判定原因；报告可以区分 retrieval、query_plan、sql_generation、contract/scorer。
+- 真正丢失的排序、limit 或计划输出投影仍被阻断或明确标为 QueryPlan→SQL fidelity failure，不能因“放宽合同”而静默通过；parser 歧义或失败也不能放行。
+- 新 trace 同时记录完整候选 SQL、结构化计划表达、dialect、SQL 观察表达、规范化表达、别名绑定、等价判定和无法判定原因；报告可以区分 retrieval、query_plan、sql_generation、contract/scorer 与 output contract。
 - M23 的 local / embedding 复测只在固定合同下解释；若目标 schema 已在 Context，报告不得把失败计入 retrieval。
-- focused tests 覆盖纯比较、pipeline blocked path、输出契约与 triage 归因；全量 pytest 不回归。默认模型、embedding、Milvus、fusion、case、oracle 与数据库事实均不因本模块自动切换。
+- focused tests 覆盖纯比较、scope / ambiguity / dialect 边界、pipeline blocked path、输出契约与 triage 归因；全量 pytest 不回归。默认模型、embedding、Milvus、fusion、case、oracle 与数据库事实均不因本模块自动切换。
 
 ### 非目标与决策门
 
@@ -1494,6 +1516,18 @@ Phase 3B 完成后，后续阶段的受益：
 | 设计 seam | 规划单一 `SQLPlanFidelityContract` interface：调用方输入 QueryPlanStep 与候选 SQL，内部集中处理 AST 规范化和证据；不在多个 caller 复制字符串规则。 |
 | 保持安全边界 | 只读比较、不改写 SQL；排序方向、顺序、limit 与不可判定表达式继续保守处理，SQL Guard 保持前置。 |
 | 纳入新 A/B 事实 | M23 两组仅各一次，故只用来确定“先清合同噪音”的优先级；合同修复后才以 195-doc 固定条件执行每组至少 3 次的 local / embedding 对照。 |
+
+### v6.7（2026-08-06）—— M24 执行前事实收口与可复现门禁
+
+依据：M24 执行前审查发现，M23 local `20/27` 自动能力分与“9 个自动失败”表述矛盾；同合同 Milvus `21/32` 报告已存在但多份 state 文档仍写待跑；历史 trace 也不总有完整 SQL / QueryPlan，不能直接充当 AST 规则的复演样本。
+
+| 改动 | 说明 |
+|---|---|
+| 新增 P0 前置关卡 | 先统一 M23 事实账本和读数，并建立逐 case 的 `semantic_false_block` / `true_order_or_limit_loss` / `projection_mismatch` / `generation_or_plan_error` / `insufficient_evidence` 定性表。 |
+| 收紧 AST 规格 | 明确 dialect、SELECT scope、CTE / 子查询、歧义字段、ordinal order、排序顺序和 limit 形式；无法证明等价时返回保守失败。 |
+| 输出政策前置 | 用户已确认自动 case 使用精确投影、显式 alias 白名单和严格 `body.columns` 展示顺序；人工 case 只报告差异，敏感列继续硬拒绝。 |
+| 加入可复现证据 | 新 trace 要保存完整候选 SQL、结构化 QueryPlan、AST / alias / dialect 证据和拒绝原因；任何放行还需通过 SQL Guard 与自动结果校验。 |
+| 修订 A/B 纪律 | local 与 Milvus 每组至少 3 次并交错执行，按自动能力分、合同误拦和真保真失败分层解释，不以单一总分决策。 |
 
 ### v6.5（2026-08-03）—— M21 收口与 Qwen-plus embedding controlled A/B
 

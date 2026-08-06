@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
-from engine.nl2sql.pipeline import _sql_plan_contract_evidence, run_text2sql_pipeline
+from engine.nl2sql.pipeline import run_text2sql_pipeline
 from eval.run_eval import EvalCase, EvalResult, _score_case, write_report
 from eval.scorers.rule_scorers import score_case_rules
 from engine.nl2sql.generator import SQLPlanContractError, validate_sql_plan_contract
@@ -273,16 +273,19 @@ def test_sql_plan_contract_preserves_order_by_and_rejects_silent_drop() -> None:
 
     step = QueryPlanStep(
         step_id="step_1", step_index=1, purpose="按渠道统计订单量", order_by=["order_count DESC"],
+        output_expressions={"order_count": "COUNT(*)"},
     )
 
     validate_sql_plan_contract(
         "SELECT channel_name, COUNT(*) AS order_count FROM orders GROUP BY channel_name ORDER BY order_count DESC",
         plan_step=step,
+        domain_schema=load_domain_schema(),
     )
     with pytest.raises(SQLPlanContractError, match="ORDER BY"):
         validate_sql_plan_contract(
             "SELECT channel_name, COUNT(*) AS order_count FROM orders GROUP BY channel_name",
             plan_step=step,
+            domain_schema=load_domain_schema(),
         )
 
 
@@ -293,13 +296,17 @@ def test_sql_plan_contract_evidence_keeps_candidate_and_observed_clause() -> Non
         step_id="step_1", step_index=1, purpose="订单列表", order_by=["orders.paid_at ASC"], limit=10,
     )
 
-    evidence = _sql_plan_contract_evidence(
-        "SELECT order_no FROM orders ORDER BY paid_at ASC LIMIT 10", step,
+    result = validate_sql_plan_contract(
+        "SELECT order_no FROM orders ORDER BY paid_at ASC LIMIT 10",
+        plan_step=step,
+        domain_schema=load_domain_schema(),
     )
+    evidence = result.to_trace_metadata()
 
     assert evidence["candidate_sql_preview"].startswith("SELECT order_no")
-    assert evidence["planned_order_by"] == ["orders.paid_at ASC"]
-    assert evidence["observed_order_by_clause"] == "paid_at ASC"
+    assert evidence["candidate_sql"] == "SELECT order_no FROM orders ORDER BY paid_at ASC LIMIT 10"
+    assert evidence["planned_order_by"] == ("orders.paid_at ASC",)
+    assert evidence["observed_order_by"] == ("paid_at ASC",)
     assert evidence["observed_limit"] == 10
 
 

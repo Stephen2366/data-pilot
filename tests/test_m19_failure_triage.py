@@ -163,9 +163,9 @@ def test_triage_marks_column_recall_as_output_contract_subtype(tmp_path: Path) -
 
     triage = triage_results([result], trace_path=trace_path)[0]
 
-    assert triage.failure_stage == "schema_context"
+    assert triage.failure_stage == "output_contract"
     assert triage.failure_subtype == "output_column_contract"
-    assert triage.needs_action == "manual_review"
+    assert triage.needs_action == "fix_pipeline"
 
 
 def test_triage_marks_table_recall_as_output_contract_subtype(tmp_path: Path) -> None:
@@ -191,9 +191,9 @@ def test_triage_marks_table_recall_as_output_contract_subtype(tmp_path: Path) ->
 
     triage = triage_results([result], trace_path=trace_path)[0]
 
-    assert triage.failure_stage == "schema_retrieval"
+    assert triage.failure_stage == "output_contract"
     assert triage.failure_subtype == "output_table_contract"
-    assert triage.needs_action == "manual_review"
+    assert triage.needs_action == "fix_pipeline"
 
 
 def test_report_includes_result_match_triage_summary(tmp_path: Path) -> None:
@@ -286,5 +286,5 @@ def test_compare_triage_files_outputs_failure_distribution(tmp_path: Path) -> No
     compare_triage_files(left_path=left_json, right_path=right_json, output_path=output)
     report = output.read_text(encoding="utf-8")
 
-    assert "| schema_retrieval | 1 | 0 | -1 |" in report
+    assert "| output_contract | 1 | 0 | -1 |" in report
     assert "| result_match | 0 | 1 | 1 |" in report

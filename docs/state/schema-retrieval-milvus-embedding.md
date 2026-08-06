@@ -2,7 +2,7 @@
 
 > 本文是 DataPilot 的 Schema Retrieval、Milvus 向量库和 embedding 实验速查。Trigger：只要涉及 `SCHEMA_VECTOR_BACKEND`、`SCHEMA_EMBEDDING_PROVIDER`、Milvus collection、embedding A/B、`schema_docs_hash`、schema retrieval 召回质量或 M20 clean run 结论，必须先读本文。当前运行命令入口仍以 `docs/state/runbook.md` 为准，长期 eval 数字以 `docs/state/eval-baselines.md` 为准。
 
-更新时间：2026-08-05
+更新时间：2026-08-06
 
 ## 一句话结论
 
@@ -132,6 +132,7 @@ M20 clean 链路：
 - M21 controlled Qwen-plus A/B：固定 `qwen3.7-plus`、weighted、同一 32 题和 oracle，只比较 `inmemory + deterministic` 与 clean Milvus/Qwen embedding；两组均为 `21/32`，`schema_context=6` 和 `failure_subtype` 分布完全相同，没有端到端 embedding 提分证据。
 - M21 collection reuse audit：`datapilot_schema_docs_m21_qwen_weighted_20260803_001` 在多次 Qwen-plus weighted / RRF / embedding A/B 中均记录 `milvus_initial_row_count=193`、`milvus_inserted_document_count=0`、`milvus_final_row_count=193`，且 schema hash 与 embedding 配置一致；这些测试是安全复用 clean collection，不构成 Milvus 污染。
 - 单次真实 LLM run 有非确定性；不据此切换默认 embedding / Milvus / 默认模型，默认仍保持 `inmemory + deterministic`。
+- M23 195-doc 新合同的 clean Milvus + DashScope `qwen3.7-text-embedding` 单次 diagnostic 为 `21/32`、自动 `20/27`；同合同 local 为 `23/32`、自动也为 `20/27`。两组总分差来自人工/诊断项，且各仅一次，不能定性 embedding 退化；详见 `M23-E03/E04`。
 
 ## Retrieval-only Benchmark
 
