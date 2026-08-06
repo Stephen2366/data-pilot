@@ -4,7 +4,7 @@
 >
 > **核心目标**：在不改动 `/api/query` 响应契约、不替代 JSONL 和现有 eval 报告的前提下，新增可选 LangFuse Cloud 写入，并补齐 **L1/L2 规则评分器 + 最小 L3 LLM-as-Judge** 评分能力，最后跑通一次最小 Experiment 验证全链路闭环。LangFuse 自部署不再作为 DataPilot Phase 3B 的默认目标，改为 EvalBench 阶段重点探索。
 >
-> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。v6.5 追加 M23：在提出下一轮 retrieval 假设前，先治理仍会污染分数解释的 eval、语义层与数据库事实边界。
+> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。v6.5 追加 M23：在提出下一轮 retrieval 假设前，先治理仍会污染分数解释的 eval、语义层与数据库事实边界；v6.6 追加 M24，先清理 SQL 合同格式噪音和 QueryPlan→SQL 保真缺口，再重新解释 retrieval A/B。
 
 ## 灵感来源：一线开发者的 LangFuse 评测实战经验
 
@@ -56,23 +56,7 @@
 | "rule 指标从 trace 埋点算，不用 LLM" | L1/L2/L3 分层框架：能用规则不用 LLM |
 | Experiment 是评测闭环的关键环节 | M18：最小 Experiment 走通验证 |
 
-## 前置状态（供新 AI 会话续接）
-
-### 项目当前状态快照
-
-| 维度 | 事实 |
-|------|------|
-| 当前阶段 | Phase 3A（M14-lite）刚收口，Phase 3 RAG/Hybrid 尚未开工 |
-| 当前 trace 实现 | `engine/trace/recorder.py`：`TraceRecord` Pydantic 模型 → `append_trace()` 写 JSONL 到 `eval/traces/traces.jsonl` |
-| trace 写入入口 | `app/api/query.py` 的 `_record_trace()` 函数，在 `_success_response()` / `_blocked_response()` 中调用 |
-| trace 路径可覆盖 | 通过 `app.state.trace_path` 指向临时文件，测试/smoke/实验各自写入不同路径 |
-| 当前评测体系 | `eval/run_eval.py`：YAML 用例 → 调 `/api/query` → 纯规则评分（contains/equals/expected_value）→ Markdown 报告 |
-| A/B 实验 | `scripts/run_qwen_ab_experiments.py`：子进程运行 eval、解析 Markdown 报告 → 汇总表格 |
-| 已有配置清理 | `.env` / `.env.example` 中的 LangSmith 配置已清理；`Settings` 中若仍有旧 LangSmith 字段，Phase 3B 实施时同步移除，避免与 LangFuse tracing 口径混淆 |
-| LangFuse 配置现状 | `.env` 已手动写入 `LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`LANGFUSE_BASE_URL` 三项 Cloud 配置；文档和日志不得记录具体 key |
-| LangFuse smoke 现状 | ✅ 本会话已用 JP LangFuse Cloud 跑通过一次临时 SDK smoke，Cloud UI 中可见 `datapilot-langfuse-cloud-smoke-20260728T083247Z` trace 和 `fake-sql-pipeline-step` span |
-| LangFuse 代码现状 | ❌ 代码库中仍无任何 LangFuse 正式引用；Phase 3B 实施前只完成了临时 SDK 连通性验证 |
-| 独立评测项目 | EvalBench尚在规划阶段，计划做成独立项目 |
+## 规划背景
 
 ### 本次对话分析结论摘要
 
@@ -86,7 +70,7 @@
 
 用户决定：**趁 Phase 3A 刚收口、Phase 3 未开工的窗口期，新增 Phase 3B 引入 LangFuse。v6 路线进一步收敛为：DataPilot 先用 LangFuse Cloud 验证能力，自部署留给 EvalBench 阶段；当前请求级 `trace_id` 保持 DataPilot 自己管理，LangFuse 使用独立 `langfuse_trace_id` 并通过 metadata 建立映射。** 本文档即为该阶段的执行计划。
 
-### 关键文件索引
+## 关键文件索引
 
 | 文件 | 作用 | 本阶段是否修改 |
 |------|------|---------------|
@@ -341,6 +325,9 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 | M19 Trace Failure Triage / LangFuse-driven Eval Analysis | 5 | M18 | 把 trace/span/score 转成失败阶段、失败原因和下一步动作，形成本地报告 + 可选 LangFuse triage score 的改进闭环 | failure triage summary、triage scorer/heuristics、A/B failure distribution、`.agent_work/temp/m19-notes.md` |
 | M20 Schema Retrieval / Milvus Index Hygiene | 6 | M19 | 修复 Milvus 实验链路的索引生命周期、去重和版本口径，并先校准 eval 的 MySQL ground truth，保证 Qwen embedding / Milvus A/B 结果可信 | MySQL ground truth audit、Milvus collection reset/upsert、run 内 retriever 复用、schema_docs_hash、diagnostic 复测、`.agent_work/temp/m20-notes.md` |
 | M21 Schema Retrieval Fusion / Context Repair | 7 | M20 | 基于 clean Milvus、Qwen LLM diagnostic 和 retrieval-only benchmark 的证据，修复 schema_context 最大失败簇，让 vector 语义召回能进入最终上下文 | retrieval-only baseline、fusion / rerank 对比、relation/metric 覆盖增强方案、diagnostic 复测、`.agent_work/temp/m21-notes.md` |
+| M22 Eval Contract / Semantic Output Stabilization | 8 | M21 | 分离 Context / Output / Result / Manual 契约，暴露 QueryPlan→SQL 的排序、limit 等真实缺口 | 窄 SQL Plan Contract、结构化语义拒绝、trace 合同证据、194-doc 历史对照 |
+| M23 Eval / Semantic / Database Baseline Hygiene | 9 | M22 | 固化数据库语义、reference 与 oracle 边界，形成 195-doc 新合同 | 结果校验 case、异常专项、MySQL/SQLite 审计、schema docs hash 门禁 |
+| M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity | 10 | M23 新合同基线 | 以 M23 的 195-doc / 新 case-scoring 合同为固定基线，消除 SQL 计划合同的格式误拦，并让 QueryPlan 已声明的排序、limit 和输出投影可验证地保真 | 只读语义比较 module、合同/输出证据、分层回归测试、M23 新合同下的重复 A/B |
 
 ## 模块实施明细
 
@@ -1266,6 +1253,60 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 
 ---
 
+## M24：SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity
+
+**定位**：M24 是独立于 M23 的 pipeline 可靠性模块。M23 负责把数据库事实、reference、case 和 scorer 的地基校准；M24 在这块地基上解决“正确 SQL 被字符串合同误拦”与“QueryPlan 已说明但 SQL 丢失排序、limit 或投影”两类问题。它不以提高总分为目标，更不把生成/合同问题伪装成 retrieval 优化。
+
+> 通俗说：M23 先保证试卷和标准答案可信；M24 再修正自动阅卷能否认出 `c.channel_name` 与 `channels.channel_name` 是同一件事，同时检查学生有没有漏答“前 10 条”“按什么排序”“输出哪些列”。
+
+### M24 前置事实与边界（2026-08-06）
+
+1. M22 trace 已确认当前 SQL Plan Contract 是 `normalized_string_contains`。它会把下列 SQL 等价形式误判为“漏排序”：表别名（`c.channel_name` vs `channels.channel_name`）、反引号（`` `gmv` ``）、限定名省略（`SUM(actual_amount)` vs `SUM(orders_wide.actual_amount)`）和用 SELECT 输出别名排序（`used_order_count DESC` vs `COUNT(DISTINCT orders.id) DESC`）。这些属于合同误拦，不是 retrieval miss。
+2. M23 新合同的本地首次全量基线为 Qwen `qwen3.7-plus` + `inmemory/deterministic` + weighted，195 docs / hash `ce04fe4f...`，`23/32`（自动 `20/27`）。其 9 个自动失败全部已有 trace 证据落在 QueryPlan→SQL：缺 `ORDER BY`、丢 `LIMIT 10`、输出列超量，或 query-plan / SQL generation error；检索层零失败。
+3. 紧随其后的 Milvus + DashScope Qwen embedding 单次对照使用相同 195-doc hash、1024 维、run-scoped clean collection、weighted、32 条 diagnostic 与 SQLite oracle，结果 `21/32`。两组共同失败 `db_simple_001/002/003`、`db_core_002`、`db_join_003`；embedding 单次额外失败主要是 `sql_plan_contract_failed`、输出别名/列契约和严格 table contract。它**支持优先修合同与生成保真**，但每组仅一次真实 LLM run，不能把 `23→21` 定性为 embedding 退化，也不改变默认 retrieval。
+4. 归因纪律保持不变：只有目标表/字段没有进入 `schema_context`，才可归因 retrieval；若 Context 已有而 QueryPlan/SQL 未采用，归因 query-plan / SQL generation；若 SQL 语义等价却被拒，归因 contract/scorer。
+
+### 目标与深模块设计
+
+新增一个深模块，暂称 `SQLPlanFidelityContract`：调用方只传入已验证的 `QueryPlanStep` 和候选只读 SQL，得到统一的 `passed / failed` 与可读证据；别名解析、反引号处理、限定名解析、输出别名回溯和失败分类都隐藏在 module 内部。它的 interface 必须同时成为 pipeline 与测试的唯一 seam，避免 `generator.py`、`pipeline.py` 和 scorer 各自维护一套“什么算等价”的局部规则。
+
+该 module 只做**验证与证据归一化**，不改写 LLM SQL、不补写排序/limit、不放宽 SQL Guard。SQL Guard 仍先检查只读与安全；不能解析或存在歧义的候选 SQL 维持保守失败并留下证据。
+
+### 最小执行内容
+
+1. **替换窄字符串比较，保持窄合同范围**
+   - 复用项目已有 `sqlglot` AST 能力，将候选 SQL 与 QueryPlan 的 `order_by` / `limit` 解析为可比较的规范形式。
+   - 支持已由 M22/M23 trace 证明的等价形式：表别名与原表名映射、标识符反引号、唯一可解析的限定名省略，以及 `ORDER BY` 引用 SELECT 输出别名。
+   - 仍严格比较排序方向、排序项顺序和 limit；不把 `ASC` 当 `DESC`，不因为 SQL 有额外排序项而静默忽略计划项，也不将不可证明等价的表达式放行。
+2. **把“SQL 合同”与“输出合同”拆开记录**
+   - SQL Plan Contract 只判断已声明的 `order_by` / `limit` 是否保留。
+   - QueryPlan→SQL Fidelity 另记录表、字段/表达式和 `output_columns` 的保真情况，区分“漏投影”“额外投影”“别名等价”“大小写/序列化差异”。
+   - 修正 triage 的归因：最终 `body.columns` 或 `result_match` 的失败不得再标为 `schema_context`；Context 证据与最终输出证据分别保留。
+3. **以 M23 失败簇建立最小回归集**
+   - 误拦回归：`db_core_004`、`db_plan_001`、`db_prompt_002`、`db_trace_002`、SCD 手工题的别名/限定名形式。
+   - 真漏失回归：`db_simple_001` 必须保留稳定排序、`db_simple_002` 必须保留 `LIMIT 10`、`db_simple_003` 必须不超出计划输出列。
+   - 生成保真诊断：`db_core_002`、`db_multi_001/002`、`db_hard_001`、`db_join_003`；先由 trace 判断是 QueryPlan 未表达、SQL 未采用，还是 case/scorer 需要人工确认。
+4. **合同修复后再做受控实验**
+   - 先完成 deterministic unit / pipeline regression，不用真实 LLM 分数证明逻辑正确。
+   - 再固定 M23 的 195-doc hash、32 条 diagnostic、Qwen `qwen3.7-plus`、weighted、SQLite deterministic oracle、LangFuse off 与同一代理设置，分别运行 local 与 clean Milvus/Qwen embedding。
+   - 每组至少 3 次，记录每 case 的通过次数、failure stage、Context 是否含目标 schema、合同误拦数量和自动能力分的中位数/范围；不要仅凭单次 `23/32 vs 21/32` 改默认 embedding 或 retrieval backend。
+
+### 验收门槛
+
+- 已证实的别名、反引号、限定名和输出别名等价 SQL 不再被 SQL Plan Contract 拦截；每个放行都有 AST 规范化证据。
+- 真正丢失的排序、limit 或计划输出投影仍被阻断或明确标为 QueryPlan→SQL fidelity failure，不能因“放宽合同”而静默通过。
+- 新 trace 同时记录计划表达、SQL 观察表达、规范化表达、等价判定和无法判定原因；报告可以区分 retrieval、query_plan、sql_generation、contract/scorer。
+- M23 的 local / embedding 复测只在固定合同下解释；若目标 schema 已在 Context，报告不得把失败计入 retrieval。
+- focused tests 覆盖纯比较、pipeline blocked path、输出契约与 triage 归因；全量 pytest 不回归。默认模型、embedding、Milvus、fusion、case、oracle 与数据库事实均不因本模块自动切换。
+
+### 非目标与决策门
+
+- 不在 M24 引入 reranker、调整 top_k/context budget、切 RRF 或重写 schema docs；这些是独立 retrieval 假设，必须等合同噪音清除后的重复实验再讨论。
+- 不自动宽松接受所有额外输出列。是否允许额外**非敏感**列属于 API / eval 输出语义选择：先以 case 契约和安全策略为准，明确后才实施。
+- 不为通过 SQL Plan Contract 自动修 SQL；模型真正漏掉的排序、limit、表或字段仍应作为生成缺口保留。
+
+---
+
 ## 与独立评测项目（EvalBench）的关系
 
 Phase 3B 是 EvalBench 的**前置探路阶段**，但不是 EvalBench 本身。最通俗的分工：
@@ -1443,6 +1484,17 @@ Phase 3B 完成后，后续阶段的受益：
 
 ## 修订记录
 
+### v6.6（2026-08-06）—— M24 SQL 计划语义等价与生成保真
+
+依据：M22 C1/C2 trace 已证明字符串 SQL Plan Contract 会误拦别名、反引号、限定名和等价 ORDER BY；M23 新合同首次 local / Milvus-Qwen embedding 对照为 `23/32` 与 `21/32`，失败仍主要集中在 SQL 合同、输出投影和生成链路，不能安全归因 embedding。
+
+| 改动 | 说明 |
+|------|------|
+| 新增 M24 | 将 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity 设为独立 pipeline 可靠性模块，不与已完成基线治理的 M23 混写。 |
+| 设计 seam | 规划单一 `SQLPlanFidelityContract` interface：调用方输入 QueryPlanStep 与候选 SQL，内部集中处理 AST 规范化和证据；不在多个 caller 复制字符串规则。 |
+| 保持安全边界 | 只读比较、不改写 SQL；排序方向、顺序、limit 与不可判定表达式继续保守处理，SQL Guard 保持前置。 |
+| 纳入新 A/B 事实 | M23 两组仅各一次，故只用来确定“先清合同噪音”的优先级；合同修复后才以 195-doc 固定条件执行每组至少 3 次的 local / embedding 对照。 |
+
 ### v6.5（2026-08-03）—— M21 收口与 Qwen-plus embedding controlled A/B
 
 依据：用户确认在 M21 内补做一次固定 Qwen-plus 的本地 deterministic vs clean Milvus/Qwen embedding 对照，以排除 embedding 链路的基本隐患后再进入 M22。
@@ -1549,7 +1601,7 @@ Phase 3B 完成后，后续阶段的受益：
 | 收紧 smoke 与 SDK 基线说明 | Step 0 的临时 smoke 不依赖 DataPilot，放 `.agent_work/temp/`；以已 smoke 通过的 `langfuse==4.14.1` 作为排查基线 |
 | 修正伪代码和评分器边界 | TraceRouter 捕获异常时记录 warning；安全类 case 由 `safety_compliance` 评分，`sql_success` 返回 skipped |
 | 清理失效链接 | v2.1 修订记录中的空锚点链接改为纯文本 |
-| 登记本会话已完成的 Cloud smoke 事实 | 前置状态写明 `.env` 已有三项 LangFuse Cloud 配置，且已在 JP Cloud UI 看到 `datapilot-langfuse-cloud-smoke-20260728T083247Z` / `fake-sql-pipeline-step`；Step 0 改为复跑并正式记录，不重复要求用户生成 key |
+| 登记本会话已完成的 Cloud smoke 事实 | `.env` 已有三项 LangFuse Cloud 配置，且已在 JP Cloud UI 看到 `datapilot-langfuse-cloud-smoke-20260728T083247Z` / `fake-sql-pipeline-step`；Step 0 改为复跑并正式记录，不重复要求用户生成 key |
 
 ### v4（2026-07-28）—— 项目边界收紧
 

@@ -13,6 +13,19 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验] M23 新合同 32 条全量 diagnostic 首跑（2026-08-06）
+
+- 配置：Qwen `qwen3.7-plus` + `new_text2sql` + local `inmemory + deterministic + weighted`、32 条 diagnostic、195-doc corpus / hash `ce04fe4f...`、SQLite deterministic oracle、LangFuse off、代理。
+- 结果：total `23/32`；automated `20/27`；manual_or_diagnostic `3/5`（review 3）。这是 M23 新合同下第一个 32 条全量基线；M22 194-doc 的 24~28/32 不可直接比较。
+- 失败结构（10 条 failed_or_review）：
+  - 3 条 result_contract（输出契约不保真）：`db_simple_001` 缺 ORDER BY（"前 10"含义不定，首行不匹配）、`db_simple_002` 丢 LIMIT 10（返回 6681 行 vs expected 10）、`db_simple_003` 列超量（输出 coupons 全 10 列 vs expected 3 列）。trace 确认 QueryPlan 有排序 / 限制意图，是 QueryPlan→SQL 生成保真问题，直接复现 M22 活跃坑「SQL generation 可能丢弃 order_by/limit」。
+  - 6 条生成 / 计划失败（SQL 为空被拦）：`db_core_002`、`db_multi_001`、`db_trace_002`（sql_plan_contract_failed）、`db_multi_002`、`db_hard_001`、`db_join_003`（llm_generation_error）。其中 `db_core_002`、`db_join_003` 与 M23-E02 异常专项失败点重合，属稳定失败点。
+  - 1 条人工待核：`db_hard_003`（SCD 窗口平均售价，SQL 已正确生成）。
+- 亮点：安全 4/4 全拦（sql_guard 2 + plan_validation 2）；M23 收口口径生效（`db_core_004` 各渠道订单量 COUNT DISTINCT + 排序、`db_join_001` 渠道退款率、`db_schema_003` 宽表题均通过）；检索层零失败（schema_retrieval 32/32 success，table_hit / column_recall 全过）。
+- 结论：9 个自动失败全部落在生成 / 计划链路（6 生成失败 + 3 契约不保真），与 M22 路线判断一致；下一步先查 QueryPlan→SQL 保真缺口（排序 / limit / 列契约），不归因 retrieval。
+- 验证快照：报告 `eval/reports/m23-qwen-local-weighted-diagnostic-report.md`、triage `eval/reports/m23-qwen-local-weighted-diagnostic-triage.json`、traces `eval/traces/m23-qwen-local-weighted-diagnostic-traces.jsonl`。
+- 遗留/后续：Milvus + Qwen embedding 同合同端到端对比待跑（M23 下一条）；跑完才能判断 embedding 是否在新合同下带来可归因提分。
+
 ### [模块任务] M23 Eval / Semantic / Database Baseline Hygiene（2026-08-05）
 
 - 改动范围：`metrics.yaml`、订单/退款 schema descriptions、`relations.yaml`、seed 固定事实、formal / challenge cases、`result_match` 日期归一化及 focused tests；完整素材见 `docs/notes/m23-notes.md`。
@@ -21,6 +34,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 验证：20 条 reference SQL 在当前 MySQL 与 deterministic SQLite 均可执行、逐条行数一致；focused `42 passed, 1 warning`；全量 pytest `152 passed, 1 warning`。warning 均为既有 Starlette/httpx `TestClient` deprecation。
 - Milvus 复用补丁：M23 语义文本改变后发现，旧实现只校验 row_count / dimension，194 条旧向量会被错误映射为 194 条新文档。现将 `schema_docs_hash` 写入 collection schema description，复用时强制校验；随后新增 `net_refund_amount` 使当前 corpus 进一步变为 195 条 / `ce04fe4f...`，缺少标记或 hash 不同的 M20/M22 collection 必须新建或显式 reset。
 - 异常专项：将异常彩蛋规则从 M22 实验卡片提升为 `eval-baselines.md` §2.5 长期章节；新增 `net_refund_amount` 指标和 `db_anomaly_001/002/003`，并由 `database-exception-suite.yaml` 引用既有 case，避免 formal / challenge / diagnostic 的重复 YAML。专项为 6 条自动 + 1 条人工素材；新增三条 reference SQL 已在 SQLite 与当前 MySQL 执行成功，相关 focused `32 passed, 1 warning`。
+- 真实 LLM 快照（2026-08-06）：首次无代理运行在所有 case 的 QueryPlan 阶段报 `WinError 10013`，作为网络失败不记分；配置本地代理后，Qwen `qwen3.7-plus` + `new_text2sql` + local deterministic / weighted 完成 7 条专项，结果 `1/7`（自动 `1/6`、人工 `0/1 review`）。唯一自动通过为 `db_anomaly_001`，证明 signed completed refund reference 能进入端到端链路；其余失败分别显示成交订单缺 limit、coupon 输出列不符、退款率结果不符、退款渠道关联缺 `orders/channels`、对账输出列缺失，`db_join_003` 为 LLM generation error。单次诊断不切默认。报告/trace/triage 位于 `.codex/temp_work/m23-exception-suite-retry-20260806_145019-*`。
 - 遗留/后续：SQLite 仍是离线 oracle，MySQL 仍仅做只读审计；外部单号、负数退款和订单头/明细金额对账尚无独立自动 case。M22 真实 LLM 总分属于旧合同历史快照，下一轮 retrieval 假设必须从 M23 新合同重新建基线。
 
 ### [评测审计] M22 数据库异常彩蛋覆盖边界（2026-08-05）

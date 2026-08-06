@@ -6,8 +6,6 @@
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
 - 当前模块：M23 Eval / Semantic / Database Baseline Hygiene（实现完成，待验收）
-- 下一模块：M23 后续 retrieval 假设（必须从 M23 新 case / scorer 合同重新建基线；不复用 M21 的 193-doc 对照或 M22 旧总分）
-- 当前模块验收：M23 未验收（待 accept-module）
 - 上一模块验收：M22 未验收（待 `accept-module`）
 - 阻塞项：无
 - 更新时间：2026-08-05
@@ -40,6 +38,8 @@
 | 日期 | 事实 |
 |---|---|
 | 2026-08-05 | M23 已收口非 pipeline 基线：商品退款率改为成交订单内“明细优先、整单退款回退 `refunds.product_id`”，`order_count` 统一为 `COUNT(DISTINCT orders.id)`；challenge 12 条、formal 8 条自动 SQL case 使用 `result_match` / `expected_value`，并新增 6 自动 + 1 人工的异常专项。原 20 条与新增 3 条 reference SQL 经 MySQL 与 SQLite 双端审计均可执行。当前 195 条 schema docs hash 为 `ce04fe4f...`；Milvus 复用强制校验 collection schema description 中的同一 hash。此前 focused `42 passed`、全量 pytest `152 passed, 1 warning`。 |
+| 2026-08-06 | M23 新合同 32 条全量 diagnostic 首跑：Qwen `qwen3.7-plus` + local deterministic / weighted 为 `23/32`（自动 `20/27`、人工 `3/5`）。失败全部落在生成/计划链路：3 条输出契约不保真（缺 ORDER BY、丢 LIMIT 10 返 6681 行、列超量）+ 6 条生成失败（`db_core_002`、`db_multi_001/002`、`db_hard_001`、`db_join_003`、`db_trace_002`）+ 1 人工（`db_hard_003`）；检索层零失败。此为新合同首条全量基线（`M23-E03`），Milvus + Qwen embedding 同合同对比待跑。 |
+| 2026-08-06 | M23 异常专项首次真实 LLM run：Qwen `qwen3.7-plus` + local deterministic / weighted 为 `1/7`（自动 `1/6`、人工 `0/1 review`）。`db_anomaly_001` 的 completed / `processed_at` / 带符号净退款金额通过；其余暴露 limit、输出列、退款率、真实外键和对账输出缺口。无代理启动的 `WinError 10013` 不计入；本次代理 run 仅为单次诊断快照，不切默认。 |
 | 2026-08-02 | M19 failure triage 已完成：`eval/run_eval.py` 默认报告新增 `Failure Triage Summary`，支持 `--triage-json` 和 `--compare-triage-left/right/report`；LangFuse 可选回写 `triage:*` scores。 |
 | 2026-08-02 | M19 代码验证：focused tests、M16-M19 focused tests、全量 pytest 均已通过；全量快照为 `121 passed, 2 skipped`。 |
 | 2026-08-02 | M19 LangFuse Cloud smoke：代理下 `langfuse_triage_scores=ok:24`；说明 triage score 可写回 Cloud。 |
