@@ -287,3 +287,69 @@ M23 12 个独立自动样本的投影结果：
 - 合计本轮最终有效回归：`109 passed`。另一次组合首跑因旧 pytest 临时目录被 Windows 占用产生 19 个 setup error，并发现 1 个测试夹具把 `COUNT(*)` 错绑定成 `COUNT(orders.id)`；夹具修正后改用独立 `--basetemp=.agent_work/temp/m24-pytest-20260806-b`，上述 77 项全绿。未删除被占用目录。
 - `git diff --check` 通过；环境未安装 ruff（`No module named ruff`），未临时下载依赖。
 - 按用户边界，未运行任何完整 formal / challenge / diagnostic，也未运行真实 LLM 或 Milvus；后续能力数字必须由用户手工评测产生，不能用本地单测替代。
+
+## M24 真实评测尝试（2026-08-06，外部账户阻塞）
+
+- focused 回归门禁由当前会话复跑通过：`70 passed, 1 warning`；warning 仍为既有 Starlette/httpx 弃用提示。
+- 第一次 Local L1 diagnostic 运行 15 分钟后超时，只落下 25 条 trace，没有完整 report/triage，因此不计入样本。
+- 使用更长超时重跑完整 Local L1，32 条 trace/report/triage 均生成，但结果不能作为能力样本：除 4 条预期安全/计划阻断外，大多数 case 的 `QueryPlan` 请求都收到 DashScope/Qwen HTTP `400 Arrearage`，错误信息为“Access denied, please make sure your account is in good standing”，即账户欠费/状态不可用。
+- 该次报告表面为 `7/32`，其中安全拒绝题通过；它反映的是外部模型账户不可用，不是 M24 合同、Local 检索或 embedding 能力。未启动 Milvus M1–M3，避免重复制造同一外部失败。
+- 产物：`eval/reports/m24-ab-l1r-local-weighted-diagnostic-report.md`、对应 triage，以及 `eval/traces/m24-ab-l1r-local-weighted-diagnostic-traces.jsonl`；首次超时的部分 trace 另保留为 `m24-ab-l1-local-weighted-diagnostic-traces.jsonl`。
+- 后续动作：账户恢复且 Qwen API health check 成功后，再按 `L1 → M1 → L2 → M2 → L3 → M3` 交错执行；在此之前不得使用 `7/32`、`20/27` 等数字解释 M24 或 embedding。
+
+## M24 受控 A/B 完成快照（2026-08-06）
+
+- Qwen 账户恢复后 health check 返回 `{"status":"ok"}`，随后完成 6 次有效 diagnostic；之前的 `Arrearage` 失败运行仍保留但不计入样本。
+- 交错结果：Local `24/32, 24/32, 25/32`，自动能力 `21/27, 21/27, 22/27`；Milvus/Qwen embedding `25/32, 25/32, 25/32`，自动能力稳定 `22/27`。两组 manual/diagnostic 均为 `3/5`。
+- Milvus 使用唯一 collection `datapilot_schema_docs_m24_qwen_weighted_20260806_194900`；M1/M2/M3 均 `milvus_final_row_count=195`，schema hash 与 1024 维配置一致，未发现重复灌入或 corpus mismatch。
+- 逐 case 矩阵已固化到 `eval/reports/m24-ab-execution-manifest.md`。稳定通过的历史 SQL alias/限定名合同样本没有出现新的 `semantic_false_block`；M1 的 `db_core_002` 明确暴露了计划 `orders.id` 与候选 `order_items.id` 的真实表达式保真错误。
+- `db_simple_002/003` 六次均捕获额外投影；`db_simple_001` 六次均结果首行错误；`db_core_002`、`db_multi_002`、`db_join_003`、`db_hard_001` 等稳定失败仍主要是生成/计划、结果语义或人工语义问题。六次 135 个可执行 SQL trace 的 pipeline `output_contract` span 均成功，说明部分投影问题发生在 QueryPlan 已声明过宽之后的 case scorer 合同。
+- 结论边界：Milvus 自动分在这三次样本中稳定高于 Local 一分，但这不是 embedding 因果证明；当前更可靠的 M24 结论是 AST 合同误拦已被压住，剩余主要工作转为 QueryPlan 输出投影、真实生成保真和少数结果语义失败。默认 backend/embedding 不因该 A/B 自动切换。
+
+## M24 收尾素材（finish-module，2026-08-06）
+
+### 模块名称与改动文件清单
+
+模块：**M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity**。
+
+- 深 module 与 pipeline：`engine/nl2sql/fidelity_contract.py`、`generator.py`、`pipeline.py`、`planner.py`、`prompt.py`。
+- eval 与归因：`eval/scorers/rule_scorers.py`、`eval/triage.py`。
+- 测试：`tests/test_m24_sql_plan_fidelity.py`、`test_phase3a_planner.py`、`test_phase3a_pipeline.py`、`test_m17_scorers.py`、`test_m19_failure_triage.py`、`test_m22_eval_contract.py`。
+- 计划与状态文档：`docs/phase3b-langfuse-plan-v6.md`、本 notes、`docs/state/AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md`、`eval-baselines.md`、`schema-retrieval-milvus-embedding.md`。
+- 评测产物：`eval/reports/m24-ab-execution-manifest.md` 与 L1/L2/L3、M1/M2/M3 六组有效 report/triage；`m24-ab-l1r-*` 是账户欠费失败证据，只留作外部故障记录，不计入能力样本。trace 按项目规则保存在 `eval/traces/`。
+
+### 关键决策与取舍
+
+1. **字符串包含 vs AST 等价**：字符串方案简单但已经误拦表 alias、反引号、唯一限定名省略和 SELECT alias；采用独立 SQLGlot AST module。风险是 AST scope 扩张成 SQL 优化器，因此首版只证明有历史证据的同一顶层 SELECT 等价，其他情况统一 `indeterminate` 并阻断。
+2. **候选 SQL 自证 vs QueryPlan 显式绑定**：若用候选 SQL 的 alias 表达式反解计划，错误 SQL 也能自证。最终新增 `output_expressions`，由 QueryPlan 明示聚合 alias 的可信表达式；缺绑定不猜。
+3. **投影政策**：备选为“精确集合但顺序不敏感”或“允许非敏感 extra”。用户确认采用**精确集合 + 显式 alias 白名单 + 展示顺序稳定**。代价是计划必须更准确，收益是 API 表格、chart 和 eval 的输出合同一致，辅助列不会静默泄露到用户结果。
+4. **安全与语义顺序**：SQL policy 预检先于 fidelity；SQL Tool 执行时再做一次 Guard。合同 pass 只说明 SQL 忠实于计划，不代表答案语义正确。
+5. **方言与 oracle**：MySQL 是生成/解析合同；SQLite 只做确定性结果 oracle，不要求候选 SQL 同时满足两种 dialect。
+6. **检索默认值**：三次 Milvus 自动分均比对应 Local 高约 1 分，但样本仍混有 LLM 波动，不能把单次或小样本总分当作 embedding 因果证据；保持 `inmemory + deterministic + weighted` 默认不变。
+
+### 注释扫描小结
+
+- 按文件/类/函数覆盖、设计深度、复杂流程可读性、注释形式四轮扫描了 M24 的 7 个生产代码文件；新增/修改的核心接口均有中文 docstring，复杂路径有步骤分隔，关键安全与保守边界使用 `★`。
+- 收尾补强三处：公开 fidelity interface 标记为模块主角；解释 projection 为什么用 tuple/Counter 而不是 set；解释物理排序列与聚合 alias 的绑定差别，以及 scorer alias 白名单不放宽集合/顺序。
+- 测试函数命名已能直接表达场景，不重复添加逐函数注释；简单 `__init__` 等样板方法沿用项目豁免，不堆砌无信息量注释。
+
+### 最终验证快照
+
+- M24 focused：`70 passed, 1 warning in 134.77s`。
+- 全仓 pytest：`176 passed, 1 warning in 462.55s`。
+- warning 均为既有 `StarletteDeprecationWarning`（Starlette `TestClient` 使用 httpx 的旧兼容入口），与 M24 无关。
+- 全仓首轮曾因 300 秒工具上限在约 58% 处终止，终止前无失败；随后换独立 `--basetemp=.agent_work/temp/m24-finish-full-20260806d` 完整重跑并全绿。另有两次 1 秒启动探针被工具主动终止，不计作测试结果。
+- 未运行 Alembic / seed（M24 不改 ORM 或数据）；收尾阶段也未重复运行真实 LLM formal/challenge/diagnostic。
+
+### 参考资料
+
+- 项目事实源：`docs/state/AI_CONTEXT.md`、`runbook.md`、`eval-baselines.md`、`AI_CONTEXT_CHANGELOG.md`，以及 M22/M23 notes 与历史 trace/report。
+- 设计依据：`docs/phase3b-langfuse-plan-v6.md` M24/v6.7；实现复用项目既有 SQLGlot、SchemaGraph、SQL Guard、trace 与 deterministic SQLite oracle，没有复制外部项目代码。
+- 方法论：实现阶段使用 deep-module seam 思路，把复杂等价判断收进单一纯函数接口；没有为未来未出现的 CTE/多 scope 需求预建通用 SQL 优化器。
+
+### 遗留与后续
+
+- M24 已完成开发、真实受控诊断和文档收尾，但尚未执行 `accept-module`，状态应为“未验收”。
+- 当前稳定问题已从字符串误拦转向 QueryPlan 过宽投影、生成表达式不忠实和结果语义错误；后续应按逐 case 证据修 QueryPlan/prompt，不扩大 AST 放行边界。
+- CTE/derived scope、ordinal ORDER BY、参数化或 offset LIMIT 继续保守阻断；只有真实业务样本出现并补齐正反例后才扩展。
+- Milvus 是否切默认必须另做能隔离 LLM 波动的 retrieval/embedding 证据，不使用本轮一分差直接决策。

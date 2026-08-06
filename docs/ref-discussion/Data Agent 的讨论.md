@@ -1,6 +1,6 @@
 # 网上关于对 Data Agent 的讨论
 
-> **讨论素材**：网上技术讨论原文（未筛选、未整理，保持原文）。制定计划 / 面试话题参考时可翻阅；用到哪条再当场摘录到对应 notes / plan，观点仅代表原作者、不要照搬。排名不分先后。
+> **讨论素材**：网上技术讨论原文（未筛选、未整理，保持原文）。制定计划 / 面试话题参考时可翻阅；用到哪条再当场摘录到对应 notes / plan，观点仅代表原作者、不要照搬。排名不分先后，需完整阅读。
 
 **1. 真实取数场景**
 
@@ -199,4 +199,22 @@ B：对，所以要在 schema/business knowledge 上外挂 memory，挂了也确
 基于 LangGraph 构建 ReAct Agent，统一接入本地与 MCP 工具，通过结果校验、Replan 和调用预算控制无效循环。
 构建面向 Northwind 8 张业务表的 HybridRAG 与 NL2SQL 链路，使用 SQLGlot 校验查询安全；在20条用例中取得 Recall@5 91.67%、MRR 0.8125，平均延迟4.72S。
 ```
+
+**17. 某人的简历** 
+
+```
+DataForge —— Multi-Agent 智能数据分析系统
+
+技术栈： Python、FastAPI、LangGraph、LangChain,、Vue3、ChromaDB、SQLite、Pandas、DeepSeek/Qwen、LangSmith
+
+项目描述：面向数据分析场景的 Multi-Agent 编排系统，用户通过自然语言驱动 7 个专业 Agent 在 LangGraph 有状态图中协同完成从任务规划、SQL 执行、图表生成到分析报告的全流程自动化。
+
+核心贡献：
+1. Multi-Agent 有向图编排：基于 LangGraph StateGraph 构建 7 节点流水线（Planner-→SQL-→Chart→Report→ 双辩论 →Validator），通过条件路由与状态 Schema 管理。实现任务拆解、执行与校验的全流程调度。
+2. 对抗辩论+裁决验证：引入 Optimistic/Pessimistic 双 Agent 交叉辩论+三维量化评分，由 Validator 裁决（驳回 ≤3 次自动重试），有效抑制 LLM 幻觉，结论可信度从 72%提升至 91%。
+3. 双模型分层推理与高可用降级：quick_think（执行型任务）与 deep_think（决策型任务）分离调度，LLM 成本降低 40%；四级 Embedding 降级链保障服务连续性，可用性 100%。
+4. 流式交互与工程保障：FastAPl+ SSE 逐 Token 流式推送，LangSmith, 全链路追踪，API Key 鉴权+限流+SQL 白名单。独立完成 60+文件落地，15+实际任务上线，分析耗时由小时级压缩至分钟级。项目成果：独立交付 60+文件，完成 15+真实数据分析任务(含 5000+行数据集)，自动生成带交互图表的结构化报告，分析耗时由小时级压缩至分钟级。
+```
+
+
 

@@ -183,12 +183,14 @@ def _check_join_scope(*, step: QueryPlanStep, schema_graph: SchemaGraph, result:
 
 
 def _check_output_bindings(*, step: QueryPlanStep, schema_graph: SchemaGraph, result: PlanValidationResult) -> None:
-    """校验输出 alias 绑定来自计划本身，避免后续让候选 SQL 反过来解释计划。"""
+    """★ 校验输出 alias 绑定来自计划本身，避免候选 SQL 反过来解释计划。"""
 
     if step.step_type == "sql_query" and not step.output_columns:
         _append_issue(result, "invalid_query_plan", f"{step.step_id} 缺少精确输出列 output_columns。")
         return
 
+    # 物理列可以直接作为 ORDER BY 名称；只有计划新造的聚合 alias 才必须显式绑定。
+    # 例如 orders.created_at 不需要绑定，而 order_count 必须说明它等于哪个聚合表达式。
     output_names = {value.rsplit(".", 1)[-1] for value in step.output_columns}
     physical_names = {column for columns in schema_graph.fields.values() for column in columns}
     for alias in step.output_expressions:

@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity（开工前置关卡；尚未进入 pipeline 实现）
-- 上一模块验收：M22 未验收（待 `accept-module`）
+- 当前模块：M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity（开发、6 次受控 diagnostic 与收尾文档已完成）
+- 上一模块验收：M24 未验收（待 `accept-module`）
 - 阻塞项：无
 - 更新时间：2026-08-06
 
@@ -41,6 +41,8 @@
 | 2026-08-06 | M23 新合同 local 首跑：Qwen `qwen3.7-plus` + local deterministic / weighted 为 `23/32`（自动 `20/27`、人工/诊断 `3/5`）。硬失败共 9 条，其中自动 7 条、人工/诊断 2 条；另有 `db_hard_003` 只要求人工 review，不属于第 10 条硬失败。自动失败包括 3 条结果/输出不保真、2 条生成/计划错误和 2 条字符串 SQL plan contract 误拦；目标 schema 均已进入 Context。 |
 | 2026-08-06 | M23 同合同 Milvus 单次诊断已完成：Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted 为 `21/32`（自动同为 `20/27`、人工/诊断 `1/5`）；195 docs、hash `ce04fe4f...`、1024 维、final row count 195。local / Milvus 各仅一次，`23→21` 不能定性为 embedding 退化，也不改变默认 retrieval。 |
 | 2026-08-06 | M23 异常专项首次真实 LLM run：Qwen `qwen3.7-plus` + local deterministic / weighted 为 `1/7`（自动 `1/6`、人工 `0/1 review`）。`db_anomaly_001` 的 completed / `processed_at` / 带符号净退款金额通过；其余暴露 limit、输出列、退款率、真实外键和对账输出缺口。无代理启动的 `WinError 10013` 不计入；本次代理 run 仅为单次诊断快照，不切默认。 |
+| 2026-08-06 | M24 代码完成后受控 A/B：Local `24,24,25/32`（自动 `21,21,22/27`），Milvus + DashScope/Qwen embedding `25,25,25/32`（自动稳定 `22/27`），两组 manual/diagnostic 均 `3/5`。Milvus 唯一 collection 三次均 195 rows、195-doc hash 正确，M2/M3 inserted=0。该三次样本显示合同误拦历史正例稳定通过，但不单独证明 embedding 因果收益；详见 `eval/reports/m24-ab-execution-manifest.md`。 |
+| 2026-08-06 | M24 收尾验证：focused `70 passed, 1 warning`；全仓 `176 passed, 1 warning`。warning 为既有 Starlette/httpx deprecation。未重复运行外部 formal/challenge/diagnostic，未改默认 backend/embedding/fusion。 |
 | 2026-08-02 | M19 failure triage 已完成：`eval/run_eval.py` 默认报告新增 `Failure Triage Summary`，支持 `--triage-json` 和 `--compare-triage-left/right/report`；LangFuse 可选回写 `triage:*` scores。 |
 | 2026-08-02 | M19 代码验证：focused tests、M16-M19 focused tests、全量 pytest 均已通过；全量快照为 `121 passed, 2 skipped`。 |
 | 2026-08-02 | M19 LangFuse Cloud smoke：代理下 `langfuse_triage_scores=ok:24`；说明 triage score 可写回 Cloud。 |
@@ -67,6 +69,7 @@
 | 2026-08-05 | Qwen `qwen3.7-max` + 本地 deterministic + weighted 追加快照为 `26/32`；高于同条件 Qwen 3.8 的 `22/32`，但仍是单次证据，不改变默认模型。 |
 | 2026-08-05 | 用户确认将默认主模型切换为 Qwen `qwen3.7-plus`；检索仍为 `inmemory + deterministic + weighted`，不切 embedding、Milvus 或 RRF。 |
 | 2026-08-05 | 默认切换后的路线：优先观察 Qwen `qwen3.7-plus` 在 SQL Contract 别名/等价表达、QueryPlan→SQL 信息保真和延迟上的表现；DeepSeek `deepseek-v4-flash` 保留为显式回退对照。 |
+| 2026-08-06 | M24 A/B 后路线：AST SQL 合同没有出现新的 semantic false block；稳定失败转为 QueryPlan 输出投影、真实生成/计划表达式和结果语义问题。Milvus 自动能力三次均为 `22/27`，Local 为 `21–22/27`，差距不足以单独切换默认 embedding；默认仍保持 `inmemory + deterministic + weighted`。 |
 | 2026-08-04 | 默认模型、embedding、向量库和 weighted fusion 保持不变。`db_core_004` 等 SQL plan contract 失败先作为生成链路缺口复核，不预设为 retrieval 问题。 |
 | 2026-08-04 | 当前默认 diagnostic `25/32`（自动 `22/27`、人工/诊断 `3/5`）仅是 M22 新口径快照；M21 的 `21/32` 及 193-doc 实验只作历史证据。 |
 | 2026-08-04 | Eval / Trace / LangFuse 的功能说明见 `docs/eval-observability-guide.md`；历史实验和取舍见 changelog / eval-baselines，不在本仪表盘重复展开。 |
@@ -82,7 +85,7 @@
 | 2026-07-29 起，2026-08-02 仍有效 | LangFuse SDK 4.14.1 已无旧版 `client.trace()` builder | 按旧博客 / 旧草稿写 smoke 或 M16 backend 会直接 `AttributeError` | 使用 `start_observation(trace_context={"trace_id": uuid4().hex})` / `create_score(trace_id=...)` / `flush()`；细节见 `docs/notes/m15-notes.md` |
 | 2026-07-29 起，2026-08-02 仍有效 | Windows 裸连 LangFuse Cloud 偶发 `WinError 10013` | trace visibility 查询 / OTLP export 可能失败，但 score 写入和 JSONL 主链路可正常 | 真实 Cloud smoke 建议显式设置 `HTTP_PROXY` / `HTTPS_PROXY` 为 `http://127.0.0.1:7897`；脚本将 score write 和 trace visibility 分开显示 |
 | 2026-08-02 起，M20/M23 已加护栏 | 旧固定 Milvus collection `datapilot_schema_docs` 已被历史重复灌入污染；M23 还发现同数量但不同语义文本可绕过旧行数检查 | 旧 collection 的历史 A/B 结果不能直接作为 embedding 优劣结论 | 新 eval/smoke 使用唯一 collection 或 clean collection；`MilvusVectorIndex` 会拒绝行数、维度或 schema docs hash 不匹配（含缺少 hash 标记）的已有 collection |
-| 2026-08-04 起 | SQL generation 可能丢弃 QueryPlan 已明确的 `order_by/limit` | `db_simple_001`、`db_simple_002`、`db_core_004` 已被结构化拦截；需区分真实漏排序与等价表达误拦 | 窄 SQL plan contract 失败 trace 记录候选 SQL 摘要、计划/观察到的排序和 limit；不自动扩大为 AST 或通用列表排序策略 |
+| 2026-08-04 起，M24 已升级护栏 | QueryPlan 仍可能把输出投影声明过宽，或 SQL generation 生成与计划不一致的真实表达式 | AST fidelity 已消除历史表 alias/quoted identifier/唯一限定名省略/SELECT alias 误拦，并严格检查 order/limit/projection；但合同不能修正错误 QueryPlan，也不能把 contract pass 当答案正确 | 保持同一顶层 SELECT 的保守 AST 边界；依靠 `output_contract`、result scorer 和完整 trace 区分计划过宽、真实保真失败与结果语义错误，不为追分放宽 CTE/derived scope 等未知情况 |
 | 2026-08-05 起 | M23 自动 eval 仍未全覆盖数据库异常彩蛋 | 新退款率 case 已覆盖成交过滤和整单退款回退，但外部单号、负数退款、金额对账仍不能由当前自动分数证明 | 事实菜单保留在 `database-current-state.md`；后续新增异常 case 前先明确业务题面与自动判定方式 |
 
 ## 变更记录索引

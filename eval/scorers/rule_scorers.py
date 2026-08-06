@@ -473,13 +473,14 @@ def _score_expected_value(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
 
 
 def _score_result_match(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
-    """执行 expected_sql，并校验精确投影 / 展示顺序与行值结果。"""
+    """★ 执行 expected_sql，并校验精确投影 / 展示顺序与行值结果。"""
 
     if not case.expected_sql.strip():
         return _fail("rule:result_match", "result_match_expected_sql_empty", ["unexpected_error"])
     actual_columns = body.get("columns") or []
     if not isinstance(actual_columns, list):
         return _fail("rule:result_match", "result_match_actual_columns_invalid", ["unexpected_error"])
+    # alias 白名单只消除“同义列名”噪声，不放宽多列、少列或顺序变化。
     canonical_columns = _canonicalize_column_aliases(actual_columns, case.expected_column_aliases)
     if canonical_columns != list(case.expected_columns):
         return _fail(

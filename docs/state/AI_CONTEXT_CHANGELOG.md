@@ -13,6 +13,26 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity（2026-08-06）
+
+- **改动范围**：新增 `engine/nl2sql/fidelity_contract.py` 深 module，以 SQLGlot AST 比较已验证 QueryPlan 与候选 SQL；同步接入 planner/generator/pipeline、精确输出 scorer、`output_contract` trace/triage，并补齐 focused tests、M24 plan 与状态文档。完整文件清单和过程素材见 `docs/notes/m24-notes.md`。
+- **关键决策**：用户确认采用“精确投影 + 显式 alias 白名单 + 展示顺序稳定”。首版只证明同一顶层 SELECT 内有历史证据的表 alias、quoted identifier、唯一限定名省略和 SELECT alias；CTE/derived scope、歧义字段、ordinal ORDER BY、参数化或 offset LIMIT 返回 `indeterminate` 并保守阻断，不改写 SQL。
+- **可信绑定与安全边界**：QueryPlan 新增 `output_expressions`，由计划明示聚合 alias→expression，禁止候选 SQL 自证；SQL policy 预检先于 fidelity，SQL Tool 执行时再次 Guard。合同通过只证明计划保真，不等同答案正确。
+- **输出与归因**：SQL 执行后的真实 `body.columns` 必须与计划集合/顺序一致；自动 `result_match` 先按 case 明示 alias 白名单归一，再严格比较 expected columns。triage 将最终投影/table/column 合同归入独立 `output_contract`，不再用最终输出失败推断 retrieval/embedding。
+- **参考资料**：M22/M23 notes、历史 trace/report、M24/v6.7 计划、项目既有 SQLGlot/SchemaGraph/SQL Guard/trace/SQLite oracle；没有复制外部项目代码，也没有把 module 扩成通用 SQL optimizer。
+- **验证快照**：收尾 focused `70 passed, 1 warning`；全仓 `176 passed, 1 warning`。warning 为既有 Starlette/httpx deprecation。M24 不改 ORM/数据，未跑 Alembic/seed；收尾未重复真实 LLM eval。
+- **遗留/后续**：稳定问题已转为 QueryPlan 过宽投影、生成表达式不忠实和结果语义错误；只在出现真实正反例后扩展 AST scope。Milvus 三次自动分高约一分不足以证明 embedding 因果收益，默认仍为 `inmemory + deterministic + weighted`。M24 尚待 `accept-module` 验收。
+
+### [实验] M24 受控 Local vs Milvus/Qwen embedding diagnostic（2026-08-06）
+
+- 固定条件：Qwen `qwen3.7-plus`、weighted、32 条 diagnostic、SQLite deterministic oracle、LangFuse disabled、当前 195-doc corpus/hash；Local 使用 `inmemory + deterministic`，Milvus 使用 DashScope `qwen3.7-text-embedding`（1024 维）。
+- 按 `Local → Milvus → Local → Milvus → Local → Milvus` 交错完成 6 次有效 run：Local 总分 `24/24/25`，自动能力 `21/21/22/27`；Milvus 总分 `25/25/25`，自动能力 `22/22/22/27`；两组 manual/diagnostic 均 `3/5`。
+- Milvus collection `datapilot_schema_docs_m24_qwen_weighted_20260806_194900`：M1 首次写入 195，M2/M3 `inserted_document_count=0`，三次 final row count=195，schema hash 和维度均一致。
+- 合同观察：`db_core_004`、`db_plan_001`、`db_prompt_002` 等历史 alias/限定名正例六次稳定通过，没有新的 `semantic_false_block`。M1 `db_core_002` 明确记录计划 `COUNT(DISTINCT orders.id)` 与候选 `COUNT(DISTINCT order_items.id)` 的真实表达式不一致。
+- 稳定失败：`db_simple_001/002/003`、`db_core_002`、`db_hard_001/003`、`db_join_003`、`db_multi_002`。135 个可执行 SQL trace 的 pipeline `output_contract` span 均成功，说明部分投影问题来自 QueryPlan 本身声明过宽，随后由 case scorer 捕获。
+- 外部故障边界：最早 L1 在 25 条 trace 后超时；L1r 因 DashScope `400 Arrearage` 得到的 `7/32` 无效，只作账户故障证据。账户恢复并通过 health check 后的上述六次才计入样本。
+- 结论：Milvus 自动能力在三次样本中稳定高 1 分，但不是 embedding 因果证明，不切默认。完整矩阵见 `eval/reports/m24-ab-execution-manifest.md`，逐 case 证据见 `docs/notes/m24-notes.md`。
+
 ### [实验] M23 同合同 clean Milvus / Qwen embedding 单次诊断补登记（2026-08-06）
 
 - 配置：Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted；32 条 M23 diagnostic、195 docs/hash `ce04fe4f...`、1024 维、SQLite deterministic oracle、LangFuse off。collection 为 `datapilot_schema_docs_m23_qwen_plus_qwenemb_20260806_154117`，本轮 `None → inserted 195 → final 195`。

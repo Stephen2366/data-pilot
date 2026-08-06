@@ -93,7 +93,7 @@ def evaluate_sql_plan_fidelity(
     domain_schema: DomainSchema,
     dialect: str = "mysql",
 ) -> SQLPlanFidelityResult:
-    """只读比较 QueryPlan 与候选 SQL，并返回结构化判定与证据。
+    """★ 只读比较 QueryPlan 与候选 SQL，并返回结构化判定与证据。
 
     首版支持历史 trace 已证明需要的四类等价：表别名、quoted identifier、当前 SELECT
     scope 内唯一的限定名省略、同 scope SELECT 输出 alias。跨 derived scope 的字段解析、
@@ -404,6 +404,8 @@ def _select_output_names(select: exp.Select, *, dialect: str) -> tuple[tuple[str
 def _projection_issues(planned: tuple[str, ...], observed: tuple[str, ...]) -> list[FidelityIssue]:
     """精确区分 extra/missing/name 与纯展示顺序差异。"""
 
+    # ★ 这里故意不用 set：重复列和展示顺序都是 API 输出合同的一部分。
+    # Counter 只用于判断“是否仅顺序不同”，最终 passed 仍要求 tuple 完全一致。
     if planned == observed:
         return []
     if Counter(planned) == Counter(observed):

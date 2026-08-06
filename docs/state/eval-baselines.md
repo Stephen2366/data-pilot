@@ -12,7 +12,7 @@
 |---|---|---|
 | 默认主模型 | Qwen `qwen3.7-plus`；本次基于 M22 三次 C1 稳定性结果切换。 | `M22-E04` |
 | 默认检索 | `inmemory + deterministic + weighted`；Milvus、DashScope `qwen3.7-text-embedding`、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
-| 当前优化方向 | M23 新合同的 local / clean Milvus 单次诊断均已建立；M24 先清理 SQL 合同误拦、真实 order/limit 丢失和输出投影边界，再做重复交错 A/B。两组单次分数不能作为 embedding 结论。 | `M23-E03`、`M23-E04` |
+| 当前优化方向 | M24 已清理 SQL 合同误拦并完成三次/组交错 A/B；后续优先处理 QueryPlan 过宽投影、真实生成保真和结果语义问题。Milvus 自动分高约 1 分仍不能单独作为 embedding 因果或切换默认值的依据。 | `M24-E01` |
 | 已收口的假设 | DashScope `qwen3.7-text-embedding` 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
 | 不可作决策的证据 | 旧固定 Milvus collection 的重复灌入污染结果只保留作历史对照。 | `M20-E01` |
 
@@ -157,6 +157,19 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 
 - 结果：`26/32`，高于同条件 Qwen 3.8 的 `22/32`。
 - 这是单次追加快照，不纳入 C0-C3 三次重复矩阵，不改变默认模型。
+
+### M24-E01 — SQL Plan Fidelity 修复后 Local vs Milvus/Qwen 受控 A/B（2026-08-06）
+
+固定条件：Qwen `qwen3.7-plus`、weighted、32 条 diagnostic、SQLite deterministic oracle、LangFuse disabled、195-doc schema hash `ce04fe4f...`；Local 为 `inmemory + deterministic`，Milvus 为 clean collection + DashScope `qwen3.7-text-embedding`（1024 维）。按交错顺序完成三次/组。
+
+| 组 | 总分三次 | 自动能力三次 | manual/diagnostic | Milvus 健康 |
+|---|---|---|---|---|
+| Local | `24,24,25/32` | `21,21,22/27` | `3,3,3/5` | 不适用 |
+| Milvus + Qwen embedding | `25,25,25/32` | `22,22,22/27` | `3,3,3/5` | 三次 final row count=195；M1 insert=195，M2/M3 insert=0；hash/1024 维一致 |
+
+逐 case：26 个 case 六次全部通过；`db_multi_001` 与 `db_trace_002` 各 5/6；其余 7 个 case 六次均失败或 review。历史 alias/限定名 SQL 合同正例没有新的 semantic false block；M1 `db_core_002` 为真实计划表达式与候选 SQL 不一致。`db_simple_002/003` 六次均为精确投影额外列失败。该结果只说明当前三次样本下 Milvus 自动分稳定高 1 分，不能单独作为 embedding 因果或切换默认 backend 的依据。
+
+报告索引：`eval/reports/m24-ab-execution-manifest.md`；六套 report/triage/trace 以 `m24-ab-l1b`、`m24-ab-m1`、`m24-ab-l2`、`m24-ab-m2`、`m24-ab-l3`、`m24-ab-m3` 为前缀。
 
 ### M21 — Schema Retrieval Fusion / Context Repair
 
