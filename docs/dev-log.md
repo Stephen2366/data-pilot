@@ -889,42 +889,146 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 以前看到一题失败，报告往往只告诉我们“在 QueryPlan 阶段挂了”。但这像医院只记录“病人在急诊停下”，没有回答他为什么停下：可能是模型真的不会，也可能是网络 45 秒超时，甚至可能是试题没有写清排序和列，却拿隐藏答案扣分。
 
-M25 给评测加了三张互不替代的标签：**execution stage** 说失败发生在哪里，**root cause** 说当前证据支持该修谁，**report view** 说这条证据应该进入哪一种分母。外部 timeout 仍然算端到端失败，但语义状态是 **not observed**，不能包装成“模型答错”。
+M25 给评测加了三张互不替代的标签：
+
+- **execution stage** 说失败发生在哪里，
+- **root cause** 说当前证据支持该修谁，
+- **report view** 说这条证据应该进入哪一种分母。
+
+外部 timeout 仍然算端到端失败，但语义状态是 **not observed**，不能包装成“模型答错”。
 
 同时，M25 把 LLM 的一次逻辑调用拆成可观察的 physical attempts。每次 attempt 都有 provider、模型、timeout、延迟、错误 subtype 和 outcome；这样 retry 是否有效不再靠感觉。真实 4 题小样本显示：retry 从 0 调到 1 后，请求数和总时长约翻倍，却没有救回任何一题，所以默认继续保持 **45 秒、0 retry**。
 
 ### 这次做了什么
 
-1. **先把试卷写清楚**
+M25 主要解决的不是“怎样让模型多答对几题”，而是“怎样让评测结果值得相信”。
 
-   审计 formal、challenge、diagnostic 共 **42 个 raw cases**。补齐了隐藏的列、月份、排序、LIMIT 和并列规则；用稳定 `semantic_group_id` 把同一自然语言问题的不同诊断检查归到一组，最终是 **26 个 independent semantic groups**。
+以前看到某个 case 失败，我们通常只能知道它停在 QueryPlan、SQL generation 或 result scorer，却不一定知道真正原因。模型可能确实不会，也可能只是网络超时；还可能是题目没写清楚，但参考答案偷偷要求特定排序、列或时间范围。如果这些情况混在一起，总分就很难指导后续优化。
 
-   `refund_rate` 也收口为 **completed 退款去重订单数 / 成交去重订单数**。商品归因仍是订单明细优先，整单退款用 `refunds.product_id` 回退。`avg_selling_price` 写清为有效价格历史记录的算术平均，但仍保持 manual，没有因为定义清楚就擅自升级自动硬门。
+这次主要完成了以下六项工作。
 
-2. **把“在哪里失败”和“为什么失败”拆开**
+1. **先把评测试题和参考答案对齐**
 
-   `FailureTriage` 继续保留 M19 的 `failure_stage`，又增加六类 root cause：`code_issue`、`model_capability`、`retrieval_issue`、`external_service`、`eval_contract`、`mixed_or_unknown`。报告不再只保留第一条失败摘要，而是保存失败 trace steps 和 score details 的完整证据链。
+   我们审计了 formal、challenge、diagnostic 三套评测中的 42 个 raw cases，逐项检查题目有没有明确说明：
 
-3. **重新定义报告分母**
+   - 要查询哪些字段；使用哪个时间范围；应排除哪些业务状态；按什么顺序排序；是否限制返回条数；并列时如何决定先后；参考 SQL 使用的业务指标是否已经有权威定义。
 
-   新报告并列展示 **semantic answer、safety、plan/trace、provider reliability、manual/Judge、end-to-end** 六个视图。每个视图都写 eligible、observed、unavailable，以及 raw cases 和 independent groups。这样 `22/27 automated` 不会被误叫成“SQL 正确率”。
+   审计发现，一些题目只写了“前 10 条”“基本信息”或“一级类目销售额排名”，但参考 SQL 还**额外**要求了固定列、2026 年 6 月、特定排序等条件。这相当于考试题没有写要求，阅卷时却按隐藏要求扣分。M25 把这些隐藏条件补回了题目，使模型看到的要求与自动评分要求一致。
 
-4. **建立 LLM attempt 证据**
+   同时，为这轮新题面和新业务口径登记了 **`case_contract_version=m25-v1`**。这样 M25 的新分数不会与 M24 的旧题面分数直接混算，也不会反向修改历史实验结论。
 
-   新增 `llm_call` 深 module。generator 仍负责业务 prompt 和 JSON/SQL 解析，调用 module 只负责 timeout、retry、transport 分类与 attempt evidence。显式返回 `content + evidence`，没有采用 client 上的 `last_call_metadata`，避免并发请求串线。
+2. **把“检查次数”和“独立问题数”分开**
 
-5. **用小实验否定无效 retry**
+   42 个 case 并不等于 42 个独立问题。例如，同一个“2026 年 6 月 GMV”问题，可能分别有：
 
-   固定 Qwen `qwen3.7-plus`、local deterministic/weighted、SQLite oracle 和同样 4 题：
+   - 一条 case 检查最终结果；
+   - 一条 case 检查 QueryPlan；
+   - 一条 case 检查 Trace 步骤是否完整。
 
-   - **retry 0**：4 次物理调用，1/4 得到有效响应，3 次 timeout，总耗时 179.7 秒。
-   - **retry 1**：8 次物理调用，0/4 得到有效响应，8 次 attempt 全 timeout，总耗时 377.9 秒。
+   这些 case 检查的是同一个业务问题的不同侧面。如果直接把它们当成三个独立问题，总分就会重复放大某些问题的权重。
 
-   这不是总体 SLA，但足以说明本轮没有理由默认打开 retry。唯一拿到有效响应的递归类目题，SchemaGraph 已有正确表、关系和 `item_gmv`，模型却在计划中虚构了 `root_category.level/name`，因此当前证据是 **plan validation + model capability**，不是 retrieval。
+   因此 M25 新增了稳定的 **`semantic_group_id`**，把语义相同或等价的问题放进同一组：
 
-6. **用反例验证业务能力边界**
+   - 42 个 raw cases：表示实际执行了多少项检查；
+   - 26 个 independent semantic groups：表示大约有多少个独立业务问题。
 
-   退款率反例覆盖多退款记录、非 completed、错误分母和 INNER JOIN 丢失整单退款。递归类目反例中，正确 item grain 得到 70，漏子类目只得 20，错误汇总订单头金额因 join 放大到 200。正确 recursive CTE 在现有 fidelity 中仍是 `indeterminate`，M25 没为了过题扩大 AST 放行面。
+   这类似于数据库分析中必须同时区分“订单明细行数”和“去重订单数”：两者都是真实数字，但回答的问题不同。
+
+3. **重新定义业务含义**
+
+   原来的退款率只写成 `refund_count / order_count`，但没有明确：
+
+   - requested、approved、rejected、completed 哪些状态算退款；
+   - 一笔订单有多条退款记录时算几次；
+   - 整单退款没有 `order_item_id` 时如何归属商品。
+
+   M25 将商品退款率明确为：**已完成退款的去重订单数 ÷ 包含该商品的去重成交订单数**
+
+   `avg_selling_price` 也明确为：取与查询时间范围相交的有效价格历史记录，对 `price` 按记录条数计算算术平均，而不是按有效天数加权，也不是成交均价。不过，题意写清不等于评分已经足够可靠。因此平均售价题仍保持 manual，没有直接升级成自动硬门。
+
+4. **把“失败在哪里”和“为什么失败”拆成两套信息**
+
+   M19 已经能通过 `failure_stage` 告诉我们失败发生在哪一步，例如：
+
+   - `schema_retrieval`
+   - `query_plan`
+   - `plan_validation`
+   - `sql_generation`
+   - `result_match`
+
+   但“失败发生在 QueryPlan”并不等于“模型不会做 QueryPlan”。如果 QueryPlan 请求等待 45 秒后超时，执行位置确实是 QueryPlan，真正原因却是外部服务没有按时返回。
+
+   因此 M25 增加了第二条轴线——**root cause**：
+
+   - `code_issue`：确定性的代码、状态传播、parser 或安全逻辑问题；
+   - `model_capability`：provider 正常返回，但计划、SQL 或业务语义不符合已确认合同；
+   - `retrieval_issue`：Trace 证明回答所需的表、字段、指标或关系没有进入 SchemaGraph；
+   - `external_service`：timeout、网络、限流、欠费或外部服务不可用；
+   - `eval_contract`：题面、reference、scorer 或业务口径不一致；
+   - `mixed_or_unknown`：证据不足，或者多个因素混在一起。
+
+   例如本轮 `db_multi_002`：
+
+   - LLM 在约 31.68 秒后正常返回 QueryPlan；
+   - SchemaGraph 已包含类目树、商品、订单明细、订单和 `item_gmv`；
+   - 但 QueryPlan 虚构了不存在的 `root_category.level` 和 `root_category.name`。
+
+   所以它的执行阶段是 `plan_validation`，当前根因是 `model_capability`，而不是 retrieval。
+
+5. **把“模型答错”和“根本没观察到答案”分开**
+
+   M25 又新增了 **semantic status**：
+
+   - `observed_correct`：拿到了答案，并且确定性评分通过；
+   - `observed_wrong`：拿到了答案，并且确定性证据证明它不符合合同；
+   - `not_observed`：因为 timeout 或前置阻断，最终答案根本没有出现；
+   - `not_applicable`：这条 case 本来就不负责检查最终语义答案。
+
+   例如 QueryPlan timeout：
+
+   - 在 end-to-end 视角下，它仍然是一次失败，因为用户没有拿到结果；
+   - 在 provider reliability 视角下，它是 unavailable；
+   - 在 semantic answer 视角下，它是 `not_observed`，不能算成“模型已经答错”。
+
+   报告因此拆成六个视图：`semantic answer；safety；plan/trace；provider reliability；manual/Judge；end-to-end`。
+
+   每个视图分别报告 eligible、observed、passed 和 unavailable，避免再把综合自动评测分数直接叫作“SQL 正确率”。
+
+6. **记录每次 LLM 请求，并用真实实验判断 retry 是否值得开启**
+
+   以前主模型超时时，Trace 往往只剩一句网络错误，缺少：
+
+   - 使用了哪个 provider 和模型；
+   - 配置的 timeout 是多少；
+   - 实际请求了几次；
+   - 每次等了多久；
+   - 是否发生 retry；
+   - 最终是成功、timeout、HTTP 错误还是解析失败。
+
+   M25 新增了统一的 LLM 调用模块。每次逻辑调用都会记录完整的 **attempt evidence**，成功和失败使用同一种结构。
+
+   随后用四条历史超时题做了一个小型受控实验，固定模型、检索、题目和 oracle，只改变 retry：
+
+   - 45 秒、retry 0：发送 4 次实际请求，1/4 获得有效响应，总耗时 179.7 秒；
+   - 45 秒、retry 1：发送 8 次实际请求，0/4 获得有效响应，总耗时 377.9 秒。
+
+   retry=1 没有救回任何一题，却让调用次数和总耗时大约翻倍。因此本轮没有证据支持默认开启 retry，默认继续保持：
+
+   - `LLM_TIMEOUT_SECONDS=45`
+   - `LLM_MAX_RETRIES=0`
+
+   这只是四题小样本，不能解释成 provider 的总体 SLA，也不能证明 retry 永远无效。它只支持一个保守结论：**当前没有足够证据值得让所有请求默认承担重试成本。**
+
+7. **用反例证明业务 SQL 不能“碰巧答对”**
+
+   为退款率和递归类目建立了最小反事实数据：
+
+   - 退款率中，正确 SQL能区分一单多退款、非 completed 状态和整单退款；旧记录数口径会得到错误结果。
+   - 递归类目中，正确 item grain 得到 70；漏掉子类目只得到 20；错误使用订单头金额会因一单多明细被重复累计成 200。
+
+   这些反例证明了不同 SQL 的业务含义确实不同，而不是只看当前 seed 上是否碰巧返回同一个答案。
+
+   对 recursive CTE，现有 SQL fidelity 仍然返回保守的 `indeterminate`。M25 没有为了让某一题通过，就临时把 AST 检查范围扩大成未经验证的通用 CTE 等价判断。
 
 ### 新概念
 

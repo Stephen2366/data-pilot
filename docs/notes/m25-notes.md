@@ -190,6 +190,53 @@
 
 - 用户需手动执行 M25 `m25-v1` 的完整 formal/challenge/diagnostic 重复 baseline；报告现已能诚实区分 external unavailable、observed semantic 和 end-to-end。
 - retry=1 小样本为明确负结果，默认保持 0；若未来评估 60 秒等 timeout 候选，应继续固定唯一变量并至少重复，不直接改 `.env`。
+
+### 2026-08-07 当前默认 reliability 复测
+
+- 固定 Qwen `qwen3.7-plus`、45s timeout、retry=0、本地 deterministic/weighted、LangFuse off，运行 4 条 M25 reliability suite；4/4 未通过，耗时约 253.5s。
+- 失败并非全部发生在 QueryPlan：`db_multi_002`、`db_join_003` 为 QueryPlan timeout；`db_core_002` 已进入 SQL generation 后 timeout；`db_hard_001` 无 timeout，但模型输出缺少 `order_items` / `orders`，归为 model capability / output contract。
+- 本轮 triage：`external_service=3`、`model_capability=1`，前三条 semantic `not_observed`。该结果进一步说明不能把 reliability suite 简化为 QueryPlan 能力分数；仍不足以外推 provider SLA。
+
+### 2026-08-07 diagnostic baseline 尝试
+
+- 按当前默认配置启动完整 `challenge + phase3a-diagnostic-benchmark` diagnostic；外层 1200 秒上限到达后安全终止，未生成正式 report/triage。
+- 已留下 29 条 partial trace；其中可见部分请求在 21–50 秒完成，也有约 45 秒超时，说明诊断运行时间主要被外部 LLM 等待占用。
+- partial trace 不作为 diagnostic baseline，不用于正式分母或能力结论；后续需拆分 case 集或采用可续跑方式完成正式诊断。
+
+### 2026-08-07 DeepSeek diagnostic 对照
+
+- 临时切换 `LLM_PROVIDER=deepseek`、`LLM_MODEL=deepseek-v4-flash`，其余保持 45s/retry0、inmemory deterministic/weighted、LangFuse off，完整运行 32 条 M25-v1 diagnostic。
+- 结果 `25/32`，总耗时约 `917.1s`（15.3 分钟），正式 report/triage 已生成。
+- 失败结构：`query_plan=3`、`plan_validation=2`、`sql_guard=1`、`unknown=1`；root cause 为 `external_service=3`、`model_capability=2`、`code_issue=1`、`mixed_or_unknown=1`。该轮仍有 5 条 `not_observed`，不能把 25/32 直接解释成纯模型能力分数。
+- 与 Qwen partial run 的比较只能作为运行可靠性线索：DeepSeek 本轮完整结束且耗时低于外层 1200s；Qwen 本轮没有正式 report，不能做严格分数对比，也不据此切换默认模型。
+
+### 2026-08-07 Qwen qwen3.7-max diagnostic 对照
+
+- 临时切换 `LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-max`，其余保持 45s/retry0、inmemory deterministic/weighted、LangFuse off，完整运行 32 条 M25-v1 diagnostic。
+- 结果 `27/32`，总耗时约 `1152.4s`（19.2 分钟），正式 report/triage 已生成。
+- 失败结构：`query_plan=2`、`output_contract=2`、`unknown=1`、`plan_validation=1`；root cause 为 `external_service=2`、`model_capability=3`、`mixed_or_unknown=1`。语义状态 `not_observed=3`。
+- 与 DeepSeek `25/32`（917.1s）相比，本轮 qwen3.7-max 得分更高但耗时更长，且失败结构不同；两次都是单轮不同模型运行，不能把分数差直接解释为稳定模型优劣，也不据此切默认。
+
+### 2026-08-07 Qwen qwen3.7-plus diagnostic 复测
+
+- 临时切换 `LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`，其余保持 45s/retry0、inmemory deterministic/weighted、LangFuse off，完整运行 32 条 M25-v1 diagnostic；外层等待上限提高到 30 分钟以避免批量截断。
+- 结果 `26/32`，总耗时约 `1208.6s`（20.1 分钟），正式 report/triage 已生成。
+- 失败结构：`query_plan=4`、`sql_generation=1`、`output_contract=1`、`unknown=1`；root cause 为 `external_service=5`、`model_capability=1`、`mixed_or_unknown=1`。语义状态 `not_observed=5`。
+- 与同日 qwen3.7-max `27/32`（1152.4s）相比，plus 本轮低 1 分且更慢、外部服务失败更多；仍只能说明本轮运行状态，不能据单轮结果决定默认模型。
+
+### 2026-08-07 Qwen qwen3.7-plus + Milvus/Qwen embedding diagnostic
+
+- Docker/Milvus 恢复后，临时使用 `qwen3.7-plus` + `SCHEMA_VECTOR_BACKEND=milvus` + DashScope/Qwen `qwen3.7-text-embedding`（1024 维），新建唯一 collection `datapilot_schema_docs_m25_qwen37plus_qwenemb_20260807_192300`，完整运行 32 条 M25-v1 diagnostic。
+- 索引校验通过：`schema_docs_count=195`、`schema_docs_hash=8a8b6626...`、`milvus_inserted_document_count=195`、`milvus_final_row_count=195`、`milvus_dimension=1024`，确认本轮实际走 Milvus 且没有复用旧污染 collection。
+- 结果 `25/32`，总耗时约 `1280.6s`（21.3 分钟）；失败 root cause 为 `external_service=6`、`model_capability=1`，失败阶段 `query_plan=4`、`sql_generation=2`、`output_contract=1`。
+- 与同日 qwen3.7-plus + local deterministic 的 `26/32`、`1208.6s`相比，本轮少 1 条且更慢约 72 秒；单轮受 LLM 波动影响，不能据此判定 embedding 退化或切换默认检索。
+
+### 2026-08-07 Round 2 四组 diagnostic
+
+- 为降低单次 LLM 波动影响，按相同 32 条 M25-v1、45s/retry0、weighted、SQLite oracle、LangFuse off 顺序完成四组：`qwen3.7-max + Milvus/Qwen embedding`、`qwen3.7-plus + Milvus/Qwen embedding`、`qwen3.7-plus + local deterministic`、`qwen3.8-max + local deterministic`。
+- 结果分别为 `26/32`（1263.2s）、`21/32`（1242.3s）、`28/32`（1222.7s）、`18/32`（1273.6s）。Milvus 两组复用已校验 clean collection `...192300`（195 docs、1024 维、hash 一致）。
+- triage root causes 分别为：max+Milvus `model_capability=4, external_service=1, code_issue=1, mixed=1`；plus+Milvus `model_capability=6, external_service=5, mixed=1`；plus+local `external_service=3, model_capability=1, mixed=1`；3.8-max+local `external_service=11, model_capability=3`。
+- 同一 qwen3.7-plus 的 Milvus/local 差距为 `21→28`，但两次外部失败结构也不同，仍不能单轮归因于 embedding；qwen3.8-max 本轮出现大量外部服务失败，不能直接解释为模型能力低。
 - recursive CTE fidelity 仍是 `indeterminate`；是否扩展 derived scope 是后续独立设计决策，本模块不临时放宽。
 - `contributing_causes` 结构已预留，当前只有证据支持唯一主因时保持空；未来出现真实 mixed trace 再增加保守映射。
 - 完整 baseline 若暴露稳定 SchemaGraph 缺失，才重新打开 retrieval/embedding 门；否则不因最终 SQL 漏表反推检索失败。

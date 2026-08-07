@@ -40,7 +40,8 @@
 |---|---|
 | 2026-08-07 | M25 冻结 `case_contract_version=m25-v1`：formal + challenge + diagnostic 共 42 raw cases / 26 independent semantic groups；报告新增 semantic/safety/plan/provider/manual/end-to-end 六个视图与 eligible/observed/unavailable 分母。退款率改为 completed 退款去重订单数 / 成交去重订单数，明细优先、整单回退；平均售价明确为有效价格历史记录的算术平均但仍为 manual。 |
 | 2026-08-07 | M25 4-case reliability 小样本：45s/retry0 为 4 logical / 4 physical attempts、1/4 成功、3 timeout、179.7s；retry1 为 4 logical / 8 physical attempts、0/4 成功、8 timeout attempts、377.9s。该样本不支持默认开启 retry，默认保持 45s/0；timeout 归 `external_service + not_observed`，不再算模型语义错误。 |
-| 2026-08-07 | M25 收尾验证：focused `39 passed, 1 warning`，最终全仓 `184 passed, 3 skipped, 1 warning`；seed reset 成功且 14 表固定规模/关键事实通过。未运行完整 formal/challenge/diagnostic，M25-v1 完整基线由用户手动执行。 |
+| 2026-08-07 | M25 收尾验证：focused `39 passed, 1 warning`，最终全仓 `184 passed, 3 skipped, 1 warning`；seed reset 成功且 14 表固定规模/关键事实通过。随后已完成 4 组 M25-v1 diagnostic superset 对照；未另跑独立 formal，challenge 已包含在 diagnostic superset 中。 |
+| 2026-08-07 | M25 round2 四组 diagnostic：Qwen 3.7-max+Milvus `26/32`、Qwen 3.7-plus+Milvus `21/32`、Qwen 3.7-plus+local `28/32`、Qwen 3.8-max+local `18/32`；同日单轮差异不作模型/embedding 稳定结论。Milvus 两组使用 clean 195-doc、1024 维、hash `8a8b6626...` collection。 |
 | 2026-08-05 | M23 已收口非 pipeline 基线：商品退款率改为成交订单内“明细优先、整单退款回退 `refunds.product_id`”，`order_count` 统一为 `COUNT(DISTINCT orders.id)`；challenge 12 条、formal 8 条自动 SQL case 使用 `result_match` / `expected_value`，并新增 6 自动 + 1 人工的异常专项。原 20 条与新增 3 条 reference SQL 经 MySQL 与 SQLite 双端审计均可执行。当前 195 条 schema docs hash 为 `ce04fe4f...`；Milvus 复用强制校验 collection schema description 中的同一 hash。此前 focused `42 passed`、全量 pytest `152 passed, 1 warning`。 |
 | 2026-08-06 | M23 新合同 local 首跑：Qwen `qwen3.7-plus` + local deterministic / weighted 为 `23/32`（自动 `20/27`、人工/诊断 `3/5`）。硬失败共 9 条，其中自动 7 条、人工/诊断 2 条；另有 `db_hard_003` 只要求人工 review，不属于第 10 条硬失败。自动失败包括 3 条结果/输出不保真、2 条生成/计划错误和 2 条字符串 SQL plan contract 误拦；目标 schema 均已进入 Context。 |
 | 2026-08-06 | M23 同合同 Milvus 单次诊断已完成：Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted 为 `21/32`（自动同为 `20/27`、人工/诊断 `1/5`）；195 docs、hash `ce04fe4f...`、1024 维、final row count 195。local / Milvus 各仅一次，`23→21` 不能定性为 embedding 退化，也不改变默认 retrieval。 |
@@ -59,7 +60,7 @@
 | 2026-08-02 | M20 Qwen `qwen3.7-max` + clean Milvus + Qwen embedding diagnostic 完整跑通：`21/32`（row_count=193、run_scoped）；高于同链路 DeepSeek `17/32` 与 M19 污染 Qwen `20/32`；提升来自 query_plan/plan_validation 消失，`schema_context` 7 仍是主失败簇。 |
 | 2026-08-02 | Retrieval-only benchmark 已新增：Qwen embedding vector-only recall `0.929` 高于 deterministic `0.787`，但 merged recall 均为 `0.738`；说明 embedding 有信号，当前瓶颈更像 fusion / rerank。 |
 | 2026-08-03 | M21 新增显式 `rrf` fusion 实验（默认仍为 `weighted`，不读取任何 `expected_*` 标签）。retrieval-only 上，Milvus + Qwen embedding merged recall `0.738 → 0.929`、relation `0.633 → 0.967`；但同配置 DeepSeek diagnostic `21/32 → 18/32`，并新增 `plan_validation 0→3`，故 RRF 记录为否定实验且不切默认。 |
-| 2026-08-02 | `qwen3.8-max` 当前 DashScope 账号/配置不可用，最小调用返回 HTTP 403 `access_denied`；`qwen3.7-max` 可用。 |
+| 2026-08-02 | ⚠️ 旧结论：`qwen3.8-max` 曾因 DashScope 账号/配置返回 HTTP 403 `access_denied`。2026-08-07 新一轮已可完整运行 32 条 local diagnostic（`18/32`），旧“不可用”判断不再适用于当前运行状态；该轮 external failure 较多，能力结论仍待重复。 |
 | 2026-07-30 | M18 Experiment 结论：LangFuse UI 的 trace -> Dataset item 可用；UI run 需要项目 LLM key，Webhook run 需要 remote experiment URL，DataPilot 当前不临时实现 webhook runner。 |
 
 ## 当前路线判断

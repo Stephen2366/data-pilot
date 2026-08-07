@@ -115,6 +115,7 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 | `M23-E03` | 08-06 | 事实锚点 | M23 新合同 32 条 local 首跑基线 | Qwen `qwen3.7-plus` + `inmemory/deterministic` + weighted、32 条 diagnostic、195-doc corpus/hash `ce04fe4f...`、SQLite deterministic oracle、LangFuse off、proxy | total `23/32`；automated `20/27`；manual/diagnostic `3/5`；硬失败 9，failed-or-review 10 | M23-E02 为 7 条专项（不同 case 集）；M22 194-doc 分数不可比 | 自动硬失败 7 条：3 条 result/output fidelity、2 条 generation/plan error、2 条 SQL plan contract false block；另有 2 条人工/诊断硬失败。`db_hard_003` 是额外 review-only，不是硬失败。Context 无目标 schema 缺失证据。 |
 | `M23-E04` | 08-06 | 单次诊断快照 | 在 M23 同合同下核对 clean Milvus / Qwen embedding 链路 | Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted；32 条、195 docs/hash `ce04fe4f...`、1024 维、final row count 195、SQLite oracle、LangFuse off | total `21/32`；automated `20/27`；manual/diagnostic `1/5` | `M23-E03` 只作同合同单次参照；两组均未重复 | 自动能力与 local 同为 `20/27`；总分差来自人工/诊断项。旧 triage 的 `schema_context/retrieval` 中含最终表列合同，不能据 `23→21` 判断 embedding 退化；默认检索不变。 |
 | `M25-E01` | 08-07 | 受控小样本 / 负向证据 | 验证历史超时题上 transient retry 是否恢复 | Qwen `qwen3.7-plus` + local weighted + 4 条 reliability suite + 45s timeout；唯一变量 retry0/1 | retry0：1/4 logical success、4 attempts、179.7s；retry1：0/4、8 attempts、377.9s | 同行两候选；每候选仅一次，不外推 SLA | retry1 无恢复且成本翻倍，默认保持 45s/0；timeout 记 external unavailable，不记 semantic wrong。 |
+| `M25-E02` | 08-07 | 四组诊断对照 | 在同一 M25-v1 diagnostic superset 下观察模型与 Milvus/local 组合差异 | 32 条、45s/retry0、weighted、SQLite oracle、LangFuse off；四组分别为 Qwen 3.7-max+Milvus、Qwen 3.7-plus+Milvus、Qwen 3.7-plus+local、Qwen 3.8-max+local；Milvus 复用 clean 195-doc/1024-dim/hash collection | `26/32`（1263.2s）、`21/32`（1242.3s）、`28/32`（1222.7s）、`18/32`（1273.6s） | 同轮可观察运行差异；仍是每组合一次，不能外推稳定模型/embedding 因果 | plus 的 Milvus/local 差距不单归因 embedding；3.8-max 本轮 external failure 较多；默认模型/检索不变。 |
 
 ## 4. 当前活跃实验卡片
 
@@ -126,7 +127,7 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 - retry1：4 logical / 8 physical attempts，首次与最终成功均 `0/4`，8 attempts 全 timeout，总耗时 `377.9s`。
 - 有效响应的 `db_multi_002` 在 plan validation 引用不存在的 `root_category.level/name`；SchemaGraph 已含 category tree、所需表与 `item_gmv`，当前证据不支持归因 retrieval。
 - 结论仅支持“不默认开启 retry”；由于每个候选只有一次 4-case run，不能当 provider 总体 SLA，也没有据此改成新的 timeout 魔法数字。
-- M25-v1 完整 formal/challenge/diagnostic baseline 未由 Codex 运行，按用户要求留给人工执行；旧 M24 分数不与新题面/退款率合同直接比较。
+- M25-v1 diagnostic superset 已由 Codex 完成四组对照；它包含 challenge（及其中与 formal 重复/等价的 case），未另跑独立 formal。四组均为单轮诊断快照，不能替代重复稳定性基线；旧 M24 分数不与新题面/退款率合同直接比较。
 
 ### M22 — Eval Contract / Semantic Output Stabilization
 
