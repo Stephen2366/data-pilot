@@ -240,3 +240,42 @@
 - recursive CTE fidelity 仍是 `indeterminate`；是否扩展 derived scope 是后续独立设计决策，本模块不临时放宽。
 - `contributing_causes` 结构已预留，当前只有证据支持唯一主因时保持空；未来出现真实 mixed trace 再增加保守映射。
 - 完整 baseline 若暴露稳定 SchemaGraph 缺失，才重新打开 retrieval/embedding 门；否则不因最终 SQL 漏表反推检索失败。
+
+### 2026-08-07 八轮 diagnostic 失败归因复核
+
+本节只复核已有 8 轮完整 diagnostic 的 report、triage 和 trace，没有发起新的 LLM 请求，也没有修改代码。目标是把“最终没通过”拆成真正的模型能力不足、外部请求失败、代码误拦、检索缺失和 Eval 口径问题，避免直接拿总分猜原因。
+
+#### 总体证据
+
+- 8 轮共覆盖 DeepSeek/Qwen 多个模型、本地 deterministic 检索和 Milvus/Qwen embedding；单轮都是相同 32 条 case。
+- 物理 LLM 请求失败主要集中在 QueryPlan：各轮超时/网络错误分别为 `3、2、5、6、1、6、3、11`。成功的 QueryPlan 平均耗时随模型约为 18～28 秒；qwen3.7-plus 的失败 prompt 平均长度并不高于成功 prompt，因此“只是 prompt 太长”不成立。
+- 自动 triage 汇总为 `external_service=36、model_capability=21、mixed_or_unknown=6、code_issue=2、retrieval_issue=0`。但下文人工复核发现，现有自动归因漏记了几类 Eval 结构问题，因此该汇总只能作为入口，不能作为最终事实。
+
+#### 检索是否是主因
+
+- qwen3.7-plus 的 local round 2 与 Milvus round 2，最终 SchemaContext 在 32 条中有 31 条完全一致；唯一不同的 `db_core_003` 两边都生成相同正确 SQL 并通过。
+- 同一 backend 的重复运行中，local 两轮 SchemaContext 为 32/32 一致，Milvus 两轮也是 32/32 一致；但 Milvus 两轮仍有 10 条 case 的最终归因变化，分数从 25 降到 21。
+- 因而当前 local/Milvus 分差主要发生在检索之后，是 LLM/provider 波动或下游语义生成差异；已有 trace 不支持把 retrieval/embedding 当作首要故障源。
+
+#### 已确认的代码问题
+
+1. **递归 CTE 被 SQL Guard 当成真实表误拦。** `db_multi_002` 和 `db_hard_001` 的部分运行已经生成了合理的 recursive CTE，但 SQL Guard 把 `category_tree` / `cat_tree` 这类查询内部临时名称加入物理表 RBAC 检查，报“角色不允许访问表”。这会把本可继续执行的 SQL 错误拦截。需要保留对 CTE 内部真实物理表的权限检查，只排除已经声明的 CTE 名称，不能简单关闭表权限检查。
+2. **语义等价算术被 plan fidelity 误判。** `db_hard_002` 中计划表达式与 SQL 的唯一区别是 SQL 多了 `* 1.0` 以确保浮点除法；当前比较器把它判成 expression mismatch。这里是比较口径过严，不是模型算错。
+
+#### 已确认的 Eval 结构/口径问题
+
+1. **`schema_context_match` 没有真正检查 SchemaContext。** `db_schema_003` 声明了两套可接受的表组合 `expected_tables_alternatives`，runner 虽然加载该字段，但 scorer 没有消费它，也没有 `schema_context_match` 专用评分分支；case 最后反而被通用输出列检查按 `gmv` 别名判失败。当前结果不能用来证明检索成功或失败。
+2. **manual-review 队列被混在 `triage.failed` 中。** `db_hard_003` 多次完整跑通，但因为需要人工复核，triage 仍标记为 failed/unknown。报告的 manual view 有单独展示，不过若直接统计 case 的 `failed` 次数，就会误读成“8/8 流水线失败”。
+3. **`db_hard_001` 题面与严格期望并不完全对齐。** 用户问题只说“GMV”，case 却严格期望 `item_gmv` 和 `root_category`；`contract_adjustment` 目前只出现在报告中，没有进入模型提示。模型选成订单头 GMV 确实暴露业务语义能力不足，但该 case 同时有题面契约歧义，不能把所有失败都归给模型。
+
+#### 已确认的模型能力/稳定性问题
+
+- `db_core_002` / `db_join_003`：SchemaContext 已包含 products、order_items、orders、refunds 和 refund_rate，模型仍会漏掉 `refund_status='completed'` 或整单退款 `refunds.product_id` fallback。这是业务口径组合不稳定，不是检索不到表。
+- `db_multi_002` / `db_hard_001`：除外部超时和 SQL Guard 误拦外，模型也出现只查直接子类目、使用订单头 GMV、引用不存在的派生字段等真实语义/合同错误。
+- `db_join_001`：模型把中间计算别名放入输出表达式，却没有列入最终 output columns，触发计划合同校验；主要是 QueryPlan 结构遵守不稳定。
+
+#### 当前结论与后续最小验证
+
+- 现有 8 轮完整 diagnostic 已足够定位主因，当前不需要再跑完整 diagnostic。
+- 修复前也不建议继续用更多整套分数验证，因为已确认的 Eval 假阴性和 SQL Guard 误拦会继续污染结论。
+- 后续应先分别为 CTE/RBAC、`schema_context_match` alternatives、`* 1.0` 等价表达式补确定性单测；修正后只重放对应 case 做小范围真实 LLM 验证。是否调整 manual-review 的 `failed` 数据结构，以及如何把题面业务口径明确传给模型，属于会长期影响评测结构的选择，实施前需先确认方案。

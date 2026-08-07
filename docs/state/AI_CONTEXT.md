@@ -6,7 +6,7 @@
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
 - 当前模块：M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution（代码与收工完成，待验收）
-- 上一模块验收：M25 未验收（待 accept-module）
+- 上一模块验收：M25 验收未通过（2026-08-07），缺同步修复后复检
 - 阻塞项：无
 - 更新时间：2026-08-07
 
@@ -94,6 +94,7 @@
 | 2026-08-04 起，M24 已升级护栏 | QueryPlan 仍可能把输出投影声明过宽，或 SQL generation 生成与计划不一致的真实表达式 | AST fidelity 已消除历史表 alias/quoted identifier/唯一限定名省略/SELECT alias 误拦，并严格检查 order/limit/projection；但合同不能修正错误 QueryPlan，也不能把 contract pass 当答案正确 | 保持同一顶层 SELECT 的保守 AST 边界；依靠 `output_contract`、result scorer 和完整 trace 区分计划过宽、真实保真失败与结果语义错误，不为追分放宽 CTE/derived scope 等未知情况 |
 | 2026-08-05 起 | M23 自动 eval 仍未全覆盖数据库异常彩蛋 | 新退款率 case 已覆盖成交过滤和整单退款回退，但外部单号、负数退款、金额对账仍不能由当前自动分数证明 | 事实菜单保留在 `database-current-state.md`；后续新增异常 case 前先明确业务题面与自动判定方式 |
 | 2026-08-07 起 | M25 reliability 候选每组只有一次 4-case 小样本，且 provider 波动明显 | 不能把 retry0 的 1/4 与 retry1 的 0/4 外推为总体 SLA，也不能据此选新的 timeout 魔法数字 | 当前只支持“retry=1 本轮无恢复且成本翻倍，因此不切默认”；后续候选必须固定唯一变量并重复 |
+| 2026-08-07 起 | M25 八轮 diagnostic 复核已确认确定性缺陷：SQL Guard 将 CTE 临时名（category_tree/cat_tree 等）当物理表 RBAC 误拦；fidelity 将 ratio `* 1.0` 类型提升判为表达式 mismatch；`schema_context_match` 未消费 `expected_tables_alternatives`；manual-review 与 triage.failed 混读；`db_hard_001` 题面 GMV 与严格 `item_gmv` 期望不完全对齐 | 递归 / ratio / Context / manual 相关结论会被假阴性和误拦污染；修复前继续用更多整套分数验证会重复污染归因 | 修复方案待 M26 中间确认门逐项决策（见计划文件 M26 P1-3 决策卡）；先分别补 CTE/RBAC、alternatives、`* 1.0` 等价表达式的确定性单测 |
 
 ## 变更记录索引
 

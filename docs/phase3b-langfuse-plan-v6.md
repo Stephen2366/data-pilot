@@ -4,7 +4,7 @@
 >
 > **核心目标**：在不改动 `/api/query` 响应契约、不替代 JSONL 和现有 eval 报告的前提下，新增可选 LangFuse Cloud 写入，并补齐 **L1/L2 规则评分器 + 最小 L3 LLM-as-Judge** 评分能力，最后跑通一次最小 Experiment 验证全链路闭环。LangFuse 自部署不再作为 DataPilot Phase 3B 的默认目标，改为 EvalBench 阶段重点探索。
 >
-> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。v6.5 追加 M23：在提出下一轮 retrieval 假设前，先治理仍会污染分数解释的 eval、语义层与数据库事实边界；v6.6 追加 M24，先清理 SQL 合同格式噪音和 QueryPlan→SQL 保真缺口；v6.7 为 M24 加入事实收口、历史失败定性、输出政策与可复现门禁，之后才重新解释 retrieval A/B。
+> **v6 修订**：在 v5 Cloud 优先路线基础上，进一步收紧 **DataPilot trace_id 与 LangFuse trace_id 的边界**：LangFuse 不接管当前请求级 `trace_id`，只作为旁路观测系统写入并保存映射；同时把实施粒度从 6 个 step 收敛为 M15-M18 四个模块，避免 dev-log 和阶段复盘过碎。v6.2 追加 M19，把 LangFuse 从“上传本地记录”推进到“基于 trace/span/score 做失败归因、A/B 对比和改进闭环”。v6.3 追加 M20，处理 M19 后续 Qwen embedding / Milvus A/B 暴露出的 collection 重复灌入和索引可信度问题。v6.4 追加 M21，基于 clean Milvus 和 retrieval-only benchmark 结果，专门修 Schema Retrieval 的上下文融合与 rerank。v6.5 追加 M23：在提出下一轮 retrieval 假设前，先治理仍会污染分数解释的 eval、语义层与数据库事实边界；v6.6 追加 M24，先清理 SQL 合同格式噪音和 QueryPlan→SQL 保真缺口；v6.7 为 M24 加入事实收口、历史失败定性、输出政策与可复现门禁；v6.8 追加 M25，分离运行失败、能力失败与 Eval 契约；v6.9 追加 M26，用逐题人工审计校准自动 Eval，并在确认门后修复已证实的安全误拦和评分误判。
 
 ## 灵感来源：一线开发者的 LangFuse 评测实战经验
 
@@ -329,6 +329,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 | M23 Eval / Semantic / Database Baseline Hygiene | 9 | M22 | 固化数据库语义、reference 与 oracle 边界，形成 195-doc 新合同 | 结果校验 case、异常专项、MySQL/SQLite 审计、schema docs hash 门禁 |
 | M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity | 10 | M23 新合同基线 | 先收口 M23 新合同的失败事实与输出政策，再消除 SQL 计划合同的格式误拦，并让 QueryPlan 已声明的排序、limit 和输出投影可验证地保真 | 逐 case 定性表、只读语义比较 module、合同/输出证据、分层回归测试、M23 新合同下交错重复 A/B |
 | M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution | 11 | M24 完成并验收 | 校准 case / scorer / 分母，分离执行阶段与真实根因，补齐外部调用可靠性证据，再以 focused spike 验证退款率和递归类目能力 | case contract 审计、两轴归因、分层报告、LLM attempt 证据、可靠性实验、新合同基线、focused capability spike、条件性 Judge / retrieval 决策 |
+| M26 Diagnostic Human Audit / Eval Reconciliation | 12 | M25 完成并验收 | 把一轮 32 条 diagnostic 的题面、Context、Plan、SQL、执行结果和自动判分放在同一审计视图中，由 Codex 逐条给出有证据的人工复核标签；对账后再修复已确认的 SQL Guard / fidelity / scorer 误判 | 可复用 audit pack、32 条人工审计账本、自动与人工差异矩阵、中间决策门、定点修复与 targeted replay |
 
 ## 模块实施明细
 
@@ -1523,6 +1524,175 @@ M25 完成时至少能用报告和 trace 回答：
 
 ---
 
+## M26：Diagnostic Human Audit / Eval Reconciliation
+
+**定位**：M26 不是再造一个 LLM-as-Judge，也不是继续用更多整套 diagnostic 冲样本量。它先把一轮真实 diagnostic 的全部证据整理成“逐题审计卷”：Codex 能同时看到题目、权威口径、SchemaContext、QueryPlan、完整 SQL、执行结果和自动评分，再逐条判断自动 Eval 是否可信。只有完成 32 条对账并经用户确认修复方向后，M26 才修改 SQL Guard、fidelity 或 scorer。
+
+> 通俗说：现有 Eval 像一台自动阅卷机。M25 已经能告诉我们“机器在哪一步报错”，M26 要抽出一整套 32 道答卷人工复核，找出哪些是真答错、哪些是阅卷机错判、哪些根本没拿到答案。确认阅卷规则的问题后再修机器，而不是看到某一道误判就立刻放宽所有规则。
+
+### M26 前置证据与边界（2026-08-07）
+
+1. M25 已完成代码和收工，当前仍待 `accept-module`；M26 可先规划，正式实现以 M25 验收通过为入口门禁。
+2. 现有 8 轮完整 M25-v1 diagnostic 已足够定位主问题，不需要为了启动 M26 再跑一轮完整 diagnostic。首轮人工审计优先冻结当前默认链路的 `qwen3.7-plus + inmemory/deterministic + weighted` round 2（`28/32`）作为主样本；其他 7 轮只作为重复性和反例旁证，不扩成 `8 × 32` 人工工作量。
+3. 32 条 raw case 对应 26 个 independent semantic groups。首轮仍逐条审计 32 条，因为 linked case 可能检查同一回答的不同合同；汇总时必须同时按 raw case 和 semantic group 展示，不能重复计算成独立能力样本。
+4. 并非每条 trace 都有 SQL。若 QueryPlan / SQL generation timeout，审计卷必须明确显示 `SQL unavailable`、失败 stage 和 transport evidence；禁止为了填满 SQL 栏而重新调用模型或把“没有答案”判成语义错误。
+5. 已有证据确认三类确定性缺陷：递归 CTE 名称被 SQL Guard 当物理表误拦、ratio SQL 的 `* 1.0` 类型提升被 fidelity 判为表达式不一致、`schema_context_match` 声明的 `expected_tables_alternatives` 未被 scorer 实际消费。另有 manual-review 与 `triage.failed` 混读、`db_hard_001` 题面 GMV 与严格 `item_gmv` 期望不完全对齐等口径选择。
+6. local 与 Milvus 的 SchemaContext 在关键对照中 31/32 完全一致，唯一不同 case 两边均通过；同 backend 重复运行则 32/32 一致。M26 不以现有总分差重开 embedding / retrieval A/B，也不调整默认模型、backend、fusion、oracle 或 timeout/retry。
+7. M26 的人工结论是校准证据，不直接覆盖 runner 的正式 `passed`、硬安全结果或历史基线。任何自动口径变化都要通过“审计差异 → 方案比较 → 用户确认 → 回归测试”链路。
+
+### 目标与审计模型
+
+M26 在现有 runner / trace / triage 之上增加一个可复用的 audit seam。调用方只需提供一轮 case、trace、report/triage 和运行身份，module 负责组装审计证据；Markdown 或其他人类可读视图只是 adapter，不另造第二套 case/scorer 事实源。
+
+每条审计记录至少回答：
+
+| 证据区 | 必须展示的内容 | 作用 |
+|---|---|---|
+| run / case identity | run id、case id、semantic group、contract version、模型/检索/oracle、source case | 防止拿错轮次或跨合同比较 |
+| question contract | 题面、check type、expected tables/alternatives、columns、metrics、filter/time/order/limit、reference/rubric 来源 | 说明“正确”依据从哪里来 |
+| pipeline evidence | SchemaContext、QueryPlan、plan validation、完整候选 SQL、SQL Guard/fidelity、执行状态 | 看清错误在哪一步出现 |
+| result evidence | 实际列与结果摘要、reference/result oracle、自动 score details | 避免只凭 SQL 长得像不像判断 |
+| automated verdict | runner pass/review、stage/subtype、root cause、semantic status | 保存原机器判断，不事后改历史 |
+| audit verdict | `pass / fail / unavailable / insufficient_evidence`、问题分类、理由、证据定位、信心等级 | 给出独立人工复核结论 |
+| reconciliation | `agree / false_positive / false_negative / status_mismatch / unresolved` | 汇总自动 Eval 与人工判断的差异 |
+
+Codex 审查不是“凭感觉看 SQL”：能用 deterministic result/reference、固定数据库事实和明确合同证明时才判 pass/fail；仅靠 SQL 文本无法排除重复计数、时间边界或退款 fallback 时，标记 `insufficient_evidence`，不得硬判。
+
+### P0：可复用审计证据层（先做，不改评分规则）
+
+#### P0-0：入口门禁与首轮样本冻结
+
+- M25 先通过 `accept-module`；M26 开工时建立 `docs/notes/m26-notes.md` checklist。
+- 冻结首轮主样本的 case contract、trace/report/triage 路径、文件 hash、运行配置和完成状态。临时目录中的原始文件可以作为输入，但可复核的 manifest 与人工审计结果必须落到长期产物，不能只依赖易丢失路径。
+- 首轮直接消费现有完整 run，不发起 LLM 调用；若输入缺 case、trace 或运行身份，生成器应明确失败，不自动拼接其他轮次补洞。
+
+#### P0-1：Audit Record 深 module 与证据完整性
+
+- 在现有 `EvalCase`、trace、score、triage seam 上组装统一 audit record；不复制 YAML 字段定义，不让 Markdown parser 反向成为数据源。
+- 完整 SQL 必须可读且不被表格截断；无 SQL、blocked SQL、执行失败和正常 SQL 使用不同状态。报告可以折叠长证据，但原始 audit record 必须保留完整内容。
+- 对 SchemaContext 明确区分 retrieval top docs、最终 tables/fields/metrics/relations；不能继续用最终 `tables_used` 反推检索是否命中。
+- 对结果只保存完成审计所需的最小证据，沿用现有敏感字段与公开报告边界；不得因人工审计绕过 SQL Guard 或泄露受保护列。
+
+#### P0-2：人工审计协议与可复查输出
+
+- 固定四类 verdict 和五类 reconciliation，不允许只写自由文本“看起来正确”。根因继续使用 M25 六类 taxonomy，并允许指出自动归因错误。
+- 每个 pass/fail 必须引用至少一种可核实证据：确定性 result/reference、明确的 case/metric 合同、SQL AST/Guard/fidelity reason，或数据库固定事实；证据不足只能进入 `insufficient_evidence`。
+- 审计结果与自动结果并列保存，人工标签不回写 `EvalResult.passed`、LangFuse score 或历史 report；未来若要让人工 gold 参与正式统计，另设版本和用户决策门。
+- 审计过程支持暂停和续接，已完成 case 有稳定身份与状态，避免 32 条长任务因中断从头重做。
+
+#### P0 验收门禁
+
+- 对冻结 run 生成 32/32 条 audit record；有 SQL 展示完整 SQL，无 SQL 明确标记 unavailable 和失败证据。
+- 每条记录都能追溯到唯一 case、trace、run 配置和自动评分；缺证据不会静默填默认值。
+- audit module 不调用 LLM、不执行写 SQL、不改变自动 pass/fail，也不引入第二套 case schema。
+- 至少用确定性 fixture 覆盖正常 SQL、QueryPlan timeout、SQL Guard blocked、manual review、结果不匹配和缺失 trace 六类输入。
+
+### P1：完成 32 条人工对账并建立修复决策单
+
+#### P1-1：逐条审计当前默认链路样本
+
+- Codex 按固定协议审查 32 条 raw case；同一 semantic group 可并排查看，但每条 check 的自动判定仍分别对账。
+- 优先使用已有执行结果和 reference oracle。只有 SQL 已生成、现有结果证据不足且 SQL Guard 允许时，才可在 deterministic SQLite oracle 上做只读 targeted replay；不得重跑 LLM，也不得写 MySQL。
+- 对 timeout / network 类 case 只审查外部失败归因和证据完整性，语义结论保持 unavailable；可以引用其他轮次有效响应解释“该 case 曾暴露什么”，但不能把旁证冒充主 run 的答案。
+
+#### P1-2：自动与人工差异矩阵
+
+- 输出总体和逐 case reconciliation：agree、false positive、false negative、status mismatch、unresolved；同时按 code/model/retrieval/external/Eval/mixed 分类。
+- 单列三种容易误读的统计：真实 pipeline failure、review pending、external unavailable。不得继续用一个 `failed` 数覆盖三者。
+- 对每个差异登记：影响哪些 case/report view、是否改变历史解释、可选修复方案、安全/兼容风险、建议方案和 targeted regression 范围。
+
+#### P1-3：中间确认门（必须暂停）
+
+完成 32 条审计后，先向用户提交差异矩阵和以下决策卡；用户确认前不修改 SQL Guard、fidelity、scorer、case 或正式统计：
+
+| 决策 | 可选方案与风险 | 推荐 |
+|---|---|---|
+| CTE / RBAC | A. 在 AST 中区分已声明 CTE 名与其内部真实物理表，CTE 名不做 RBAC、内部物理表仍检查；B. 维持误拦；C. 对 derived/CTE 广泛放行，可能形成越权漏洞 | A，最小修复且不降低物理表权限 |
+| ratio `* 1.0` | A. 只在有类型提升证据的 ratio/cast 形态下做窄等价；B. 保持 `indeterminate` 并人工复核；C. 做通用代数化简，可能忽略 SQL NULL/类型/溢出语义 | 审计同类样本后在 A/B 中确认，拒绝 C |
+| `schema_context_match` | A. 从同请求 SchemaGraph 按 `expected_tables_alternatives` 真正评分；B. 删除/改名该 check，继续只作诊断展示 | 若 case 目标确为 Context，推荐 A |
+| manual review 状态 | A. 保留旧 `failed` 兼容字段，新增/突出 `execution_failed` 与 `review_pending` 正交状态；B. 直接改变 `failed` 含义，会破坏历史脚本 | A，先消除报告误读再评估迁移 |
+| 题面/业务合同 | 明确 `db_hard_001` 等题是订单 GMV 还是 `item_gmv`，以及输出是否必须含 root label；修改题面或放宽 expected 都会形成新 contract version | 以数据库指标事实源和产品问题意图逐题确认，不替模型选最容易通过的答案 |
+
+#### P1 验收门禁
+
+- 32/32 完成人工审计；每条都有 verdict、reconciliation、根因分类、证据和信心等级，不能把空白当通过。
+- 自动/人工差异有 raw case 与 semantic group 两种分母；manual pending 和 external unavailable 不进入 observed semantic wrong。
+- CTE、fidelity、SchemaContext、manual 状态和题面合同均形成独立决策卡；用户确认记录写入 M26 notes 后才进入 P2。
+
+### P2：经确认后的定点修复与小范围验证
+
+#### P2-1：SQL Guard CTE namespace 修复
+
+- 仅按用户确认的方案修复 CTE 名与物理表名混淆；保持单条只读、表级 RBAC、字段敏感策略和 CTE 内真实表检查。
+- 正例覆盖合法 recursive/non-recursive CTE；反例覆盖 CTE 内越权物理表、嵌套/同名遮蔽、敏感字段和危险语句。不能通过字符串删除 CTE 名或全局 allowlist 临时绕过。
+
+#### P2-2：Fidelity 与 SchemaContext scorer 修复
+
+- fidelity 只实现审计证据支持的最小等价面；无法证明安全等价的表达式继续 `indeterminate`，不扩成通用 SQL optimizer。
+- `schema_context_match` 必须直接消费同请求 SchemaGraph 和 case alternatives，明确 any-of/all-of、字段/指标要求与缺失 reason；不得退回最终 SQL/响应列做代理证据。
+- 修复后保留旧 run 的原判定，新规则使用新合同/实现版本重新计算或 targeted replay，不反向覆盖历史报告。
+
+#### P2-3：Manual / Triage 展示与 Case Contract 修订
+
+- 按确认方案拆清 execution failure、review pending 和 semantic verdict，同时保留必要兼容输出；报告标题、分母和 JSON 字段含义一致。
+- 只修订经审计确认有歧义的题面/expected/rubric，并递增 case contract version；不为提高通过率放宽精确投影、安全规则或业务指标。
+
+#### P2-4：Targeted replay 与收口
+
+- 先跑纯确定性 focused tests，再只重放受修复影响的 case：至少覆盖 `db_multi_002` / `db_hard_001` 的 CTE、`db_hard_002` 的 ratio fidelity、`db_schema_003` 的 Context scorer，以及 manual-review 代表题。
+- targeted LLM replay 必须固定当前默认链路并记录 physical attempts；外部 timeout 仍只计 unavailable。若仅需验证 scorer/Guard，可直接复用冻结 trace/SQL，不额外调用模型。
+- M26 默认不运行完整 formal/challenge/diagnostic。只有 targeted 结果显示修复可能产生广泛回归、或用户明确要求建立新基线时，先暂停说明原因、范围和预计成本，再决定是否完整运行。
+
+#### P2 验收门禁
+
+- CTE 合法查询不再因临时名被 RBAC 误拦，CTE 内越权物理表仍稳定阻断；SQL 安全回归全部通过。
+- 已确认的 fidelity false positive 被最小规则处理，真实表达式、排序、limit、grain 或 output mismatch 仍失败/indeterminate。
+- `schema_context_match` 的 alternatives 有真实正反例，最终 SQL 漏表不再反向篡改 Context 结论。
+- manual pending、execution failed、external unavailable 在结构化输出和报告中可分别统计；兼容字段变化有迁移说明。
+- 修复前后的自动/人工 reconciliation 可对比，目标 case 的误判得到关闭；未确认项保留 unresolved，不用临时替代方案掩盖。
+- focused tests、M24/M25 SQL safety/fidelity/triage/scorer 回归和全仓 pytest 通过；默认模型、retrieval、embedding、fusion、oracle、数据库结构和 seed 均不改变。
+
+### 建议执行顺序
+
+```text
+M25 accept
+→ P0 冻结现有 qwen3.7-plus + local round2 run
+→ P0 生成 32 条 audit pack（不调用 LLM）
+→ P1 Codex 逐条审计与自动/人工对账
+→ P1 输出差异矩阵和五张决策卡
+→ 暂停，等待用户确认修复选择
+→ P2 SQL Guard / fidelity / scorer / status / case 定点修复
+→ 确定性 focused regression
+→ 受影响 case targeted replay
+→ 如确需完整 diagnostic，另行说明并等待确认
+```
+
+### M26 核心完成标准
+
+M26 完成时至少能回答：
+
+1. 首轮 32 条每题实际生成了什么 SQL；没有 SQL 的题为何没有，是否有完整 transport/stage 证据？
+2. 自动 Eval 与人工审计分别如何判断，每个差异是 false positive、false negative、状态混淆还是证据不足？
+3. 哪些失败属于真实模型语义问题，哪些属于 SQL Guard/fidelity/scorer/case 合同，哪些只是 external unavailable？
+4. local/Milvus 分差中是否存在 SchemaContext 缺失证据，还是检索之后的 LLM/provider 波动？
+5. CTE 修复后，临时名能通过而内部越权物理表仍被拦吗？
+6. ratio 类型提升的最小等价规则是否关闭已知误判，同时没有放过真实表达式不一致？
+7. `schema_context_match` 是否真的按 SchemaGraph alternatives 判分，manual pending 是否不再被讲成 pipeline failed？
+8. 修复后的 targeted case 是否与人工 gold 对齐；仍 unresolved 的问题是否被诚实保留？
+
+### 非目标与决策门
+
+- 不把 Codex 审计包装成完整 LLM-as-Judge，不自动回写正式分数，不用一次人工判断宣称稳定 judge 能力。
+- 不审计 `8 × 32` 全部历史响应；首轮固定一轮 32 条，其他轮次只作必要旁证。
+- 不在审计完成前修改 scorer、case、SQL Guard 或 fidelity，也不因已知单例直接全局放宽。
+- 不通过关闭 RBAC、跳过 SQL Guard、全局字符串替换或宽泛代数化简解决误判。
+- 不为缺 SQL 的 timeout case 现场补调用；unavailable 本身就是需要保留的可靠性证据。
+- 不改数据库结构、不清洗 seed、不切 oracle，不新增持久化数据库表；若未来要把 audit 做成多人工作流/平台，留给 EvalBench 单独设计。
+- 不调整默认模型、Milvus、embedding、fusion、timeout/retry，也不重开 retrieval A/B，除非审计出现稳定的 SchemaGraph 缺失新证据并再次过用户决策门。
+- 不默认运行完整 diagnostic；任何完整真实 LLM run 都需在 targeted 验证后单独说明必要性并等待用户确认。
+
+---
+
 ## 与独立评测项目（EvalBench）的关系
 
 Phase 3B 是 EvalBench 的**前置探路阶段**，但不是 EvalBench 本身。最通俗的分工：
@@ -1699,6 +1869,18 @@ Phase 3B 完成后，后续阶段的受益：
 ---
 
 ## 修订记录
+
+### v6.9（2026-08-07）—— M26 Diagnostic 人工审计、Eval 对账与定点修复
+
+依据：M25-v1 的 8 轮完整 diagnostic 已足够证明外部 LLM 波动显著、local/Milvus Context 基本一致，同时暴露递归 CTE 临时名被 SQL Guard 误拦、ratio 类型提升被 fidelity 误判、`schema_context_match` 未消费 alternatives、manual review 与 failed 容易混读等问题。继续堆完整跑分会重复污染结论，需要先用一轮 32 条逐题人工证据校准自动 Eval。
+
+| 改动 | 说明 |
+|---|---|
+| 新增 M26 | 建立可复用 audit record / report seam，把题面、Context、Plan、完整 SQL、结果、自动判定与人工审计放在同一条证据链。 |
+| 冻结首轮样本 | 优先使用现有默认 `qwen3.7-plus + local deterministic/weighted` round 2 的 32 条完整 run；不为审计重新调用 LLM，不扩成 8 轮全量人工工作。 |
+| 增加中间确认门 | 32 条审计和差异矩阵完成后，必须先确认 CTE/RBAC、ratio fidelity、SchemaContext scorer、manual 状态和题面合同方案，再修改长期安全/评测规则。 |
+| 定点修复 | M26 不止写报告；用户确认后修复已证实误判，补安全/评分正反例并只做受影响 case targeted replay。 |
+| 保持边界 | 人工标签不覆盖正式 pass/fail；不建完整 Judge/EvalBench、不改数据库/default retrieval/model/oracle，也不默认重跑完整 diagnostic。 |
 
 ### v6.8（2026-08-07）—— M25 评测可信度、运行可靠性与证据化归因
 
