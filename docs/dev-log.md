@@ -804,11 +804,11 @@ POST /api/query`
 
 1. **[基础追问] 这个合同通过以后，为什么还不能说明答案一定正确？**
 
-   fidelity contract 检查的是 **SQL 是否忠实于 QueryPlan**，不是 QueryPlan 是否正确理解了用户问题。
+   **fidelity contract** 检查的是 **SQL 是否忠实于 QueryPlan**，不是 QueryPlan 是否正确理解了用户问题。
 
    如果 QueryPlan 本身把商品退款率的分母写错，SQL 完全照着执行，fidelity 仍然会通过。因此系统还需要 QueryPlan validation、SQL Guard、SQL execution、output contract 和 result scorer。
 
-   可以把它类比成后端 DTO 校验：请求格式合法，不表示业务逻辑一定正确。每层合同只负责自己的边界。
+   **类比后端 DTO 校验**：请求格式合法，不表示业务逻辑一定正确。每层合同只负责自己的边界。
 
 2. **[基础追问] 为什么需要 `passed / failed / indeterminate` 三种状态，布尔值不够吗？**
 
@@ -817,14 +817,6 @@ POST /api/query`
    `indeterminate` 表示当前规则无法唯一证明，例如多表查询里的无前缀 `id`、跨 derived scope 的 alias 或 `ORDER BY 1`。
 
    如果只有布尔值，就会被迫把“未知”混入“错误”或“通过”。安全场景下，更合理的做法是保留未知状态并 fail closed，同时用 reason code 指导后续扩展。
-
-3. **[工程/深挖追问] 为什么不直接比较两段 SQL 的执行结果？结果相同不就说明等价吗？**
-
-   单次数据集上的结果相同，不代表 SQL 语义等价。
-
-   例如当前 seed 只有 8 条结果，漏掉 `LIMIT 10` 仍可能返回相同数据；ASC 与 DESC 在只有一行时也看不出区别。执行结果受当前数据分布影响，不能替代结构合同。
-
-   M24 采用两层验证：AST 检查计划保真，deterministic oracle 检查当前 reference result。两层解决的问题不同。
 
 4. **[工程/深挖追问] 为什么不让 LLM judge 判断 QueryPlan 和 SQL 是否语义一致？**
 

@@ -328,6 +328,7 @@ Phase 3B 从 `M15` 开始编号。本阶段主线不再按 6 个细碎 step 写 
 | M22 Eval Contract / Semantic Output Stabilization | 8 | M21 | 分离 Context / Output / Result / Manual 契约，暴露 QueryPlan→SQL 的排序、limit 等真实缺口 | 窄 SQL Plan Contract、结构化语义拒绝、trace 合同证据、194-doc 历史对照 |
 | M23 Eval / Semantic / Database Baseline Hygiene | 9 | M22 | 固化数据库语义、reference 与 oracle 边界，形成 195-doc 新合同 | 结果校验 case、异常专项、MySQL/SQLite 审计、schema docs hash 门禁 |
 | M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity | 10 | M23 新合同基线 | 先收口 M23 新合同的失败事实与输出政策，再消除 SQL 计划合同的格式误拦，并让 QueryPlan 已声明的排序、limit 和输出投影可验证地保真 | 逐 case 定性表、只读语义比较 module、合同/输出证据、分层回归测试、M23 新合同下交错重复 A/B |
+| M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution | 11 | M24 完成并验收 | 校准 case / scorer / 分母，分离执行阶段与真实根因，补齐外部调用可靠性证据，再以 focused spike 验证退款率和递归类目能力 | case contract 审计、两轴归因、分层报告、LLM attempt 证据、可靠性实验、新合同基线、focused capability spike、条件性 Judge / retrieval 决策 |
 
 ## 模块实施明细
 
@@ -1329,6 +1330,199 @@ M22 不应把 M21 的 `21/32` 直接理解为纯模型能力问题。规划前�
 
 ---
 
+## M25：Eval Trustworthiness, Reliability & Evidence-Grounded Attribution
+
+**定位**：M25 不是新一轮“调 Prompt 冲总分”，也不是继续比较 embedding 的检索模块。它先回答三件更基础的问题：试题和自动判分是否一致、失败究竟发生在哪里且应由谁负责、外部服务不稳定时还能否诚实地描述模型能力；在这些前提成立后，才对退款率和递归类目做有证据的 focused capability validation。
+
+> 通俗说：M23 校准数据库事实和参考答案，M24 校准 QueryPlan 到 SQL 的保真合同；M25 要把“答错了”“没拿到模型响应”“试卷没写清楚”和“检索确实漏了资料”彻底分开。只有这样，后续优化模型、检索或代码时，才能知道分数变化到底说明了什么。
+
+### M25 前置事实与问题边界（2026-08-07）
+
+1. M24 已完成代码、六次受控 diagnostic 和收尾文档，focused 为 `70 passed, 1 warning`，全仓为 `176 passed, 1 warning`，但尚未执行 `accept-module`。M25 可以先完成规划，正式实现必须以 M24 验收通过为入口门禁。
+2. M24 固定 Qwen `qwen3.7-plus`、weighted、32 条 diagnostic、195-doc/hash、SQLite deterministic oracle 和 LangFuse disabled，Local 三次自动能力为 `21/21/22/27`，Milvus + DashScope `qwen3.7-text-embedding` 为 `22/22/22/27`。这 1 分差不足以证明 embedding 因果收益，也不改变默认 `inmemory + deterministic + weighted`。
+3. 当前 `22/27` 是 automated capability 综合分，不是纯 SQL / 答案正确率。它混合结果题、安全题、Context、Plan、Trace 等检查；32 条还包含 manual/diagnostic 和相同问题的 linked case，不能解释成 32 个独立自然语言能力样本。
+4. `db_simple_001/002/003` 与 `db_multi_002` 已确认存在题面未完整声明 expected contract 的问题：隐藏了排序、LIMIT、精确投影或 2026 年 6 月时间范围。它们应在新合同下重跑，不能回填或改写 M24 历史分数。
+5. M24 的 `db_join_003` 六轮均在 QueryPlan 阶段约 45 秒 timeout；`db_core_002`、`db_multi_002`、`db_hard_001` 也混有相同现象。当前主 LLM client 将 timeout 固定为 45 秒，网络异常路径又发生在部分错误上下文包装之外，因此 trace 可能只有 stage/latency/message，没有 prompt length、provider/model、attempt 等证据。
+6. 当前 triage 以最早失败 trace step 或第一条失败 score detail 作为主归因，适合定位执行断点，但不足以表达“外部 timeout 是主因，同时该 case 还没有语义结论”或“一条 SQL 同时有投影和结果问题”。M25 应保留主因，同时记录伴随证据，不能简单删除现有兼容字段。
+7. 代码已经有 `linked_case_id`、M22 automated/manual 视图、可选 LLM Judge、failure stage/subtype、完整 M24 SQL fidelity trace 等基础设施。M25 应扩展这些 seam，而不是另造一套平行 runner、case 格式或 scorer。
+
+### 目标与归因模型
+
+M25 使用三个相互独立的观察维度，避免再次把“在哪里失败”“为什么失败”“该看哪种指标”混为一谈：
+
+| 维度 | 回答的问题 | 示例 |
+|---|---|---|
+| execution stage | 运行在哪一步中断或首次出现不满足合同？ | `schema_retrieval`、`query_plan`、`sql_generation`、`result_match` |
+| root cause | 当前证据支持应修哪一类问题？ | `code_issue`、`model_capability`、`retrieval_issue`、`external_service`、`eval_contract`、`mixed_or_unknown` |
+| report view | 本条证据应进入哪个读数？ | `semantic_answer`、`safety`、`plan_and_trace`、`provider_reliability`、`manual_or_judge` |
+
+根因分类遵守以下证据边界：
+
+| 根因 | 何时成立 | 不得据此推断 |
+|---|---|---|
+| `code_issue` | 固定输入可复现的 pipeline、trace、parser、scorer、状态传播或确定性合同缺陷 | 不能因模型输出不好就默认是代码 bug |
+| `model_capability` | provider 已正常返回，证据显示 QueryPlan / SQL 的业务语义、结构、表达式或输出不符合已确认合同 | timeout、欠费、网络错误不属于模型能力结论 |
+| `retrieval_issue` | 同请求 SchemaGraph 确实缺少回答所需的表、字段、指标或关系事实 | 最终 SQL 漏表、漏列不能反向证明 retrieval miss |
+| `external_service` | timeout、网络权限、欠费、限流、服务不可用或外部 Milvus/API 故障有明确 transport 证据 | 不能把该次 case 记成已观察到的语义错误 |
+| `eval_contract` | 题面、业务默认、reference、scorer、alias、manual rubric 或样本权重不一致 | 不因修订新合同反向改写旧实验历史 |
+| `mixed_or_unknown` | 多个因素共同作用，或证据不足以唯一归因 | 不为得到整齐统计而强塞进其他五类 |
+
+每条失败保留一个 `primary_root_cause`，并允许记录 `contributing_causes`、证据等级和仍未回答的问题。execution stage 保持与 M19/M24 兼容；root cause 是新增的决策层，不替换 stage。
+
+### P0：评测可信度与可靠性证据地基（不可降级）
+
+#### P0-0：入口门禁与历史冻结
+
+- M24 必须先通过 `accept-module`，M25 才进入代码实现；M24 的六次有效 run、欠费失败 run 和部分 trace 均继续保留原始身份。
+- 固定历史解释：M24 Local `21/21/22/27` 与 Milvus `22/22/22/27` 只属于当时 195-doc、旧题面/合同的受控观察，不因 M25 修改 case 而重算。
+- M25 开工时建立 `docs/notes/m25-notes.md` implementation checklist；任何 case/scorer/default 的长期变化仍需用户在具体改动前确认。
+
+#### P0-1：全量 Case Contract Audit
+
+- 审计所有自动 case，而不只审计当前失败项。对每条题建立可追溯合同：问题文本、权威业务默认、expected tables/columns/metrics、时间范围、过滤、排序、LIMIT、alias、reference SQL、check type、是否独立问题。
+- 每个约束只能处于三种状态之一：题面显式声明、由已登记的权威 metric / 产品默认继承、或尚有歧义。尚有歧义的 case 不得继续充当精确自动能力硬门。
+- 优先修订 `db_simple_001/002/003` 与 `db_multi_002`；同时复核 `db_hard_003` 的“平均售价”究竟是价格记录算术平均、时间加权平均还是成交均价，先收口业务定义再决定能否从 manual 升为自动结果题。
+- `coupon_order_count` 保持 canonical 输出名。暂不直接把 `coupon_usage_count` 加入白名单，因为它可能表示桥接记录数而非去重订单数；若未来允许，必须同时有产品语义和表达式证据，不能只因某次模型使用了该 alias 就放宽。
+- 自动 case 的精确投影、显式 alias 白名单和稳定展示顺序继续沿用 M24 已确认政策；敏感字段始终由 SQL Guard 硬拒绝。
+
+#### P0-2：样本独立性与分母契约
+
+- 复用并补全现有 `linked_case_id`，为重复、等价、同问题不同检查目标建立稳定 group；不复制问题定义，也不为凑独立样本数删除有诊断价值的 linked case。
+- 报告同时展示：raw case count、independent question count、linked/equivalent group count、automated/manual 分母，以及每个 report view 的 eligible / observed / unavailable。
+- `semantic_answer` 只统计有确定性答案合同的结果题；provider timeout 时该条仍计入 end-to-end failure 和 reliability unavailable，但不得伪装成已观察到的 semantic wrong。
+- 安全、Plan/Trace、manual/Judge 分别展示，禁止把综合 automated capability 重新命名为“SQL 正确率”。
+
+#### P0-3：两轴 Failure Attribution 与完整失败链
+
+- 保留当前 `failure_stage` / `failure_subtype` 兼容输出，新增 root cause、evidence level、primary/contributing causes、observability completeness 和 semantic conclusion status。
+- 继续使用“最早硬失败”作为 primary execution evidence，但报告同时保存所有失败 trace step、score detail 和后续未执行项；区分 `not_observed`、`failed`、`review_required`，避免早返回被误读为后续能力失败。
+- 为 timeout、HTTP 4xx、网络权限、限流、JSON parse、合同失败、结果不匹配建立稳定 error subtype。账户 `Arrearage`、`WinError 10013`、read timeout 必须能分别聚合。
+- root cause 映射必须以 trace/scorer 证据为输入，不靠 case id 永久贴标签；同一 case 在不同 run 可以属于不同根因。
+
+#### P0-4：LLM Attempt / Transport 可观测性
+
+- 让主模型调用的 timeout 可配置，但 M25 不预先规定最终默认值；先记录并实验，再决定是否调整默认。
+- 对 QueryPlan 和 SQL generation 分别记录 provider、exact model、stage、attempt index/count、configured timeout、每次 attempt latency、prompt/system prompt length、响应/parse 状态、稳定 error subtype 和最终 outcome。
+- 成功路径和失败路径使用同一证据结构；网络异常不能再绕过错误上下文补充。敏感 prompt 正文不进入公开报告，长度、hash 或既有私有 trace 边界足以支持对照。
+- retry 只允许用于幂等 LLM 请求和明确可重试的瞬时错误；非瞬时 4xx、业务/安全拒绝、解析或语义错误不得为了提成功率盲目重试。
+
+#### P0 验收门禁
+
+- 全部自动 case 均有 contract audit 结果；不存在未声明却由 expected SQL 强制要求的排序、LIMIT、时间范围或精确列。
+- 报告能同时给出 raw cases、independent questions、linked groups，以及五类 report view 的 eligible / observed / unavailable 分母。
+- 已知 M24 timeout 被归为 `external_service`，并保留其发生 stage；它们不再进入“已观察到的 semantic wrong / model capability wrong”。
+- 五类根因和 `mixed_or_unknown` 均有 focused 正反例；同一 case 不被永久绑定根因。
+- trace 能重建每个 LLM attempt 的 stage、timeout、latency、prompt length、provider/model 与 outcome；网络失败和成功路径字段一致。
+- focused tests、M24 fidelity / output / safety 回归和全仓 pytest 均通过；默认模型、retrieval、embedding、fusion、oracle 和数据库事实不因 P0 自动变化。
+
+### P1：受控运行可靠性实验与能力验证（P0 通过后执行）
+
+#### P1-1：Timeout / Retry 受控实验
+
+- 先对 `db_join_003`、`db_core_002`、`db_multi_002`、`db_hard_001` 建立 focused reliability 集；固定模型、retrieval、corpus/hash、oracle、代理和输入，只改变预先声明的 timeout / retry 候选策略。
+- 每个候选至少进行可观察重复，记录首次成功率、最终成功率、attempt 分布、总延迟、额外调用/成本、错误 subtype，以及获得有效响应后的语义结果。
+- 对照 prompt/context 体积与 stage，判断 45 秒是否只是 client 配置过短、是否集中在 QueryPlan、是否与 context/prompt 长度相关；不得只把 timeout 改成新的魔法数字后宣布修复。
+- 仅当数据表明 retry 提升瞬时故障恢复、且额外延迟/成本可接受时，才提出默认策略变更；若证据不支持，保留显式实验配置并记录否定结论。
+
+#### P1-2：冻结 M25 新合同并重建基线
+
+- P0 case/scorer 变更完成后，为新合同登记版本、case count、independent question count、195-doc hash、oracle、模型、检索、代理和可靠性策略。
+- 首个基线优先使用当前默认 Qwen `qwen3.7-plus` + `inmemory/deterministic + weighted`；按预先登记的重复次数运行，不与 M24 旧合同分数直接比较。
+- 同时报告 end-to-end pass、provider reliability、observed semantic answer、safety、plan/trace 和 manual；外部故障必须显式占位，不能从报告中消失。
+- 基线若仍有大量 unavailable 或 attribution incomplete，不进入能力优化结论，先回到 P0/P1-1 补证据。
+
+#### P1-3：退款率 Focused Capability Spike
+
+- 目标 case 以 `db_core_002` 为主，`db_join_003` 只在 provider 返回有效结果后提供人工/归因证据。
+- 验证成交订单过滤、明细退款优先、整单退款回退 `refunds.product_id`、订单分母绑定、正确 join/grain，以及 QueryPlan `output_expressions` 到 SQL 的表达式保真。
+- 先建立确定性的计划/SQL 正反例与 reference-result counterexample，再通过少量重复真实调用判断缺口位于 metric 事实、QueryPlan、SQL generation 还是 fidelity；不预先规定必须通过 prompt、few-shot、planner 或其他单一方案修复。
+- provider timeout 只计可靠性，不得作为退款率能力失败；Context 已包含目标事实时不得归因 retrieval。
+
+#### P1-4：递归类目 Focused Capability Spike
+
+- 先修订 `db_multi_002` 题面的时间范围并确认 `db_hard_001` 的 `item_gmv` 口径，再验证一级类目树、指定根类目及子类目、成交过滤和明细销售额聚合。
+- 在接入 pipeline 前，用正反例验证 M24 fidelity 对 recursive CTE / derived scope 的实际边界：正确 scope 可验证，错误 alias、漏递归、错误根节点或错误 `gmv` 粒度不能因扩展 AST 而放行。
+- 若现有 fidelity 无法安全证明 CTE 等价，可以保留 `indeterminate` 并形成后续设计决策；M25 不以“必须扩大 AST 支持面”为完成条件。
+- 最终能力结论必须同时有有效 provider 响应、完整计划/SQL evidence 和 deterministic result oracle；只看到计划结构或 manual review 不算能力通过。
+
+#### P1 验收门禁
+
+- timeout、可重试瞬时错误、非重试 4xx、parse error、合同失败和语义错误能够独立统计；retry 不作用于非瞬时或非幂等路径。
+- reliability 实验记录固定条件、唯一变量、重复次数、成功率、延迟和额外成本；得不到稳定结论时明确登记 `inconclusive`。
+- M25 新合同基线可复现，且同时提供 end-to-end 与 observed semantic 两类读数，不隐藏 unavailable。
+- 退款率 spike 有覆盖整单退款 fallback 与错误分母的正反例；递归类目 spike 有正确/错误 CTE、root scope 和 `item_gmv` 粒度证据。
+- 每个 capability 失败都能落到 metric/context、QueryPlan、SQL generation、fidelity、result 或 external 中的有证据位置；不能仅凭最终总分推断。
+- P1 不自动切换默认模型、Milvus、embedding、fusion 或 oracle；任何默认策略变更另设用户决策门。
+
+### P2：条件性增强（不阻塞 M25 核心验收）
+
+#### P2-1：LLM-as-Judge Shadow Pilot
+
+- 只有 manual case 的业务定义、人工 rubric 和 gold label 已先确定时才启动；优先覆盖 `db_hard_001`、`db_hard_003`、`db_join_003`，不覆盖安全硬门和已有确定性 result/AST 合同。
+- Judge 获得足以判断的业务 rubric/reference result，而不是只看截断的 reference SQL 和前三行 preview；尽量使用与生成模型不同的 provider/model，降低相关偏差。
+- shadow 结果单独报告，不改变正式 automated pass/fail；评估重复一致性、与人工标签的一致率、误判结构、unavailable、延迟和成本。
+- 当前固定 `0.8` 阈值、三次 retry 和 judge prompt 都属于待校准候选，不视为既定产品政策。
+
+#### P2-2：条件性 Retrieval / Embedding 复测
+
+- 只有 P0/P1 出现“所需表/字段/指标/关系没有进入 SchemaGraph”的稳定证据，才提出新的 retrieval 假设；Context 已有而计划未采用时不重跑 embedding A/B。
+- 若执行，先用当前 195-doc corpus/hash 做 retrieval-only 单变量实验，再做固定模型与可靠性策略的端到端对照；同时检查 collection row count、dimension、hash 和 reuse metadata。
+- M24 三次 Milvus 自动分高 1 分只作为历史观察，不能充当本次实验的预设结论；RRF 仍为历史否定实验，不因离线 recall 好看直接复活。
+
+#### P2-3：少量 Multi-seed / Counterfactual Robustness Probe
+
+- 针对容易在单一 seed 上“错误 SQL 碰巧同结果”的少量高风险 case，设计最小反事实数据或额外 seed，用于区分 reference 与常见错误 SQL。
+- 不在 M25 建设完整多 seed 平台，也不清洗当前确定性 seed；probe 只为高风险业务口径提供补充证据，长期平台化留给 EvalBench。
+
+#### P2 验收门禁
+
+- Judge 只有在人工 gold/rubric 存在时才给一致性结论；它不得覆盖安全、result oracle 或 SQL fidelity 硬规则。
+- Retrieval 复测必须同时报告 retrieval-only 与端到端证据，并保持 corpus/hash 与唯一变量纪律；证据不足时不切默认。
+- Counterfactual probe 能让至少一个常见错误 SQL 与 reference 产生不同结果；否则不把它包装成鲁棒性证明。
+- 任一 P2 项无充足前提时允许明确跳过，不阻塞 P0/P1 核心完成。
+
+### 建议执行顺序
+
+```text
+M24 accept
+→ P0-1 全量 case contract audit
+→ P0-2 样本独立性与分母合同
+→ P0-3 两轴归因与完整失败链
+→ P0-4 LLM attempt / transport 可观测性
+→ P1-1 timeout / retry 受控实验
+→ P1-2 冻结 M25 新合同并重建默认链路基线
+→ P1-3 refund_rate focused spike
+→ P1-4 recursive category focused spike
+→ P2 Judge / retrieval / counterfactual 条件性实验
+→ 基于证据决定 M26 优化方向
+```
+
+### M25 核心完成标准
+
+M25 完成时至少能用报告和 trace 回答：
+
+1. 每个自动 case 的强制约束来自题面、权威业务默认还是尚未解决的歧义？
+2. raw case、独立问题、semantic answer、safety、plan/trace、reliability 和 manual 的分母分别是多少？
+3. 一次失败发生在哪个 execution stage，当前 primary root cause 属于代码、模型、检索、外部服务、Eval 契约还是证据不足？
+4. timeout / external unavailable 与 observed semantic wrong 是否完全分开，同时仍被 end-to-end reliability 诚实计入？
+5. `db_core_002` 的缺口位于 metric、QueryPlan、SQL generation、fidelity 还是 result；整单退款与错误分母是否有反例证据？
+6. `db_multi_002` / `db_hard_001` 的递归、时间、root scope 与 `item_gmv` 是否分别得到验证；CTE fidelity 的安全边界是什么？
+7. M25 新合同基线能否复现，哪些结论是稳定、否定或 inconclusive？
+8. Judge、retrieval 或 multi-seed 是否满足继续投入的证据门槛，而不是仅因为它们“看起来高级”就进入默认链路？
+
+### 非目标与决策门
+
+- 不在 contract audit 前通过改 prompt、加 few-shot 或放宽 alias/scorer 追分。
+- 不把 provider timeout、欠费、网络权限或 Milvus 不可用描述成模型语义失败。
+- 不把排除 external unavailable 后的 observed semantic rate 单独包装成端到端成功率；两者必须并列。
+- 不为修一条递归题直接把 M24 AST 扩成通用 SQL optimizer；先以正反例证明所需最小 scope。
+- 不让 LLM Judge 覆盖安全、确定性结果、输出投影或 AST fidelity 硬规则。
+- 不因为 M24 的 1 分差切默认 Milvus/Qwen embedding，不重新调 RRF/top_k/rerank，除非 P2 retrieval 决策门被新证据触发。
+- 不改数据库结构、不清洗 seed、不切 result oracle；若发现事实或 reference 矛盾，先登记为 Eval/业务口径问题并等待用户确认。
+- 不在 M25 建完整 EvalBench 平台；DataPilot 只实现本项目闭环需要的最小结构，并保留未来 adapter 可消费的清晰证据。
+
+---
+
 ## 与独立评测项目（EvalBench）的关系
 
 Phase 3B 是 EvalBench 的**前置探路阶段**，但不是 EvalBench 本身。最通俗的分工：
@@ -1505,6 +1699,18 @@ Phase 3B 完成后，后续阶段的受益：
 ---
 
 ## 修订记录
+
+### v6.8（2026-08-07）—— M25 评测可信度、运行可靠性与证据化归因
+
+依据：M24 六次受控 diagnostic 已证明历史 SQL 字符串合同误拦基本收口，但稳定失败仍混有题面隐藏约束、QueryPlan/SQL 真实语义缺口、固定 45 秒 provider timeout、manual review 与 linked case；继续只看 `passed/32` 或 `automated/27` 会把 Eval、外部服务和模型能力错误混为一谈。
+
+| 改动 | 说明 |
+|---|---|
+| 新增 M25 | 将 case contract、样本分母、失败根因和 provider reliability 设为 P0；可靠性实验与 refund/recursive focused capability spike 设为 P1；Judge、retrieval 和 counterfactual probe 设为条件性 P2。 |
+| 建立两轴归因 | 保留 execution stage 兼容口径，新增 `code_issue / model_capability / retrieval_issue / external_service / eval_contract / mixed_or_unknown` 根因层，并允许 primary + contributing causes。 |
+| 拆分能力与可用性 | 报告同时展示 semantic answer、safety、plan/trace、provider reliability、manual/Judge 和 end-to-end；timeout 计可靠性失败，但不伪装成已观察到的语义错误。 |
+| 收紧实验纪律 | 先审计题面/reference/scorer，再补 LLM attempt 证据并做 timeout/retry 单变量实验；新合同冻结后才重建基线和验证退款率、递归类目能力。 |
+| 保持默认边界 | 不因 M24 一分差切 Milvus/Qwen embedding，不直接扩 alias 白名单或 AST scope，不让 Judge 覆盖确定性硬规则。 |
 
 ### v6.6（2026-08-06）—— M24 SQL 计划语义等价与生成保真
 

@@ -5,10 +5,10 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity（开发、6 次受控 diagnostic 与收尾文档已完成）
-- 上一模块验收：M24 未验收（待 `accept-module`）
+- 当前模块：M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity（已验收）
+- 上一模块验收：M24 已验收（2026-08-07）
 - 阻塞项：无
-- 更新时间：2026-08-06
+- 更新时间：2026-08-07
 
 ## 必读规则
 
@@ -87,6 +87,7 @@
 | 2026-08-02 起，M20/M23 已加护栏 | 旧固定 Milvus collection `datapilot_schema_docs` 已被历史重复灌入污染；M23 还发现同数量但不同语义文本可绕过旧行数检查 | 旧 collection 的历史 A/B 结果不能直接作为 embedding 优劣结论 | 新 eval/smoke 使用唯一 collection 或 clean collection；`MilvusVectorIndex` 会拒绝行数、维度或 schema docs hash 不匹配（含缺少 hash 标记）的已有 collection |
 | 2026-08-04 起，M24 已升级护栏 | QueryPlan 仍可能把输出投影声明过宽，或 SQL generation 生成与计划不一致的真实表达式 | AST fidelity 已消除历史表 alias/quoted identifier/唯一限定名省略/SELECT alias 误拦，并严格检查 order/limit/projection；但合同不能修正错误 QueryPlan，也不能把 contract pass 当答案正确 | 保持同一顶层 SELECT 的保守 AST 边界；依靠 `output_contract`、result scorer 和完整 trace 区分计划过宽、真实保真失败与结果语义错误，不为追分放宽 CTE/derived scope 等未知情况 |
 | 2026-08-05 起 | M23 自动 eval 仍未全覆盖数据库异常彩蛋 | 新退款率 case 已覆盖成交过滤和整单退款回退，但外部单号、负数退款、金额对账仍不能由当前自动分数证明 | 事实菜单保留在 `database-current-state.md`；后续新增异常 case 前先明确业务题面与自动判定方式 |
+| 2026-08-07 起（验收登记） | AI_CONTEXT「当前默认值」NL2SQL 行未提及 M24 的 fidelity 合同与 SQL 执行后 `output_contract` 展示顺序硬门 | 续接排障遇 `output_projection_contract_failed` / `body_columns_order_or_set_mismatch` 时可能不知道新链路 | 待单独文档小修：在该行补"LLM 生成后经 SQL Plan Fidelity AST 合同，SQL 执行后 output_contract 校验 body.columns 集合与展示顺序"；修完移除本条 |
 
 ## 变更记录索引
 
