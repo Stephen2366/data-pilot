@@ -22,6 +22,7 @@ from engine.nl2sql.generator import (
     get_default_llm_client,
     validate_sql_plan_contract,
 )
+from engine.nl2sql.llm_call import LLMCallEvidence
 from engine.nl2sql.planner import QueryPlan, validate_query_plan
 from engine.nl2sql.semantic_validation import validate_request_semantics
 from engine.nl2sql.schema_loader import DomainSchema, load_domain_schema
@@ -200,7 +201,17 @@ def _llm_error_metadata(exc: LLMGenerationError) -> dict[str, Any]:
         metadata["parse_error"] = exc.parse_error
     if exc.prompt_length is not None:
         metadata["prompt_length"] = exc.prompt_length
+    if exc.error_subtype:
+        metadata["error_subtype"] = exc.error_subtype
+    if exc.call_evidence is not None:
+        metadata["llm_call"] = exc.call_evidence.to_trace_metadata()
     return metadata
+
+
+def _llm_success_metadata(evidence: list[LLMCallEvidence]) -> dict[str, Any]:
+    """成功路径也写 attempt 证据，避免报告只能看见失败调用。"""
+
+    return {"llm_call": evidence[-1].to_trace_metadata()} if evidence else {}
 
 
 def _first_sql_step(plan: QueryPlan):
@@ -364,12 +375,14 @@ def run_text2sql_pipeline(
 
     # 步骤 3：QueryPlan 生成与自检 -----------------------------------------------------------
     span = trace_context.start_span(name="query_plan")
+    query_plan_call_evidence: list[LLMCallEvidence] = []
     try:
         plan = generate_query_plan(
             question=question,
             schema_graph=schema_graph,
             domain_schema=active_domain_schema,
             llm_client=llm_client,
+            llm_evidence_sink=query_plan_call_evidence.append,
         )
     except QueryPlanExtractionError as exc:
         span.fail(
@@ -412,6 +425,7 @@ def run_text2sql_pipeline(
             "step_count": len(plan.steps),
             "sql_step_count": sum(1 for step in plan.steps if step.step_type == "sql_query"),
             "step_ids": [step.step_id for step in plan.steps],
+            **_llm_success_metadata(query_plan_call_evidence),
         },
     )
 
@@ -457,6 +471,7 @@ def run_text2sql_pipeline(
 
     # 步骤 4：局部 Schema SQL 生成 -----------------------------------------------------------
     span = trace_context.start_span(name="sql_generation", parent_step_id=plan_step.step_id)
+    sql_call_evidence: list[LLMCallEvidence] = []
     try:
         generated_sql = generate_sql_from_plan_step(
             question=question,
@@ -465,6 +480,7 @@ def run_text2sql_pipeline(
             schema_graph=schema_graph,
             domain_schema=active_domain_schema,
             llm_client=llm_client,
+            llm_evidence_sink=sql_call_evidence.append,
         )
     except LLMGenerationError as exc:
         span.fail(
@@ -526,6 +542,7 @@ def run_text2sql_pipeline(
     span.end(
         output_summary=generated_sql.reasoning_summary,
         metadata={
+            **_llm_success_metadata(sql_call_evidence),
             "tables_used": generated_sql.tables_used,
             "confidence": generated_sql.confidence,
             "sql_preview": generated_sql.sql[:300],

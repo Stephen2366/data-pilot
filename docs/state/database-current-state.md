@@ -76,11 +76,11 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - `gmv`：`SUM(orders.order_amount)`，过滤 `orders.order_status NOT IN ('cancelled', 'canceled') AND orders.paid_at IS NOT NULL`。
 - `item_gmv`：`SUM(order_items.line_amount)`，关联 `orders` 后套用成交过滤。
 - `net_revenue`：`SUM(orders.actual_amount)`，其中 `actual_amount = order_amount + shipping_amount - discount_amount`。
-- `refund_rate`：成交订单内的退款数 / 订单数；商品维度优先用 `refunds.order_item_id -> order_items.product_id` 的订单明细归因。整单退款的 `order_item_id` 为空时，使用 `refunds.product_id` 作为唯一兼容回退，不能因 INNER JOIN 被丢弃，也不能复制归因给同订单每个商品。
+- `refund_rate`：成交订单内的已完成退款去重订单数 / 成交去重订单数；分子只统计 `refund_status='completed'`。商品维度优先用 `refunds.order_item_id -> order_items.product_id` 的订单明细归因。整单退款的 `order_item_id` 为空时，使用 `refunds.product_id` 作为唯一兼容回退，不能因 INNER JOIN 被丢弃，也不能复制归因给同订单每个商品。
 - `net_refund_amount`：实际已完成退款的带符号金额，`SUM(refunds.refund_amount)`，过滤 `refund_status = 'completed'` 并按 `processed_at` 取时间窗口；负数是冲销修正，必须保留。
 - `coupon_usage_rate`：`COUNT(DISTINCT order_coupons.order_id) / COUNT(DISTINCT orders.id)`。
 - `add_to_pay_conversion_rate`：从 `user_behavior_log` 计算支付成功事件数 / 加购事件数，可按 `device_type` 分组。
-- `avg_selling_price`：从 `product_price_history` 按时间窗口匹配后聚合。
+- `avg_selling_price`：从 `product_price_history` 取与时间窗口相交的有效记录，按记录条数计算 `price` 算术平均值，不按有效天数加权。
 
 指标口径唯一事实源是 `domain_pack/metrics.yaml`。写 SQL、写 plan 或改 prompt 时，先看这里，不要把 GMV / 净收入 / 商品 GMV 混成一个概念。
 

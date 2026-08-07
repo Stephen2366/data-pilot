@@ -13,6 +13,24 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution（2026-08-07）
+
+- **改动范围**：新增 `engine/nl2sql/llm_call.py` 深 module、`semantic_group_id` / `case_contract_version=m25-v1`、两轴 triage 与六类 report views；同步 LLM 配置/pipeline trace、三套主 case、退款率事实/seed、focused tests、runbook 与模块 notes。完整清单见 `docs/notes/m25-notes.md`。
+- **关键决策**：用户确认正式题面补齐列/时间/排序/LIMIT，退款率采用 completed 退款去重订单分子，平均售价保持记录算术平均但不自动升级；归因深化 `eval.triage`，LLM 调用采用显式 content+evidence 而非 stateful `last_call_metadata`；timeout 默认 45 秒，retry 默认 0，只有明确 transient 幂等错误可显式重试。
+- **可信评测结构**：42 raw cases 映射为 26 independent groups；报告并列 semantic answer、safety、plan/trace、provider reliability、manual/Judge 与 end-to-end 的 eligible/observed/unavailable。failure stage 继续表示执行断点，root cause 新增 `code_issue/model_capability/retrieval_issue/external_service/eval_contract/mixed_or_unknown`；完整 trace/score 失败链不再被 first-failure summary 丢弃。
+- **调用证据**：QueryPlan/SQL generation 的成功和失败都记录 provider、exact model、stage、configured timeout、attempt index/count、逐次 latency、prompt/system length、stable error subtype 和 outcome；timeout、Arrearage、WinError 10013、429/5xx、parse 与合同错误可分别归因，非瞬时错误不重试。
+- **能力反例**：退款率 probe 区分多退款记录、非 completed、错误分母和 INNER JOIN 丢整单 fallback；递归 probe 区分漏子类目 `20`、正确 item grain `70` 与订单头重复聚合 `200`。正确 recursive CTE 的 M24 fidelity 仍为保守 `indeterminate`，未扩大 AST scope。
+- **参考资料**：M25 计划、M24 六轮 trace/report、M22-M24 notes、state runbook/eval/database facts与既有 triage/fidelity；采用 deep module/seam 设计词汇，没有照搬 Judge 三次 retry，也未查新的外部资料。
+- **验证快照**：focused `39 passed, 1 warning`；linked 修复回归 `12 passed`；最终全仓 `184 passed, 3 skipped, 1 warning`；seed reset 成功、14 表规模与固定事实通过；`git diff --check` 无 whitespace error。warning 为既有 Starlette/httpx deprecation。
+- **遗留/后续**：按用户要求未跑完整 formal/challenge/diagnostic，M25-v1 完整 baseline 待用户手动执行；`contributing_causes` 已预留但无真实 mixed 证据时保持空；recursive derived scope 以后需独立决策；只有新 trace 证明 SchemaGraph 缺事实时才重开 retrieval/embedding。
+
+### [实验] M25 4-case Timeout / Retry Focused Reliability（2026-08-07）
+
+- 固定 Qwen `qwen3.7-plus`、`inmemory/deterministic + weighted`、SQLite oracle、LangFuse off、代理与 4 条历史超时题；唯一变量是 `LLM_MAX_RETRIES=0/1`，timeout 均 45 秒。
+- retry0：4 logical calls / 4 physical attempts，首次/最终成功均 `1/4`，3 次 QueryPlan timeout，总耗时 `179.7s`；有效响应的 `db_multi_002` 在 plan validation 因虚构 `root_category.level/name` 失败，所需 category tree、表和 `item_gmv` 已在 SchemaGraph。
+- retry1：4 logical calls / 8 physical attempts，首次/最终成功均 `0/4`，8 个 attempt 全 timeout，总耗时 `377.9s`；没有恢复且调用/延迟约翻倍。
+- **否定结论**：本轮不支持默认开启 retry，继续保持 45s/0。每候选仅一次小样本，不能外推总体 SLA；完整 attempt 证据在 `.agent_work/temp/m25-reliability-{default,retry1}-*`，结论素材已固化到 `docs/notes/m25-notes.md`。
+
 ### [模块任务] M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity（2026-08-06）
 
 - **改动范围**：新增 `engine/nl2sql/fidelity_contract.py` 深 module，以 SQLGlot AST 比较已验证 QueryPlan 与候选 SQL；同步接入 planner/generator/pipeline、精确输出 scorer、`output_contract` trace/triage，并补齐 focused tests、M24 plan 与状态文档。完整文件清单和过程素材见 `docs/notes/m24-notes.md`。
@@ -31,6 +49,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 合同观察：`db_core_004`、`db_plan_001`、`db_prompt_002` 等历史 alias/限定名正例六次稳定通过，没有新的 `semantic_false_block`。M1 `db_core_002` 明确记录计划 `COUNT(DISTINCT orders.id)` 与候选 `COUNT(DISTINCT order_items.id)` 的真实表达式不一致。
 - 稳定失败：`db_simple_001/002/003`、`db_core_002`、`db_hard_001/003`、`db_join_003`、`db_multi_002`。135 个可执行 SQL trace 的 pipeline `output_contract` span 均成功，说明部分投影问题来自 QueryPlan 本身声明过宽，随后由 case scorer 捕获。
 - 外部故障边界：最早 L1 在 25 条 trace 后超时；L1r 因 DashScope `400 Arrearage` 得到的 `7/32` 无效，只作账户故障证据。账户恢复并通过 health check 后的上述六次才计入样本。
+- ⚠️ 注：M25 已把此类 timeout/Arrearage/网络权限升级为稳定 transport subtype 与 `external_service + not_observed`；它们保留执行 stage，但不进入已观察的模型语义错误。见上方 M25 模块档案。
 - 结论：Milvus 自动能力在三次样本中稳定高 1 分，但不是 embedding 因果证明，不切默认。完整矩阵见 `eval/reports/m24-ab-execution-manifest.md`，逐 case 证据见 `docs/notes/m24-notes.md`。
 
 ### [实验] M23 同合同 clean Milvus / Qwen embedding 单次诊断补登记（2026-08-06）

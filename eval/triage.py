@@ -42,6 +42,17 @@ FailureSubtype = Literal[
     "scorer_contract",
 ]
 
+RootCause = Literal[
+    "code_issue",
+    "model_capability",
+    "retrieval_issue",
+    "external_service",
+    "eval_contract",
+    "mixed_or_unknown",
+]
+SemanticStatus = Literal["observed_correct", "observed_wrong", "not_observed", "not_applicable"]
+EvidenceLevel = Literal["direct", "inferred", "insufficient"]
+
 NeedsAction = Literal[
     "fix_pipeline",
     "fix_schema_desc",
@@ -102,6 +113,116 @@ class FailureTriage:
     langfuse_trace_id: str | None = None
     langfuse_write_status: str = "skipped"
     regression_candidate: bool = False
+    # M25：执行阶段回答“在哪里失败”，root cause 回答“为什么失败”。两者不可混为一列。
+    primary_root_cause: RootCause = "mixed_or_unknown"
+    contributing_causes: tuple[RootCause, ...] = ()
+    evidence_chain: tuple[str, ...] = ()
+    semantic_status: SemanticStatus = "not_applicable"
+    error_subtype: str | None = None
+    observability_complete: bool = False
+    evidence_level: EvidenceLevel = "insufficient"
+
+
+@dataclass(frozen=True)
+class EvidenceView:
+    """一个明确问题的分母；raw case 与独立语义题组同时报告。"""
+
+    eligible_case_count: int
+    eligible_group_count: int
+    observed_case_count: int
+    passed_case_count: int
+    unavailable_case_count: int
+
+
+@dataclass(frozen=True)
+class EvalEvidenceAnalysis:
+    """M25 可信度摘要，不替代单 case 明细与旧报告。"""
+
+    raw_case_count: int
+    independent_group_count: int
+    duplicate_case_count: int
+    linked_or_equivalent_group_count: int
+    views: dict[str, EvidenceView]
+    root_cause_counts: dict[str, int]
+    semantic_status_counts: dict[str, int]
+
+
+def analyze_eval_run(results: list[Any], triages: list[FailureTriage]) -> EvalEvidenceAnalysis:
+    """按语义组和证据视图重算分母，避免把复制题当成独立样本。"""
+
+    triage_by_case = {item.case_id: item for item in triages}
+    groups = {result.case.semantic_group_id or result.case.case_id for result in results}
+    group_counts = Counter(result.case.semantic_group_id or result.case.case_id for result in results)
+
+    def build_view(predicate: Any, *, unavailable_external: bool = False, semantic_observation: bool = False) -> EvidenceView:
+        eligible = [result for result in results if predicate(result)]
+        unavailable = [
+            result
+            for result in eligible
+            if unavailable_external
+            and triage_by_case.get(result.case.case_id)
+            and triage_by_case[result.case.case_id].primary_root_cause == "external_service"
+        ]
+        return EvidenceView(
+            eligible_case_count=len(eligible),
+            eligible_group_count=len({result.case.semantic_group_id or result.case.case_id for result in eligible}),
+            observed_case_count=sum(
+                1
+                for result in eligible
+                if (
+                    triage_by_case.get(result.case.case_id)
+                    and triage_by_case[result.case.case_id].semantic_status in {"observed_correct", "observed_wrong"}
+                )
+            )
+            if semantic_observation
+            else len(eligible) - len(unavailable),
+            passed_case_count=sum(result.passed for result in eligible),
+            unavailable_case_count=len(unavailable),
+        )
+
+    semantic_checks = {"result_match", "expected_value", "contains", "equals"}
+    plan_checks = {
+        "metric_mapping_match",
+        "schema_context_match",
+        "join_path_match",
+        "plan_structure_match",
+        "plan_validation_blocked",
+        "schema_context_size",
+        "trace_steps_complete",
+    }
+    views = {
+        "semantic_answer": build_view(
+            lambda result: result.case.check_type in semantic_checks,
+            unavailable_external=True,
+            semantic_observation=True,
+        ),
+        "safety": build_view(
+            lambda result: result.case.security_expectation == "block" or result.case.check_type == "sql_guard_block"
+        ),
+        "plan_and_trace": build_view(
+            lambda result: result.case.check_type in plan_checks
+            or bool(set(result.case.phase3a_capabilities) & {"query_plan", "trace_steps", "schema_retrieval"})
+        ),
+        "provider_reliability": build_view(
+            lambda result: result.actual_pipeline_mode == "new_text2sql" and result.case.security_expectation == "allow",
+            unavailable_external=True,
+        ),
+        "manual_or_judge": build_view(
+            lambda result: result.review_required
+            or "manual_review" in result.case.case_properties
+            or result.case.check_type in {"manual", "llm_judge"}
+        ),
+        "end_to_end": build_view(lambda result: True),
+    }
+    return EvalEvidenceAnalysis(
+        raw_case_count=len(results),
+        independent_group_count=len(groups),
+        duplicate_case_count=len(results) - len(groups),
+        linked_or_equivalent_group_count=sum(count > 1 for count in group_counts.values()),
+        views=views,
+        root_cause_counts=dict(Counter(item.primary_root_cause for item in triages if item.failed)),
+        semantic_status_counts=dict(Counter(item.semantic_status for item in triages)),
+    )
 
 
 def load_trace_records(trace_path: Path) -> dict[str, dict[str, Any]]:
@@ -134,6 +255,83 @@ def triage_results(results: list[Any], *, trace_path: Path) -> list[FailureTriag
     return [triage_result(result, trace_records.get(result.trace_id or "")) for result in results]
 
 
+def _error_subtype(trace_record: dict[str, Any], result: Any) -> str | None:
+    """从失败 step 的 M25 `llm_call` 证据中提取最终错误细类。"""
+
+    failed_step = _first_failed_trace_step(trace_record)
+    metadata = (failed_step or {}).get("metadata") or {}
+    if metadata.get("error_subtype"):
+        return str(metadata["error_subtype"])
+    attempts = (metadata.get("llm_call") or {}).get("attempts") or []
+    if attempts and attempts[-1].get("error_subtype"):
+        return str(attempts[-1]["error_subtype"])
+    text = " ".join(
+        str(value or "")
+        for value in ((failed_step or {}).get("output_summary"), result.error_type, result.reason)
+    ).lower()
+    if "timeout" in text or "timed out" in text or "超时" in text:
+        return "timeout"
+    return None
+
+
+def _root_cause(stage: FailureStage, trace_record: dict[str, Any], result: Any) -> RootCause:
+    """基于证据给出保守根因；证据不足时宁可 unknown，不把外部失败算成模型错误。"""
+
+    subtype = _error_subtype(trace_record, result)
+    if subtype in {
+        "timeout",
+        "network_error",
+        "network_permission_denied",
+        "account_arrearage",
+        "rate_limited",
+        "http_408",
+        "http_429",
+    } or (
+        subtype is not None and subtype.startswith("http_5")
+    ):
+        return "external_service"
+    if stage in {"schema_retrieval", "schema_context"}:
+        return "retrieval_issue"
+    if stage in {"scorer_issue"}:
+        return "eval_contract"
+    if stage == "judge_unavailable":
+        return "external_service"
+    if stage in {"query_plan", "plan_validation", "sql_generation", "result_match", "answer_synthesis", "output_contract"}:
+        return "model_capability"
+    if stage in {"sql_guard", "sql_execution"}:
+        return "code_issue"
+    return "mixed_or_unknown"
+
+
+def _evidence_chain(result: Any, trace_record: dict[str, Any]) -> tuple[str, ...]:
+    """保留完整失败链；first failure 仍决定 primary stage，但不再丢掉后续 scorer 证据。"""
+
+    chain: list[str] = []
+    for step in trace_record.get("trace_steps") or []:
+        status = str(step.get("status") or "")
+        if status in {"error", "blocked", "failed"} or step.get("error_type"):
+            label = step.get("name") or step.get("step_type") or "unknown"
+            chain.append(f"trace:{label}:{step.get('error_type') or status}")
+    for detail in result.score_details:
+        if detail.passed is False and not detail.skipped:
+            chain.append(f"score:{detail.name}:{detail.reason}")
+    return tuple(chain)
+
+
+def _semantic_status(result: Any, root_cause: RootCause) -> SemanticStatus:
+    """把“没观察到答案”与“观察到错误答案”分开。"""
+
+    semantic_names = {"rule:result_match", "rule:expected_value", "rule:contains", "rule:equals"}
+    details = [detail for detail in result.score_details if detail.name in semantic_names and not detail.skipped]
+    if any(detail.passed is False for detail in details):
+        return "observed_wrong"
+    if any(detail.passed is True for detail in details):
+        return "observed_correct"
+    if root_cause == "external_service" or (not result.passed and not result.sql):
+        return "not_observed"
+    return "not_applicable"
+
+
 def triage_result(result: Any, trace_record: dict[str, Any] | None = None) -> FailureTriage:
     """归因单条 EvalResult。
 
@@ -153,6 +351,7 @@ def triage_result(result: Any, trace_record: dict[str, Any] | None = None) -> Fa
 
     # 步骤 1：通过 case 也保留轻量 triage，服务 LangFuse `triage:failed=0` 筛选 ==========
     if not failed:
+        root_cause: RootCause = "mixed_or_unknown"
         return FailureTriage(
             case_id=result.case.case_id,
             question=result.case.question,
@@ -166,6 +365,11 @@ def triage_result(result: Any, trace_record: dict[str, Any] | None = None) -> Fa
             langfuse_trace_id=langfuse_trace_id,
             langfuse_write_status=langfuse_write_status,
             regression_candidate=False,
+            primary_root_cause=root_cause,
+            evidence_chain=_evidence_chain(result, trace_record),
+            semantic_status=_semantic_status(result, root_cause),
+            observability_complete=True,
+            evidence_level="direct",
         )
 
     # 步骤 2：优先相信 trace step 的失败边界；它最接近真实 pipeline 执行位置 ----------
@@ -322,6 +526,8 @@ def triage_summary(triages: list[FailureTriage]) -> dict[str, Any]:
         "failure_subtype_counts": dict(
             Counter(triage.failure_subtype for triage in failed_triages if triage.failure_subtype)
         ),
+        "root_cause_counts": dict(Counter(triage.primary_root_cause for triage in failed_triages)),
+        "semantic_status_counts": dict(Counter(triage.semantic_status for triage in triages)),
         "needs_action_counts": dict(Counter(triage.needs_action for triage in failed_triages)),
         "top_cases": [asdict(triage) for triage in _top_triage_cases(failed_triages)],
         "regression_candidates": [asdict(triage) for triage in failed_triages if triage.regression_candidate],
@@ -401,12 +607,16 @@ def _triage(
 ) -> FailureTriage:
     """集中补全 action / candidate 等派生字段。"""
 
-    resolved_action = needs_action or _needs_action(stage, result)
+    root_cause = _root_cause(stage, trace_record, result)
+    resolved_action = needs_action or ("infra_retry" if root_cause == "external_service" else _needs_action(stage, result))
     resolved_candidate = (
         regression_candidate
         if regression_candidate is not None
-        else stage not in {"scorer_issue", "judge_unavailable", "unknown"} and not result.review_required
+        else root_cause != "external_service"
+        and stage not in {"scorer_issue", "judge_unavailable", "unknown"}
+        and not result.review_required
     )
+    chain = _evidence_chain(result, trace_record)
     return FailureTriage(
         case_id=result.case.case_id,
         question=result.case.question,
@@ -421,6 +631,12 @@ def _triage(
         langfuse_trace_id=trace_record.get("langfuse_trace_id"),
         langfuse_write_status=str(trace_record.get("langfuse_write_status") or "skipped"),
         regression_candidate=resolved_candidate,
+        primary_root_cause=root_cause,
+        evidence_chain=chain,
+        semantic_status=_semantic_status(result, root_cause),
+        error_subtype=_error_subtype(trace_record, result),
+        observability_complete=bool(chain or result.error_type),
+        evidence_level="direct" if chain or result.error_type else "insufficient",
     )
 
 

@@ -5,12 +5,12 @@
 metrics:
   refund_rate:
     name: 退款率
-    formula: refund_count / order_count
-    numerator: COUNT(DISTINCT refunds.id)
+    formula: completed_refunded_order_count / completed_order_count
+    numerator: COUNT(DISTINCT CASE WHEN refunds.refund_status = 'completed' THEN refunds.order_id END)
     denominator: COUNT(DISTINCT orders.id)
     filter: orders.order_status NOT IN ('cancelled', 'canceled') AND orders.paid_at IS NOT NULL
     default_time_field: orders.paid_at
-    description: 按成交订单统计退款单数占订单数的比例；商品维度优先用 refunds.order_item_id -> order_items.product_id，整单退款在 order_item_id 为空时回退 refunds.product_id，不能用 INNER JOIN 静默丢弃。
+    description: 按成交订单统计已完成退款的去重订单数占成交订单数的比例；商品维度优先用 refunds.order_item_id -> order_items.product_id，整单退款在 order_item_id 为空时回退 refunds.product_id，不能用 INNER JOIN 静默丢弃。
   gmv:
     name: GMV
     formula: SUM(orders.order_amount)
@@ -64,7 +64,7 @@ metrics:
     name: 历史平均售价
     formula: AVG(product_price_history.price)
     default_time_field: product_price_history.valid_from
-    description: 查询历史售价时按 valid_from / valid_to 做时间窗口匹配。
+    description: 历史价格记录在题目时间范围内有交集时，按记录条数计算 price 的算术平均值；不是按有效天数加权。
   pending_high_priority_ticket_count:
     name: 待处理高优先级工单数
     formula: COUNT(tickets.id)

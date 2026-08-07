@@ -1,7 +1,7 @@
-"""M4 LLM SQL Generator：调用 DeepSeek 生成 SQL，并把模型输出解析成结构化结果。
+"""LLM SQL Generator：调用 OpenAI-compatible provider，并解析 QueryPlan / SQL。
 
-★ 本模块只做一个最小 provider 适配层。阶段二先跑通 DeepSeek 主路径，不把工程复杂度
-花在多厂商抽象上；如果密钥缺失或网络失败，向上返回可诊断错误。
+★ provider transport、attempt 与 retry 由 M25 ``llm_call`` module 统一执行；本模块专注
+DataPilot 的业务 prompt、结构化解析和 SQL/计划合同，不在 parser 里复制网络可靠性逻辑。
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from engine.nl2sql.fidelity_contract import SQLPlanFidelityResult, evaluate_sql_plan_fidelity
+from engine.nl2sql.llm_call import LLMCallEvidence, LLMGenerationError, execute_llm_call
 from engine.nl2sql.planner import QueryPlan, QueryPlanStep
 from engine.nl2sql.prompt import build_local_schema_sql_prompt, build_query_plan_prompt, build_sql_prompt
 from engine.nl2sql.schema_loader import DomainSchema
@@ -38,25 +39,6 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, object], ti
         return json.loads(response.read().decode("utf-8"))
 
 
-class LLMGenerationError(RuntimeError):
-    """LLM SQL 生成失败，调用方应转成结构化拦截响应。"""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        raw_response_preview: str | None = None,
-        parse_error: str | None = None,
-        prompt_length: int | None = None,
-        stage: str | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.raw_response_preview = raw_response_preview
-        self.parse_error = parse_error
-        self.prompt_length = prompt_length
-        self.stage = stage
-
-
 class QueryPlanExtractionError(LLMGenerationError):
     """QueryPlan 解析失败，固定映射到 M10 的 `invalid_query_plan`。"""
 
@@ -69,7 +51,11 @@ class SQLPlanContractError(LLMGenerationError):
     issue_tag = "sql_plan_contract_failed"
 
     def __init__(self, message: str, *, contract_result: SQLPlanFidelityResult) -> None:
-        super().__init__(message, stage="sql_generation")
+        super().__init__(
+            message,
+            stage="sql_generation",
+            error_subtype=f"plan_contract_{contract_result.reason_code}",
+        )
         self.contract_result = contract_result
         categories = {issue.category for issue in contract_result.issues}
         if contract_result.status == "indeterminate":
@@ -114,12 +100,16 @@ class OpenAICompatibleChatClient:
         model: str,
         post_json: PostJson = _post_json,
         timeout: float = 45.0,
+        max_retries: int = 0,
+        retry_backoff_seconds: float = 1.0,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/") or self.default_base_url
         self.model = model or self.default_model
         self._post_json = post_json
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_backoff_seconds = retry_backoff_seconds
 
     def complete(self, *, prompt: str, system_prompt: str | None = None) -> str:
         """调用 OpenAI-compatible chat completions 接口。"""
@@ -152,17 +142,44 @@ class OpenAICompatibleChatClient:
             )
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            raise LLMGenerationError(f"{self.provider_label} HTTP 调用失败：{exc.code} {detail[:300]}") from exc
+            normalized_detail = detail.lower()
+            if "arrearage" in normalized_detail:
+                subtype = "account_arrearage"
+            elif exc.code == 429:
+                subtype = "rate_limited"
+            else:
+                subtype = f"http_{exc.code}"
+            raise LLMGenerationError(
+                f"{self.provider_label} HTTP 调用失败：{exc.code} {detail[:300]}",
+                error_subtype=subtype,
+                retryable=exc.code in {408, 429} or exc.code >= 500,
+            ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise LLMGenerationError(f"{self.provider_label} 网络调用失败：{exc}") from exc
+            error_text = str(exc).lower()
+            if isinstance(exc, TimeoutError) or "timed out" in error_text:
+                subtype = "timeout"
+            elif "winerror 10013" in error_text:
+                subtype = "network_permission_denied"
+            else:
+                subtype = "network_error"
+            raise LLMGenerationError(
+                f"{self.provider_label} 网络调用失败：{exc}",
+                error_subtype=subtype,
+                retryable=subtype != "network_permission_denied",
+            ) from exc
         except json.JSONDecodeError as exc:
-            raise LLMGenerationError(f"{self.provider_label} 返回非 JSON：{exc}") from exc
+            raise LLMGenerationError(
+                f"{self.provider_label} 返回非 JSON：{exc}", error_subtype="transport_response_invalid_json"
+            ) from exc
 
-        # 步骤 3：只把模型正文交给 SQL 提取器；token / cost 等细节留给 M5 trace。
+        # 步骤 3：只把模型正文交给上层 parser；attempt 证据由 llm_call 统一产出。
         try:
             return str(response_payload["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMGenerationError(f"{self.provider_label} 返回结构缺少 choices/message/content：{response_payload}") from exc
+            raise LLMGenerationError(
+                f"{self.provider_label} 返回结构缺少 choices/message/content：{response_payload}",
+                error_subtype="transport_response_contract",
+            ) from exc
 
 
 class DeepSeekChatClient(OpenAICompatibleChatClient):
@@ -203,6 +220,9 @@ def get_default_llm_client() -> LLMClient:
             api_key=settings.dashscope_api_key,
             base_url=settings.dashscope_base_url,
             model=model,
+            timeout=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+            retry_backoff_seconds=settings.llm_retry_backoff_seconds,
         )
 
     api_key = settings.deepseek_api_key or settings.llm_api_key
@@ -212,18 +232,29 @@ def get_default_llm_client() -> LLMClient:
         api_key=api_key,
         base_url=settings.deepseek_base_url or "https://api.deepseek.com",
         model=model,
+        timeout=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
+        retry_backoff_seconds=settings.llm_retry_backoff_seconds,
     )
 
 
-def _complete_with_system_prompt(client: LLMClient, *, prompt: str, system_prompt: str) -> str:
-    """兼容新旧 fake client：真实客户端用 system prompt，旧测试替身仍可只接收 prompt。"""
+LLMEvidenceSink = Callable[[LLMCallEvidence], None]
 
-    try:
-        return client.complete(prompt=prompt, system_prompt=system_prompt)
-    except TypeError as exc:
-        if "system_prompt" not in str(exc):
-            raise
-        return client.complete(prompt=prompt)
+
+def _complete_with_evidence(
+    client: LLMClient,
+    *,
+    prompt: str,
+    system_prompt: str,
+    stage: str,
+    evidence_sink: LLMEvidenceSink | None,
+) -> str:
+    """通过深调用 module 执行，并把成功证据显式交给当前请求的 caller。"""
+
+    result = execute_llm_call(client, prompt=prompt, system_prompt=system_prompt, stage=stage)
+    if evidence_sink is not None:
+        evidence_sink(result.evidence)
+    return result.content
 
 
 def extract_generated_sql(raw_text: str) -> GeneratedSQL:
@@ -311,6 +342,8 @@ def _add_error_context(
         exc.raw_response_preview = raw_text.strip()[:500]
     if not exc.parse_error:
         exc.parse_error = str(exc)
+    if not exc.error_subtype:
+        exc.error_subtype = "response_parse_error"
     return exc
 
 
@@ -320,14 +353,17 @@ def generate_sql(
     user_role: str,
     domain_schema: DomainSchema,
     llm_client: LLMClient | None = None,
+    llm_evidence_sink: LLMEvidenceSink | None = None,
 ) -> GeneratedSQL:
     """构造 prompt、调用 LLM，并返回结构化 SQL 结果。"""
 
     client = llm_client or get_default_llm_client()
     prompt = build_sql_prompt(question=question, user_role=user_role, domain_schema=domain_schema)
-    raw_text = _complete_with_system_prompt(
+    raw_text = _complete_with_evidence(
         client,
         prompt=prompt,
+        stage="sql_generation",
+        evidence_sink=llm_evidence_sink,
         system_prompt="你是 DataPilot 的 NL2SQL 生成器。请把中文业务问题转换为安全的单条 SELECT SQL，并按要求返回结构化结果。",
     )
     try:
@@ -342,6 +378,7 @@ def generate_query_plan(
     schema_graph: SchemaGraph,
     domain_schema: DomainSchema,
     llm_client: LLMClient | None = None,
+    llm_evidence_sink: LLMEvidenceSink | None = None,
 ) -> QueryPlan:
     """调用 LLM 生成 M10 `QueryPlan`，不可解析时交给上层结构化拦截。"""
 
@@ -352,9 +389,11 @@ def generate_query_plan(
         metrics=domain_schema.metrics,
         join_paths=schema_graph.join_paths,
     )
-    raw_text = _complete_with_system_prompt(
+    raw_text = _complete_with_evidence(
         client,
         prompt=prompt,
+        stage="query_plan",
+        evidence_sink=llm_evidence_sink,
         system_prompt="你是 DataPilot 的查询规划器。根据用户问题和局部 Schema 信息输出结构化 JSON 查询计划，不直接生成 SQL。",
     )
     try:
@@ -372,6 +411,7 @@ def generate_sql_from_plan_step(
     domain_schema: DomainSchema,
     llm_client: LLMClient | None = None,
     enforce_plan_contract: bool = False,
+    llm_evidence_sink: LLMEvidenceSink | None = None,
 ) -> GeneratedSQL:
     """基于已验证的 QueryPlanStep 和局部 Schema 生成 SQL。"""
 
@@ -384,9 +424,11 @@ def generate_sql_from_plan_step(
         metrics=domain_schema.metrics,
         join_paths=schema_graph.join_paths,
     )
-    raw_text = _complete_with_system_prompt(
+    raw_text = _complete_with_evidence(
         client,
         prompt=prompt,
+        stage="sql_generation",
+        evidence_sink=llm_evidence_sink,
         system_prompt="你是 DataPilot 的 SQL 生成器。根据已验证的 QueryPlanStep 和局部 Schema 生成安全的只读 SELECT SQL。",
     )
     try:

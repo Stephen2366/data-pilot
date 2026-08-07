@@ -10,6 +10,7 @@
 |---|---|---|
 | 默认 Qwen 主链路 | `LLM_PROVIDER=qwen`；`QWEN_MODEL=qwen3.7-plus` | 当前默认。Qwen provider 读取 `QWEN_MODEL`，不是 `LLM_MODEL`。`.env` 中的 `LLM_MODEL=deepseek-v4-flash` 仅作为显式切回 DeepSeek 时的备用入口。 |
 | DeepSeek 主模型对照 | `LLM_PROVIDER=deepseek`；`LLM_MODEL=deepseek-v4-flash` | 显式切换时使用；`LLM_MODEL` 在现有代码语义里主要服务 DeepSeek provider。 |
+| LLM 可靠性配置 | `LLM_TIMEOUT_SECONDS=45`；`LLM_MAX_RETRIES=0`；`LLM_RETRY_BACKOFF_SECONDS=1` | M25 默认不自动重试。只对明确标记为 transient 的 timeout / 网络 / 429 / 5xx 生效；聚焦实验在当前 shell 临时覆盖，不直接改 `.env` 默认。 |
 | L3 judge | `EVAL_JUDGE_MODEL=<模型名>` 或 CLI `--judge-model <模型名>` | 默认关闭；只影响 eval 追加的 L3 judge，不改变业务 NL2SQL 主模型。 |
 
 ## Schema Retrieval / Embedding 链路
@@ -52,6 +53,7 @@
 | challenge | `python -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-challenge-traces.jsonl --report eval/reports/<name>-challenge-report.md --triage-json eval/reports/<name>-challenge-triage.json` | 更难的数据库升级题。 |
 | diagnostic | `python -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-diagnostic-traces.jsonl --report eval/reports/<name>-diagnostic-report.md --triage-json eval/reports/<name>-diagnostic-triage.json` | 定位边界和失败结构，不追满分。 |
 | database exception suite | `python -m eval.run_eval --case-set eval\cases\database-exception-suite.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-exception-traces.jsonl --report eval/reports/<name>-exception-report.md --triage-json eval/reports/<name>-exception-triage.json` | M23 异常专项：6 条自动 + 1 条人工素材；复用原 case，不复制 YAML。 |
+| M25 reliability suite | `python -m eval.run_eval --case-set eval\cases\m25-reliability-suite.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-m25-reliability-traces.jsonl --report eval/reports/<name>-m25-reliability-report.md --triage-json eval/reports/<name>-m25-reliability-triage.json` | 仅 4 条历史超时题。分别临时设置 timeout / retry 候选并重复运行；不是能力总分，不能替代完整评测。 |
 | failure distribution 对比 | `python -m eval.run_eval --compare-triage-left <left>.json --compare-triage-right <right>.json --compare-triage-report eval/reports/<name>-compare.md` | M19 A/B 入口，看失败结构变化，不只看总分。 |
 | schema retrieval embedding-only | `python -m eval.run_schema_retrieval_benchmark --report eval/reports/<name>-schema-retrieval-report.md --top-k 12 --fusion-strategy weighted` | M21 的检索隔离评测；`--fusion-strategy rrf` 只作显式候选对比，不调用 LLM / SQL。Milvus + Qwen embedding 版本需先临时设置 `SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=dashscope`、`QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding`、`QWEN_EMBEDDING_DIMENSIONS=1024`，并不要复用旧污染 `MILVUS_COLLECTION`。 |
 

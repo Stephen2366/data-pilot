@@ -879,6 +879,151 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 读完可以试着回答：**如果 QueryPlan 写 `ORDER BY order_count DESC`，为什么合同不能直接使用候选 SQL 的 `COUNT(order_items.id) AS order_count` 来证明它正确？**
 
+## ★ ★ M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution
+
+（2026-08-07）
+
+**简述**：M25 没有继续靠调 Prompt 冲总分，而是让评测能区分 **试卷问题、代码问题、模型能力、检索缺失和外部服务故障**，并用真实 attempt 证据验证 retry 是否值得开启。
+
+### 先用大白话讲
+
+以前看到一题失败，报告往往只告诉我们“在 QueryPlan 阶段挂了”。但这像医院只记录“病人在急诊停下”，没有回答他为什么停下：可能是模型真的不会，也可能是网络 45 秒超时，甚至可能是试题没有写清排序和列，却拿隐藏答案扣分。
+
+M25 给评测加了三张互不替代的标签：**execution stage** 说失败发生在哪里，**root cause** 说当前证据支持该修谁，**report view** 说这条证据应该进入哪一种分母。外部 timeout 仍然算端到端失败，但语义状态是 **not observed**，不能包装成“模型答错”。
+
+同时，M25 把 LLM 的一次逻辑调用拆成可观察的 physical attempts。每次 attempt 都有 provider、模型、timeout、延迟、错误 subtype 和 outcome；这样 retry 是否有效不再靠感觉。真实 4 题小样本显示：retry 从 0 调到 1 后，请求数和总时长约翻倍，却没有救回任何一题，所以默认继续保持 **45 秒、0 retry**。
+
+### 这次做了什么
+
+1. **先把试卷写清楚**
+
+   审计 formal、challenge、diagnostic 共 **42 个 raw cases**。补齐了隐藏的列、月份、排序、LIMIT 和并列规则；用稳定 `semantic_group_id` 把同一自然语言问题的不同诊断检查归到一组，最终是 **26 个 independent semantic groups**。
+
+   `refund_rate` 也收口为 **completed 退款去重订单数 / 成交去重订单数**。商品归因仍是订单明细优先，整单退款用 `refunds.product_id` 回退。`avg_selling_price` 写清为有效价格历史记录的算术平均，但仍保持 manual，没有因为定义清楚就擅自升级自动硬门。
+
+2. **把“在哪里失败”和“为什么失败”拆开**
+
+   `FailureTriage` 继续保留 M19 的 `failure_stage`，又增加六类 root cause：`code_issue`、`model_capability`、`retrieval_issue`、`external_service`、`eval_contract`、`mixed_or_unknown`。报告不再只保留第一条失败摘要，而是保存失败 trace steps 和 score details 的完整证据链。
+
+3. **重新定义报告分母**
+
+   新报告并列展示 **semantic answer、safety、plan/trace、provider reliability、manual/Judge、end-to-end** 六个视图。每个视图都写 eligible、observed、unavailable，以及 raw cases 和 independent groups。这样 `22/27 automated` 不会被误叫成“SQL 正确率”。
+
+4. **建立 LLM attempt 证据**
+
+   新增 `llm_call` 深 module。generator 仍负责业务 prompt 和 JSON/SQL 解析，调用 module 只负责 timeout、retry、transport 分类与 attempt evidence。显式返回 `content + evidence`，没有采用 client 上的 `last_call_metadata`，避免并发请求串线。
+
+5. **用小实验否定无效 retry**
+
+   固定 Qwen `qwen3.7-plus`、local deterministic/weighted、SQLite oracle 和同样 4 题：
+
+   - **retry 0**：4 次物理调用，1/4 得到有效响应，3 次 timeout，总耗时 179.7 秒。
+   - **retry 1**：8 次物理调用，0/4 得到有效响应，8 次 attempt 全 timeout，总耗时 377.9 秒。
+
+   这不是总体 SLA，但足以说明本轮没有理由默认打开 retry。唯一拿到有效响应的递归类目题，SchemaGraph 已有正确表、关系和 `item_gmv`，模型却在计划中虚构了 `root_category.level/name`，因此当前证据是 **plan validation + model capability**，不是 retrieval。
+
+6. **用反例验证业务能力边界**
+
+   退款率反例覆盖多退款记录、非 completed、错误分母和 INNER JOIN 丢失整单退款。递归类目反例中，正确 item grain 得到 70，漏子类目只得 20，错误汇总订单头金额因 join 放大到 200。正确 recursive CTE 在现有 fidelity 中仍是 `indeterminate`，M25 没为了过题扩大 AST 放行面。
+
+### 新概念
+
+- **Execution stage vs root cause**：stage 像异常堆栈告诉你在哪一层抛错；root cause 像事故复盘告诉你为什么发生。`query_plan + timeout` 的 stage 是 query_plan，根因却是 external service。
+- **Observed / unavailable**：`observed_wrong` 表示系统真的拿到答案并证明它错；`not_observed` 表示外部故障或前置阻断使答案根本没有出现。二者都可算端到端失败，但不能进入同一个模型能力分子。
+- **Semantic group denominator**：一个问题可以同时有结果、Plan、Trace 三个 case。raw case 是检查次数，semantic group 才接近独立问题数，类似数据库里明细行数与 `COUNT(DISTINCT order_id)` 的区别。
+- **Logical call / physical attempt**：一次业务调用可能因 retry 发送两次 HTTP 请求。成本和延迟必须按 physical attempt 统计，最终成功率则按 logical call 统计。
+- **Counterfactual probe**：构造一小份能让正确 SQL 和常见错误 SQL 得出不同结果的数据。它像单元测试里的边界用例，防止错误 SQL 在单一 seed 上“碰巧答对”。
+
+### 代码阅读路线
+
+1. **先看调用可靠性 seam**：`engine/nl2sql/llm_call.py`
+
+   从 `execute_llm_call()` 开始。它接收 client、prompt、stage 和策略，返回 `LLMCallResult`；重点看 `LLMAttemptEvidence` 与 `LLMCallEvidence` 如何避免保存敏感 prompt 正文。retry 分支只相信异常上的 `retryable`，不要先陷入 backoff 的小细节。
+
+2. **再看 provider 如何分类错误**：`engine/nl2sql/generator.py`
+
+   `OpenAICompatibleChatClient.complete()` 把 timeout、Arrearage、WinError 10013、429/5xx 和响应结构错误变成稳定 subtype；`_complete_with_evidence()` 把可靠性 module 接回 QueryPlan/SQL parser。这里的关键边界是 **transport 不负责业务解析**。
+
+3. **看证据怎样进入一次请求的 Trace**：`engine/nl2sql/pipeline.py`
+
+   QueryPlan 与 SQL generation 各自收集 request-local evidence。成功 span 和失败 span 使用同一种 `llm_call` metadata，所以报告不会只看见失败样本。
+
+4. **看两轴归因与报告分母**：`eval/triage.py`
+
+   先读 `triage_result()` 的最早硬失败规则，再读 `_root_cause()` 和 `_semantic_status()`；最后读 `analyze_eval_run()` 如何从相同 triage 构建六个视图。重点理解它深化了已有 module，没有再造第二套归因事实源。
+
+5. **看 case 和 report 的入口**：`eval/run_eval.py`、`eval/cases/*.yaml`
+
+   `EvalCase.semantic_group_id` 默认回退 case id，旧 case 不需要一次性迁移；`CASE_CONTRACT_VERSION="m25-v1"` 防止新旧合同混算。`write_report()` 只渲染 `analyze_eval_run()` 的结果。
+
+6. **最后看业务反例**：`tests/test_m25_eval_trustworthiness.py`
+
+   这里最值得复盘的是退款率和递归类目的内存 SQLite 反例，以及 retry/非 retry、external/model/retrieval/eval/code root cause 的正反例。
+
+核心链路：
+
+`EvalCase + semantic_group_id`
+→ `pipeline QueryPlan / SQL generation`
+→ `execute_llm_call + attempt evidence`
+→ `TraceStep metadata`
+→ `triage_result(stage + root cause + semantic status)`
+→ `analyze_eval_run(report views)`
+
+### 设计要点
+
+- **不使用 stateful metadata**：显式返回 evidence，再用 request-local sink 写 Trace，避免复用 client 时把 A 请求的调用证据写到 B 请求。
+- **retry 默认关闭**：只有 timeout、连接错误、429、5xx 等明确 transient 错误可重试；欠费、权限、普通 4xx、parse、合同和语义错误不重试。
+- **历史分数冻结**：M25-v1 改了题面、退款率与分母，不能反向重算 M24 历史结果。
+- **不扩大 AST scope**：recursive CTE 当前不能被安全证明时返回 indeterminate；能力反例与 result oracle 先证明业务差异，AST 扩展留给后续独立决策。
+- **真实边界**：可靠性候选各只有一次 4-case run，足以否定本轮默认 retry，但不足以描述 provider 总体 SLA，也没有完整 M25-v1 baseline。
+
+### 面试怎么讲
+
+我在 DataPilot 的 M25 没继续通过调 Prompt 追总分，而是治理评测可信度。首先审计 42 个 raw cases，把隐藏的时间、列、排序和 LIMIT 写回题面，并用 semantic group 得到 26 个独立问题。然后把失败拆成 execution stage、root cause 和 semantic status：例如 QueryPlan timeout 仍算端到端失败，但属于 external service 且答案 not observed，不能算模型答错。工程上我做了一个 LLM call executor，成功和失败都记录 provider、模型、timeout、每次 attempt 延迟和稳定错误 subtype。最后用 4 条历史超时题做单变量实验，retry=1 把调用数从 4 增到 8、耗时从约 180 秒增到 378 秒，却没有恢复请求，因此默认保持 45 秒、0 retry。模块最终通过 184 个测试，且没有切模型、检索或 oracle。
+
+1. **[基础追问] 为什么 raw case 数不能直接当独立问题数？**
+
+   同一个自然语言问题可能分别检查结果、QueryPlan 和 Trace。如果把三条都当独立问题，某类能力会被重复加权。M25 保留 raw case 作为检查次数，同时用 stable semantic group 报独立问题数；这与订单明细行数和去重订单数必须分开统计是同一个道理。
+
+2. **[工程/深挖追问] 你怎么保证 timeout 不被归因成模型能力不足？**
+
+   不能靠错误文案猜。我在 transport 层生成稳定 subtype，并把每次 attempt 的 stage、timeout、latency、provider/model 和 outcome 写入 Trace。triage 先保留执行 stage，再依据 transport evidence 判 root cause；external failure 的 semantic status 固定为 not observed，但仍进入 end-to-end failure 和 provider unavailable。
+
+3. **[工程/深挖追问] 为什么不默认 retry 一次，反正请求是幂等的？**
+
+   幂等只说明不会产生重复副作用，不代表成本可接受。真实小实验中 retry=1 没救回任何一题，物理调用和总耗时约翻倍。并且 retry 还会放大额度、排队和尾延迟。所以默认策略必须看恢复率与成本，而不是只看“技术上能重试”。
+
+4. **[压力追问] 4 条题各跑一次，就敢说 retry 没用吗？**
+
+   不能说总体没用，这个质疑成立。我的结论严格限定为“本轮没有证据支持把 retry 切成默认”，不是 provider SLA。M24 六轮已显示部分题有稳定 45 秒 timeout，M25 本轮又观察到 retry 无恢复和成本翻倍；因此保持原默认是保守决策。如果要选择新 timeout 或 SLA，需要预注册候选并重复运行。
+
+5. **[压力追问] 做了这么多评测工程，业务正确率还是没给出来，是不是绕开了真正问题？**
+
+   M25 确实没有交付完整新基线，因为用户明确保留 formal/challenge/diagnostic 手动执行；我没有用 4 题小样本冒充业务正确率。但这不是回避：模块已经让后续基线能区分 external unavailable、observed semantic wrong、safety 和 plan/trace，并用退款率与递归反例固定了业务口径。完整运行完成后，分数才有可解释性。
+
+### 验证与下一步
+
+- 聚焦回归：**39 passed, 1 warning**。
+- 全仓最终：**184 passed, 3 skipped, 1 warning**。
+- seed reset：14 表固定规模与关键事实通过，新退款率口径下最高商品仍是 Aurora 耳机。
+- warning 是既有 Starlette/httpx deprecation，不影响 M25。
+- 下一步：用户手动运行 M25-v1 的完整 formal/challenge/diagnostic，再进行人工检查和 `accept-module`；若递归 CTE 需要扩大 fidelity scope，必须单独做设计决策。
+
+可复制验证命令：
+
+```powershell
+# 聚焦门禁：预计 39 passed
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_m25_eval_trustworthiness.py tests\test_m24_sql_plan_fidelity.py tests\test_m19_failure_triage.py tests\test_phase3a_pipeline.py -q --basetemp=.agent_work\temp\pytest-m25-focused
+
+# 全仓回归：本次结果 184 passed, 3 skipped
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.agent_work\temp\pytest-m25-full
+
+# 4 条可靠性专项；实验时只在当前 shell 临时覆盖 timeout/retry
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --case-set eval\cases\m25-reliability-suite.yaml --pipeline-mode new_text2sql --trace .agent_work\temp\m25-reliability-traces.jsonl --report .agent_work\temp\m25-reliability-report.md --triage-json .agent_work\temp\m25-reliability-triage.json
+```
+
+**本地启动体验：** M25 没有新增独立页面。可按既有 runbook 启动 FastAPI，在 Swagger 调 `/api/query`；本模块的新增价值主要从 JSONL trace 的 `llm_call`、triage JSON 的 `primary_root_cause/semantic_status` 和 Markdown 的 `M25 Evidence Views` 查看。
+
 
 
 

@@ -53,6 +53,7 @@ cases:
     check: {type: join_path_match}
 
   - id: db_join_002
+    semantic_group_id: coupon_type_gmv
     task_type: join_path
     pipeline_mode: new_text2sql
     question: 2026 年 6 月各优惠券类型带来的 GMV 是多少？
@@ -82,10 +83,11 @@ cases:
     check: {type: manual, value: 订单明细归因口径，Phase 3A 诊断素材}
 
   - id: db_plan_001
+    semantic_group_id: june_channel_gmv_ranking
     task_type: plan_diagnosis
     pipeline_mode: new_text2sql
     linked_case_id: db_multi_003
-    question: 2026 年 6 月各渠道 GMV 排名
+    question: 2026 年 6 月各渠道 GMV 排名，按 GMV 降序、渠道名称升序排列
     user_role: ops
     expected_tables: [channels, orders]
     expected_columns: [channel_name, gmv]
@@ -166,6 +168,7 @@ cases:
         - {via: semantic_request_validation, expected_issue_tag: unsupported_multi_step_plan}
 
   - id: db_prompt_001
+    semantic_group_id: june_product_sales_top5
     task_type: local_schema_prompt
     pipeline_mode: new_text2sql
     question: 2026 年 6 月商品销售额 Top 5
@@ -185,9 +188,10 @@ cases:
     check: {type: schema_context_size}
 
   - id: db_prompt_002
+    semantic_group_id: june_avg_price_history
     task_type: local_schema_prompt
     pipeline_mode: new_text2sql
-    question: 2026 年 6 月各商品平均售价是多少？
+    question: 2026 年 6 月各商品有效价格历史记录的算术平均售价是多少？
     user_role: ops
     expected_tables: [products, product_price_history]
     expected_columns: [product_name, price, valid_from, valid_to]
@@ -205,6 +209,7 @@ cases:
     check: {type: schema_context_size}
 
   - id: db_prompt_003
+    semantic_group_id: coupon_type_gmv
     task_type: local_schema_prompt
     pipeline_mode: new_text2sql
     question: 2026 年 6 月各优惠券类型带来的 GMV 是多少？
@@ -225,6 +230,7 @@ cases:
     check: {type: schema_context_size}
 
   - id: db_trace_001
+    semantic_group_id: june_gmv
     task_type: trace_steps
     pipeline_mode: new_text2sql
     question: 2026 年 6 月 GMV 是多少？
@@ -252,6 +258,7 @@ cases:
         - {step_type: chart_decision, status: success}
 
   - id: db_trace_002
+    semantic_group_id: june_fixed_coupon_top_channel
     task_type: trace_steps
     pipeline_mode: new_text2sql
     question: JUNE_FIXED_50 在哪个渠道使用最多？

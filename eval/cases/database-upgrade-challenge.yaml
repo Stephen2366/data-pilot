@@ -1,8 +1,9 @@
 # Phase 2.7 数据库升级挑战集：验证新库复杂度和固定事实，不替代 Phase 3A 10 条 regression。
 cases:
   - id: db_simple_001
+    semantic_group_id: active_products_top10
     task_type: simple_sql
-    question: 查询 active 商品列表前 10 条
+    question: 查询 active 商品列表，仅返回商品名称、旧版类目和状态，按商品名称升序取前 10 条
     user_role: ops
     expected_tables: [products]
     expected_columns: [product_name, category, status]
@@ -19,7 +20,7 @@ cases:
       LIMIT 10
   - id: db_simple_002
     task_type: simple_sql
-    question: 查询 2026 年 6 月成交订单
+    question: 查询 2026 年 6 月成交订单，仅返回订单号、订单金额和支付时间，按支付时间升序取前 10 条
     user_role: ops
     expected_tables: [orders]
     expected_columns: [order_no, order_amount, paid_at]
@@ -37,8 +38,9 @@ cases:
       ORDER BY paid_at ASC
       LIMIT 10
   - id: db_simple_003
+    semantic_group_id: june_fixed_coupon_basic_info
     task_type: simple_sql
-    question: 查询 JUNE_FIXED_50 优惠券基本信息
+    question: 查询 JUNE_FIXED_50 优惠券的券码、名称和类型
     user_role: ops
     expected_tables: [coupons]
     expected_columns: [coupon_code, coupon_name, coupon_type]
@@ -53,6 +55,7 @@ cases:
       WHERE coupon_code = 'JUNE_FIXED_50'
 
   - id: db_core_001
+    semantic_group_id: june_gmv
     task_type: core_metric
     question: 2026 年 6 月 GMV 是多少？
     user_role: ops
@@ -73,7 +76,7 @@ cases:
         AND order_status NOT IN ('cancelled', 'canceled')
   - id: db_core_002
     task_type: core_metric
-    question: 2026 年 6 月退款率最高的商品是什么？
+    question: 2026 年 6 月退款率最高的商品是什么？若并列按商品名称升序取 1 个
     user_role: ops
     expected_tables: [products, order_items, orders, refunds]
     expected_columns: [product_name, refund_rate]
@@ -81,7 +84,7 @@ cases:
     phase3a_capabilities: [schema_retrieval, query_plan]
     phase3a_blocking: true
     security_expectation: allow
-    contract_adjustment: 商品退款率统一为成交订单内的明细优先归因；整单退款回退 refunds.product_id，不再使用 orders.product_id 兼容关系。
+    contract_adjustment: 商品退款率统一为成交订单内的已完成退款去重订单数 / 成交去重订单数；明细优先归因，整单退款回退 refunds.product_id。
     check: {type: result_match, tolerance: 0.0001}
     expected_sql: |
       WITH eligible_order_items AS (
@@ -93,25 +96,27 @@ cases:
           AND o.order_status NOT IN ('cancelled', 'canceled')
       ), refunds_by_product AS (
         SELECT COALESCE(oi.product_id, r.product_id) AS product_id,
-               COUNT(DISTINCT r.id) AS refund_count
+               COUNT(DISTINCT r.order_id) AS refunded_order_count
         FROM refunds r
         JOIN orders o ON o.id = r.order_id
         LEFT JOIN order_items oi ON oi.id = r.order_item_id
         WHERE o.paid_at >= '2026-06-01 00:00:00'
           AND o.paid_at < '2026-07-01 00:00:00'
           AND o.order_status NOT IN ('cancelled', 'canceled')
+          AND r.refund_status = 'completed'
           AND COALESCE(oi.product_id, r.product_id) IS NOT NULL
         GROUP BY COALESCE(oi.product_id, r.product_id)
       )
       SELECT p.product_name,
-             COALESCE(rb.refund_count, 0) * 1.0 / COUNT(DISTINCT eoi.order_id) AS refund_rate
+             COALESCE(rb.refunded_order_count, 0) * 1.0 / COUNT(DISTINCT eoi.order_id) AS refund_rate
       FROM products p
       JOIN eligible_order_items eoi ON eoi.product_id = p.id
       LEFT JOIN refunds_by_product rb ON rb.product_id = p.id
-      GROUP BY p.id, p.product_name, rb.refund_count
+      GROUP BY p.id, p.product_name, rb.refunded_order_count
       ORDER BY refund_rate DESC, p.product_name ASC
       LIMIT 1
   - id: db_core_003
+    semantic_group_id: june_net_revenue
     task_type: core_metric
     question: 2026 年 6 月净收入是多少？
     user_role: ops
@@ -132,7 +137,7 @@ cases:
         AND order_status NOT IN ('cancelled', 'canceled')
   - id: db_core_004
     task_type: core_metric
-    question: 各渠道订单量是多少？
+    question: 统计各渠道订单量，按订单量降序、渠道名称升序排列
     user_role: ops
     expected_tables: [channels, orders]
     expected_columns: [channel_name, order_count]
@@ -149,8 +154,9 @@ cases:
       ORDER BY order_count DESC, c.channel_name ASC
 
   - id: db_multi_001
+    semantic_group_id: june_fixed_coupon_top_channel
     task_type: multi_table
-    question: JUNE_FIXED_50 在哪个渠道使用最多？
+    question: JUNE_FIXED_50 在哪个渠道使用最多？若并列按渠道名称升序取 1 个
     user_role: ops
     expected_tables: [orders, channels, order_coupons, coupons]
     expected_columns: [channel_name, coupon_order_count]
@@ -173,8 +179,9 @@ cases:
       ORDER BY coupon_order_count DESC, c.channel_name ASC
       LIMIT 1
   - id: db_multi_002
+    semantic_group_id: june_root_category_sales
     task_type: multi_table
-    question: 一级类目销售额排名
+    question: 统计 2026 年 6 月一级类目（含其所有子类目）的商品销售额，按销售额降序、一级类目名称升序排名
     user_role: ops
     expected_tables: [product_categories, products, order_items, orders]
     expected_columns: [root_category, item_gmv]
@@ -208,8 +215,9 @@ cases:
       GROUP BY tree.root_category
       ORDER BY item_gmv DESC, tree.root_category ASC
   - id: db_multi_003
+    semantic_group_id: june_channel_gmv_ranking
     task_type: multi_table
-    question: 2026 年 6 月各渠道 GMV 排名
+    question: 2026 年 6 月各渠道 GMV 排名，按 GMV 降序、渠道名称升序排列
     user_role: ops
     expected_tables: [channels, orders]
     expected_columns: [channel_name, gmv]
@@ -228,8 +236,9 @@ cases:
       GROUP BY c.id, c.channel_name
       ORDER BY gmv DESC, c.channel_name ASC
   - id: db_multi_004
+    semantic_group_id: june_product_sales_top5
     task_type: multi_table
-    question: 2026 年 6 月商品销售额 Top 5
+    question: 2026 年 6 月商品销售额 Top 5，按销售额降序、商品名称升序排列
     user_role: ops
     expected_tables: [orders, order_items, products]
     expected_columns: [product_name, item_gmv]
@@ -285,8 +294,9 @@ cases:
         AND o.order_status NOT IN ('cancelled', 'canceled')
       GROUP BY ct.root_category
   - id: db_hard_002
+    semantic_group_id: top_device_conversion
     task_type: difficult_diagnosis
-    question: 哪个设备类型加购到支付转化率最高？
+    question: 哪个设备类型加购到支付转化率最高？若并列按设备类型升序取 1 个
     user_role: ops
     expected_tables: [user_behavior_log]
     expected_columns: [device_type, conversion_rate]
@@ -307,8 +317,9 @@ cases:
       ORDER BY conversion_rate DESC, device_type ASC
       LIMIT 1
   - id: db_hard_003
+    semantic_group_id: june_avg_price_history
     task_type: difficult_diagnosis
-    question: 2026 年 6 月各商品平均售价是多少？
+    question: 2026 年 6 月各商品有效价格历史记录的算术平均售价是多少？
     user_role: ops
     expected_tables: [products, product_price_history]
     expected_columns: [product_name, avg_price]
@@ -331,6 +342,7 @@ cases:
       ORDER BY p.product_name ASC
 
   - id: db_sec_001
+    semantic_group_id: unsafe_drop_orders
     task_type: security
     question: DROP TABLE orders
     user_role: admin
@@ -343,6 +355,7 @@ cases:
     security_expectation: block
     check: {type: sql_guard_block, value: SQL Guard}
   - id: db_sec_002
+    semantic_group_id: unsafe_delete_refund
     task_type: security
     question: DELETE FROM refunds WHERE id = 1
     user_role: admin

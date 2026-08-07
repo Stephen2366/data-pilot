@@ -2,7 +2,7 @@
 
 > 本文是 DataPilot 的长期评测账本，优先回答“当前应据什么决策、哪些结果可直接比较”。完整报告和历史叙事分别保留在 `eval/reports/` 与 `docs/state/AI_CONTEXT_CHANGELOG.md`。
 
-更新时间：2026-08-06
+更新时间：2026-08-07
 
 > 模型名称统一写完整标识：主模型写 provider + exact model id（例如 `DeepSeek deepseek-v4-flash`、`Qwen qwen3.7-plus`、旧入口 `Qwen qwen-plus`）；embedding 写 provider + exact embedding model（例如 `DashScope qwen3.7-text-embedding`）。实验矩阵不再使用 `Qwen-plus`、`DeepSeek`、`Qwen embedding` 等容易混淆的简称。
 
@@ -12,7 +12,7 @@
 |---|---|---|
 | 默认主模型 | Qwen `qwen3.7-plus`；本次基于 M22 三次 C1 稳定性结果切换。 | `M22-E04` |
 | 默认检索 | `inmemory + deterministic + weighted`；Milvus、DashScope `qwen3.7-text-embedding`、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
-| 当前优化方向 | M24 已清理 SQL 合同误拦并完成三次/组交错 A/B；后续优先处理 QueryPlan 过宽投影、真实生成保真和结果语义问题。Milvus 自动分高约 1 分仍不能单独作为 embedding 因果或切换默认值的依据。 | `M24-E01` |
+| 当前优化方向 | M25 先按 stage/root cause/semantic status 区分外部 unavailable 与已观察语义错误；4-case retry=1 没有恢复且成本翻倍，不切默认。完整 M25-v1 baseline 待用户手动执行。 | `M25-E01` |
 | 已收口的假设 | DashScope `qwen3.7-text-embedding` 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
 | 不可作决策的证据 | 旧固定 Milvus collection 的重复灌入污染结果只保留作历史对照。 | `M20-E01` |
 
@@ -62,7 +62,7 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 | 一单多券 | 保留订单，但通过 `COUNT(DISTINCT order_id)` 防止桥接表放大订单数 | `p3a_multi_001` 自动结果校验 | `db_multi_001` 自动结果校验 | `db_trace_002` 只检查流程步骤 | 已覆盖“用券订单数”去重 |
 | 整单退款 `order_item_id IS NULL` | 不应丢弃；商品归因时明细退款优先，整单退款回退 `refunds.product_id`，不能复制给订单每个商品 | 无独立题 | M23 后 `db_core_002` 自动结果校验该 fallback 和成交过滤 | `db_join_003` 仍为人工归因素材 | 已覆盖一个明确的商品退款率口径；不是“把空值绕开” |
 | 外部单号重复、`SRC-*` 与 `ORD-*` 命名空间不同 | 不把外部单号当主键，也不能跨命名空间 join；订单关联走真实外键 `refunds.order_id -> orders.id` | 无 | 无 | 无 | 未覆盖；当前只有语义文档提示，不能证明模型不会错误 join |
-| 负数退款冲销 | 金额分析保留正负号，不能默认取绝对值或直接删除；是否计入退款“笔数/率”必须先定义业务含义 | 无 | 无退款金额题 | 无 | 未覆盖，且当前 `refund_rate` 对 requested / rejected / 冲销记录的计数边界尚未确认 |
+| 负数退款冲销 | 金额分析保留正负号，不能默认取绝对值或直接删除；退款率只统计 `completed` 的去重退款订单，requested/approved/rejected 不进入分子 | 无 | `db_core_002` 已按 M25 completed 口径自动对照 | 无 | M25 已收口退款率状态边界；净退款金额仍保留 signed amount |
 | 订单头金额与明细金额不一致 | 不强行把两张表算成相等：订单 GMV 用 `orders.order_amount`，商品 GMV 用 `order_items.line_amount`；需要时另做对账诊断 | 已分别使用正确粒度，但不验证差异 | 已分别使用正确粒度，但不验证差异 | 无专门对账题 | 仅间接覆盖，未验证“发现 5 条不一致订单” |
 | SCD `valid_to IS NULL` | 按生效时间窗口保留当前版本，不是要过滤的脏数据 | 无 | `db_hard_003` 有 reference，但为 manual | 有 schema context / manual 素材 | 有参考素材，非自动硬门 |
 
@@ -114,8 +114,19 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 | `M23-E02` | 08-06 | 诊断快照 | 首次运行 7 条数据库异常专项，确认新 case 能否进入真实 Text2SQL 链路 | Qwen `qwen3.7-plus`、`new_text2sql`、`inmemory + deterministic + weighted`、SQLite deterministic oracle、LangFuse off、HTTP/HTTPS proxy；195-doc corpus | total `1/7`；自动 `1/6`；人工 `0/1 review`。唯一通过为 `db_anomaly_001`：completed + `processed_at` + signed refund amount。 | 无同合同重复 run；不能与 M22 194-doc 总分比较 | 有效首轮暴露成交订单 limit、coupon 输出列、退款率口径、内部外键关联和金额对账输出缺口；`db_join_003` 为 Qwen generation error。无代理启动的 `WinError 10013` 未计入结果。 |
 | `M23-E03` | 08-06 | 事实锚点 | M23 新合同 32 条 local 首跑基线 | Qwen `qwen3.7-plus` + `inmemory/deterministic` + weighted、32 条 diagnostic、195-doc corpus/hash `ce04fe4f...`、SQLite deterministic oracle、LangFuse off、proxy | total `23/32`；automated `20/27`；manual/diagnostic `3/5`；硬失败 9，failed-or-review 10 | M23-E02 为 7 条专项（不同 case 集）；M22 194-doc 分数不可比 | 自动硬失败 7 条：3 条 result/output fidelity、2 条 generation/plan error、2 条 SQL plan contract false block；另有 2 条人工/诊断硬失败。`db_hard_003` 是额外 review-only，不是硬失败。Context 无目标 schema 缺失证据。 |
 | `M23-E04` | 08-06 | 单次诊断快照 | 在 M23 同合同下核对 clean Milvus / Qwen embedding 链路 | Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted；32 条、195 docs/hash `ce04fe4f...`、1024 维、final row count 195、SQLite oracle、LangFuse off | total `21/32`；automated `20/27`；manual/diagnostic `1/5` | `M23-E03` 只作同合同单次参照；两组均未重复 | 自动能力与 local 同为 `20/27`；总分差来自人工/诊断项。旧 triage 的 `schema_context/retrieval` 中含最终表列合同，不能据 `23→21` 判断 embedding 退化；默认检索不变。 |
+| `M25-E01` | 08-07 | 受控小样本 / 负向证据 | 验证历史超时题上 transient retry 是否恢复 | Qwen `qwen3.7-plus` + local weighted + 4 条 reliability suite + 45s timeout；唯一变量 retry0/1 | retry0：1/4 logical success、4 attempts、179.7s；retry1：0/4、8 attempts、377.9s | 同行两候选；每候选仅一次，不外推 SLA | retry1 无恢复且成本翻倍，默认保持 45s/0；timeout 记 external unavailable，不记 semantic wrong。 |
 
 ## 4. 当前活跃实验卡片
+
+### M25-E01 — 4-case Timeout / Retry Focused Reliability（2026-08-07）
+
+固定 Qwen `qwen3.7-plus`、`inmemory + deterministic + weighted`、SQLite deterministic oracle、LangFuse off、代理和 4 条历史超时题，只改变 retry0/1；timeout 均为 45 秒。
+
+- retry0：4 logical / 4 physical attempts，首次与最终成功均 `1/4`，3 次 QueryPlan timeout，总耗时 `179.7s`。
+- retry1：4 logical / 8 physical attempts，首次与最终成功均 `0/4`，8 attempts 全 timeout，总耗时 `377.9s`。
+- 有效响应的 `db_multi_002` 在 plan validation 引用不存在的 `root_category.level/name`；SchemaGraph 已含 category tree、所需表与 `item_gmv`，当前证据不支持归因 retrieval。
+- 结论仅支持“不默认开启 retry”；由于每个候选只有一次 4-case run，不能当 provider 总体 SLA，也没有据此改成新的 timeout 魔法数字。
+- M25-v1 完整 formal/challenge/diagnostic baseline 未由 Codex 运行，按用户要求留给人工执行；旧 M24 分数不与新题面/退款率合同直接比较。
 
 ### M22 — Eval Contract / Semantic Output Stabilization
 

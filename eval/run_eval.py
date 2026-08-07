@@ -38,6 +38,7 @@ from eval.scorers.llm_judge import resolve_judge_model
 from eval.scorers.rule_scorers import score_case_rules, should_skip_due_to_pipeline_mode
 from eval.triage import (
     FailureTriage,
+    analyze_eval_run,
     build_triage_score_payloads,
     compare_triage_files,
     triage_results,
@@ -52,6 +53,8 @@ from scripts.seed_data import seed_database
 DEFAULT_CASES_PATH = PROJECT_ROOT / "eval" / "cases" / "smoke.yaml"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "eval" / "reports" / "latest.md"
 DEFAULT_TRACE_PATH = PROJECT_ROOT / ".agent_work" / "temp" / "m6-eval-traces.jsonl"
+# 题面、退款率口径、语义分组与报告分母发生变化时必须显式升级，禁止与 M24 混算。
+CASE_CONTRACT_VERSION = "m25-v1"
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,8 @@ class EvalCase:
     phase3a_blocking: bool = True
     case_properties: list[str] = field(default_factory=list)
     linked_case_id: str | None = None
+    # M25：同义/复制题共享稳定分组；缺省回退 case_id，旧 case 无需批量迁移。
+    semantic_group_id: str = ""
     expected_tables_alternatives: list[dict[str, Any]] = field(default_factory=list)
     expected_plan: dict[str, Any] = field(default_factory=dict)
     expected_plan_result: str = ""
@@ -165,6 +170,7 @@ def _load_cases_from_path(path: Path) -> list[EvalCase]:
                 phase3a_blocking=bool(item.get("phase3a_blocking", True)),
                 case_properties=list(item.get("case_properties") or []),
                 linked_case_id=item.get("linked_case_id"),
+                semantic_group_id=str(item.get("semantic_group_id") or item["id"]),
                 expected_tables_alternatives=list(item.get("expected_tables_alternatives") or []),
                 expected_plan=dict(item.get("expected_plan") or {}),
                 expected_plan_result=str(item.get("expected_plan_result", "")),
@@ -450,10 +456,16 @@ def _build_eval_schema_vector_index(
 
     settings = get_settings()
     runtime_metadata: dict[str, Any] = {
+        "case_contract_version": CASE_CONTRACT_VERSION,
         "result_match_oracle_backend": "sqlite_deterministic_seed",
         "schema_vector_backend": settings.schema_vector_backend,
         "schema_embedding_provider": settings.schema_embedding_provider,
         "schema_fusion_strategy": schema_fusion_strategy,
+        "llm_provider": settings.llm_provider,
+        "llm_model": settings.qwen_model if settings.llm_provider.lower() == "qwen" else settings.llm_model,
+        "llm_timeout_seconds": settings.llm_timeout_seconds,
+        "llm_max_retries": settings.llm_max_retries,
+        "llm_retry_backoff_seconds": settings.llm_retry_backoff_seconds,
     }
     if pipeline_mode != "new_text2sql" or settings.schema_vector_backend.lower() != "milvus":
         runtime_metadata["schema_vector_index_reuse"] = "not_applicable"
@@ -555,6 +567,28 @@ def write_report(
             triages=triages,
             langfuse_triage_write_result=langfuse_triage_write_result,
         )
+        analysis = analyze_eval_run(results, triages)
+        lines.extend(
+            [
+                "",
+                "## M25 Evidence Views",
+                "",
+                f"- raw_case_count: {analysis.raw_case_count}",
+                f"- independent_semantic_group_count: {analysis.independent_group_count}",
+                f"- duplicate_case_count: {analysis.duplicate_case_count}",
+                f"- linked_or_equivalent_group_count: {analysis.linked_or_equivalent_group_count}",
+                "",
+                "| view | eligible_cases | independent_groups | observed_cases | passed_cases | unavailable_cases |",
+                "|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for name, view in analysis.views.items():
+            lines.append(
+                f"| {name} | {view.eligible_case_count} | {view.eligible_group_count} | "
+                f"{view.observed_case_count} | {view.passed_case_count} | {view.unavailable_case_count} |"
+            )
+        lines.extend(["", f"- root_cause_counts: {analysis.root_cause_counts}"])
+        lines.append(f"- semantic_status_counts: {analysis.semantic_status_counts}")
     lines.extend(
         [
             "",

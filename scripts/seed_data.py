@@ -142,11 +142,15 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
     refunds_by_product = (
         select(
             func.coalesce(OrderItem.product_id, Refund.product_id).label("product_id"),
-            func.count(func.distinct(Refund.id)).label("refund_count"),
+            func.count(func.distinct(Refund.order_id)).label("refunded_order_count"),
         )
         .join(Order, Order.id == Refund.order_id)
         .outerjoin(OrderItem, OrderItem.id == Refund.order_item_id)
-        .where(*valid_order_filter, func.coalesce(OrderItem.product_id, Refund.product_id).is_not(None))
+        .where(
+            *valid_order_filter,
+            Refund.refund_status == "completed",
+            func.coalesce(OrderItem.product_id, Refund.product_id).is_not(None),
+        )
         .group_by(func.coalesce(OrderItem.product_id, Refund.product_id))
         .cte("refunds_by_product")
     )
@@ -154,16 +158,16 @@ def verify_business_facts(session: Session) -> dict[str, Any]:
         select(
             Product.product_name,
             (
-                func.coalesce(refunds_by_product.c.refund_count, 0) * 1.0
+                func.coalesce(refunds_by_product.c.refunded_order_count, 0) * 1.0
                 / func.count(func.distinct(eligible_order_items.c.order_id))
             ).label("refund_rate"),
         )
         .join(eligible_order_items, eligible_order_items.c.product_id == Product.id)
         .outerjoin(refunds_by_product, refunds_by_product.c.product_id == Product.id)
-        .group_by(Product.id, Product.product_name, refunds_by_product.c.refund_count)
+        .group_by(Product.id, Product.product_name, refunds_by_product.c.refunded_order_count)
         .order_by(
             (
-                func.coalesce(refunds_by_product.c.refund_count, 0) * 1.0
+                func.coalesce(refunds_by_product.c.refunded_order_count, 0) * 1.0
                 / func.count(func.distinct(eligible_order_items.c.order_id))
             ).desc(),
             Product.product_name.asc(),

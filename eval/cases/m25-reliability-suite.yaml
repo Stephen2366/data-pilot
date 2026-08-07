@@ -1,0 +1,9 @@
+# M25 聚焦可靠性套件：只复用 M24 六轮中出现过 45 秒超时的四个 case。
+# ★ 这是运行稳定性小样本，不替代 formal / challenge / diagnostic，也不复制 case 正文。
+name: m25_reliability_suite
+description: 控制 timeout / transient retry 变量，观察同一题多轮 attempt 证据与成功率。
+sources:
+  - path: eval/cases/database-upgrade-challenge.yaml
+    case_ids: [db_core_002, db_multi_002, db_hard_001]
+  - path: eval/cases/phase3a-diagnostic-benchmark.yaml
+    case_ids: [db_join_003]

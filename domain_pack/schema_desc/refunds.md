@@ -25,7 +25,7 @@
 
 ## 指标口径
 
-- 退款率：成交订单范围内的 `refund_count / order_count`。商品维度优先用 `order_item_id -> order_items.product_id`，整单退款的 `order_item_id` 为空时回退 `refunds.product_id`；不能用 INNER JOIN 丢弃整单退款。
+- 退款率：成交订单范围内的“已完成退款去重订单数 / 成交去重订单数”。分子只统计 `refund_status = 'completed'`。商品维度优先用 `order_item_id -> order_items.product_id`，整单退款的 `order_item_id` 为空时回退 `refunds.product_id`；不能用 INNER JOIN 丢弃整单退款。
 - 实际净退款金额：按 `processed_at` 落在查询窗口、且 `refund_status = 'completed'` 的 `SUM(refund_amount)`；负数表示冲销修正，必须保留负号，不能取绝对值。
 - Top 退款原因锚点：`quality_issue`。
 

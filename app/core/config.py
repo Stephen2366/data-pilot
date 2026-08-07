@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="mock", alias="LLM_PROVIDER")
     llm_model: str = Field(default="mock-sql-generator", alias="LLM_MODEL")
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    # M25：45 秒仍是兼容默认；重试默认关闭，只在聚焦实验中显式开启。
+    llm_timeout_seconds: float = Field(default=45.0, gt=0, alias="LLM_TIMEOUT_SECONDS")
+    llm_max_retries: int = Field(default=0, ge=0, alias="LLM_MAX_RETRIES")
+    llm_retry_backoff_seconds: float = Field(default=1.0, ge=0, alias="LLM_RETRY_BACKOFF_SECONDS")
 
     # 常用模型供应商配置 ========================================================================
     # 当前只建模常用的 DeepSeek 和 SiliconFlow；其他供应商暂时交给 extra="ignore" 忽略。

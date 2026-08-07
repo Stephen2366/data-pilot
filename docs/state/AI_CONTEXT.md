@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M24 SQL Plan Contract Semantic Equivalence / Plan-to-SQL Fidelity（已验收）
-- 上一模块验收：M24 已验收（2026-08-07）
+- 当前模块：M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution（代码与收工完成，待验收）
+- 上一模块验收：M25 未验收（待 accept-module）
 - 阻塞项：无
 - 更新时间：2026-08-07
 
@@ -26,8 +26,9 @@
 - 后端：FastAPI + Pydantic Schema；`/api/query` 返回结构化 `AgentResponse`。
 - 数据库：MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic；SQLite 仅用于测试 / smoke。
 - 数据底座：Phase 2.7 后 14 张物理表，固定业务事实和指标口径以 `docs/state/database-current-state.md` 为准。
-- NL2SQL：M3 模板 SQL 优先；模板未命中走 LLM + Schema Retrieval + QueryPlan + SQL Guard。
+- NL2SQL：M3 模板 SQL 优先；模板未命中走 LLM + Schema Retrieval + QueryPlan + SQL Guard；LLM 生成后经 SQL Plan Fidelity AST 合同，SQL 执行后由 `output_contract` 校验展示列集合与顺序。
 - 主模型默认：Qwen `qwen3.7-plus`，配置入口为 `LLM_PROVIDER=qwen` + `QWEN_MODEL=qwen3.7-plus`。
+- 主 LLM 可靠性默认：`LLM_TIMEOUT_SECONDS=45`、`LLM_MAX_RETRIES=0`、`LLM_RETRY_BACKOFF_SECONDS=1`；成功/失败 attempt 均进入 trace，实验配置只在当前 shell 覆盖。
 - DeepSeek 主模型：显式切换时使用 `LLM_PROVIDER=deepseek` + `LLM_MODEL=deepseek-v4-flash`；Qwen provider 不读取 `LLM_MODEL`。
 - Schema Retrieval 默认：`inmemory + deterministic`；`milvus` / `siliconflow` / `dashscope(qwen3.7-text-embedding)` 只通过环境变量显式开启。
 - SQL 安全：sqlglot AST 只读检查 + 表级 RBAC + 敏感字段策略；`admin` 也不能通过 Text2SQL 直出 `users.email/users.phone`。
@@ -37,6 +38,9 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-07 | M25 冻结 `case_contract_version=m25-v1`：formal + challenge + diagnostic 共 42 raw cases / 26 independent semantic groups；报告新增 semantic/safety/plan/provider/manual/end-to-end 六个视图与 eligible/observed/unavailable 分母。退款率改为 completed 退款去重订单数 / 成交去重订单数，明细优先、整单回退；平均售价明确为有效价格历史记录的算术平均但仍为 manual。 |
+| 2026-08-07 | M25 4-case reliability 小样本：45s/retry0 为 4 logical / 4 physical attempts、1/4 成功、3 timeout、179.7s；retry1 为 4 logical / 8 physical attempts、0/4 成功、8 timeout attempts、377.9s。该样本不支持默认开启 retry，默认保持 45s/0；timeout 归 `external_service + not_observed`，不再算模型语义错误。 |
+| 2026-08-07 | M25 收尾验证：focused `39 passed, 1 warning`，最终全仓 `184 passed, 3 skipped, 1 warning`；seed reset 成功且 14 表固定规模/关键事实通过。未运行完整 formal/challenge/diagnostic，M25-v1 完整基线由用户手动执行。 |
 | 2026-08-05 | M23 已收口非 pipeline 基线：商品退款率改为成交订单内“明细优先、整单退款回退 `refunds.product_id`”，`order_count` 统一为 `COUNT(DISTINCT orders.id)`；challenge 12 条、formal 8 条自动 SQL case 使用 `result_match` / `expected_value`，并新增 6 自动 + 1 人工的异常专项。原 20 条与新增 3 条 reference SQL 经 MySQL 与 SQLite 双端审计均可执行。当前 195 条 schema docs hash 为 `ce04fe4f...`；Milvus 复用强制校验 collection schema description 中的同一 hash。此前 focused `42 passed`、全量 pytest `152 passed, 1 warning`。 |
 | 2026-08-06 | M23 新合同 local 首跑：Qwen `qwen3.7-plus` + local deterministic / weighted 为 `23/32`（自动 `20/27`、人工/诊断 `3/5`）。硬失败共 9 条，其中自动 7 条、人工/诊断 2 条；另有 `db_hard_003` 只要求人工 review，不属于第 10 条硬失败。自动失败包括 3 条结果/输出不保真、2 条生成/计划错误和 2 条字符串 SQL plan contract 误拦；目标 schema 均已进入 Context。 |
 | 2026-08-06 | M23 同合同 Milvus 单次诊断已完成：Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted 为 `21/32`（自动同为 `20/27`、人工/诊断 `1/5`）；195 docs、hash `ce04fe4f...`、1024 维、final row count 195。local / Milvus 各仅一次，`23→21` 不能定性为 embedding 退化，也不改变默认 retrieval。 |
@@ -62,6 +66,7 @@
 
 | 日期 | 判断 |
 |---|---|
+| 2026-08-07 | M25 后路线：先用 execution stage + root cause + semantic status 区分代码、模型、检索、外部服务与 Eval 契约。4-case retry=1 没有恢复且成本翻倍，不切默认；递归题的 SchemaGraph 事实完整但计划引用虚构字段，当前证据指向 plan/model，不触发 embedding A/B。 |
 | 2026-08-04 | M22 已校正 Context / Output / Result / Manual 契约：不再使用 M21 的 `schema_context` 失败数直接判断检索质量。后续先按 trace 和 failure subtype 定位，再提出单变量假设。 |
 | 2026-08-05 | M22 C0-refresh/C1/C2/C3 首轮分别为 `24/32`、`27/32`、`25/32`、`24/32`；retrieval-only local weighted `0.738`、Milvus weighted `0.738`、Milvus RRF `0.929`。这些只用于同一 194-doc 的 M22 旧合同筛选。M23 已补退款率成交过滤与整单退款回退，并新增外部关联、负数冲销和金额对账专项；因 `net_refund_amount` 新增，后续检索实验必须以 195-doc corpus 重建基线。 |
 | 2026-08-05 | M22 C0-C3 三次重复完成：C0 `24/24/25`、C1 `27/28/28`、C2 `25/27/25`、C3 `24/26/27`（32 条总分）。C1 三次均最高或并列最高；C2/C3 无稳定端到端收益，不切默认。C2 第2次有效结果使用 `r2b` 文件名，首次启动中断未计入。 |
@@ -87,7 +92,7 @@
 | 2026-08-02 起，M20/M23 已加护栏 | 旧固定 Milvus collection `datapilot_schema_docs` 已被历史重复灌入污染；M23 还发现同数量但不同语义文本可绕过旧行数检查 | 旧 collection 的历史 A/B 结果不能直接作为 embedding 优劣结论 | 新 eval/smoke 使用唯一 collection 或 clean collection；`MilvusVectorIndex` 会拒绝行数、维度或 schema docs hash 不匹配（含缺少 hash 标记）的已有 collection |
 | 2026-08-04 起，M24 已升级护栏 | QueryPlan 仍可能把输出投影声明过宽，或 SQL generation 生成与计划不一致的真实表达式 | AST fidelity 已消除历史表 alias/quoted identifier/唯一限定名省略/SELECT alias 误拦，并严格检查 order/limit/projection；但合同不能修正错误 QueryPlan，也不能把 contract pass 当答案正确 | 保持同一顶层 SELECT 的保守 AST 边界；依靠 `output_contract`、result scorer 和完整 trace 区分计划过宽、真实保真失败与结果语义错误，不为追分放宽 CTE/derived scope 等未知情况 |
 | 2026-08-05 起 | M23 自动 eval 仍未全覆盖数据库异常彩蛋 | 新退款率 case 已覆盖成交过滤和整单退款回退，但外部单号、负数退款、金额对账仍不能由当前自动分数证明 | 事实菜单保留在 `database-current-state.md`；后续新增异常 case 前先明确业务题面与自动判定方式 |
-| 2026-08-07 起（验收登记） | AI_CONTEXT「当前默认值」NL2SQL 行未提及 M24 的 fidelity 合同与 SQL 执行后 `output_contract` 展示顺序硬门 | 续接排障遇 `output_projection_contract_failed` / `body_columns_order_or_set_mismatch` 时可能不知道新链路 | 待单独文档小修：在该行补"LLM 生成后经 SQL Plan Fidelity AST 合同，SQL 执行后 output_contract 校验 body.columns 集合与展示顺序"；修完移除本条 |
+| 2026-08-07 起 | M25 reliability 候选每组只有一次 4-case 小样本，且 provider 波动明显 | 不能把 retry0 的 1/4 与 retry1 的 0/4 外推为总体 SLA，也不能据此选新的 timeout 魔法数字 | 当前只支持“retry=1 本轮无恢复且成本翻倍，因此不切默认”；后续候选必须固定唯一变量并重复 |
 
 ## 变更记录索引
 
