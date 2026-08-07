@@ -6,7 +6,7 @@
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
 - 当前模块：M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution（代码与收工完成，待验收）
-- 上一模块验收：M25 验收未通过（2026-08-07），缺同步修复后复检
+- 上一模块验收：M25 已验收（2026-08-07）
 - 阻塞项：无
 - 更新时间：2026-08-07
 
@@ -67,7 +67,7 @@
 
 | 日期 | 判断 |
 |---|---|
-| 2026-08-07 | M25 后路线：先用 execution stage + root cause + semantic status 区分代码、模型、检索、外部服务与 Eval 契约。4-case retry=1 没有恢复且成本翻倍，不切默认；递归题的 SchemaGraph 事实完整但计划引用虚构字段，当前证据指向 plan/model，不触发 embedding A/B。 |
+| 2026-08-07 | M25 后路线：先用 execution stage + root cause + semantic status 区分代码、模型、检索、外部服务与 Eval 契约。4-case retry=1 没有恢复且成本翻倍，不切默认；递归题的 SchemaGraph 事实完整但计划引用虚构字段，当前证据指向 plan/model，不触发 embedding A/B；八轮复核另确认部分递归失败是 SQL Guard 把 CTE 临时名当物理表误拦（code_issue），修复前不继续用整套分数验证，先补 CTE/RBAC、`* 1.0` 等价、alternatives 的确定性单测。 |
 | 2026-08-04 | M22 已校正 Context / Output / Result / Manual 契约：不再使用 M21 的 `schema_context` 失败数直接判断检索质量。后续先按 trace 和 failure subtype 定位，再提出单变量假设。 |
 | 2026-08-05 | M22 C0-refresh/C1/C2/C3 首轮分别为 `24/32`、`27/32`、`25/32`、`24/32`；retrieval-only local weighted `0.738`、Milvus weighted `0.738`、Milvus RRF `0.929`。这些只用于同一 194-doc 的 M22 旧合同筛选。M23 已补退款率成交过滤与整单退款回退，并新增外部关联、负数冲销和金额对账专项；因 `net_refund_amount` 新增，后续检索实验必须以 195-doc corpus 重建基线。 |
 | 2026-08-05 | M22 C0-C3 三次重复完成：C0 `24/24/25`、C1 `27/28/28`、C2 `25/27/25`、C3 `24/26/27`（32 条总分）。C1 三次均最高或并列最高；C2/C3 无稳定端到端收益，不切默认。C2 第2次有效结果使用 `r2b` 文件名，首次启动中断未计入。 |

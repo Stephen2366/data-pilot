@@ -12,7 +12,7 @@
 |---|---|---|
 | 默认主模型 | Qwen `qwen3.7-plus`；本次基于 M22 三次 C1 稳定性结果切换。 | `M22-E04` |
 | 默认检索 | `inmemory + deterministic + weighted`；Milvus、DashScope `qwen3.7-text-embedding`、RRF 均仅作显式实验路径。 | `M20-E01`、`M21-E02`、`M21-E03` |
-| 当前优化方向 | M25 先按 stage/root cause/semantic status 区分外部 unavailable 与已观察语义错误；4-case retry=1 没有恢复且成本翻倍，不切默认。完整 M25-v1 baseline 待用户手动执行。 | `M25-E01` |
+| 当前优化方向 | M25 先按 stage/root cause/semantic status 区分外部 unavailable 与已观察语义错误；4-case retry=1 没有恢复且成本翻倍，不切默认。M25-v1 四组单轮对照已完成（`M25-E02`）；正式重复稳定性基线待用户决定后执行。 | `M25-E01`、`M25-E02` |
 | 已收口的假设 | DashScope `qwen3.7-text-embedding` 有向量召回信号，但尚无端到端可归因提分；RRF 也未带来端到端收益。 | `M21-E01`、`M21-E02`、`M21-E03` |
 | 不可作决策的证据 | 旧固定 Milvus collection 的重复灌入污染结果只保留作历史对照。 | `M20-E01` |
 

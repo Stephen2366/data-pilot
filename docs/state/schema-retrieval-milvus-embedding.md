@@ -2,13 +2,15 @@
 
 > 本文是 DataPilot 的 Schema Retrieval、Milvus 向量库和 embedding 实验速查。Trigger：只要涉及 `SCHEMA_VECTOR_BACKEND`、`SCHEMA_EMBEDDING_PROVIDER`、Milvus collection、embedding A/B、`schema_docs_hash`、schema retrieval 召回质量或 M20 clean run 结论，必须先读本文。当前运行命令入口仍以 `docs/state/runbook.md` 为准，长期 eval 数字以 `docs/state/eval-baselines.md` 为准。
 
-更新时间：2026-08-06
+更新时间：2026-08-07
 
 ## 一句话结论
 
 默认链路仍是 **`inmemory + deterministic`**，Milvus / SiliconFlow / DashScope-Qwen embedding 只作为显式实验路径。M20 已修复“固定 Milvus collection 被重复灌入”的实验污染问题：后续 clean 实验必须使用唯一 collection 或干净 collection，并在报告中检查 `schema_docs_hash`、row_count、embedding 配置和 `schema_vector_index_reuse`。
 
 > M23 更新（2026-08-05）：字段 / 指标 / 关系语义更新后，新增 `net_refund_amount` 指标使当前 Schema document corpus 从 194 增至 195 条，hash 为 `ce04fe4fefc1cfb9226562f55154a1ed59eb91e9e41c3a83823c53ea491061b1`。M22 的 `58534c...` 与 M20/M21 的 193-doc 结果都是历史事实；新 retrieval-only 或端到端 A/B 必须使用当前 hash，不得跨 corpus 直接比较。
+>
+> M25 更新（2026-08-07）：M25 修订退款率口径（completed 去重退款订单 / 成交去重订单）后，corpus 仍为 195 条，但文档文本变化使当前 hash 变为 `8a8b6626a4cbec6197d9625ec12d5d40668025476f823eaa9458647cecd8d41a`；`ce04fe4f...` 只属 M23 旧文本 corpus。新 retrieval-only 或端到端 A/B 必须使用当前 hash，不得跨 corpus 直接比较。
 
 ## 当前默认与边界
 
