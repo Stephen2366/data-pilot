@@ -1128,6 +1128,174 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cas
 
 **本地启动体验：** M25 没有新增独立页面。可按既有 runbook 启动 FastAPI，在 Swagger 调 `/api/query`；本模块的新增价值主要从 JSONL trace 的 `llm_call`、triage JSON 的 `primary_root_cause/semantic_status` 和 Markdown 的 `M25 Evidence Views` 查看。
 
+## ★ ★ M26 Diagnostic Human Audit / Eval Reconciliation
+
+（2026-08-07）
+
+M26 的目标不是再跑一次大模型、再看一个总分，而是先回答一个更基础的问题：**上一轮评测里显示的失败，哪些真是模型错了，哪些是评测和代码把正确路径误判了？**
+
+### 先用大白话理解
+
+一次评测报告像期末成绩单，但成绩单本身也可能有阅卷规则错误。M26 先把已经跑完的 M25 round2 冻结为审计输入，再让人工按同一份 trace、SQL、结果和 triage 证据逐项复核。这样后续修改不会把历史证据“洗白”，也不会因为重新调用不稳定的模型而得到另一份无法比较的答案。
+
+审计结果是：32 条 raw case 实际对应 26 个独立语义问题；人工复核后有 26 条一致、1 条是假阳性、4 条是状态不一致、1 条证据不足。这里最有价值的不是“找到了几个 bug”，而是把每种不一致都连回可复现的代码和测试。
+
+### 这次做了什么
+
+这次先做一次 **评测结果审计（evaluation audit）**：确认 diagnostic 中每个“通过”或“失败”到底是否可信。否则很容易把 **评分器 bug、SQL Guard 误拦、网络超时** 错当成模型能力不足，后续优化方向就会跑偏。具体做了下面几件事：
+
+1. **冻结并整理上一轮 diagnostic 的原始证据**
+
+   我们没有重新调用 LLM，而是固定使用 M25 round2 已经产生的：
+
+   - Trace：模型在哪一步执行、生成了什么 QueryPlan、是否生成 SQL；
+   - 候选 SQL：模型实际给出的 SQL；
+   - 执行结果与评分结果；
+   - triage：原来系统对失败阶段和原因的判断。
+
+   这样做的意义是：**先判断“当时这次运行发生了什么”，而不是重新跑一次后得到另一份受网络和模型波动影响的结果。**
+
+   最终把 32 个检查项整理为 26 个独立业务问题，并为每一项保留可回看的审计记录。
+
+2. **逐项检查上一轮生成 SQL 是否真的符合业务合同**
+
+   这次确实检查了上一轮的 SQL，但检查方式是基于冻结的 SQL、执行结果和业务合同做审计，**不是重新执行全部候选 SQL 或重新生成 SQL**。
+
+   最典型的是 `db_core_002`：自动评分显示它通过了，但审计发现候选 SQL 少了整单退款的归因回退：
+
+   ```
+   COALESCE(order_items.product_id, refunds.product_id)
+   ```
+
+   如果退款没有关联到具体订单明细，正确逻辑应回退使用 `refunds.product_id`。原 SQL 漏掉这部分，但现有 seed 数据恰好没有让它暴露错误，所以结果“碰巧正确”。
+
+   因此这次新增了一个 **反事实测试**：专门构造能让正确 SQL 与错误 SQL 得到不同结果的数据。这样以后不会再因为当前数据太巧合，让错误 SQL 被自动判为正确。
+
+3. **修复合法 CTE 被 SQL 安全层误拦的问题**
+
+   递归 SQL 常用 CTE，例如：
+
+   ```
+   WITH RECURSIVE category_tree AS (...)
+   ```
+
+   `category_tree` 只是本次查询内部创建的临时名字，不是真实数据库表。旧 SQL Guard 没有区分两者，会把它也当成物理表做 RBAC 权限校验，导致合法递归查询被拒绝。
+
+   现在改为按 SQL 的 **scope（作用域）** 判断：
+
+   - CTE 临时名可以被后续 SQL 引用；
+   - CTE 内真正访问的物理表仍做 RBAC 检查；
+   - 即使经过 CTE，也不能读取 `users.email` 之类敏感字段。
+
+   所以这不是“放宽安全规则”，而是让安全规则识别正确的 SQL 结构。
+
+4. **修复 SQL Fidelity 对 `\* 1.0` 的误判，但严格控制范围**
+
+   有些 SQL 会写成：
+
+   ```
+   refund_count * 1.0 / NULLIF(order_count, 0)
+   ```
+
+   这里的 `* 1.0` 通常只是为了避免整数除法，让结果保留小数；它不改变退款率的业务含义。但旧 Fidelity 会把它视为“SQL 与 QueryPlan 表达式不同”，从而阻断执行。
+
+   这次没有实现宽松的“数学等价判断”，因为通用代数变形会碰到空值、类型、聚合粒度、Join 重复和数据库方言等风险。
+
+   只增加了一个 **可证明安全的窄规则**：
+
+   - 分母仍是相同的 `NULLIF(..., 0)`；
+   - 分子不变；
+   - 唯一变化只是额外乘以 `1.0`。
+
+   只在满足这些条件时才视为等价；换分子、换分母、乘其他数字等情况仍然会被拒绝。
+
+5. **让 SchemaGraph alternatives 和人工复核状态真正生效**
+
+   评测 case 中原本已经可以写“满足方案 A 或方案 B 都算 SchemaGraph 正确”，但评分器没有真正使用这条规则，导致有些 Context 检查表面通过、实际没有验证到目标内容。
+
+   现在评分器会从同一次请求的 SchemaGraph 中检查：
+
+   - 找到了哪些表；
+   - 找到了哪些字段；
+   - 找到了哪些指标；
+   - 是否完整满足任意一种允许的替代方案。
+
+   同时，把两种以前容易混淆的状态拆开：
+
+   - **`execution_failed`**：自动链路已经确定失败；
+   - **`review_pending`**：缺少确定性 oracle，需要人工判断。
+
+   例如模型超时、根本没有生成 SQL，不能叫“模型 SQL 答错”；它应是外部不可用或未观察到结果。`db_hard_003` 这种 SCD 时间边界题则仍是人工复核，不伪装成自动失败。
+
+最终，这次工作把“上一轮的分数”拆成了更可信的事实：哪些是 **真实 SQL 语义错误**，哪些是 **代码或 scorer 的确定性缺陷**，哪些只是 **外部超时导致没有观察到结果**。这样下一次完整 diagnostic 跑出的 M26-v1 基线，才有可解释性。
+
+### 新概念
+
+- **Frozen audit evidence**：先把一次运行的输入、trace、报告和 triage 固定下来再复核。像财务审计先封存凭证，避免后续系统变化改变被审计的事实。
+- **SQL scope**：CTE、子查询和外层查询各有自己的名字空间。判断一个标识符是不是物理表，不能只扫描全局名称，必须看它所在 scope。
+- **Narrow semantic equivalence**：只接受能够用明确 AST 结构证明的一个小等价规则，而不是“看起来差不多就通过”。它宁可保守，也不把真实业务 SQL 改错放过去。
+- **Execution failed vs review pending**：前者说明自动链路已确定失败，后者表示还没有足够证据下结论；两者都可能尚未通过，但不能混成一个失败原因。
+
+### 代码阅读路线
+
+1. 先看 `eval/audit.py` 和 `eval/run_audit.py`，理解冻结证据如何生成 audit record、如何写入人工 verdict，以及为什么 audit 不重跑模型。
+2. 再看 `engine/sql_guard/policy.py` 的 `extract_sql_access()`，重点理解 sqlglot `Scope` 如何让 CTE 名称不冒充物理表。
+3. 看 `engine/nl2sql/fidelity_contract.py` 的 ratio helper，观察“仅加 `* 1.0`”如何被限制为可证明的窄模式。
+4. 看 `eval/scorers/rule_scorers.py`、`eval/triage.py` 与 `eval/run_eval.py`，理解 SchemaGraph alternatives、正交 triage 状态和报告如何共享同一份事实。
+5. 最后读 `tests/test_m26_targeted_contracts.py`；其中 CTE/RBAC、ratio 正反例、SchemaGraph alternatives、triage 和退款率反事实覆盖了本模块最重要的边界。
+
+### 面试怎么讲
+
+我在 DataPilot 的 M26 做的不是直接调 Prompt 或追求更高的 diagnostic 总分，而是先治理评测结果的可信度。M25 的 diagnostic 已经暴露出递归 SQL、退款率、SchemaGraph 和人工题状态上的异常，但“失败”不一定等于模型答错：它也可能来自 SQL Guard 误拦、评分器没有消费 case 合同、当前 seed 恰好掩盖错误 SQL，或者外部超时导致根本没有生成 SQL。
+
+因此我先冻结上一轮的 trace、候选 SQL、执行结果、评分报告和 triage，避免重新调用 LLM 后被网络和模型波动干扰。32 个检查项归并为 26 个独立语义问题后，我发现了一次自动评分假阳性：退款率 SQL 漏掉整单退款的 `COALESCE(order_items.product_id, refunds.product_id)` 回退逻辑，却因为现有 seed 数据碰巧通过。随后我用 SQLite 反事实数据证明，缺少回退时会把正确答案从 `Beta, 1.0` 错算成 `Alpha, 0.0`。
+
+修复时我刻意控制范围：SQL Guard 仅在 AST scope 内识别 CTE 临时名，真实物理表和敏感字段继续走 RBAC；SQL fidelity 仅接受相同分母和分子、只多出 `* 1.0` 的 ratio 类型提升；SchemaGraph scorer 开始真正消费 alternatives；自动执行失败与等待人工复核拆成正交状态。最终 focused 62 个、全仓 194 个测试通过。但我没有把这些确定性修复说成模型能力提升：M26 尚未跑新的完整 LLM diagnostic，新的 M26-v1 端到端基线仍需用固定配置独立建立。
+
+1. **[基础追问] 你这个模块到底是在修模型、修 SQL 安全，还是修评测？为什么这些事情会放在同一个模块？**
+
+   M26 的主目标是修 **评测归因的可信度**，但审计证明有些“评测失败”来自确定性代码边界，因此不能只改报告。比如递归 SQL 被拒绝时，表面上看是模型没有完成任务，实际是 SQL Guard 把 CTE 临时名误认为物理表；`schema_context_match` 表面通过，实际没有验证 alternatives。  
+
+   所以这个模块不是把模型、安全和评测混在一起，而是沿着同一条证据链处理：**冻结运行证据 → 判断失败来源 → 只修已经证实的确定性缺陷 → 用测试证明边界没有被放宽**。模型是否真的进步，仍要由后续完整 diagnostic 回答。
+
+2. **[工程/深挖追问] 你让 CTE alias 绕过了表级 RBAC。攻击者能不能把敏感表藏进 CTE，借此绕过权限检查？**
+
+   不能，因为放行的不是 CTE 内的数据访问，而只是 **查询内部临时名字的引用**。例如 `category_tree` 是 CTE alias，不是数据库里的物理表；后续 `SELECT * FROM category_tree` 不应再把它当作一张真实表检查。  
+
+   但 SQL Guard 会继续进入这个 CTE 对应的 scope，提取其中真正访问的物理表和字段。因此 CTE 内查询禁用表仍会被拦截，访问 `users.email` 这类敏感字段也仍会被拦截。M26 的回归测试同时覆盖了合法递归 CTE、CTE 内越权表、CTE 内敏感字段和 CTE 名遮蔽物理表四种情况。这里的安全边界是：**修正名称解析，不降低数据访问约束。**
+
+3. **[工程/深挖追问] 你如何证明 `db_core_002` 是自动评分假阳性，而不是你主观认为那条 SQL “写得不够标准”？**
+
+   我没有只根据 SQL 写法下结论，而是把业务合同变成了能区分正确与错误的反事实数据。合同规定商品退款率需要优先按订单明细归因，整单退款缺少 `order_item_id` 时再回退到 `refunds.product_id`。  
+
+   原候选 SQL 缺少这个回退，在原 seed 上仍然通过 Top1 结果比较；但在新构造的最小 SQLite 数据里，正确 SQL 得到 `Beta, 1.0`，缺少回退的 SQL 得到 `Alpha, 0.0`。因此它不是“风格不同”，而是在存在整单退款时计算了错误的业务语义。  
+
+   这也是 M26 的一个原则：**当现有数据无法区分两种 SQL 时，不能仅凭一次 result_match 就宣称它们业务等价。**
+
+4. **[压力追问] 你的审计还要从历史 Markdown 报告里提取 Score Summary。既然源数据不完整，凭什么相信这次审计结论？**
+
+   不能把这部分证据说得比它实际更强。历史 M25 run 没有单独保存逐 case 的结构化 `score_details`，因此 M26 的 legacy adapter 只读取冻结 Markdown 中已有的 Score Summary，并在审计记录里明确标注来源和报告 hash。  
+
+   关键是它没有重新执行 scorer，也没有从别的 run 补数据；trace、候选 SQL、triage 和报告必须来自同一冻结运行，缺任何一项就失败。这样至少保证审计不把另一轮运行的证据拼进来。  
+
+   这条限制也已经转化为后续改进项：新的 runner 应保存结构化 score artifact，让报告只是给人阅读的展示层，而不是审计时反向恢复事实的长期数据源。
+
+### 验证与下一步
+
+- 聚焦回归：**62 passed, 1 warning**。
+- 全仓回归：**194 passed, 1 warning**。
+- warning 为既有 Starlette/httpx deprecation，不影响 M26。
+- 本模块未运行新的完整真实 LLM diagnostic，也没有切换模型、embedding、Milvus、LangFuse 或数据库默认值；因此不能把确定性修复表述为新的端到端能力基线。
+- 下一步：用户人工查看 audit artifact 后执行 `accept-module`；若要得到 M26-v1 的新真实 LLM 基线，应另行授权完整运行。
+
+可复制的审计命令（用于已保留的冻结输入）：
+
+```powershell
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_audit --trace <frozen-trace.jsonl> --report <frozen-report.md> --triage <frozen-triage.json> --output-prefix eval\reports\m26-audit
+```
+
+**本地启动体验：** M26 没有新增 Web 页面。阅读 [审计 Markdown](eval/reports/m26-qwen37plus-local-round2-audit.md) 或运行上述 CLI 即可查看逐 case 证据；API 启动方式仍以 `docs/state/runbook.md` 为准。
+
 
 
 

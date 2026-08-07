@@ -13,6 +13,15 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M26 Diagnostic Human Audit / Eval Reconciliation（2026-08-07）
+
+- **改动范围**：新增冻结评测审计入口 `eval/audit.py` / `eval/run_audit.py`、M25 round2 的 audit / verdict artifacts、SQL Guard CTE scope 解析、SQL Plan Fidelity 窄等价规则、SchemaGraph alternatives scorer、triage 状态与报告、两个高风险 case 合同和定点回归测试；过程素材见 `docs/notes/m26-notes.md`。
+- **审计结论**：固定 M25 Qwen 3.7-plus + local round2 的 trace / report / triage，以 manifest hash 锁定输入；32 raw cases 聚合为 26 个 semantic groups。人工 verdict 后 raw reconciliation 为 26 agree、1 false positive、4 status mismatch、1 unresolved；其中 26 pass、2 fail、3 external unavailable、1 evidence insufficient。历史 Markdown 只保留 Score Summary，audit 因而用只读兼容 adapter 提取历史分数，未回写或重算 M25 结果。
+- **用户确认后的 P2 定点修复**：SQL Guard 改为 sqlglot scope 内区分 CTE alias 与物理表，CTE 内访问的物理表 / 敏感字段仍执行严格 RBAC；Fidelity 仅允许 `NULLIF(..., 0)` 分母不变且分子仅多出 `* 1.0` 的 ratio 类型提升，不引入通用代数等价；SchemaGraph scorer 真正消费同一 trace 的 `expected_tables_alternatives`；`failed` 保持向后兼容，另增加正交的 `execution_failed` 与 `review_pending`。
+- **合同与反例**：`db_hard_001` 明确为数码电子一级类目的 `item_gmv`；`db_hard_003` 仍保留 manual，但明确 SCD 半开区间与名称排序；`db_core_002` 增加 SQLite 反事实，证明漏掉整单退款 `COALESCE(oi.product_id, r.product_id)` 会在非巧合数据上答错。
+- **验证快照**：P2 focused `62 passed, 1 warning`；全仓 `194 passed, 1 warning`。warning 均为既有 Starlette/httpx deprecation。未运行新的完整真实 LLM diagnostic、未更改模型 / retrieval / LangFuse / 数据库默认值，也没有覆盖冻结 M25 历史报告。
+- **遗留/后续**：`db_hard_003` 仍需人工 review；历史 M25 报告缺结构化 score detail，audit adapter 仅用于该冻结证据；待用户人工检查后再执行 `accept-module`，新的 M26 合同完整 LLM 基线应在后续单独授权的运行中建立。
+
 ### [模块任务] M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution（2026-08-07）
 
 - **改动范围**：新增 `engine/nl2sql/llm_call.py` 深 module、`semantic_group_id` / `case_contract_version=m25-v1`、两轴 triage 与六类 report views；同步 LLM 配置/pipeline trace、三套主 case、退款率事实/seed、focused tests、runbook 与模块 notes。完整清单见 `docs/notes/m25-notes.md`。

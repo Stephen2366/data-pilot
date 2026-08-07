@@ -57,6 +57,8 @@ class SQLPlanFidelityResult:
     candidate_sql: str = ""
     candidate_sql_hash: str = ""
     evidence_level: str = "full"
+    # M26：只记录已证明的窄等价，不把它伪装成通用 SQL 化简器。
+    narrow_equivalences: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -139,6 +141,7 @@ def evaluate_sql_plan_fidelity(
     select_aliases = {item.alias: item.this for item in select.expressions if item.alias}
     plan_aliases, plan_alias_issue = _parse_plan_alias_bindings(plan_step, dialect=dialect)
     issues: list[FidelityIssue] = []
+    narrow_equivalences: list[str] = []
     if plan_alias_issue is not None:
         issues.append(plan_alias_issue)
     planned_normalized: list[str] = []
@@ -194,7 +197,15 @@ def evaluate_sql_plan_fidelity(
                 continue
             planned_normalized.append(planned_expr)
             observed_normalized.append(observed_expr)
-            if planned_expr != observed_expr:
+            if planned_expr != observed_expr and _is_ratio_numeric_type_promotion(
+                planned_expr,
+                observed_expr,
+                dialect=dialect,
+            ):
+                # ★ ``* 1.0`` 在 MySQL/SQLite ratio 中是显式的小数类型提升。这里只接受
+                # 同一分母（且分母是 NULLIF(..., 0)）的单一乘法因子，绝不扩展成代数优化。
+                narrow_equivalences.append("ratio_numeric_type_promotion:*1.0")
+            elif planned_expr != observed_expr:
                 issues.append(
                     FidelityIssue(
                         "order_by",
@@ -255,6 +266,7 @@ def evaluate_sql_plan_fidelity(
         normalized_sql=statement.sql(dialect=dialect, normalize=True),
         candidate_sql=candidate_sql,
         candidate_sql_hash=sql_hash,
+        narrow_equivalences=tuple(narrow_equivalences),
     )
 
 
@@ -356,6 +368,53 @@ def _normalize_expression(
             raise _IndeterminateExpression(f"无前缀字段 {column.name} 可能来自 derived scope。")
         raise _IndeterminateExpression(f"无前缀字段 {column.name} 在当前 scope 不是唯一可解析字段。")
     return node.sql(dialect=dialect, normalize=True)
+
+
+def _is_ratio_numeric_type_promotion(planned_sql: str, observed_sql: str, *, dialect: str) -> bool:
+    """只识别 ``numerator * 1.0 / NULLIF(denominator, 0)`` 的窄类型提升等价。
+
+    这不是一般代数化简：不交换运算顺序、不消除任意常数、不处理加减或多层 cast，也不忽略
+    NULL / 溢出语义。两侧分母都必须是同一 ``NULLIF(..., 0)``，以保留除零防护的证据。
+    """
+
+    try:
+        planned = sqlglot.parse_one(f"SELECT {planned_sql}", read=dialect).expressions[0]
+        observed = sqlglot.parse_one(f"SELECT {observed_sql}", read=dialect).expressions[0]
+    except sqlglot.errors.SqlglotError:
+        return False
+    if not isinstance(planned, exp.Div) or not isinstance(observed, exp.Div):
+        return False
+    if not (_is_nullif_zero(planned.right) and _is_nullif_zero(observed.right)):
+        return False
+    if planned.right.sql(dialect=dialect, normalize=True) != observed.right.sql(dialect=dialect, normalize=True):
+        return False
+    numerator = observed.left
+    if not isinstance(numerator, exp.Mul):
+        return False
+    if _is_decimal_one(numerator.right):
+        observed_base = numerator.left
+    elif _is_decimal_one(numerator.left):
+        observed_base = numerator.right
+    else:
+        return False
+    return planned.left.sql(dialect=dialect, normalize=True) == observed_base.sql(dialect=dialect, normalize=True)
+
+
+def _is_decimal_one(expression: exp.Expression | None) -> bool:
+    """只接受 SQL 文本中明确写出的 `1.0`，避免把整数乘法也误认为类型提升。"""
+
+    return isinstance(expression, exp.Literal) and not expression.is_int and expression.this == "1.0"
+
+
+def _is_nullif_zero(expression: exp.Expression | None) -> bool:
+    """确认 ratio 的除零保护没有在“等价”过程中被抹掉。"""
+
+    return (
+        isinstance(expression, exp.Nullif)
+        and isinstance(expression.expression, exp.Literal)
+        and expression.expression.is_int
+        and expression.expression.this == "0"
+    )
 
 
 def _extract_limit(select: exp.Select) -> tuple[int | None, FidelityIssue | None]:

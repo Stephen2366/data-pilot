@@ -85,7 +85,7 @@ def score_case_rules(
 
     # ★ 计划阻断和局部 Schema 上下文是过程契约，不能被最终 SQL 的表/列检查抢先遮蔽。
     # 否则“正确拒绝 supplier_name”会因为响应本来没有 supplier_name 而被误报成输出列失败。
-    if case.check_type == "schema_context_size":
+    if case.check_type in {"schema_context_size", "schema_context_match"}:
         details.append(_score_schema_context(case, body))
         details.append(_score_sql_success(body))
         return details
@@ -268,7 +268,12 @@ def _score_plan_validation_blocked(case: Any, body: dict[str, Any]) -> EvalScore
 
 
 def _score_schema_context(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
-    """按 JSONL trace 的 SchemaGraph 元数据评分，绝不拿最终输出列冒充上下文。"""
+    """按 JSONL trace 的 SchemaGraph 元数据评分，绝不拿最终输出列冒充上下文。
+
+    `schema_context_match` 的 multi-answer case 直接检查同一请求的 tables/fields/metrics，
+    不再先走最终响应的 table/column scorer。这样“检索上下文正确、生成 SQL 错误”能保持为
+    两条独立证据，也让 alternatives 真正成为可执行合同而非 YAML 装饰字段。
+    """
 
     trace_steps = body.get("_trace_steps") or []
     context_step = next((step for step in trace_steps if step.get("step_type") == "schema_context"), None)
@@ -279,6 +284,7 @@ def _score_schema_context(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
     actual_tables = set(metadata.get("tables") or [])
     actual_fields = set(metadata.get("fields") or [])
     actual_columns = {field.rsplit(".", 1)[-1] for field in actual_fields}
+    actual_metrics = set(metadata.get("metrics") or [])
     contract = case.expected_schema_context
     missing_tables = [table for table in contract.get("must_include_tables", []) if table not in actual_tables]
     missing_columns = [column for column in contract.get("must_include_columns", []) if column not in actual_columns]
@@ -307,6 +313,38 @@ def _score_schema_context(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
         message = f"must_not_include_tables_present={forbidden_present}"
         (contract_warnings if forbidden_level == "warn" else contract_errors).append(message)
 
+    # 步骤 2：multi-answer alternatives 只消费 SchemaGraph ===============================
+    alternative_failures: list[dict[str, Any]] = []
+    alternatives = list(case.expected_tables_alternatives or [])
+    if case.check_type == "schema_context_match":
+        match_mode = str(case.check.get("match_mode") or "any_alternative")
+        require_columns = bool(case.check.get("alternative_must_include_columns", True))
+        if match_mode != "any_alternative":
+            contract_errors.append(f"unsupported_alternative_match_mode={match_mode}")
+        elif not alternatives:
+            contract_errors.append("schema_context_alternatives_empty")
+        else:
+            matched = False
+            for index, alternative in enumerate(alternatives, start=1):
+                expected_alt_tables = set(alternative.get("tables") or [])
+                required_columns = set(alternative.get("required_columns") or []) if require_columns else set()
+                # 指标名（如 gmv）可以来自 SchemaGraph.metrics，而不要求伪装成物理字段。
+                available_names = actual_columns | actual_metrics
+                missing_alt_tables = sorted(expected_alt_tables - actual_tables)
+                missing_alt_columns = sorted(required_columns - available_names)
+                if not missing_alt_tables and not missing_alt_columns:
+                    matched = True
+                    break
+                alternative_failures.append(
+                    {
+                        "alternative_index": index,
+                        "missing_tables": missing_alt_tables,
+                        "missing_columns_or_metrics": missing_alt_columns,
+                    }
+                )
+            if not matched:
+                contract_errors.append("schema_context_alternatives_no_match")
+
     if missing_tables or missing_columns or missing_join_keys or contract_errors:
         return _fail(
             "rule:schema_context",
@@ -322,7 +360,9 @@ def _score_schema_context(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
             metadata={
                 "actual_tables": sorted(actual_tables),
                 "actual_fields": sorted(actual_fields),
+                "actual_metrics": sorted(actual_metrics),
                 "contract_warnings": contract_warnings,
+                "alternative_failures": alternative_failures,
             },
         )
     return EvalScoreDetail(
@@ -333,7 +373,9 @@ def _score_schema_context(case: Any, body: dict[str, Any]) -> EvalScoreDetail:
         metadata={
             "actual_tables": sorted(actual_tables),
             "actual_fields": sorted(actual_fields),
+            "actual_metrics": sorted(actual_metrics),
             "contract_warnings": contract_warnings,
+            "alternative_failures": alternative_failures,
         },
     )
 

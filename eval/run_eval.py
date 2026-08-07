@@ -53,8 +53,9 @@ from scripts.seed_data import seed_database
 DEFAULT_CASES_PATH = PROJECT_ROOT / "eval" / "cases" / "smoke.yaml"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "eval" / "reports" / "latest.md"
 DEFAULT_TRACE_PATH = PROJECT_ROOT / ".agent_work" / "temp" / "m6-eval-traces.jsonl"
-# 题面、退款率口径、语义分组与报告分母发生变化时必须显式升级，禁止与 M24 混算。
-CASE_CONTRACT_VERSION = "m25-v1"
+# M26 修订了 item_gmv 题面、SCD 边界/排序说明，并让 SchemaGraph alternatives 成为真实 scorer 合同；
+# 新 run 不得与冻结的 m25-v1 历史分数混算。
+CASE_CONTRACT_VERSION = "m26-v1"
 
 
 @dataclass(frozen=True)
@@ -742,6 +743,9 @@ def _append_failure_triage_summary(
             "",
             f"- triaged_cases: {summary['total']}",
             f"- failed_or_review_cases: {summary['failed']}",
+            f"- execution_failed: {summary['execution_failed']}",
+            f"- review_pending: {summary['review_pending']}",
+            f"- external_unavailable: {summary['external_unavailable']}",
             "",
             "### Failure Stage Counts",
             "",
@@ -817,14 +821,16 @@ def _append_failure_triage_summary(
             "",
             "### Case Triage Details",
             "",
-            "| case_id | failed | failure_stage | failure_subtype | needs_action | evidence_step | confidence | reason |",
-            "|---|---|---|---|---|---|---:|---|",
+            "| case_id | failed | execution_failed | review_pending | failure_stage | failure_subtype | needs_action | evidence_step | confidence | reason |",
+            "|---|---|---|---|---|---|---|---|---:|---|",
         ]
     )
     for triage in failed_triages:
         lines.append(
-            "| {case_id} | yes | {stage} | {subtype} | {action} | {evidence} | {confidence} | {reason} |".format(
+            "| {case_id} | yes | {execution_failed} | {review_pending} | {stage} | {subtype} | {action} | {evidence} | {confidence} | {reason} |".format(
                 case_id=triage.case_id,
+                execution_failed="yes" if triage.execution_failed else "no",
+                review_pending="yes" if triage.review_pending else "no",
                 stage=triage.failure_stage,
                 subtype=triage.failure_subtype or "-",
                 action=triage.needs_action,
@@ -834,7 +840,7 @@ def _append_failure_triage_summary(
             )
         )
     if not failed_triages:
-        lines.append("| - | no | - | - | - | - | 0 | no_failed_cases |")
+        lines.append("| - | no | no | no | - | - | - | - | 0 | no_failed_cases |")
 
     if langfuse_triage_write_result is not None:
         lines.extend(

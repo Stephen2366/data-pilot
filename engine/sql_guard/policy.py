@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.optimizer.scope import Scope, build_scope
 
 from engine.nl2sql.schema_loader import DomainSchema
 from engine.sql_guard.guard import GuardResult, validate_readonly_sql
@@ -24,16 +25,24 @@ class SQLAccessInfo:
     columns: set[str] = field(default_factory=set)
 
 
-def _table_aliases(statement: exp.Expression) -> dict[str, str]:
-    """收集 SQL 中 `orders o` 这种 alias 到真实表名的映射。"""
+def _scope_physical_sources(scope: Scope) -> tuple[dict[str, str], set[str]]:
+    """提取单个 AST scope 的真实物理表，刻意不把 CTE / derived alias 当成表。
+
+    例如 ``WITH category_tree AS (...) SELECT * FROM category_tree`` 的外层 source 在
+    sqlglot 看来是 Scope，不是 ``exp.Table``；真正应做 RBAC 的是 CTE 内部的
+    ``product_categories``。按 scope 处理也避免嵌套查询里同名 alias 相互污染。
+    """
 
     aliases: dict[str, str] = {}
-    for table in statement.find_all(exp.Table):
-        table_name = table.name
+    physical_tables: set[str] = set()
+    for alias, (_, source) in scope.selected_sources.items():
+        if not isinstance(source, exp.Table):
+            continue
+        table_name = source.name
+        aliases[alias] = table_name
         aliases[table_name] = table_name
-        if table.alias:
-            aliases[table.alias] = table_name
-    return aliases
+        physical_tables.add(table_name)
+    return aliases, physical_tables
 
 
 def _qualify_column(column: exp.Column, aliases: dict[str, str], domain_schema: DomainSchema) -> set[str]:
@@ -56,27 +65,38 @@ def _qualify_column(column: exp.Column, aliases: dict[str, str], domain_schema: 
 
 
 def extract_sql_access(sql: str, domain_schema: DomainSchema) -> SQLAccessInfo:
-    """使用 sqlglot AST 提取 SQL 访问的表和列。"""
+    """使用 sqlglot AST 提取真实物理表和字段访问。
+
+    ★ CTE 名是查询内部临时结果，不是数据权限对象：不能因它不在 RBAC allowlist 被误拦；
+    但每个 CTE scope 内读到的物理表和敏感字段仍必须加入同一份访问集合并严格检查。
+    """
 
     statement = sqlglot.parse_one(sql, read="mysql")
-    aliases = _table_aliases(statement)
-    tables = set(aliases.values())
+    root_scope = build_scope(statement)
+    if root_scope is None:
+        raise sqlglot.errors.SqlglotError("SQL Guard 无法建立 scope")
+
+    tables: set[str] = set()
     columns: set[str] = set()
 
-    # 步骤 1：提取显式列引用 --------------------------------------------------------------
-    for column in statement.find_all(exp.Column):
-        columns.update(_qualify_column(column, aliases, domain_schema))
+    # 步骤 1：逐 scope 收集显式字段；scope.columns 不会把 CTE 子查询字段混到外层 ----------
+    for scope in root_scope.traverse():
+        aliases, scope_tables = _scope_physical_sources(scope)
+        tables.update(scope_tables)
+        for column in scope.columns:
+            columns.update(_qualify_column(column, aliases, domain_schema))
 
-    # 步骤 2：处理 SELECT * ----------------------------------------------------------------
-    # ★ 对非 admin 来说，`SELECT * FROM users` 会把 email/phone 一起带出，所以必须展开后检查。
-    for star in statement.find_all(exp.Star):
-        parent = star.parent
-        table_prefix = getattr(parent, "table", None)
-        target_tables = {aliases.get(table_prefix, table_prefix)} if table_prefix else tables
-        for table_name in target_tables:
-            table = domain_schema.tables.get(table_name)
-            if table:
-                columns.update(f"{table_name}.{field_name}" for field_name in table.fields)
+        # 步骤 2：在同一 scope 展开 SELECT * ----------------------------------------------
+        # 外层 ``SELECT * FROM cte`` 没有物理表可展开；CTE 内的 ``SELECT * FROM users``
+        # 则在它自己的 scope 展开 users.email/users.phone，敏感策略不会被绕过。
+        for star in scope.expression.find_all(exp.Star):
+            parent = star.parent
+            table_prefix = getattr(parent, "table", None)
+            target_tables = {aliases.get(table_prefix, table_prefix)} if table_prefix else scope_tables
+            for table_name in target_tables:
+                table = domain_schema.tables.get(table_name)
+                if table:
+                    columns.update(f"{table_name}.{field_name}" for field_name in table.fields)
 
     return SQLAccessInfo(tables=tables, columns=columns)
 

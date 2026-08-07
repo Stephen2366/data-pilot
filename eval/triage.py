@@ -121,6 +121,9 @@ class FailureTriage:
     error_subtype: str | None = None
     observability_complete: bool = False
     evidence_level: EvidenceLevel = "insufficient"
+    # M26：保留 failed 兼容历史脚本，但用两个正交字段消除“待人工看=执行失败”的误读。
+    execution_failed: bool = False
+    review_pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -370,6 +373,8 @@ def triage_result(result: Any, trace_record: dict[str, Any] | None = None) -> Fa
             semantic_status=_semantic_status(result, root_cause),
             observability_complete=True,
             evidence_level="direct",
+            execution_failed=False,
+            review_pending=False,
         )
 
     # 步骤 2：优先相信 trace step 的失败边界；它最接近真实 pipeline 执行位置 ----------
@@ -522,6 +527,12 @@ def triage_summary(triages: list[FailureTriage]) -> dict[str, Any]:
     return {
         "total": len(triages),
         "failed": len(failed_triages),
+        "execution_failed": sum(triage.execution_failed for triage in triages),
+        "review_pending": sum(triage.review_pending for triage in triages),
+        "external_unavailable": sum(
+            triage.primary_root_cause == "external_service" and triage.semantic_status == "not_observed"
+            for triage in triages
+        ),
         "failure_stage_counts": dict(Counter(triage.failure_stage for triage in failed_triages)),
         "failure_subtype_counts": dict(
             Counter(triage.failure_subtype for triage in failed_triages if triage.failure_subtype)
@@ -637,6 +648,8 @@ def _triage(
         error_subtype=_error_subtype(trace_record, result),
         observability_complete=bool(chain or result.error_type),
         evidence_level="direct" if chain or result.error_type else "insufficient",
+        execution_failed=not result.passed and not result.review_required,
+        review_pending=result.review_required,
     )
 
 
@@ -670,6 +683,8 @@ def _stage_from_score_detail(detail: Any, result: Any) -> FailureStage:
         return "sql_guard"
     if detail.name == "rule:sql_success":
         return "sql_execution" if result.error_type == "sql_execution_error" else "unknown"
+    if detail.name == "rule:schema_context":
+        return "schema_context"
     if "output_projection_mismatch" in detail.issue_tags:
         return "output_contract"
     if detail.name in {"rule:result_match", "rule:expected_value", "rule:contains", "rule:equals"}:

@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution（代码与收工完成，待验收）
-- 上一模块验收：M25 已验收（2026-08-07）
+- 当前模块：M26 Diagnostic Human Audit / Eval Reconciliation（代码与收工完成，待验收）
+- 上一模块验收：M26 未验收（待 `accept-module`）
 - 阻塞项：无
 - 更新时间：2026-08-07
 
@@ -38,6 +38,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-07 | M26 对冻结 M25 Qwen 3.7-plus + local round2 建立可复用 audit evidence：32 raw / 26 semantic groups，人工 reconciliation 为 26 agree、1 false positive、4 status mismatch、1 unresolved（verdict：26 pass、2 fail、3 external unavailable、1 insufficient evidence）。P2 已经用户确认后定点修复 CTE/RBAC scope、ratio `* 1.0` 窄等价、SchemaGraph alternatives 和 manual/failed 混读；合同升为 `m26-v1`，历史 M25-v1 不重算。focused `62 passed, 1 warning`，全仓 `194 passed, 1 warning`；未跑新的完整 LLM 基线，未切任何默认模型 / retrieval / LangFuse / 数据库配置。 |
 | 2026-08-07 | M25 冻结 `case_contract_version=m25-v1`：formal + challenge + diagnostic 共 42 raw cases / 26 independent semantic groups；报告新增 semantic/safety/plan/provider/manual/end-to-end 六个视图与 eligible/observed/unavailable 分母。退款率改为 completed 退款去重订单数 / 成交去重订单数，明细优先、整单回退；平均售价明确为有效价格历史记录的算术平均但仍为 manual。 |
 | 2026-08-07 | M25 4-case reliability 小样本：45s/retry0 为 4 logical / 4 physical attempts、1/4 成功、3 timeout、179.7s；retry1 为 4 logical / 8 physical attempts、0/4 成功、8 timeout attempts、377.9s。该样本不支持默认开启 retry，默认保持 45s/0；timeout 归 `external_service + not_observed`，不再算模型语义错误。 |
 | 2026-08-07 | M25 收尾验证：focused `39 passed, 1 warning`，最终全仓 `184 passed, 3 skipped, 1 warning`；seed reset 成功且 14 表固定规模/关键事实通过。随后已完成 4 组 M25-v1 diagnostic superset 对照；未另跑独立 formal，challenge 已包含在 diagnostic superset 中。 |
@@ -67,6 +68,7 @@
 
 | 日期 | 判断 |
 |---|---|
+| 2026-08-07 | M26 后路线：已修复的 CTE / ratio / alternatives / review 状态问题不再用作检索或模型能力结论；CTE alias 只在 SQL Guard scope 内豁免，物理表和敏感字段保持严格；ratio 只接受可证明的 `* 1.0` 数值提升，拒绝通用代数放宽。M26-v1 与 M25-v1 历史分数隔离；在用户未单独授权前，不用新的整套真实 LLM diagnostic 建立或替代基线。 |
 | 2026-08-07 | M25 后路线：先用 execution stage + root cause + semantic status 区分代码、模型、检索、外部服务与 Eval 契约。4-case retry=1 没有恢复且成本翻倍，不切默认；递归题的 SchemaGraph 事实完整但计划引用虚构字段，当前证据指向 plan/model，不触发 embedding A/B；八轮复核另确认部分递归失败是 SQL Guard 把 CTE 临时名当物理表误拦（code_issue），修复前不继续用整套分数验证，先补 CTE/RBAC、`* 1.0` 等价、alternatives 的确定性单测。 |
 | 2026-08-04 | M22 已校正 Context / Output / Result / Manual 契约：不再使用 M21 的 `schema_context` 失败数直接判断检索质量。后续先按 trace 和 failure subtype 定位，再提出单变量假设。 |
 | 2026-08-05 | M22 C0-refresh/C1/C2/C3 首轮分别为 `24/32`、`27/32`、`25/32`、`24/32`；retrieval-only local weighted `0.738`、Milvus weighted `0.738`、Milvus RRF `0.929`。这些只用于同一 194-doc 的 M22 旧合同筛选。M23 已补退款率成交过滤与整单退款回退，并新增外部关联、负数冲销和金额对账专项；因 `net_refund_amount` 新增，后续检索实验必须以 195-doc corpus 重建基线。 |
@@ -94,7 +96,8 @@
 | 2026-08-04 起，M24 已升级护栏 | QueryPlan 仍可能把输出投影声明过宽，或 SQL generation 生成与计划不一致的真实表达式 | AST fidelity 已消除历史表 alias/quoted identifier/唯一限定名省略/SELECT alias 误拦，并严格检查 order/limit/projection；但合同不能修正错误 QueryPlan，也不能把 contract pass 当答案正确 | 保持同一顶层 SELECT 的保守 AST 边界；依靠 `output_contract`、result scorer 和完整 trace 区分计划过宽、真实保真失败与结果语义错误，不为追分放宽 CTE/derived scope 等未知情况 |
 | 2026-08-05 起 | M23 自动 eval 仍未全覆盖数据库异常彩蛋 | 新退款率 case 已覆盖成交过滤和整单退款回退，但外部单号、负数退款、金额对账仍不能由当前自动分数证明 | 事实菜单保留在 `database-current-state.md`；后续新增异常 case 前先明确业务题面与自动判定方式 |
 | 2026-08-07 起 | M25 reliability 候选每组只有一次 4-case 小样本，且 provider 波动明显 | 不能把 retry0 的 1/4 与 retry1 的 0/4 外推为总体 SLA，也不能据此选新的 timeout 魔法数字 | 当前只支持“retry=1 本轮无恢复且成本翻倍，因此不切默认”；后续候选必须固定唯一变量并重复 |
-| 2026-08-07 起 | M25 八轮 diagnostic 复核已确认确定性缺陷：SQL Guard 将 CTE 临时名（category_tree/cat_tree 等）当物理表 RBAC 误拦；fidelity 将 ratio `* 1.0` 类型提升判为表达式 mismatch；`schema_context_match` 未消费 `expected_tables_alternatives`；manual-review 与 triage.failed 混读；`db_hard_001` 题面 GMV 与严格 `item_gmv` 期望不完全对齐 | 递归 / ratio / Context / manual 相关结论会被假阴性和误拦污染；修复前继续用更多整套分数验证会重复污染归因 | 修复方案待 M26 中间确认门逐项决策（见计划文件 M26 P1-3 决策卡）；先分别补 CTE/RBAC、alternatives、`* 1.0` 等价表达式的确定性单测 |
+| 2026-08-07 起，M26 已定点修复 | M25 八轮 diagnostic 发现的 CTE alias RBAC 误拦、ratio `* 1.0` 误判、未消费 alternatives、manual/failed 混读及 `item_gmv` 题面歧义 | 冻结的 M25-v1 报告仍保留原始证据，不能把修复后的规则反写成历史分数；后续若混用新旧合同会误读趋势 | M26-v1 已用 scope、窄等价、trace alternatives、正交状态和反事实测试固定边界；新的完整 LLM 基线尚未运行，不能声称端到端分数已提升 |
+| 2026-08-07 起 | 历史 M25 Markdown 只含汇总 Score Summary，缺少每 case 的结构化 score detail | 旧 run 的 audit 需要兼容提取，不能享受新 case-level evidence 精度 | `eval/audit.py` 仅为冻结历史输入提供只读 legacy adapter；新运行应保留结构化 trace / triage / score evidence |
 
 ## 变更记录索引
 

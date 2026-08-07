@@ -263,7 +263,7 @@ cases:
 
   - id: db_hard_001
     task_type: difficult_diagnosis
-    question: 数码电子及其子类目 2026 年 6 月 GMV 是多少？
+    question: 数码电子及其所有子类目 2026 年 6 月商品销售额（item_gmv）是多少？仅返回一级类目名称和商品销售额
     user_role: ops
     expected_tables: [product_categories, products, order_items, orders]
     expected_columns: [root_category, item_gmv]
@@ -272,7 +272,7 @@ cases:
     phase3a_blocking: false
     case_properties: [manual_review, difficult_diagnosis]
     security_expectation: allow
-    contract_adjustment: 商品明细 GMV 的输出别名统一为 item_gmv，避免与订单 GMV 混用。
+    contract_adjustment: 题面明确为商品明细销售额 item_gmv，并要求 root_category 输出；避免与 orders.order_amount 的订单 GMV 混用。
     check: {type: manual, value: 递归 CTE，Phase 3A 诊断素材}
     expected_sql: |
       WITH RECURSIVE category_tree AS (
@@ -319,7 +319,7 @@ cases:
   - id: db_hard_003
     semantic_group_id: june_avg_price_history
     task_type: difficult_diagnosis
-    question: 2026 年 6 月各商品有效价格历史记录的算术平均售价是多少？
+    question: 查询与 2026 年 6 月时间窗口相交的各商品有效价格记录，按记录条数计算算术平均售价；valid_to 等于 6 月 1 日的不计入，按商品名称升序输出
     user_role: ops
     expected_tables: [products, product_price_history]
     expected_columns: [product_name, avg_price]
@@ -331,7 +331,8 @@ cases:
     phase3a_blocking: false
     case_properties: [manual_review, difficult_diagnosis]
     security_expectation: allow
-    check: {type: manual, value: SCD 时间窗口 JOIN，Phase 3A 诊断素材}
+    contract_adjustment: 保持 manual；明确采用 valid_to > 窗口开始的半开区间和 product_name ASC，不升级为自动能力硬门。
+    check: {type: manual, value: SCD 时间窗口与输出排序，Phase 3A 诊断素材}
     expected_sql: |
       SELECT p.product_name, ROUND(AVG(pph.price), 2) AS avg_price
       FROM products p
