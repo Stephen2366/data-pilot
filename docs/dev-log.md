@@ -1308,6 +1308,98 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_audit --tr
 
 **本地启动体验：** M26 没有新增 Web 页面。阅读 [审计 Markdown](eval/reports/m26-qwen37plus-local-round2-audit.md) 或运行上述 CLI 即可查看逐 case 证据；API 启动方式仍以 `docs/state/runbook.md` 为准。
 
+## ★ ★ M27 Diagnostic / Eval Case 体系优化
+
+（2026-08-09）
+
+**简述**：把旧评测里“同一道业务题为了多检查几项就多调用几次模型”的结构，改成 **一题一次执行、多条断言共用同一份证据** 的 `m27-v1` 体系；确定性验证已完成，但 **尚未运行新的真实 LLM 基线**。
+
+### 先用大白话讲
+
+旧 diagnostic 像是让同一个学生为数学、语文和实验课分别重新答一遍同一道题：不仅浪费调用，还会因为每次 LLM 输出不同，让“这次 SQL 错了”与“这次 Trace 少了一步”混成两张不同答卷的结论。M27 改成一张答卷交给多位老师：**Result、SchemaContext、QueryPlan、Trace、安全和拒绝路径**分别评分，但都看同一次 API 执行、同一份 SQLite snapshot 和同一个 trace。
+
+把它类比成你熟悉的后端接口测试会更直观：不能为了验证响应字段、数据库写入和日志各发一次 HTTP 请求；应该先完成**一次请求**，再围绕这次请求留下的事实写多条断言。M27 的价值正是让“模型这次答得怎样”先变成一份可追溯的答卷，再讨论不同维度的成绩。
+
+### 这次做了什么
+
+这一节的主线是：先把“题目是什么”和“怎样检查答案”拆开，再把一次运行留下的事实保存好，最后才计算不同视图的分母和 Gate。这样评测报告不再只是一个总分，而能回答：**哪道业务题出了问题、问题发生在哪一层、这次是否有足够证据下结论。**
+
+- **先消除重复答题和“空检查”**：旧 formal、challenge、diagnostic 的 **42 条 raw case** 实际只有 **26 个旧语义组**，同一业务问题会因检查结果、计划或 Trace 而被重复调用模型。更危险的是，部分旧 check（例如 metric mapping、JoinPath、Plan、Trace）没有真实 scorer，会落入默认 `ok`。M27 先做 inventory 和迁移矩阵，再把它们整理成 **28 个 canonical Scenario**：这里的 Scenario 就是“一道唯一的业务题”，而不是“一种检查方法”。
+
+- **让一次答题接受多项检查**：每个 Scenario 可以挂多个 **typed assertion**。assertion 可以理解为“有明确规则的判卷项”：例如六月 GMV 这道题，既可检查结果行，又可检查返回列、Schema Context、QueryPlan 和 Trace。`Evaluator.evaluate()` 保证同一个 `(run, scenario, replicate)` 最多调用一次 Pipeline；候选 SQL 和 reference SQL 也共用同一 SQLite snapshot。于是多个 scorer 是在检查**同一张答卷**，不会发生“结果来自第一次模型输出、计划来自第二次模型输出”的归因混乱。
+
+- **把分数改成可解释的视图**：`EvalRun` 保存每次执行和 assertion 的结构化明细，`Projector` 再从明细计算 `eligible / observed / passed / failed / not_observed`。其中 `not_observed` 的意思不是答错，而是这次没有足够证据自动评分，例如外部服务不可用；Reliability 的多次 replicate 也会归约为一个逻辑 Scenario，不能靠重复请求扩大分母。Core、Stress、Manual Lab 说明题目职责；Smoke、Reliability、Database Exception 是“从题库选题”的 selector；Gate 则单独决定哪些 assertion 必须通过。
+
+- **用反事实守住业务合同**：只在当前 seed 上对比结果，错误 SQL 可能碰巧通过。因此 SCD、退款率和递归分类都有最小 SQLite 反事实：缺少 `valid_to IS NULL`、把 rejected refund 算进分子、漏掉子类时，坏 SQL 必须得到不同结果。这证明的是 **case 合同和 scorer 能区分对错**，不是模型能力已经提升。
+
+- **明确本模块没有做什么**：M27 保存的是脱敏的结构化 artifact（例如行数、fingerprint、Trace 摘要），不默认保存完整结果行、prompt 或凭证；旧 M26 报告也不重算。更重要的是，本次没有跑新的真实 LLM 基线，所以不能声称默认模型在 28 个 Scenario 上的通过率、成本或稳定性已经得到验证；那需要用户单独授权后再建立新的事实锚点。
+
+### 新概念
+
+- **Scenario + assertion**：Scenario 是唯一业务问题；assertion 是对同一份执行证据的一个可裁决检查。可以把它类比成一次 SpringBoot 接口调用后的多层测试：业务返回、字段契约、日志和安全策略各自断言，但不会为了每条断言再发一次请求。
+- **Snapshot oracle**：候选 SQL 与 reference SQL 在同一个数据库快照上执行。像单元测试里的同一事务，避免 scorer 各自重新 seed 数据导致“标准答案”和“实际答案”看见不同数据。
+- **Projector**：结构化明细的只读视图。它类似 SQL 的聚合查询：Markdown 和 LangFuse payload 都消费同一个投影，不再让 Markdown 反过来成为评分事实源。
+
+### 代码阅读路线
+
+1. **先看合同**：`eval/contracts.py` 与 `eval/catalog.py` 定义 `m27-v1` Scenario、typed assertion、四类 hash 和严格 YAML loader；重点理解为什么未知 kind 会在执行前失败。
+2. **再看执行闭环**：`eval/evaluator.py`、`eval/environment.py`、`eval/ports.py` 展示一次 Pipeline 调用、同 snapshot Oracle、checkpoint 与 interrupted/abandoned 边界如何协作。
+3. **看怎么评分**：`eval/assertions.py` 和 `engine/nl2sql/pipeline.py`。后者把安全的 `plan_steps` 写入 trace，前者用它评分 Plan、Join 和 Metric，而不再默认通过。
+4. **最后看消费层**：`eval/selectors.py`、`eval/projectors.py`、`eval/reporting.py` 和 `eval/run_eval.py`。这里能看到 selector 不复制题面、replicate 不扩大分母，以及 CLI 只把 gate 转成退出码。
+
+核心调用链是：
+
+`canonical scenarios.yaml`
+→ `catalog / selector`
+→ `Evaluator.evaluate()`
+→ `RunEnvironment（API + 同 snapshot Oracle）`
+→ `ExecutionEvidence`
+→ `typed assertions`
+→ `EvalRun artifact`
+→ `projector`
+→ `Markdown / LangFuse payload / CLI gate`
+
+### 设计要点
+
+- **新旧合同隔离**：旧 formal/challenge/diagnostic 报告仍是历史证据，不能被 M27 重新计分；新结果也不能与旧 `25/32`、`26/32` 直接比较。
+- **安全 artifact 优先**：完成的 JSON 只保存 allowlist trace 摘要、行数和稳定 fingerprint，不保存完整 rows、prompt、answer 或凭证。代价是不能恢复原始业务行，换来清理 raw trace 后仍能核验评分身份且不泄露 PII。
+- **不擅自改变运行默认值**：本模块没有切模型、检索、embedding、数据库、oracle、timeout 或 retry；真实 LLM 基线仍需要单独授权。
+
+### 面试怎么讲
+
+我把 DataPilot 的评测从“case 列表加总分”改成了更像工程测试平台的合同体系。先盘点发现 42 条 raw case 只有 26 个旧语义问题，同题被不同诊断维度重复调用，而且部分 Join/Plan/Trace check 实际会默认通过。于是我设计了 `Scenario + typed assertion + Evaluator`：每个业务问题只执行一次，结果、上下文、计划和安全断言共享同一份 trace 与数据库 snapshot；再用 versioned projector 推导分母和 gate。为了避免原 seed 掩盖 SQL 语义错误，我还为 SCD、退款和递归分类补了反事实 SQLite 测试。全仓 208 个测试通过，但我没有把它包装成模型能力提升，因为真实 M27 基线尚未运行。
+
+1. **[基础追问] M27 为什么要把 Scenario 和 assertion 分开？这和普通测试用例有什么不同？**
+
+   **Scenario** 表示一个唯一的业务问题，例如“六月各渠道 GMV 排名”；**assertion** 表示围绕同一答案要检查的某个维度，例如结果是否正确、输出列是否正确、计划是否真的用了 `channels -> orders` 的 Join。普通测试也可以有多个断言，但旧评测的数据结构把“一个 check”当成“一道题”，导致同一业务问题要重新调用多次模型。M27 把业务题与评分维度拆开，才能保证多条断言看到的是**同一张答卷**，也才能明确一个问题到底是 SQL 语义错、Context 不足，还是 Trace 证据缺失。
+
+2. **[工程/深挖追问] 为什么不继续在旧 runner 上补几个 scorer？**
+
+   因为旧 runner 的基本单位是单个 check，对同一业务题会重复调用模型；即使补齐 scorer，Result 和 Plan 也可能来自不同 LLM 输出，归因仍不可信。M27 把复杂性集中到 `Evaluator.evaluate()`，先固定“一题一次执行”的证据边界，再让多个纯 scorer 读取同一份 evidence。
+
+3. **[压力追问] 你保存 hash 不保存完整结果行，出了争议怎么复核？**
+
+   这个质疑成立：hash 不能替代原始业务数据。M27 的目标是长期、安全地保存可重算的自动评分身份和结构化差异，不是建设审计数据仓库；raw trace 仍可短期保留用于排障。若未来需要人工仲裁或长期保留完整 rows，应新建受控的权限、保留期和脱敏策略，而不是把敏感数据默认塞进 eval report。
+
+### 验证与下一步
+
+- 验证：M27 focused/counterfactual **`14 passed, 1 warning`**，证明一次调用、多断言、artifact、selector/gate 与 SCD/退款/递归反事实；legacy Eval 回归 **`37 passed, 1 warning`**，证明历史读取链未被破坏；pipeline 相关 **`21 passed, 1 warning`**，证明新增 QueryPlan trace 摘要没有回归；全仓 **`208 passed, 1 warning`**。warning 始终是既有 Starlette/httpx deprecation，不影响本模块结论。
+- 下一步：先由用户人工检查，再运行 `accept-module`。如要建立 `m27-v1` 真实 LLM 基线，需要单独确认 selector、调用数、成本和运行窗口；新结果从零开始解释，不与 M26 历史单一总分做升降比较。
+
+可复制的确定性验证命令：
+
+```powershell
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.codex/temp_work/pytest-m27-full
+```
+
+**本地启动体验：** M27 没有新增 Web 页面；它的入口是评测 CLI。先可无副作用查看新入口：
+
+```powershell
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --help
+```
+
+你会看到 `--selector`、`--suite`、`--scenario`、`--replicate-count` 和 gate 相关参数。真实执行会调用当前配置的模型，因此在未获得新基线授权前，不要以“试一下”为由运行该 CLI；模型、检索与默认配置仍以 `docs/state/runbook.md` 为准。
+
 
 
 

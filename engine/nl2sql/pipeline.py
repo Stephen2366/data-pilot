@@ -425,6 +425,23 @@ def run_text2sql_pipeline(
             "step_count": len(plan.steps),
             "sql_step_count": sum(1 for step in plan.steps if step.step_type == "sql_query"),
             "step_ids": [step.step_id for step in plan.steps],
+            # ★ M27 typed Plan / Join / Metric assertions 必须消费同一次执行证据。
+            # 这里只写结构化计划字段，不保存 prompt 或 LLM 原文，因此 JSONL/audit 可以在
+            # 不重跑模型的情况下复核“模型计划了哪些表、关系、指标和输出”。
+            "plan_steps": [
+                {
+                    "step_id": step.step_id,
+                    "step_type": step.step_type,
+                    "tables": step.tables,
+                    "columns": step.columns,
+                    "metrics": step.metrics,
+                    "joins": step.joins,
+                    "group_by": step.group_by,
+                    "order_by": step.order_by,
+                    "output_columns": step.output_columns,
+                }
+                for step in plan.steps
+            ],
             **_llm_success_metadata(query_plan_call_evidence),
         },
     )

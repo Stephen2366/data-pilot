@@ -1,0 +1,11 @@
+selector_id: reliability
+scenario_ids:
+  - june_gmv
+  - active_products_top10
+execution_protocol:
+  pipeline_mode: new_text2sql
+  schema_fusion_strategy: weighted
+  replicate_count: 3
+gate_policy:
+  effects_by_classification: {core: advisory, stress: excluded, manual_lab: excluded}
+  assertion_overrides: {}

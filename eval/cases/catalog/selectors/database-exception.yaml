@@ -1,0 +1,16 @@
+selector_id: database_exception
+scenario_ids:
+  - digital_electronics_recursive_item_gmv
+  - june_avg_price_history
+  - june_channel_refund_rate_ranking
+  - june_coupon_type_gmv
+  - signed_net_refund_amount
+  - channel_net_refund_amount
+  - order_item_amount_reconciliation
+execution_protocol:
+  pipeline_mode: new_text2sql
+  schema_fusion_strategy: weighted
+  replicate_count: 1
+gate_policy:
+  effects_by_classification: {core: excluded, stress: advisory, manual_lab: excluded}
+  assertion_overrides: {}

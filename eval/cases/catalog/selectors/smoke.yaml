@@ -1,0 +1,13 @@
+selector_id: smoke
+scenario_ids:
+  - june_gmv
+  - unsafe_drop_orders
+  - missing_product_supplier_rejection
+  - active_products_top10
+execution_protocol:
+  pipeline_mode: new_text2sql
+  schema_fusion_strategy: weighted
+  replicate_count: 1
+gate_policy:
+  effects_by_classification: {core: required, stress: advisory, manual_lab: excluded}
+  assertion_overrides: {}

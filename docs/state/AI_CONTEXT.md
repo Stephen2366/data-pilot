@@ -4,11 +4,11 @@
 
 ## 当前状态（唯一权威出处）
 
-- 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
-- 当前模块：M26 Diagnostic Human Audit / Eval Reconciliation（代码与收工完成，待验收）
+- 当前阶段计划文件：`docs/notes/m27-plan.md`
+- 当前模块：M27 Diagnostic / Eval Case 体系优化（代码与收工完成，待 accept-module）
 - 上一模块验收：M26 已验收（2026-08-08）
 - 阻塞项：无
-- 更新时间：2026-08-08
+- 更新时间：2026-08-09
 
 ## 必读规则
 
@@ -38,6 +38,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-09 | M27 已完成确定性收工：旧 42 raw/26 semantic-group 盘点后形成 28 个 `m27-v1` canonical Scenario，单题多 typed assertion 共享一次 Pipeline/Oracle snapshot；新增 Core/Stress/Manual policy、Smoke/Reliability/Database Exception selector、三态 gate、结构化脱敏 artifact 和 Markdown/LangFuse payload adapter。`eval.run_eval` CLI 已切到 `Evaluator.evaluate()`；旧 case/report/audit 只读冻结。全仓 `208 passed, 1 warning`；未运行真实 LLM M27 基线，未切任何默认模型/retrieval/embedding/DB/oracle/reliability。新 M27 数字不得与 M26 `25/32` 等历史分数比较。 |
 | 2026-08-08 | M26-v1 第二轮四组已完成：plus+local `25/32`、plus+Milvus `25/32`、max+local `26/32`、max+Milvus `26/32`；两轮区间分别为 `25–26`、`25–26`、`25–26`、`26–27`。两组 Milvus 仍校验为 195 initial / 0 inserted / 195 final、hash `8a8b6626...`。`db_schema_003` 四组第二轮仍为 alternatives mismatch；max 两组再次出现 44–68 秒延迟。每组仅两次，仍不改变默认 local deterministic/weighted。 |
 | 2026-08-08 | M26-v1 追加三组完整 diagnostic 已完成：`qwen3.7-max + local` `25/32`（triage execution_failed `5` / review_pending `3` / external_unavailable `3`）、`qwen3.7-plus + Milvus` `26/32`（`3/3/4`）、`qwen3.7-max + Milvus` `27/32`（`3/3/3`）。两组 Milvus 均命中 clean 195-doc、1024 维、hash `8a8b6626...` collection，initial/final `195`、inserted `0`；max 组有 45–73 秒高延迟但最终返回。单轮快照不改变默认 local deterministic/weighted，也不证明模型或 embedding 因果。 |
 | 2026-08-08 | 追加对照的 local max 子组已完成：`25/32`，triage execution_failed `5`、review_pending `3`、external_unavailable `3`；`db_core_002` 为 SQL generation external failure，`db_schema_003` 暴露 alternatives mismatch，`db_join_003` 暴露缺 `products` 的 output-table contract，`db_hard_002` 通过。Milvus 启动前曾因宿主 9091 保留端口失败，随后已通过改 host health 映射恢复并完成两组 Milvus。 |

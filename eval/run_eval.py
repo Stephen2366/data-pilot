@@ -45,6 +45,14 @@ from eval.triage import (
     triage_summary,
     write_triage_json,
 )
+from eval.catalog import load_catalog
+from eval.contracts import EvalRunSpec, ExecutionProtocol
+from eval.environment import SQLiteRunEnvironmentFactory
+from eval.evaluator import Evaluator
+from eval.ports import FileCheckpointStore
+from eval.projectors import SuitePolicy, exit_code_for_gate, project_eval_run
+from eval.reporting import write_markdown
+from eval.selectors import load_selector, policy_for_classification
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.schema_retrieval.retriever import build_configured_schema_vector_index
 from engine.schema_retrieval.vector_index import VectorIndex
@@ -868,7 +876,7 @@ def _format_score_details(details: list[EvalScoreDetail]) -> str:
     return "; ".join(parts)
 
 
-def main(argv: list[str] | None = None) -> int:
+def legacy_main(argv: list[str] | None = None) -> int:
     """命令行入口：加载 cases，执行 API smoke，并写入 latest.md。"""
 
     parser = argparse.ArgumentParser(description="Run DataPilot M6 EvalOps-lite smoke cases.")
@@ -981,6 +989,97 @@ def main(argv: list[str] | None = None) -> int:
             f"error_type={result.error_type} trace_id={result.trace_id}"
         )
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """M27 唯一 CLI 入口：canonical catalog -> Evaluator -> structured artifact -> projector/report。
+
+    旧 ``formal/challenge/diagnostic`` 参数不再被这个入口解析；历史 runner 函数留在本文件仅供
+    冻结报告/遗留测试读取，不能生成新的 M27 分数。真实模型调用仍需用户单独决定，本模块自身
+    不在测试或导入阶段发请求。
+    """
+
+    parser = argparse.ArgumentParser(description="Run DataPilot m27-v1 canonical evaluation.")
+    parser.add_argument("--catalog", type=Path, default=PROJECT_ROOT / "eval" / "cases" / "catalog" / "scenarios.yaml")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--selector", default="smoke", help="selector 文件名（位于 eval/cases/catalog/selectors/）或 YAML 路径。")
+    group.add_argument("--suite", choices=["core", "stress", "manual_lab"], help="按 canonical classification 选择整套场景。")
+    parser.add_argument("--scenario", action="append", default=[], help="显式 scenario id；只能与默认 selector smoke 一起替换使用。")
+    parser.add_argument("--pipeline-mode", choices=["baseline", "new_text2sql"], default=None)
+    parser.add_argument("--schema-fusion-strategy", choices=["weighted", "rrf"], default=None)
+    parser.add_argument("--replicate-count", type=int, default=None)
+    parser.add_argument("--run-id", default=datetime.now().strftime("m27-%Y%m%d-%H%M%S"))
+    parser.add_argument("--artifact-dir", type=Path, default=PROJECT_ROOT / "eval" / "reports" / "m27-artifacts")
+    parser.add_argument("--checkpoint-dir", type=Path, default=PROJECT_ROOT / ".codex" / "temp_work" / "m27-checkpoints")
+    parser.add_argument("--trace-dir", type=Path, default=PROJECT_ROOT / "eval" / "traces")
+    parser.add_argument("--report", type=Path, default=None)
+    parser.add_argument("--fail-closed-inconclusive", action="store_true")
+    args = parser.parse_args(argv)
+
+    catalog = load_catalog(args.catalog)
+    if args.scenario:
+        if args.suite is not None or args.selector != "smoke":
+            parser.error("--scenario cannot be combined with --selector or --suite")
+        scenario_ids = tuple(args.scenario)
+        # 显式本地选择沿用清晰的 classification 默认 gate，不猜测 old blocking 语义。
+        selected = {item.scenario_id: item.classification for item in catalog.scenarios if item.scenario_id in scenario_ids}
+        if len(selected) != len(scenario_ids):
+            parser.error("--scenario contains an unknown or duplicate canonical scenario id")
+        policy = SuitePolicy(
+            suite_id="explicit",
+            selected_scenario_ids=scenario_ids,
+            effects_by_classification={"core": "required", "stress": "advisory", "manual_lab": "excluded"},
+            assertion_overrides={},
+            scenario_classifications=selected,
+        )
+        protocol = ExecutionProtocol()
+    elif args.suite:
+        effect = "required" if args.suite == "core" else "advisory" if args.suite == "stress" else "excluded"
+        policy = policy_for_classification(catalog, suite_id=args.suite, classification=args.suite, gate_effect=effect)
+        protocol = ExecutionProtocol()
+    else:
+        selector_path = Path(args.selector)
+        if not selector_path.suffix:
+            selector_path = PROJECT_ROOT / "eval" / "cases" / "catalog" / "selectors" / f"{args.selector}.yaml"
+        selector = load_selector(selector_path, catalog)
+        policy, protocol = selector.policy, selector.execution_protocol
+    if args.replicate_count is not None:
+        if args.replicate_count < 1:
+            parser.error("--replicate-count must be positive")
+        protocol = ExecutionProtocol(protocol.pipeline_mode, protocol.schema_fusion_strategy, args.replicate_count)
+    protocol = ExecutionProtocol(
+        args.pipeline_mode or protocol.pipeline_mode,
+        args.schema_fusion_strategy or protocol.schema_fusion_strategy,
+        protocol.replicate_count,
+    )
+    policy_payload = {
+        "suite_id": policy.suite_id,
+        "selected_scenario_ids": list(policy.selected_scenario_ids),
+        "effects_by_classification": policy.effects_by_classification,
+        "assertion_overrides": policy.assertion_overrides,
+        "scenario_classifications": policy.scenario_classifications,
+    }
+    run = Evaluator(
+        catalog=catalog,
+        environment_factory=SQLiteRunEnvironmentFactory(trace_root=args.trace_dir),
+        checkpoint_store=FileCheckpointStore(checkpoint_root=args.checkpoint_dir, artifact_root=args.artifact_dir),
+    ).evaluate(EvalRunSpec(
+        run_id=args.run_id,
+        scenario_ids=policy.selected_scenario_ids,
+        execution_protocol=protocol,
+        suite_policy=policy_payload,
+    ))
+    if run.run_status != "completed":
+        print(f"run_status={run.run_status}")
+        print(f"failure_reason={run.failure_reason}")
+        return 4
+    projected = project_eval_run(run, policy)
+    report_path = args.report or args.artifact_dir / f"{run.run_id}.md"
+    write_markdown(run, projected, report_path)
+    print(f"artifact={args.artifact_dir / f'{run.run_id}.json'}")
+    print(f"report={report_path}")
+    print(f"gate={projected.gate.outcome}")
+    return exit_code_for_gate(projected.gate, fail_closed_inconclusive=args.fail_closed_inconclusive)
 
 
 if __name__ == "__main__":

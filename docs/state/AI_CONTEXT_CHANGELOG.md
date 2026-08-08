@@ -13,6 +13,15 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M27 Diagnostic / Eval Case 体系优化（2026-08-09）
+
+- **改动范围**：新增 `m27-v1` typed contract/catalog/environment/ports/assertion/evaluator/projector/reporting/selector 模块、28 条 canonical Scenario、三个 selector、反事实与接口测试；`engine/nl2sql/pipeline.py` 补安全的 QueryPlan `plan_steps` 摘要；`eval.run_eval` CLI 切换为 M27 Interface。完整过程素材见 `docs/notes/m27-notes.md`。
+- **关键记录**：用户确认 A1–A3 后，按 P0 migration matrix 将旧 formal/challenge/diagnostic 的 42 raw case、26 个旧语义组治理为 28 个唯一 Scenario；用户随后授权直接完成 B 门确定性实施。一个 `(run, scenario, replicate)` 最多一次 Pipeline 调用，所有 assertion 共享同 snapshot Oracle evidence。旧默认 `ok` 的 metric/join/plan/trace 已替换为真实 pure scorer；Reliability replicate 归约为一个逻辑分母；gate 由 projector 推导，`inconclusive` exit policy 与 EvalRun 分离。
+- **业务/安全边界**：商品退款率采用完整排名而非旧 Top1 projection；SCD 开放 `valid_to`、completed refund、递归子类都以 SQLite counterfactual 证明。completed artifact 仅保存 allowlist response/trace 摘要、row count 与 result fingerprint，不保存 rows/prompt/answer/凭证；`interrupted` 与遗留 `running -> abandoned` 不能进入 projector。旧 M26 artifact、YAML、报告与 audit 不覆盖、不重算。
+- **验证快照**：M27 foundation + counterfactual `14 passed, 1 warning`；legacy Eval 合同 `37 passed, 1 warning`；pipeline + M27 `21 passed, 1 warning`；全仓 `208 passed, 1 warning`（509.65s）；`git diff --check` 通过。warning 均为既有 Starlette/httpx deprecation。
+- **参考资料**：`m27-plan.md`、M26 notes、项目 state/runbook/database facts、现有 runner/scorer/trace/audit 实现；未检索或照搬外部平台。
+- **遗留/后续**：M27 未验收（待 `accept-module`）。真实 LLM `m27-v1` 基线仍须用户单独确认范围/调用数/成本；不要将其与旧 25/32、26/32 等口径直接升降比较。LangFuse 目前只构造严格 allowlist payload，实际上传仍需显式授权。
+
 ### [审查] M26-v1 第二轮 Qwen plus 人工 SQL 审查（2026-08-08）
 
 - 范围：对 `m26-v1-r2-qwen37plus-local` 与 `m26-v1-r2-qwen37plus-milvus` 两份冻结 run 各 32 条逐题人工审查，不重跑 LLM、不改代码或 case；每份生成独立 audit evidence pack（`eval/reports/m26-v1-r2-qwen37plus-{local,milvus}-human-audit.{json,md}`），禁止跨 run 混用证据。
