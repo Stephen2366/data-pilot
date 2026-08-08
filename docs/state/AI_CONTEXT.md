@@ -8,7 +8,7 @@
 - 当前模块：M26 Diagnostic Human Audit / Eval Reconciliation（代码与收工完成，待验收）
 - 上一模块验收：M26 未验收（待 `accept-module`）
 - 阻塞项：无
-- 更新时间：2026-08-07
+- 更新时间：2026-08-08
 
 ## 必读规则
 
@@ -38,6 +38,10 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-08 | M26-v1 第二轮四组已完成：plus+local `25/32`、plus+Milvus `25/32`、max+local `26/32`、max+Milvus `26/32`；两轮区间分别为 `25–26`、`25–26`、`25–26`、`26–27`。两组 Milvus 仍校验为 195 initial / 0 inserted / 195 final、hash `8a8b6626...`。`db_schema_003` 四组第二轮仍为 alternatives mismatch；max 两组再次出现 44–68 秒延迟。每组仅两次，仍不改变默认 local deterministic/weighted。 |
+| 2026-08-08 | M26-v1 追加三组完整 diagnostic 已完成：`qwen3.7-max + local` `25/32`（triage execution_failed `5` / review_pending `3` / external_unavailable `3`）、`qwen3.7-plus + Milvus` `26/32`（`3/3/4`）、`qwen3.7-max + Milvus` `27/32`（`3/3/3`）。两组 Milvus 均命中 clean 195-doc、1024 维、hash `8a8b6626...` collection，initial/final `195`、inserted `0`；max 组有 45–73 秒高延迟但最终返回。单轮快照不改变默认 local deterministic/weighted，也不证明模型或 embedding 因果。 |
+| 2026-08-08 | 追加对照的 local max 子组已完成：`25/32`，triage execution_failed `5`、review_pending `3`、external_unavailable `3`；`db_core_002` 为 SQL generation external failure，`db_schema_003` 暴露 alternatives mismatch，`db_join_003` 暴露缺 `products` 的 output-table contract，`db_hard_002` 通过。Milvus 启动前曾因宿主 9091 保留端口失败，随后已通过改 host health 映射恢复并完成两组 Milvus。 |
+| 2026-08-08 | M26-v1 在用户授权后完成一次受控完整 diagnostic：Qwen `qwen3.7-plus` + local deterministic/weighted + 45s/retry0 + SQLite + LangFuse off，32 条 raw，runner `26/32`；triage execution_failed `4`、review_pending `3`、external_unavailable `4`。`db_core_002` 真实 result mismatch、`db_schema_003` 正确落到 schema_context alternatives；`db_hard_002` ratio 通过。CTE 代表题 `db_multi_002` timeout，不能据此证明 CTE 端到端收益；该轮不是稳定基线，不与 M25 `28/32` 直接比较。 |
 | 2026-08-07 | M26 对冻结 M25 Qwen 3.7-plus + local round2 建立可复用 audit evidence：32 raw / 26 semantic groups，人工 reconciliation 为 26 agree、1 false positive、4 status mismatch、1 unresolved（verdict：26 pass、2 fail、3 external unavailable、1 insufficient evidence）。P2 已经用户确认后定点修复 CTE/RBAC scope、ratio `* 1.0` 窄等价、SchemaGraph alternatives 和 manual/failed 混读；合同升为 `m26-v1`，历史 M25-v1 不重算。focused `62 passed, 1 warning`，全仓 `194 passed, 1 warning`；未跑新的完整 LLM 基线，未切任何默认模型 / retrieval / LangFuse / 数据库配置。 |
 | 2026-08-07 | M25 冻结 `case_contract_version=m25-v1`：formal + challenge + diagnostic 共 42 raw cases / 26 independent semantic groups；报告新增 semantic/safety/plan/provider/manual/end-to-end 六个视图与 eligible/observed/unavailable 分母。退款率改为 completed 退款去重订单数 / 成交去重订单数，明细优先、整单回退；平均售价明确为有效价格历史记录的算术平均但仍为 manual。 |
 | 2026-08-07 | M25 4-case reliability 小样本：45s/retry0 为 4 logical / 4 physical attempts、1/4 成功、3 timeout、179.7s；retry1 为 4 logical / 8 physical attempts、0/4 成功、8 timeout attempts、377.9s。该样本不支持默认开启 retry，默认保持 45s/0；timeout 归 `external_service + not_observed`，不再算模型语义错误。 |
@@ -68,6 +72,7 @@
 
 | 日期 | 判断 |
 |---|---|
+| 2026-08-08 | M26-v1 首次完整 run 只支持“新合同下定点修复可被观察”：`output_contract` 旧失败降为 0，`schema_context` 正确暴露 alternatives mismatch，`result_match` 新暴露 `db_core_002` 语义错误；但 CTE 代表题因 external timeout 未观察到 SQL，不能宣称端到端修复收益。后续若要判断 CTE，应单独重放该 case 或在重复 diagnostic 中等待可观察结果。 |
 | 2026-08-07 | M26 后路线：已修复的 CTE / ratio / alternatives / review 状态问题不再用作检索或模型能力结论；CTE alias 只在 SQL Guard scope 内豁免，物理表和敏感字段保持严格；ratio 只接受可证明的 `* 1.0` 数值提升，拒绝通用代数放宽。M26-v1 与 M25-v1 历史分数隔离；在用户未单独授权前，不用新的整套真实 LLM diagnostic 建立或替代基线。 |
 | 2026-08-07 | M25 后路线：先用 execution stage + root cause + semantic status 区分代码、模型、检索、外部服务与 Eval 契约。4-case retry=1 没有恢复且成本翻倍，不切默认；递归题的 SchemaGraph 事实完整但计划引用虚构字段，当前证据指向 plan/model，不触发 embedding A/B；八轮复核另确认部分递归失败是 SQL Guard 把 CTE 临时名当物理表误拦（code_issue），修复前不继续用整套分数验证，先补 CTE/RBAC、`* 1.0` 等价、alternatives 的确定性单测。 |
 | 2026-08-04 | M22 已校正 Context / Output / Result / Manual 契约：不再使用 M21 的 `schema_context` 失败数直接判断检索质量。后续先按 trace 和 failure subtype 定位，再提出单变量假设。 |

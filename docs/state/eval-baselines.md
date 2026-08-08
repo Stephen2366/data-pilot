@@ -2,7 +2,7 @@
 
 > 本文是 DataPilot 的长期评测账本，优先回答“当前应据什么决策、哪些结果可直接比较”。完整报告和历史叙事分别保留在 `eval/reports/` 与 `docs/state/AI_CONTEXT_CHANGELOG.md`。
 
-更新时间：2026-08-07
+更新时间：2026-08-08
 
 > 模型名称统一写完整标识：主模型写 provider + exact model id（例如 `DeepSeek deepseek-v4-flash`、`Qwen qwen3.7-plus`、旧入口 `Qwen qwen-plus`）；embedding 写 provider + exact embedding model（例如 `DashScope qwen3.7-text-embedding`）。实验矩阵不再使用 `Qwen-plus`、`DeepSeek`、`Qwen embedding` 等容易混淆的简称。
 
@@ -116,8 +116,36 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 | `M23-E04` | 08-06 | 单次诊断快照 | 在 M23 同合同下核对 clean Milvus / Qwen embedding 链路 | Qwen `qwen3.7-plus` + clean run-scoped Milvus + DashScope `qwen3.7-text-embedding` + weighted；32 条、195 docs/hash `ce04fe4f...`、1024 维、final row count 195、SQLite oracle、LangFuse off | total `21/32`；automated `20/27`；manual/diagnostic `1/5` | `M23-E03` 只作同合同单次参照；两组均未重复 | 自动能力与 local 同为 `20/27`；总分差来自人工/诊断项。旧 triage 的 `schema_context/retrieval` 中含最终表列合同，不能据 `23→21` 判断 embedding 退化；默认检索不变。 |
 | `M25-E01` | 08-07 | 受控小样本 / 负向证据 | 验证历史超时题上 transient retry 是否恢复 | Qwen `qwen3.7-plus` + local weighted + 4 条 reliability suite + 45s timeout；唯一变量 retry0/1 | retry0：1/4 logical success、4 attempts、179.7s；retry1：0/4、8 attempts、377.9s | 同行两候选；每候选仅一次，不外推 SLA | retry1 无恢复且成本翻倍，默认保持 45s/0；timeout 记 external unavailable，不记 semantic wrong。 |
 | `M25-E02` | 08-07 | 四组诊断对照 | 在同一 M25-v1 diagnostic superset 下观察模型与 Milvus/local 组合差异 | 32 条、45s/retry0、weighted、SQLite oracle、LangFuse off；四组分别为 Qwen 3.7-max+Milvus、Qwen 3.7-plus+Milvus、Qwen 3.7-plus+local、Qwen 3.8-max+local；Milvus 复用 clean 195-doc/1024-dim/hash collection | `26/32`（1263.2s）、`21/32`（1242.3s）、`28/32`（1222.7s）、`18/32`（1273.6s） | 同轮可观察运行差异；仍是每组合一次，不能外推稳定模型/embedding 因果 | plus 的 Milvus/local 差距不单归因 embedding；3.8-max 本轮 external failure 较多；默认模型/检索不变。 |
+| `M26-E01` | 08-08 | M26-v1 追加诊断对照 | 在新 M26 合同下复核 Qwen 3.7-plus/max 与 local/Milvus 组合；两组 Milvus 共用 clean collection | 32 条、45s/retry0、weighted、SQLite oracle、LangFuse off、`m26-v1`；Milvus 为 195 docs / 1024 维 / hash `8a8b6626...`，initial/final 195、inserted 0 | plus+Milvus `26/32`；max+local `25/32`；max+Milvus `27/32`；同日 plus+local `26/32` | 每组合单轮 snapshot，max 存在 45–73s 延迟波动；不能与 M25-v1 或旧合同分数直接比较，也不能归因模型/embedding 因果 | 仅记录 M26 新合同证据；默认仍为 local deterministic/weighted，不切模型、Milvus 或 embedding。 |
+| `M26-E02` | 08-08 | M26-v1 第二轮重复对照 | 在同一 M26 合同下重复四组，观察单轮结果是否稳定；Milvus 继续复用 clean collection | 32 条、45s/retry0、weighted、SQLite oracle、LangFuse off、`m26-v1`；Milvus 为 195 docs / 1024 维 / hash `8a8b6626...`，initial/final 195、inserted 0 | plus+local `25/32`；plus+Milvus `25/32`；max+local `26/32`；max+Milvus `26/32` | 与 M26-E01 合并区间分别为 `25–26`、`25–26`、`25–26`、`26–27`；每组合两次，仍不足以建立稳定概率或模型/embedding 因果 | 结果处于相近区间；`db_schema_003` 重复为 alternatives mismatch；max 两组有 44–68s 延迟；默认路线不变。 |
 
 ## 4. 当前活跃实验卡片
+
+### M26-E01 — M26-v1 模型 / 检索追加对照（2026-08-08）
+
+固定条件：`m26-v1`、32 条 challenge + diagnostic、`new_text2sql`、weighted、SQLite deterministic oracle、LangFuse off、45s/retry0。Milvus 两组均复用 clean collection `datapilot_schema_docs_m25_qwen37plus_qwenemb_20260807_192300`，195 docs、1024 维、schema hash `8a8b6626...`，initial/final row count 195、inserted 0。
+
+| 组 | runner 通过 | failed | review_required | triage execution_failed / review_pending / external_unavailable |
+|---|---:|---:|---:|---:|
+| Qwen `qwen3.7-plus` + local | 26/32 | 6 | 3 | 4 / 3 / 4 |
+| Qwen `qwen3.7-max` + local | 25/32 | 7 | 3 | 5 / 3 / 3 |
+| Qwen `qwen3.7-plus` + Milvus | 26/32 | 6 | 3 | 3 / 3 / 4 |
+| Qwen `qwen3.7-max` + Milvus | 27/32 | 5 | 3 | 3 / 3 / 3 |
+
+这四组都是一次性诊断快照，不构成稳定模型或 embedding A/B。`db_schema_003` 在多组仍暴露 SchemaContext alternatives mismatch；max+Milvus 另有约 45–73 秒的请求延迟异常但最终返回 200。结论只支持“本轮可观察到 max+Milvus 得分最高”，不支持把差异归因到单一模型或 Milvus/embedding，也不改变默认 local deterministic/weighted。报告与 trace 路径见本节后的报告索引和 `docs/notes/m26-notes.md`。
+
+### M26-E02 — M26-v1 第二轮重复对照（2026-08-08）
+
+固定条件与 `M26-E01` 相同；四组各再跑一次，Milvus 仍使用同一 clean collection，runtime metadata 均为 195 initial / 0 inserted / 195 final。
+
+| 组 | 第 1 轮 | 第 2 轮 | 两轮区间 |
+|---|---:|---:|---:|
+| Qwen `qwen3.7-plus` + local | 26/32 | 25/32 | 25–26 |
+| Qwen `qwen3.7-plus` + Milvus | 26/32 | 25/32 | 25–26 |
+| Qwen `qwen3.7-max` + local | 25/32 | 26/32 | 25–26 |
+| Qwen `qwen3.7-max` + Milvus | 27/32 | 26/32 | 26–27 |
+
+两轮显示四组结果已落在相近区间，但每组合仅两次，仍不能称为稳定概率或模型/embedding 因果结论。`db_schema_003` 四组第二轮仍为 alternatives mismatch；max 两组再次出现 44–68 秒级请求，属于延迟风险素材。失败 case 在组合间迁移，符合真实 LLM 非确定性；默认模型和检索不切换。
 
 ### M25-E01 — 4-case Timeout / Retry Focused Reliability（2026-08-07）
 
@@ -238,6 +266,8 @@ M22 原审计描述的是当时的合同：`db_core_002` 只按 `order_item_id` 
 | `M22-E06` | `eval/reports/m22-qwen37max-local-weighted-report.md`；`eval/reports/m22-qwen37max-local-weighted-triage.json`；`eval/traces/m22-qwen37max-local-weighted-traces.jsonl` |
 | `M23-E03` | `eval/reports/m23-qwen-local-weighted-diagnostic-report.md`；`eval/reports/m23-qwen-local-weighted-diagnostic-triage.json`；`eval/traces/m23-qwen-local-weighted-diagnostic-traces.jsonl` |
 | `M23-E04` | `eval/reports/m23-qwen-milvus-qwenemb-diagnostic-report.md`；`eval/reports/m23-qwen-milvus-qwenemb-diagnostic-triage.json`；`eval/traces/m23-qwen-milvus-qwenemb-diagnostic-traces.jsonl` |
+| `M26-E01` | `eval/reports/m26-v1-qwen37plus-local-diagnostic-report.md`；`m26-v1-qwen37plus-local-diagnostic-triage.json`；`m26-v1-qwen37plus-milvus-diagnostic-report.md`；`m26-v1-qwen37plus-milvus-diagnostic-triage.json`；`m26-v1-qwen37max-local-diagnostic-report.md`；`m26-v1-qwen37max-local-diagnostic-triage.json`；`m26-v1-qwen37max-milvus-diagnostic-report.md`；`m26-v1-qwen37max-milvus-diagnostic-triage.json`（对应 trace 位于 `eval/traces/`） |
+| `M26-E02` | `eval/reports/m26-v1-r2-qwen37plus-local-diagnostic-report.md`；`m26-v1-r2-qwen37plus-local-diagnostic-triage.json`；`m26-v1-r2-qwen37plus-milvus-diagnostic-report.md`；`m26-v1-r2-qwen37plus-milvus-diagnostic-triage.json`；`m26-v1-r2-qwen37max-local-diagnostic-report.md`；`m26-v1-r2-qwen37max-local-diagnostic-triage.json`；`m26-v1-r2-qwen37max-milvus-diagnostic-report.md`；`m26-v1-r2-qwen37max-milvus-diagnostic-triage.json`（对应 trace 位于 `eval/traces/`） |
 
 ## 7. 维护规则
 

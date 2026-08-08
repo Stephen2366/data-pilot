@@ -13,6 +13,27 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验] M26-v1 第二轮模型/检索对照（2026-08-08）
+
+- 用户要求在第一轮基础上重复四组完整 diagnostic：Qwen `qwen3.7-plus + local`、`qwen3.7-plus + Milvus`、`qwen3.7-max + local`、`qwen3.7-max + Milvus`。固定 M26-v1、32 条、45s/retry0、weighted、SQLite oracle、LangFuse off；四组均生成独立 `r2` trace/report/triage。
+- 第二轮结果：plus+local `25/32`（triage execution 5 / review 3 / external 4）；plus+Milvus `25/32`（4 / 3 / 5）；max+local `26/32`（4 / 3 / 1）；max+Milvus `26/32`（4 / 3 / 1）。两组 Milvus 的 collection runtime metadata 均为 195 initial、0 inserted、195 final，hash `8a8b6626...`。
+- 与第一轮合并看，四组 raw 区间分别为 plus+local `25–26`、plus+Milvus `25–26`、max+local `25–26`、max+Milvus `26–27`。两轮结果支持“当前采样下四组接近、max+Milvus略高”的描述，不支持稳定模型/embedding 因果或默认切换；每组仍只有 2 次。
+- 诊断层新证据：`db_schema_003` 四组第二轮仍归因于 schema_context alternatives mismatch，重复性较强；`db_core_002`、`db_trace_002`、`db_multi_002` 等失败在组合间迁移，体现真实 LLM 输出非确定性。max 两组再次出现 44–68 秒级请求，需按延迟风险记录，不直接算语义错误。
+
+### [实验] M26-v1 模型/检索追加对照（2026-08-08，已完成）
+
+- 用户要求追加三组完整 diagnostic：Qwen `qwen3.7-plus + Milvus`、Qwen `qwen3.7-max + local`、Qwen `qwen3.7-max + Milvus`。三组均固定 M26-v1、32 条、45s/retry0、weighted、SQLite oracle、LangFuse off；结果分别为 `26/32`、`25/32`、`27/32`，均保留独立 trace/report/triage。
+- `qwen3.7-max + local` triage 为 execution_failed `5`、review_pending `3`、external_unavailable `3`；`qwen3.7-plus + Milvus` 为 `3/3/4`；`qwen3.7-max + Milvus` 为 `3/3/3`。三组都仍观察到 `db_schema_003` alternatives mismatch；max+Milvus 还记录到个别 45–73 秒的高延迟请求，但最终 HTTP 200。
+- 两组 Milvus 均复用 clean collection `datapilot_schema_docs_m25_qwen37plus_qwenemb_20260807_192300`，195 docs、1024 维、hash `8a8b6626...`，initial/final row count 均 195、inserted `0`，因此没有把 collection 重新灌库差异混入模型比较。为绕过 Windows 保留端口 `9091`，仅把宿主 health 映射调整为 `19091:9091`，内部端口和绑定数据卷保持不变。
+- 解释边界：同轮 raw 通过数为 max+Milvus `27/32`、plus+Milvus `26/32`、plus+local `26/32`、max+local `25/32`；每组合只跑一次，且 max 存在明显响应时延波动，不能据此断言稳定的模型或 Milvus/embedding 因果，也不改变默认 local deterministic/weighted。
+
+### [实验] M26-v1 完整 diagnostic（2026-08-08）
+
+- 用户明确授权后，固定 Qwen `qwen3.7-plus`、local deterministic/weighted、45s/retry0、SQLite oracle、LangFuse off，按 `m26-v1` 运行 challenge + diagnostic extra 共 32 条；产物为 `eval/traces/m26-v1-qwen37plus-local-diagnostic-traces.jsonl`、对应 report/triage，以及 `eval/reports/m26-v1-vs-m25-round2-triage-compare.md`。
+- 结果为 raw `26/32`、failed `6`、review_required `3`；triage 队列为 execution_failed `4`、review_pending `3`、external_unavailable `4`。semantic status：observed_correct `10`、observed_wrong `1`、not_observed `4`、not_applicable `17`。这不是稳定能力基线，只是新合同的一次诊断快照。
+- 新证据：`db_core_002` 真实 result mismatch，确认审计指出的整单退款 fallback 缺口；`db_schema_003` 已从旧 output-column 误归因改为真实 SchemaContext alternatives 不匹配；`db_hard_002` ratio 通过，未重现 `* 1.0` fidelity 假阴性。CTE 代表题 `db_multi_002` 仍 QueryPlan external failure，没有 SQL，因此不能用本轮证明 CTE 端到端收益。
+- 解释边界：M25 round2 为 `28/32`、M26-v1 为 `26/32`，不能直接说退化，因为 case contract、scorer 和真实 LLM 运行都发生了变化；本轮没有做第二次重复、模型 A/B、embedding A/B 或 retry 实验。
+
 ### [模块任务] M26 Diagnostic Human Audit / Eval Reconciliation（2026-08-07）
 
 - **改动范围**：新增冻结评测审计入口 `eval/audit.py` / `eval/run_audit.py`、M25 round2 的 audit / verdict artifacts、SQL Guard CTE scope 解析、SQL Plan Fidelity 窄等价规则、SchemaGraph alternatives scorer、triage 状态与报告、两个高风险 case 合同和定点回归测试；过程素材见 `docs/notes/m26-notes.md`。

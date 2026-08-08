@@ -1229,6 +1229,10 @@ M26 的目标不是再跑一次大模型、再看一个总分，而是先回答�
 
 最终，这次工作把“上一轮的分数”拆成了更可信的事实：哪些是 **真实 SQL 语义错误**，哪些是 **代码或 scorer 的确定性缺陷**，哪些只是 **外部超时导致没有观察到结果**。这样下一次完整 diagnostic 跑出的 M26-v1 基线，才有可解释性。
 
+模块完成后又补跑了 **两轮、四种模型/检索组合的完整 diagnostic**，共 256 次 raw case 执行；各组合都落在相近区间，现有证据不足以证明 Qwen Max 或 Milvus 有稳定优势。随后由 Codex 对第二轮 Qwen Plus 的 local / Milvus 两组各 32 条逐题审查，除了区分 **SQL 确实错误** 与 **超时导致无 SQL**，还发现 3 条自动通过但业务语义有误的 SQL，说明只看 runner 总分仍会漏掉 false positive。
+
+复查也暴露了当前评测结构的历史包袱：formal、challenge、diagnostic 存在重复业务问题，manual、expected-block 和能力诊断题又混在同一总分里。后续建议改为 **一个业务场景只执行一次、多个 assertion 共享同一份 Trace**，suite 只负责选择场景，diagnostic 改为多维报告视图；这仍是待确认的下一步方向，M26 没有擅自改动现有 case 或正式口径。
+
 ### 新概念
 
 - **Frozen audit evidence**：先把一次运行的输入、trace、报告和 triage 固定下来再复核。像财务审计先封存凭证，避免后续系统变化改变被审计的事实。
