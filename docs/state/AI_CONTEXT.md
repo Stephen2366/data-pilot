@@ -6,7 +6,7 @@
 
 - 当前阶段计划文件：`docs/phase3b-langfuse-plan-v6.md`
 - 当前模块：M26 Diagnostic Human Audit / Eval Reconciliation（代码与收工完成，待验收）
-- 上一模块验收：M26 未验收（待 `accept-module`）
+- 上一模块验收：M26 已验收（2026-08-08）
 - 阻塞项：无
 - 更新时间：2026-08-08
 
@@ -103,6 +103,9 @@
 | 2026-08-07 起 | M25 reliability 候选每组只有一次 4-case 小样本，且 provider 波动明显 | 不能把 retry0 的 1/4 与 retry1 的 0/4 外推为总体 SLA，也不能据此选新的 timeout 魔法数字 | 当前只支持“retry=1 本轮无恢复且成本翻倍，因此不切默认”；后续候选必须固定唯一变量并重复 |
 | 2026-08-07 起，M26 已定点修复 | M25 八轮 diagnostic 发现的 CTE alias RBAC 误拦、ratio `* 1.0` 误判、未消费 alternatives、manual/failed 混读及 `item_gmv` 题面歧义 | 冻结的 M25-v1 报告仍保留原始证据，不能把修复后的规则反写成历史分数；后续若混用新旧合同会误读趋势 | M26-v1 已用 scope、窄等价、trace alternatives、正交状态和反事实测试固定边界；新的完整 LLM 基线尚未运行，不能声称端到端分数已提升 |
 | 2026-08-07 起 | 历史 M25 Markdown 只含汇总 Score Summary，缺少每 case 的结构化 score detail | 旧 run 的 audit 需要兼容提取，不能享受新 case-level evidence 精度 | `eval/audit.py` 仅为冻结历史输入提供只读 legacy adapter；新运行应保留结构化 trace / triage / score evidence |
+| 2026-08-08 起 | M26 人工审查发现 3 条自动通过但语义有误的 SQL：`db_join_001` 漏 completed 退款状态过滤、`db_hard_003` 三值逻辑误排 SCD 现行记录、`db_prompt_002` 窗口上界早一天 | runner 自动通过不能直接当业务语义正确；后续若引用这些题的结果会误读趋势 | 已记录在 changelog [审查] 条目与 `docs/notes/m26-notes.md`；未修复，修 case / scorer / schema 需用户确认 |
+| 2026-08-08 起 | `eval.audit._automated_summary()` 只靠冻结 Markdown 中 `rule:manual_review` 重建 review_required，与 triage `review_pending` 不一致 | 审计卷宗的 review 计数可能偏离源 report；人工审查应以 triage 为准 | 展示层证据缺口，尚未修改代码；后续 runner 补结构化 score artifact 时一并处理 |
+| 2026-08-08 起 | Windows 宿主保留端口 9091 导致 Milvus health 检查失败 | 每次启动 Milvus eval 前可能重复遇到 | host health 端口映射改为 `19091:9091`，内部端口和数据卷不变；排查菜单见 schema-retrieval 文档 |
 
 ## 变更记录索引
 

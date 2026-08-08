@@ -217,6 +217,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_schema_ret
 | vector dimension mismatch | collection 来自不同 embedding 模型 / 维度 | 换唯一 collection 或显式 reset。 |
 | 不同 embedding 模型复用同一 collection | row_count 和维度可能仍匹配，但向量语义已经不一致 | 更换 provider / model 时必须使用新 collection。 |
 | 多个 eval 进程并发写同一 collection | 可能产生竞态或重复写入 | 不并发写同一实验 collection。 |
+| Milvus health 检查失败（宿主 9091 保留端口） | Windows 上 9091 常被系统保留 | host health 端口映射改为 `19091:9091`，内部端口与绑定数据卷保持不变（M26 验证过）。 |
 | `milvus_inserted_document_count > 0` | 本次 eval 发生了实际写入，结果可能不可与之前 run 直接比较 | 立即停止并把该 run 标记为不可比较。 |
 | Qwen / DashScope embedding 报 key 错 | `.env` / 环境变量未设置或账号不可用 | 先跑最小 provider smoke；不要改默认 embedding。 |
 | eval 很慢或超时 | 真实 LLM + embedding 调用慢 | 长 run 用更长 timeout 或后台日志方式；partial trace 不纳入结论。 |

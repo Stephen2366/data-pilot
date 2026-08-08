@@ -13,6 +13,14 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [审查] M26-v1 第二轮 Qwen plus 人工 SQL 审查（2026-08-08）
+
+- 范围：对 `m26-v1-r2-qwen37plus-local` 与 `m26-v1-r2-qwen37plus-milvus` 两份冻结 run 各 32 条逐题人工审查，不重跑 LLM、不改代码或 case；每份生成独立 audit evidence pack（`eval/reports/m26-v1-r2-qwen37plus-{local,milvus}-human-audit.{json,md}`），禁止跨 run 混用证据。
+- 人工 verdict：plus+local 为 pass 23 / fail 5 / unavailable 4；plus+Milvus 为 pass 24 / fail 3 / unavailable 5。两组自动与人工一致均 26 条；自动 failed 中各有 4–5 条是无 SQL 的 external unavailable（QueryPlan/LLM timeout），不属于语义错误。
+- **发现 3 条自动通过但业务语义有误的 SQL（已记录，未修复）**：① `db_join_001`（local）用 `refunds.id IS NOT NULL` 统计全部退款状态，漏退款率合同的 `refund_status = 'completed'` 过滤，结果 `0.2254` 与同轮 Milvus completed 过滤后的 `0.0564` 明显不同；② `db_hard_003`（local）同时写 `valid_to IS NULL OR valid_to > '2026-06-01'` 与 `valid_to != '2026-06-01'`，SQL 三值逻辑会误过滤 `valid_to IS NULL` 的现行记录，违反 SCD 半开区间合同；③ `db_prompt_002`（Milvus）窗口上界写 `valid_from < '2026-06-30'`，合同为 `< '2026-07-01'`，漏掉 6 月 30 日生效记录。三者都说明"runner 自动通过"不能直接当业务语义正确。
+- 审计 adapter 证据缺口：`eval.audit._automated_summary()` 只靠冻结 Markdown Score Summary 中是否存在 `rule:manual_review` 重建 `review_required`，与 triage 的 `review_pending` 不一致（该两组重建为 local 1 / Milvus 0，源 report 每轮为 3）；人工审查以 triage `review_pending` 为准。这是 audit 展示层的证据缺口，尚未修改代码，后续 runner 补结构化 score artifact 时应一并处理。
+- 边界：以上发现均未回写历史报告或改动正式口径；是否修 case / scorer / schema 需用户另行确认。
+
 ### [实验] M26-v1 第二轮模型/检索对照（2026-08-08）
 
 - 用户要求在第一轮基础上重复四组完整 diagnostic：Qwen `qwen3.7-plus + local`、`qwen3.7-plus + Milvus`、`qwen3.7-max + local`、`qwen3.7-max + Milvus`。固定 M26-v1、32 条、45s/retry0、weighted、SQLite oracle、LangFuse off；四组均生成独立 `r2` trace/report/triage。

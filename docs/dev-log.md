@@ -1248,6 +1248,14 @@ M26 的目标不是再跑一次大模型、再看一个总分，而是先回答�
 4. 看 `eval/scorers/rule_scorers.py`、`eval/triage.py` 与 `eval/run_eval.py`，理解 SchemaGraph alternatives、正交 triage 状态和报告如何共享同一份事实。
 5. 最后读 `tests/test_m26_targeted_contracts.py`；其中 CTE/RBAC、ratio 正反例、SchemaGraph alternatives、triage 和退款率反事实覆盖了本模块最重要的边界。
 
+### 设计要点
+
+- **冻结审计证据不回写**：审计只消费同一轮 run 的 case / trace / report / triage，人工 verdict 不与正式 `passed`、LangFuse score 或历史报告混写。原因和财务审计封存凭证一样——先固定事实，再谈修复；否则每次系统变化都会悄悄改变被审计的结论。
+- **窄等价宁可保守**：fidelity 只接受"同一分母 + 分子仅多乘 `* 1.0`"这一种可证明的类型提升。不做通用代数化简，因为 NULL、类型、聚合粒度、Join 重复和方言差异都可能在"看起来一样"的变形中被忽略。
+- **schema_context 直接消费 SchemaGraph**：`expected_tables_alternatives` 由同请求的 tables / fields / metrics 判定，绝不拿最终输出列冒充上下文证据。这样"检索对了但 SQL 生成错了"保持为两条独立证据，也不会让最终响应反向篡改 Context 结论。
+- **failed 兼容 + 正交状态**：保留旧 `failed` 字段供历史脚本使用，另加 `execution_failed`（自动链路已确定失败）与 `review_pending`（缺确定性 oracle，待人工），消除"待人工看"被误读成"执行失败"的歧义。
+- **CTE 修复是名称解析修正，不是安全放宽**：只把 CTE 临时名从 RBAC 表集合中剔除，CTE 内部访问的物理表和敏感字段仍逐 scope 严格检查；安全边界是"修正识别，不降低约束"。
+
 ### 面试怎么讲
 
 我在 DataPilot 的 M26 做的不是直接调 Prompt 或追求更高的 diagnostic 总分，而是先治理评测结果的可信度。M25 的 diagnostic 已经暴露出递归 SQL、退款率、SchemaGraph 和人工题状态上的异常，但“失败”不一定等于模型答错：它也可能来自 SQL Guard 误拦、评分器没有消费 case 合同、当前 seed 恰好掩盖错误 SQL，或者外部超时导致根本没有生成 SQL。

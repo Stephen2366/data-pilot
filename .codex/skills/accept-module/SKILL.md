@@ -22,13 +22,16 @@ description: 项目模块验收门禁，在收工整理和用户人工检查之�
 废弃口径登记在本目录 `deprecated-terms.txt`（每行一条 rg 正则），出现即错误：
 
 ```bash
-rg -n -f .claude/skills/accept-module/deprecated-terms.txt --hidden \
-   -g '!.git' -g '!dev-log.md' -g '!docs/state/AI_CONTEXT.md' -g '!docs/state/AI_CONTEXT_CHANGELOG.md' -g '!CLAUDE.md' \
-   -g '!.agent_work/**' -g '!docs/archive-dormant/**' -g '!docs/archive-versions/**' -g '!.claude/skills/accept-module/**' .
+rg -n -f .codex/skills/accept-module/deprecated-terms.txt --hidden \
+   -g '!.git' -g '!dev-log.md' -g '!docs/dev-log(M0-M19).md' -g '!docs/notes/**' \
+   -g '!docs/state/AI_CONTEXT.md' -g '!docs/state/AI_CONTEXT_CHANGELOG.md' -g '!CLAUDE.md' \
+   -g '!.gitignore' \
+   -g '!.agent_work/**' -g '!docs/archive-dormant/**' -g '!docs/archive-versions/**' \
+   -g '!.claude/skills/accept-module/**' -g '!.codex/skills/accept-module/**' .
 ```
 
 - 无输出（exit code 1）= ✅；有命中 = ❌，逐条列出 `文件:行` 与命中内容。
-- 排除原因：dev-log.md / docs/state/AI_CONTEXT.md / docs/state/AI_CONTEXT_CHANGELOG.md 是历史记录文件（含旧日志与旧条目），引用的旧路径/旧口径不代表当前状态（AI_CONTEXT「当前状态」「已知的坑」「最新事实快照」的时效性由检查 3 / 8 / 9 兜底）；`docs/archive-dormant/` 和 `docs/archive-versions/` 是冻结历史文档，引用的旧路径/旧口径不代表当前项目；CLAUDE.md 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
+- 排除原因：dev-log.md / docs/dev-log(M0-M19).md / docs/notes/ 是历史记录文件（含旧日志与旧条目），引用的旧路径/旧口径不代表当前状态（AI_CONTEXT「当前状态」「已知的坑」「最新事实快照」的时效性由检查 3 / 8 / 9 兜底）；`docs/archive-dormant/` 和 `docs/archive-versions/` 是冻结历史文档，引用的旧路径/旧口径不代表当前项目；CLAUDE.md 与 .gitignore 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
 - rg 默认跳过 .gitignore 覆盖的文件。若本次模块改过路径类配置，额外人工看一眼本地 `.env`。
 
 ## 检查 2：目录地图一致
