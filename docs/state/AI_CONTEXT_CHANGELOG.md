@@ -11,6 +11,8 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 「变更记录」：小修可以只写一段话；较大的任务建议包含：改动范围、关键记录（比如关键决策、决策原因、实验结果、新发现、用户做出的选择等）、参考资料、验证快照、遗留/后续。
 
+同一模块 / 同一阶段内连续的小修（中间没有被 [模块任务] / [实验] 等其他类型条目隔开时），合并到一个 [小修] 小节。
+
 ## 变更记录（新的在上）
 
 ### [实验] M27 Stress / Database Exception：Qwen plus + Milvus（2026-08-10）
@@ -18,21 +20,12 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 用户各授权一次：Stress `m27-stress-20260809-qwen37plus-milvus-01`（9 logical / 9 physical）与 Database Exception `m27-database-exception-20260809-qwen37plus-milvus-01`（7 / 7）。两轮都固定 Qwen `qwen3.7-plus`、Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim、clean collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`、195-doc hash `8a8b6626...`、weighted、45s/retry0、SQLite deterministic oracle、LangFuse off；新 artifact 已完整记录 runtime identity。
 - Stress 全部 assertion 为 `7 passed / 14 failed / 4 not_observed`，7 completed / 2 external unavailable；Database Exception 为 `4 / 4 / 11`，3 completed / 4 external unavailable。两套 suite policy 的 required 都是 `0 / 0 / 0`，Gate `inconclusive` 反映没有 required 硬门结论，不是“业务硬门失败”。均为单轮 advisory 证据，不作模型 / Milvus 因果结论、不登记长期 baseline。未改任何默认配置。
 
-### [小修] Eval 实验快照按决策价值分层（2026-08-09）
+### [小修] M27 文档与状态同步（2026-08-09）
 
-- `eval-baselines.md` 不再按 v1 / v2 或模块编号持续新增快照标题，改为「当前有效实验快照 → 正式长期基线 → 历史实验记录」：仍可支持当前路线判断的运行留在前者，用户指定的 completed run 才进入长期基线，合同或条件已过时的记录移入历史。首个 v2 Core 明确标为“过渡证据”，不是严格 Milvus/P1 对照；四条 v1 Core 转为历史追溯。仅整理账本结构，未运行真实 LLM、未改合同、分母、Gate 或默认配置。
-
-### [小修] 数据库当前事实文档对齐 M27（2026-08-09）
-
-- `database-current-state.md` 保留 14 表、指标、seed 与改库事实，但移除了旧 Phase 3A / M23 Eval 入口、`--cases` 命令和过时的异常专项映射；当前评测统一链接到 M27 catalog、runbook 和 eval-baselines。补充事实来源分工，以及 `orders_wide` 的月度 `snapshot_at` 与星型明细回退规则；重复的数据质量说明收敛为一张“应该怎么查 / 容易错在哪里”表。未运行数据库或真实 LLM，未改 schema、seed、指标、oracle 或默认配置。
-
-### [小修] M27 Milvus runtime identity 与速查收敛（2026-08-09）
-
-- resolved runtime identity 新增 embedding 模型/维度、Milvus collection、schema document count/hash，确保未来 M27 artifact 能区分同为 Milvus 的不同语料和 embedding 条件；只读取配置与 domain pack，不连接或写入 Milvus。首个 v2 Core 早于该字段扩展，已在 eval-baselines 标为过渡快照。`schema-retrieval-milvus-embedding.md` 移除失效 legacy CLI / 数字，明确 DashScope/Qwen 是唯一文档化 M27 Milvus 路径，SiliconFlow 仅保留实现历史。M27 foundation/review `23 passed, 1 warning`；未调用真实 LLM、未切默认配置。
-
-### [小修] M27 临时目录统一与 Gate 操作指引（2026-08-09）
-
-- 用户确认将 M27 checkpoint 与所有 AI 临时产物统一到 `.agent_work/temp/`：`eval.run_eval` 默认 checkpoint 根目录已迁移，旧临时目录的 66 个直接子项已移动到共享目录；长期 artifact/report/trace 不移动。runbook 同时补齐前台等待超时的精确检查路径，以及 `passed` / `failed` / `inconclusive` 的操作边界。未调用 LLM、未改变 Eval 合同、默认模型或可靠性配置。
+- **Eval 账本分层**：`eval-baselines.md` 不再按 v1 / v2 或模块编号持续新增快照标题，改为「当前有效实验快照 → 正式长期基线 → 历史实验记录」：仍可支持当前路线判断的运行留在前者，用户指定的 completed run 才进入长期基线，合同或条件已过时的记录移入历史。首个 v2 Core 明确标为“过渡证据”，不是严格 Milvus/P1 对照；四条 v1 Core 转为历史追溯。仅整理账本结构，未运行真实 LLM、未改合同、分母、Gate 或默认配置。
+- **数据库事实文档对齐**：`database-current-state.md` 保留 14 表、指标、seed 与改库事实，但移除了旧 Phase 3A / M23 Eval 入口、`--cases` 命令和过时的异常专项映射；当前评测统一链接到 M27 catalog、runbook 和 eval-baselines。补充事实来源分工，以及 `orders_wide` 的月度 `snapshot_at` 与星型明细回退规则；重复的数据质量说明收敛为一张“应该怎么查 / 容易错在哪里”表。未运行数据库或真实 LLM，未改 schema、seed、指标、oracle 或默认配置。
+- **Milvus runtime identity 与速查收敛**：resolved runtime identity 新增 embedding 模型/维度、Milvus collection、schema document count/hash，确保未来 M27 artifact 能区分同为 Milvus 的不同语料和 embedding 条件；只读取配置与 domain pack，不连接或写入 Milvus。首个 v2 Core 早于该字段扩展，已在 eval-baselines 标为过渡快照。`schema-retrieval-milvus-embedding.md` 移除失效 legacy CLI / 数字，明确 DashScope/Qwen 是唯一文档化 M27 Milvus 路径，SiliconFlow 仅保留实现历史。M27 foundation/review `23 passed, 1 warning`；未调用真实 LLM、未切默认配置。
+- **临时目录统一与 Gate 指引**：用户确认将 M27 checkpoint 与所有 AI 临时产物统一到 `.agent_work/temp/`：`eval.run_eval` 默认 checkpoint 根目录已迁移，旧临时目录的 66 个直接子项已移动到共享目录；长期 artifact/report/trace 不移动。runbook 同时补齐前台等待超时的精确检查路径，以及 `passed` / `failed` / `inconclusive` 的操作边界。未调用 LLM、未改变 Eval 合同、默认模型或可靠性配置。
 
 ### [实验] M27 v2 Core：Qwen plus + Milvus（2026-08-09）
 
@@ -46,6 +39,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - **改动范围**：M27 canonical contract 升为 `m27-v2`；Evaluator 从 QueryPlan trace 读取 transient `error_subtype`，将无候选答卷的 timeout/network/429/5xx 记为 `external_unavailable`；metric scorer 统一带表前缀与裸字段；渠道 GMV 提升 `gmv` metric 召回并补 `orders_wide.snapshot_at` 计划提示。普通 API 默认切到 `new_text2sql`，Eval adapter 对新旧路径都显式传 `force_new_pipeline`，legacy baseline 保持显式 `false` 回退。
 - **关键记录**：用户确认这次 P0 可以改变正式分母/Gate，因此 v1 的 timeout 空答卷不再伪装成业务 failed；相关 assertion 变为 `not_observed`，required Gate 为 `inconclusive`。这是正式可比性变化，故不重写旧 artifact，而是冻结为 v1 追溯快照；review 保持 v1/v2 artifact 只读兼容。`net_revenue = SUM(orders.actual_amount)` 不是业务 binding 错误，修的是命名空间比较；渠道 GMV 不放宽 Scenario/scorer，而是让正确 metric 与快照时间口径进入上下文。
 - **验证快照**：`tests/test_m27_foundation.py tests/test_m27_review.py` 为 `22 passed, 1 warning`（含 v1 artifact 只读 review 兼容）；新 API 默认/显式 legacy 测试为 `2 passed, 1 warning`；`tests/test_phase3a_eval.py` 为 `23 passed, 1 warning`；`eval.run_eval --help` 显示 `m27-v2`。warning 均为既有 Starlette/httpx deprecation。未调用真实 LLM，未改模型、检索、embedding、数据库、oracle 或 45s/retry0 默认可靠性配置。
+- **参考资料**：`docs/notes/m27-notes.md`「Core 失败复盘与 P0/P1 实施」、`docs/notes/m27-plan.md` §13、v1 冻结快照 artifact（`eval/reports/m27-artifacts/`）、既有 runner/scorer 实现。
 - **遗留/后续**：尚未运行 M27 v2 真实 Core，也未登记新的正式长期基线；将来运行须单独授权，且不可将 v2 与 v1 的 `29 passed / 5 failed / 0 not_observed` 直接升降比较。M27 仍待 `accept-module`。
 
 ### [小修] 真实 Eval 的单次执行纪律（2026-08-09）

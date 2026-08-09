@@ -213,6 +213,8 @@ def test_enhanced_guard_blocks_sensitive_fields_and_role_table_access() -> None:
 
 def test_query_api_uses_template_first_then_llm_and_applies_policy(monkeypatch: Any) -> None:
     # 红灯目标：模板命中仍走 M3 稳定路径；模板未命中才调用 LLM，且生成 SQL 继续过 policy。
+    # M27 v2 起 /api/query 默认走新 Text2SQL 链路；这里显式 force_new_pipeline=False，
+    # 验证 legacy 模板优先契约与安全 policy（新默认链路由 test_phase3a_pipeline 覆盖）。
     from engine.nl2sql import generator
 
     fake_client = FakeLLMClient(

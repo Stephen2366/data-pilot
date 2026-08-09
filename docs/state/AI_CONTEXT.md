@@ -5,8 +5,8 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划：`docs/notes/m27-plan.md`
-- 当前模块：M27 Diagnostic / Eval Case 体系优化（含 Review Bundle 增补，待 `accept-module`）
-- 上一模块验收：M26 已验收（2026-08-08）
+- 当前模块：M27 Diagnostic / Eval Case 体系优化（含 Review Bundle 增补，已验收 2026-08-10）
+- 上一模块验收：M26 已验收（2026-08-08）；M27 已验收（2026-08-10）
 - 阻塞项：无
 - 更新时间：2026-08-10
 

@@ -85,6 +85,8 @@ def test_sql_guard_allows_select_and_blocks_dangerous_writes() -> None:
 
 def test_query_api_returns_agent_response_for_five_template_questions() -> None:
     # 红灯目标：5 个高价值问题都要返回简化版 AgentResponse，并带可消费的表格数据。
+    # M27 v2 起 /api/query 默认走新 Text2SQL 链路；这里显式 force_new_pipeline=False，
+    # 继续验证 legacy 模板契约（与 runbook 的显式回退入口一致）。
     questions_and_expected = [
         ("2026年6月退款率最高的商品是什么？", "Aurora Noise Cancelling Headphones"),
         ("各渠道订单量是多少？", "Mobile App"),
@@ -97,7 +99,7 @@ def test_query_api_returns_agent_response_for_five_template_questions() -> None:
         for question, expected_text in questions_and_expected:
             response = client.post(
                 "/api/query",
-                json={"question": question, "user_role": "ops"},
+                json={"question": question, "user_role": "ops", "force_new_pipeline": False},
             )
 
             body = response.json()
