@@ -5,7 +5,7 @@
 ## 当前状态（唯一权威出处）
 
 - 当前阶段计划文件：`docs/notes/m27-plan.md`
-- 当前模块：M27 Diagnostic / Eval Case 体系优化（代码与收工完成，待 accept-module）
+- 当前模块：M27 Diagnostic / Eval Case 体系优化（含用户授权的 Review Bundle 增补，待 accept-module）
 - 上一模块验收：M26 已验收（2026-08-08）
 - 阻塞项：无
 - 更新时间：2026-08-09
@@ -38,6 +38,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-09 | M27 新增独立 `eval.review` / `eval.run_review`：completed artifact + 同 run 短期 checkpoint + canonical catalog 才能生成脱敏 Codex/人工复核包；checkpoint 缺失或身份不一致会失败，不从 Markdown 猜证据。review verdict（`pass/fail/insufficient_evidence`）与 auto/manual reconciliation 只写旁路 bundle，绝不改 EvalRun、自动分母或 Gate，M26 audit 继续只读 legacy。已对 `m27-smoke-20260809-02` 生成 4 条 Codex 高置信度 `pass` verdict；focused `38 passed, 1 warning`，未调用新的 LLM。 |
 | 2026-08-09 | 用户授权完成一次 M27 `smoke` 真实 LLM run：Qwen `qwen3.7-plus` + inmemory deterministic/weighted + 45s/retry0 + SQLite deterministic seed + LangFuse off，artifact `m27-smoke-20260809-02` / report `eval/reports/m27-smoke-20260809-02.md`；4 个 logical Scenario、9 条 required assertion 全通过，Gate `passed`，无 unavailable。它只验证 Smoke 链路和当前一次调用，不是完整主回归或稳定能力/成本基线，不与 M26 `25/32` 等历史数字比较。此前 `m27-smoke-20260809-01` 在外部调用期间被工具时限中断，保留为 incomplete checkpoint，不投影、不计分。 |
 | 2026-08-09 | M27 已完成确定性收工：旧 42 raw/26 semantic-group 盘点后形成 28 个 `m27-v1` canonical Scenario，单题多 typed assertion 共享一次 Pipeline/Oracle snapshot；新增 Core/Stress/Manual policy、Smoke/Reliability/Database Exception selector、三态 gate、结构化脱敏 artifact 和 Markdown/LangFuse payload adapter。`eval.run_eval` CLI 已切到 `Evaluator.evaluate()`；旧 case/report/audit 只读冻结。全仓 `208 passed, 1 warning`；未运行真实 LLM M27 基线，未切任何默认模型/retrieval/embedding/DB/oracle/reliability。新 M27 数字不得与 M26 `25/32` 等历史分数比较。 |
 | 2026-08-08 | M26-v1 第二轮四组已完成：plus+local `25/32`、plus+Milvus `25/32`、max+local `26/32`、max+Milvus `26/32`；两轮区间分别为 `25–26`、`25–26`、`25–26`、`26–27`。两组 Milvus 仍校验为 195 initial / 0 inserted / 195 final、hash `8a8b6626...`。`db_schema_003` 四组第二轮仍为 alternatives mismatch；max 两组再次出现 44–68 秒延迟。每组仅两次，仍不改变默认 local deterministic/weighted。 |

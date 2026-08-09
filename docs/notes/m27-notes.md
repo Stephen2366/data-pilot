@@ -187,3 +187,17 @@
 - 首次 `m27-smoke-20260809-01` 受工具 60 秒时限中断，已完成 `june_gmv`、`unsafe_drop_orders`、`missing_product_supplier_rejection` 的 checkpoint，manifest 保持 `running`。M27 不支持 resume，故该 run 不生成 completed artifact/report，也不进入 Gate。
 - 使用新 run id `m27-smoke-20260809-02` 完成完整 selector：4 个 logical Scenario、4 个 physical attempts、9 条 required assertion 全通过，Gate `passed`，无 failed/not_observed/unavailable。产物为 `eval/reports/m27-artifacts/m27-smoke-20260809-02.json` 和 `eval/reports/m27-smoke-20260809-02.md`；既有 Starlette/httpx deprecation warning 未影响结论。
 - 解释边界：Smoke 仅验证当前运行环境下 API、Guard、Trace、artifact 与报告闭环，不是完整 Core/Stress 评测，不能推出稳定模型能力、成本或可靠性，也不得与 M26 的 `25/32` 等旧口径相比较。
+
+## M27 Review Bundle 增补（用户授权，进行中）
+
+- [x] 新增独立 `eval.review` module 与 `eval.run_review` CLI：从 completed M27 artifact、短期 checkpoint 和 canonical catalog 生成 Codex 可读的 review bundle。
+- [x] bundle 只保存脱敏的 candidate/reference SQL、有限结果样本、trace 摘要、assertion 事实与合同摘要；不得改写 EvalRun、projector 分母或 Gate，也不调用 LLM。
+- [x] 支持独立写入 Codex/manual verdict 与 auto/manual reconciliation；M26 `eval.run_audit` 继续只读 legacy 输入，不能复用。
+- [x] 补确定性测试、更新 runbook / cases README / state 档案，并运行针对性 pytest；不运行新的真实 LLM eval。
+
+### 实现与验证结果
+
+- 用户在 M27 原计划已明确“不建设人工 verdict/review workflow”的基础上，明确授权此旁路增补；实现保持不改 EvalRun、自动 scorer、projector、Gate、分母和 M26 legacy audit 的边界。
+- `eval.review.build_review_bundle()` 是唯一组装 Interface：它校验 completed M27 artifact、raw checkpoint、catalog 的 run/scenario/replicate/assertion 身份，缺失或不一致即失败。bundle 提供 candidate/reference SQL、最多 3 行脱敏 candidate/reference preview、trace 摘要、contract 和 assertion 事实；email/phone/credential key 与文本中的 email/手机号会被脱敏。
+- `apply_review_verdicts()` 强制所有 logical Scenario 都有 `pass/fail/insufficient_evidence`、confidence、reason 和 evidence，输出独立 reconciliation；`eval.run_review` CLI 不执行 Pipeline/LLM，只写 `eval/reports/m27-reviews/`。
+- 验证：`python -m pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.codex/temp_work/pytest-m27-review-final`：**38 passed, 1 warning**（既有 Starlette/httpx deprecation）。对既有 `m27-smoke-20260809-02` 运行 CLI 后生成 4 条 Codex high-confidence `pass` verdict；无新的真实 LLM 调用。

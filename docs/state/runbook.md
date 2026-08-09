@@ -47,6 +47,7 @@
 | Stress suite | 验证复杂业务边界；9 题 / 9 次调用 | `python -m eval.run_eval --suite stress --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 覆盖递归、SCD、退款、复杂 Join；默认 advisory。 |
 | Reliability selector | 看波动与可用性；2 题 / 6 次调用 | `python -m eval.run_eval --selector reliability --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 每题 3 个 replicate；分母仍是 2 个逻辑 Scenario。 |
 | Database Exception selector | 验证异常数据口径；7 题 / 7 次调用 | `python -m eval.run_eval --selector database-exception --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 选择 canonical Stress Scenario，不复制异常题正文。 |
+| M27 Codex / 人工复核 | 自动结果需逐题业务核验；0 次模型调用 | `python -m eval.run_review --run-id <run-id> [--verdicts-json <verdicts.json>]` | 只读 completed artifact、短期 checkpoint 与 catalog；生成独立 review bundle，不改变 EvalRun、分母或 Gate。checkpoint 清理后会明确拒绝生成，不猜造证据。 |
 | M26 audit（冻结审计，无模型调用） | 复核历史 run；数量随冻结输入 | `python -m eval.run_audit --trace <frozen-trace.jsonl> --report <frozen-report.md> --triage <frozen-triage.json> --output-prefix eval/reports/m26-audit` | 只读取旧 case/trace/report/triage；不调用 LLM、不重跑旧 scorer。 |
 | schema retrieval embedding-only | 只测检索召回；10 条 query | `python -m eval.run_schema_retrieval_benchmark --report eval/reports/<name>-schema-retrieval-report.md --top-k 12 --fusion-strategy weighted` | 不调用 PipelinePort / LLM SQL；Milvus 与 embedding 开关见 state 文档。 |
 

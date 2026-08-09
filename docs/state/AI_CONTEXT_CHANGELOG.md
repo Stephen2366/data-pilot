@@ -13,6 +13,13 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M27 Codex Review Bundle（2026-08-09）
+
+- **改动范围**：新增 `eval/review.py` 深 module、`eval/run_review.py` CLI 与 `tests/test_m27_review.py`；同步 M27 runbook / cases README / state 档案。它是用户在 M27 原计划“暂不实现人工 verdict 工作流”之外明确授权的旁路增补，不改 formal case、EvalRun schema、分母、Gate 或旧 M26 audit。
+- **关键记录**：review bundle 以 completed M27 artifact、同 run 的短期 raw checkpoint、canonical catalog 三者的 `(run_id, scenario_id, replicate_id)` 和 assertion identity 对齐为前提。它仅输出脱敏 candidate/reference SQL、最多 3 行结果 preview、trace 摘要和合同；缺 checkpoint / 身份不一致即失败，不由 Markdown 猜造人工证据。Codex/manual verdict 固定为 `pass/fail/insufficient_evidence`，另记录 confidence、reason、evidence 与 auto/manual reconciliation，始终独立于自动评分事实。
+- **验证快照**：`pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.codex/temp_work/pytest-m27-review-final`：`38 passed, 1 warning`；warning 为既有 Starlette/httpx deprecation。`python -m eval.run_review --run-id m27-smoke-20260809-02 --verdicts-json ...` 生成 4 条 Codex high-confidence `pass` review record；未调用新的真实 LLM。
+- **遗留/后续**：review bundle 依赖短期 checkpoint，清理后不能重建，这符合默认不长期存完整 rows/prompt 的安全策略。若未来确需长期独立人工复核，应另行确认保留期、访问控制和更严格的 SQL / 结果样本脱敏策略；不得把它接入 Gate 或改写旧 M26 audit。
+
 ### [实验] M27 Smoke selector 真实 LLM 验证（2026-08-09）
 
 - 用户授权一次 M27 `smoke` selector；固定 Qwen `qwen3.7-plus`、inmemory deterministic/weighted、45s/retry0、SQLite deterministic seed、LangFuse off，未改任何默认配置。

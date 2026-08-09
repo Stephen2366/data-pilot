@@ -32,6 +32,13 @@ eval/cases/
 
 M27 CLI、真实 LLM 授权边界、artifact 路径和命令见 [docs/state/runbook.md](../../docs/state/runbook.md)。分母、Gate、首次真实基线和旧数字隔离见 [docs/state/eval-baselines.md](../../docs/state/eval-baselines.md)。
 
+### Codex / 人工复核
+
+- `python -m eval.run_review --run-id <run-id>` 会读取 completed M27 artifact、同 run 的短期 checkpoint 和 canonical catalog，生成独立的 review JSON / Markdown。
+- bundle 只保留脱敏 SQL、有限结果 preview、Trace 摘要、合同和自动 assertion 事实，供 Codex 或人工写 `pass` / `fail` / `insufficient_evidence` verdict。
+- review 是自动评分之后的旁路证据：不能改写 EvalRun、不能重算分母或 Gate，也不能用 M26 的 `eval.run_audit` 读取。
+- checkpoint 已清理或与 artifact 身份不一致时，命令必须失败；不要从 Markdown 总结猜造人工结论。
+
 ## Legacy：formal / challenge / diagnostic 三层用例
 
 > 以下内容描述 M27 前的历史结构，只为理解冻结 YAML、旧 report 和 audit 输入保留；不再是当前加 case 或运行 eval 的规则。

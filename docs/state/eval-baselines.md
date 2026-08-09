@@ -38,7 +38,7 @@ Gate 也是独立视图：selector / suite policy 决定 assertion 为 `required
 
 | Run ID | 日期 | Selector / Scenario | Resolved runtime | Oracle / artifact | Assertion views | Gate | 解释边界 |
 |---|---|---|---|---|---|---|---|
-| [`m27-smoke-20260809-02`](../../eval/reports/m27-artifacts/m27-smoke-20260809-02.json) | 2026-08-09 | `smoke`；4 logical Scenario / 4 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；LangFuse off | SQLite deterministic seed；[Markdown report](../../eval/reports/m27-smoke-20260809-02.md) | required：passed 9 / failed 0 / not_observed 0 | `passed` | 仅验证 API、Guard、Trace、artifact、report 闭环；不是 Core/Stress 基线，不能与 M26 `25/32` 等旧口径比较。 |
+| [`m27-smoke-20260809-02`](../../eval/reports/m27-artifacts/m27-smoke-20260809-02.json) | 2026-08-09 | `smoke`；4 logical Scenario / 4 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；LangFuse off | SQLite deterministic seed；[Markdown report](../../eval/reports/m27-smoke-20260809-02.md)；[Codex review](../../eval/reports/m27-reviews/m27-smoke-20260809-02-review.md) | required：passed 9 / failed 0 / not_observed 0；Codex review 4/4 pass | `passed` | 仅验证 API、Guard、Trace、artifact、report 闭环；不是 Core/Stress 基线，不能与 M26 `25/32` 等旧口径比较。 |
 
 首次 `m27-smoke-20260809-01` 在外部调用期间被工具时限中断，只留下 `running` checkpoint；M27 不支持 resume，该不完整 run 不进入 artifact、Gate 或分数账本。
 
