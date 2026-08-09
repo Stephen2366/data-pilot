@@ -14,12 +14,14 @@
 
 - 开始任何开发 / 排障 / 验证前，必须先读本文。
 - 只要要运行命令、切模型、开 LangFuse、跑 eval，必须读 `docs/state/runbook.md`。
+- 真实 Eval 的前台等待超时不等于 run 已结束；必须按 runbook 用同一 `run_id` 检查 manifest、checkpoint 和 artifact，禁止未经确认换 `run_id` 重跑。
 - 只要涉及 eval 数字、模型 A/B、失败归因、测试集口径、通过率解读，必须读 `docs/state/eval-baselines.md`。
 - 只要涉及 SQL、字段、指标、seed、expected SQL、`result_match`，必须读 `docs/state/database-current-state.md`。
 - 只要涉及 Schema Retrieval、Milvus collection、embedding provider / model / dimension、`schema_docs_hash`，必须读 `docs/state/schema-retrieval-milvus-embedding.md`。
 - 只要需要追溯为什么这样设计、历史实验、默认值为何不切，必须读 `docs/state/AI_CONTEXT_CHANGELOG.md`。
 - `docs/dev-log.md` 面向用户学习复盘；只有写日志、解释面试讲法或用户要求时再读。
 - 不允许只凭本文摘要修改默认模型、默认 embedding、正式 eval case、安全策略或数据库结构；这些长期影响选择必须先向用户说明方案 / 风险 / 后续影响并等待确认。
+- 用户明确要求执行某个 eval 时，以 runbook 的“一次精确运行授权”为准：直接执行，不把授权问题重复抛回用户；执行器超时先查 run 状态，不能猜测子进程已停止。
 
 ## 当前默认值
 
@@ -38,9 +40,10 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-09 | 用户本意授权 M27 Core Qwen `qwen3.7-max` local/Milvus 各一次，但前台超时后 local 子进程继续完成，造成 **4 次 local**（执行重复失误）：required `28/6/0`、`29/5/0`、`13/20/1`、`9/23/2`（passed/failed/not_observed），均 Gate failed，说明单次波动明显。Milvus 单次为 `9/23/2`；DashScope `qwen3.7-text-embedding`、1024 维、weighted、clean 195-doc collection `datapilot_schema_docs_m27_qwen37max_qwenemb_20260809_180700`、hash `8a8b6626...`。不能把某条 local 与单次 Milvus 相同解释为检索无影响，也不改变默认。 |
 | 2026-08-09 | 用户授权的 M27 Core local/Milvus 对照完成：两侧均为 Qwen `qwen3.7-plus`、weighted、45s/retry0、SQLite seed、LangFuse off，均完成 19 logical Scenario / 19 physical attempts，required assertion 都是 **29 passed / 5 failed / 0 not_observed**、Core Gate `failed`，失败 Scenario/断言也完全相同（退款率排名 result/output/schema_context、实际金额 metric_mapping、渠道 GMV dashboard schema_context）。Milvus 侧实际使用 DashScope `qwen3.7-text-embedding`、1024 维、独立 clean 195-doc collection、hash `8a8b6626...`。这一对单次观察未显示 Milvus 改变本轮 assertion 结果；各仅一次，不能推断检索因果、稳定性或默认切换。 |
 | 2026-08-09 | 用户再次执行同条件 M27 `smoke`：`m27-smoke-20260809-03` 为 **4/4 logical Scenario 完成、9/9 required assertion 通过、Gate passed**，无 failed/not_observed/unavailable；随后 Codex review **4/4 high-confidence pass**，均为 `auto_passed_manual_pass`。resolved runtime 与 `-02` 相同（Qwen `qwen3.7-plus`、inmemory deterministic/weighted、45s/retry0、SQLite seed、LangFuse off）。两次 Smoke 同结果只说明该小范围链路在此配置下重复成功，仍不是 Core/Stress 基线、稳定能力/成本结论或与 M26 的可比总分。 |
-| 2026-08-09 | M27 新增独立 `eval.review` / `eval.run_review`：completed artifact + 同 run 短期 checkpoint + canonical catalog 才能生成脱敏 Codex/人工复核包；checkpoint 缺失或身份不一致会失败，不从 Markdown 猜证据。review verdict（`pass/fail/insufficient_evidence`）与 auto/manual reconciliation 只写旁路 bundle，绝不改 EvalRun、自动分母或 Gate，M26 audit 继续只读 legacy。已对 `m27-smoke-20260809-02` 生成 4 条 Codex 高置信度 `pass` verdict；focused `38 passed, 1 warning`，未调用新的 LLM。 |
+| 2026-08-09 | M27 的 `eval.review` / `eval.run_review` 已加固为 `m27-review-bundle-v2`：completed artifact、同 run 短期 checkpoint、canonical catalog 三者对齐后，bundle 记录 artifact/每题 checkpoint 的 SHA-256；`--verify-bundle` 可只读校验来源未被替换。普通业务题没有 candidate SQL 时只能标 `insufficient_evidence`，安全/预期拒绝才可凭拦截证据通过；人工分类只用于错误汇总，绝不改 EvalRun、分母或 Gate，M26 audit 继续只读 legacy。Core/Stress 后复核全部自动失败和高风险合同，并抽样自动通过题；既有 v1 review 是无哈希历史材料。review + M27/M25/M26 退款反事实验证 `37 passed, 1 warning`，未调用新的 LLM。 |
 | 2026-08-09 | 用户授权完成一次 M27 `smoke` 真实 LLM run：Qwen `qwen3.7-plus` + inmemory deterministic/weighted + 45s/retry0 + SQLite deterministic seed + LangFuse off，artifact `m27-smoke-20260809-02` / report `eval/reports/m27-smoke-20260809-02.md`；4 个 logical Scenario、9 条 required assertion 全通过，Gate `passed`，无 unavailable。它只验证 Smoke 链路和当前一次调用，不是完整主回归或稳定能力/成本基线，不与 M26 `25/32` 等历史数字比较。此前 `m27-smoke-20260809-01` 在外部调用期间被工具时限中断，保留为 incomplete checkpoint，不投影、不计分。 |
 | 2026-08-09 | M27 已完成确定性收工：旧 42 raw/26 semantic-group 盘点后形成 28 个 `m27-v1` canonical Scenario，单题多 typed assertion 共享一次 Pipeline/Oracle snapshot；新增 Core/Stress/Manual policy、Smoke/Reliability/Database Exception selector、三态 gate、结构化脱敏 artifact 和 Markdown/LangFuse payload adapter。`eval.run_eval` CLI 已切到 `Evaluator.evaluate()`；旧 case/report/audit 只读冻结。全仓 `208 passed, 1 warning`；未运行真实 LLM M27 基线，未切任何默认模型/retrieval/embedding/DB/oracle/reliability。新 M27 数字不得与 M26 `25/32` 等历史分数比较。 |
 | 2026-08-08 | M26-v1 第二轮四组已完成：plus+local `25/32`、plus+Milvus `25/32`、max+local `26/32`、max+Milvus `26/32`；两轮区间分别为 `25–26`、`25–26`、`25–26`、`26–27`。两组 Milvus 仍校验为 195 initial / 0 inserted / 195 final、hash `8a8b6626...`。`db_schema_003` 四组第二轮仍为 alternatives mismatch；max 两组再次出现 44–68 秒延迟。每组仅两次，仍不改变默认 local deterministic/weighted。 |

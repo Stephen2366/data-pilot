@@ -37,7 +37,7 @@
 
 > 当前正式入口为 **M27 canonical eval**：一个 Scenario 只执行一次，Result / Context / Plan / Trace / Safety 等 typed assertion 共享同一份证据。旧 formal / challenge / diagnostic YAML、报告与分数是只读历史证据；它们不再由当前 `eval.run_eval` CLI 生成新结果。历史口径与数字见 `docs/archive-versions/eval-baselines-old.md`。
 
-> 真实 LLM eval 默认不自动运行。用户明确要求执行某个 eval（如“跑 Smoke”“执行 Core eval”）即视为该命令的授权，直接按当前默认配置运行。
+> 真实 LLM eval 默认不自动运行。用户明确说“执行 / 跑 <selector 或 suite>”时，即授权**恰好一次**运行该命令；直接按当前默认配置执行，不重复询问授权。该授权覆盖既定临时环境变量、唯一 run ID、artifact/report/checkpoint 写入和状态轮询，但不覆盖扩大范围、额外重复运行或切换默认配置。
 
 | 目标 | 适用场景 / 数量 | 命令骨架 | 说明 |
 |---|---|---|---|
@@ -47,11 +47,27 @@
 | Stress suite | 验证复杂业务边界；9 题 / 9 次调用 | `python -m eval.run_eval --suite stress --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 覆盖递归、SCD、退款、复杂 Join；默认 advisory。 |
 | Reliability selector | 看波动与可用性；2 题 / 6 次调用 | `python -m eval.run_eval --selector reliability --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 每题 3 个 replicate；分母仍是 2 个逻辑 Scenario。 |
 | Database Exception selector | 验证异常数据口径；7 题 / 7 次调用 | `python -m eval.run_eval --selector database-exception --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 选择 canonical Stress Scenario，不复制异常题正文。 |
-| M27 Codex / 人工复核 | 自动结果需逐题业务核验；0 次模型调用 | `python -m eval.run_review --run-id <run-id> [--verdicts-json <verdicts.json>]` | 只读 completed artifact、短期 checkpoint 与 catalog；生成独立 review bundle，不改变 EvalRun、分母或 Gate。checkpoint 清理后会明确拒绝生成，不猜造证据。 |
+| M27 Codex / 人工复核 | 自动结果需逐题业务核验；0 次模型调用 | `python -m eval.run_review --run-id <run-id> [--verdicts-json <verdicts.json>]` | 只读 completed artifact、短期 checkpoint 与 catalog，生成带 SHA-256 来源指纹的独立 review bundle；不改变 EvalRun、分母或 Gate。 |
+| 校验既有 review 来源 | 复核前确认材料未被替换；0 次模型调用 | `python -m eval.run_review --verify-bundle eval/reports/m27-reviews/<run-id>-review.json` | 对 artifact 与每题 checkpoint 重算 SHA-256；缺失、清理或改写都会失败。 |
 | M26 audit（冻结审计，无模型调用） | 复核历史 run；数量随冻结输入 | `python -m eval.run_audit --trace <frozen-trace.jsonl> --report <frozen-report.md> --triage <frozen-triage.json> --output-prefix eval/reports/m26-audit` | 只读取旧 case/trace/report/triage；不调用 LLM、不重跑旧 scorer。 |
 | schema retrieval embedding-only | 只测检索召回；10 条 query | `python -m eval.run_schema_retrieval_benchmark --report eval/reports/<name>-schema-retrieval-report.md --top-k 12 --fusion-strategy weighted` | 不调用 PipelinePort / LLM SQL；Milvus 与 embedding 开关见 state 文档。 |
 
 M27 artifact 默认写入 `eval/reports/m27-artifacts/`，短期 checkpoint 写入 `.codex/temp_work/m27-checkpoints/`，JSONL trace 写入 `eval/traces/`。报告中的 `eligible / observed / passed / failed / not_observed`、Gate 和可比性规则见 `docs/state/eval-baselines.md`。
+
+### M27 Review 覆盖规则
+
+- Core / Stress 运行后，优先复核**全部自动失败**、退款/SCD/金额/时间/递归等**高风险业务合同**，再抽取少量自动通过题作为误通过抽样；不是每次都机械复核全部通过题。
+- 普通业务题没有 candidate SQL（例如外部服务不可用）时只能标 `insufficient_evidence`，意思是“没有足够材料判断”，不是模型答对或答错。只有 `safety_block` / `expected_rejection` 合同可以凭明确拦截证据判通过。
+- verdict 还必须填写结构化分类：`confirmed_correct`、两类正确拒绝，或业务 SQL / 输出合同 / Schema Context / 其他合同错误，以及 `execution_evidence_unavailable`。分类只为汇总定位，**不参与自动 Gate 或 CI**。
+- 新生成的 bundle 为 `m27-review-bundle-v2`。早期 v1 review 仅作历史证据，缺少来源哈希和上述限制，不能用新校验命令验证；需要时按原 run 重新生成 v2，而不是改写旧自动 EvalRun。
+
+### 长时间真实 Eval 的执行纪律
+
+- 默认直接在当前终端执行一次 `python -m eval.run_eval`；一次用户授权只创建一个 `run_id`。`run_id` 就是本次评测的唯一准考证号，用来绑定 checkpoint、artifact 和报告，不能拿它反复重跑。
+- 前台工具等待超时**不等于** Eval 已停止。先检查同一 `run_id` 的 manifest、checkpoint 和 artifact：checkpoint 仍增长或 manifest 为 `running` 时，只继续等待和轮询，禁止换 `run_id` 重跑。
+- 普通 Smoke / Core 不要临时使用 `.ps1`、隐藏 PowerShell、计划任务或额外终端。它们不是项目的正式入口，容易让一次授权意外变成多次真实调用。
+- 只有确认原 run 进程已经退出、manifest 明确为 `interrupted` / `failed`、且没有 completed artifact 时，才可新建 `run_id` 重跑；必须先在模块 notes 记录原因。
+- 若未来确实需要后台执行能力，应单独设计、测试并取得用户确认一个固定入口；不能在真实 LLM 基线期间临时拼装执行器。
 
 ## 运行纪律
 

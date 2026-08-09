@@ -34,6 +34,12 @@ Gate 也是独立视图：selector / suite policy 决定 assertion 为 `required
 - 修改 canonical Scenario、reference SQL、typed assertion、selector、gate、模型、检索、embedding、数据库 snapshot 或 reliability protocol 后，必须标记为新合同/新条件，不能把结果直接拼进同一基线序列。
 - retrieval-only benchmark 继续独立记录；它不调用 PipelinePort，不能证明端到端 Text2SQL 收益。
 
+### 人工复核的边界
+
+M27 review bundle 是解释自动结果的旁路证据，不是第二套分数：它不改变 `eligible / observed / passed / failed / not_observed`、不改变 Gate，也不能与自动数字混算。Core / Stress 后复核全部自动失败、退款/SCD/金额/时间/递归等高风险合同，并抽样少量自动通过题。
+
+自 `m27-review-bundle-v2` 起，bundle 保存 artifact 与各 checkpoint 的 SHA-256，复核前可验证来源仍是原文件。普通业务题没有 candidate SQL 时只能记为 `insufficient_evidence`；安全或预期拒绝题可以凭明确拦截证据判通过。人工分类只服务于错误聚合，绝不成为新分母或 Gate 输入。早期 v1 review 是无哈希的历史旁路材料，不能直接和 v2 的来源校验混用。
+
 ## 4. 已运行的真实 LLM Smoke（非基线）
 
 | Run ID | 日期 | Selector / Scenario | Resolved runtime | Oracle / artifact | Assertion views | Gate | 解释边界 |
@@ -49,6 +55,10 @@ Gate 也是独立视图：selector / suite policy 决定 assertion 为 `required
 |---|---|---|---|---|---|
 | [`m27-core-20260809-qwen37plus-local-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-local-01.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-local-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 与下方 Milvus 组成一次配对；两侧的失败 assertion 完全相同。单次结果不与 M26 比较，也不推断稳定性。 |
 | [`m27-core-20260809-qwen37plus-milvus-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-milvus-01.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-plus`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-milvus-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 独立 clean collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`：195 docs、hash `8a8b6626...`。与 local 单次一致，只能说本轮未观察到结果变化。 |
+| [`m27-core-20260809-qwen37max-local-05`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-05.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-max`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-local-05.md)；required：9 passed / 23 failed / 2 not_observed；Gate `failed` | 与下方 Milvus 为一次配对；较 plus 的本轮结果更差，但各只有一次，不作稳定模型能力结论。 |
+| [`m27-core-20260809-qwen37max-milvus-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-milvus-01.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-max`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-milvus-01.md)；required：9 passed / 23 failed / 2 not_observed；Gate `failed` | clean collection `datapilot_schema_docs_m27_qwen37max_qwenemb_20260809_180700`：195 docs、hash `8a8b6626...`。与 local 单次完全一致，只能说本轮未观察到检索路径改变结果。 |
+
+> 执行记录更正：本意只跑一次 max local，但前台工具超时后子进程继续完成，额外产生 [`local-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-01.json)、[`local-02`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-02.json)、[`local-04`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-04.json)。三条 required 分别为 28/6/0、29/5/0、13/20/1（passed/failed/not_observed），均 Gate failed。它们是执行重复失误但也是已完成的真实快照，保留以反映波动；不得与单次 Milvus 作因果结论。
 
 ## 6. 首个真实基线登记模板
 

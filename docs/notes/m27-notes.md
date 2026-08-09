@@ -189,6 +189,10 @@
 - 解释边界：Smoke 仅验证当前运行环境下 API、Guard、Trace、artifact 与报告闭环，不是完整 Core/Stress 评测，不能推出稳定模型能力、成本或可靠性，也不得与 M26 的 `25/32` 等旧口径相比较。
 - 2026-08-09：用户再次执行相同 M27 `smoke`，`m27-smoke-20260809-03` 为 **4/4 logical Scenario 完成、9/9 required assertion passed、Gate passed**，无 failed/not_observed/unavailable。随后 `eval.run_review` 读取同 run artifact/checkpoint/catalog，4 条 Codex verdict 均为 high-confidence `pass`，reconciliation 全为 `auto_passed_manual_pass`。resolved runtime 与 `-02` 相同；它仍只是第二次链路快照，不升级为完整基线或可靠性结论。
 - 2026-08-09：用户授权 M27 Core 的 Qwen plus local / Milvus 对照。local `m27-core-20260809-qwen37plus-local-01` 完成：19/19 logical execution，Core required assertion `29 passed / 5 failed / 0 not_observed`，Gate `failed`。失败集中于退款率排名（result/output/schema context）、实际金额指标绑定、渠道 GMV dashboard schema context；无 external unavailable。Docker daemon 恢复后，Milvus `m27-core-20260809-qwen37plus-milvus-01` 完成：DashScope `qwen3.7-text-embedding`、1024 维、weighted、独立 collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`；实测 195 entities、hash `8a8b6626...`。两侧 assertion 计数、失败 Scenario/断言/reason 均一致。各只运行一次，记录为“本轮未观察到 Milvus 改变结果”，不作因果或默认切换结论。
+- 2026-08-09：用户授权 Qwen `qwen3.7-max` 的 M27 Core local / Milvus 对照。执行工具前台返回超时后，local 子进程实际仍在后台继续完成；因此除配置错误后主动停止的 `-03` 外，`-01`、`-02`、`-04`、`-05` 都产生了 completed artifact。**这是本轮执行重复的失误**：用户只授权一次 local，但意外得到 4 次 local 快照，必须保留并如实记录，不能选择性删除。
+- 四次 local required 分别为：`-01` 28 passed / 6 failed / 0 not_observed，`-02` 29 / 5 / 0，`-04` 13 / 20 / 1，`-05` 9 / 23 / 2；均 Gate `failed`。它们显示同配置下显著波动，不能挑选 `-05` 与 Milvus 单次相同的结果来声称稳定对照。
+- 改由一次性 Windows task worker 后，local `m27-core-20260809-qwen37max-local-05` 完成：19/19 logical / physical，Core required assertion **9 passed / 23 failed / 2 not_observed**，Gate `failed`；无 external unavailable/pipeline error。Milvus `m27-core-20260809-qwen37max-milvus-01` 以同一模型、45s/retry0、weighted、SQLite deterministic seed、LangFuse off 完成，计数与 assertion views 完全一致。
+- Milvus 实测 collection 为 `datapilot_schema_docs_m27_qwen37max_qwenemb_20260809_180700`：DashScope `qwen3.7-text-embedding`、1024 dim、195 entities、description hash `8a8b6626a4cbec...`。该配对各一次，只能描述为“本轮未观察到 Milvus 改变 qwen3.7-max 的 Core assertion 结果”；不能推断 embedding 因果、稳定性或默认切换。
 
 ## M27 Review Bundle 增补（用户授权，进行中）
 
@@ -203,3 +207,27 @@
 - `eval.review.build_review_bundle()` 是唯一组装 Interface：它校验 completed M27 artifact、raw checkpoint、catalog 的 run/scenario/replicate/assertion 身份，缺失或不一致即失败。bundle 提供 candidate/reference SQL、最多 3 行脱敏 candidate/reference preview、trace 摘要、contract 和 assertion 事实；email/phone/credential key 与文本中的 email/手机号会被脱敏。
 - `apply_review_verdicts()` 强制所有 logical Scenario 都有 `pass/fail/insufficient_evidence`、confidence、reason 和 evidence，输出独立 reconciliation；`eval.run_review` CLI 不执行 Pipeline/LLM，只写 `eval/reports/m27-reviews/`。
 - 验证：`python -m pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.codex/temp_work/pytest-m27-review-final`：**38 passed, 1 warning**（既有 Starlette/httpx deprecation）。对既有 `m27-smoke-20260809-02` 运行 CLI 后生成 4 条 Codex high-confidence `pass` verdict；无新的真实 LLM 调用。
+
+## M27 Review Evidence Hardening（用户授权，进行中）
+
+- [x] 为 completed artifact 与每条 checkpoint 记录 SHA-256，并提供只读校验入口。
+- [x] 让无 candidate SQL 的普通业务题只能标为 `insufficient_evidence`；安全/预期拒绝题仍可凭拦截证据通过。
+- [x] 为人工 verdict 增加受限的结构化分类，并在报告汇总分类计数。
+- [x] 固化 Core/Stress 的人工复核覆盖规则，保持旁路、不影响 Gate/CI。
+- [x] 核验 M26 指出的退款整单回退反事实是否已有确定性保护，避免重复造测试。
+
+### 关键判断与取舍
+
+- review bundle 升为 `m27-review-bundle-v2`：来源哈希应绑定“当时看到的 artifact/checkpoint”，而非加入 EvalRun；`--verify-bundle` 只读重算，来源被清理、改写或替换就失败。早期 v1 review 没有哈希，保留为历史材料，不假装可被 v2 校验。
+- 普通业务题没有 candidate SQL 时，Codex 看不到实际模型答卷；此前允许手写 `pass/fail` 容易把“没拿到材料”误说成“答案对/错”。现在强制 `insufficient_evidence + execution_evidence_unavailable`。安全/预期拒绝题例外，因为 Guard 的拒绝原因本身就是合同所需证据。
+- `category` 被限制为正确、正确拒绝、业务 SQL、输出合同、Schema Context、执行证据不可用、其他合同错误八类，并与 verdict 和 assertion kind 交叉校验；报告只汇总定位，绝不反写自动分数/Gate。
+- 复核覆盖采用“全部自动失败 + 高风险业务合同 + 少量自动通过抽样”，而不是把每轮 Core/Stress 的全部通过题都人工再判一次。退款、SCD、金额、时间、递归属于高风险合同。
+- M26 指出的 completed 状态 / 整单退款 fallback 已由 `tests/test_m25_eval_trustworthiness.py` 和 `tests/test_m26_targeted_contracts.py` 的 SQLite 反事实保护；M27 catalog 也沿用 `COALESCE(order_items.product_id, refunds.product_id)` 合同。因此本轮不重复复制同义测试，改为在验证命令中纳入这两组现有保护。
+
+### 本轮验证快照
+
+- `python -m pytest -q tests/test_m27_review.py tests/test_m27_oracle_counterfactuals.py tests/test_m27_foundation.py --basetemp=.codex/temp_work/pytest-m27-review-hardening-final`：**20 passed, 1 warning**。新增覆盖 artifact/checkpoint SHA-256 篡改检测、无 SQL 普通题的 `insufficient_evidence` 限制、verdict 分类汇总；warning 为既有 Starlette/httpx deprecation。
+- 再加 M25/M26 的退款反事实保护：`python -m pytest -q tests/test_m27_review.py tests/test_m27_oracle_counterfactuals.py tests/test_m27_foundation.py tests/test_m25_eval_trustworthiness.py tests/test_m26_targeted_contracts.py --basetemp=.codex/temp_work/pytest-m27-review-hardening-final2`：**37 passed, 1 warning**。
+- `python -m eval.run_review --help`：成功展示 `--verify-bundle`；仅解析 CLI，无 Pipeline/LLM 调用。
+- `git diff --check`：通过；仅有 Git LF→CRLF 工作区提示，无 whitespace error。
+- 未重跑真实 LLM、未改模型/检索/embedding/数据库/oracle/default reliability，也未重写既有 v1 Smoke review 历史文件。

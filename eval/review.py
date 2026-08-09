@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import asdict
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -18,9 +19,19 @@ from typing import Any, Literal
 from eval.contracts import CONTRACT_VERSION, Catalog, ResultMatchSpec
 
 
-REVIEW_BUNDLE_SCHEMA_VERSION = "m27-review-bundle-v1"
+REVIEW_BUNDLE_SCHEMA_VERSION = "m27-review-bundle-v2"
 ReviewVerdict = Literal["pass", "fail", "insufficient_evidence"]
 Confidence = Literal["high", "medium", "low"]
+ReviewCategory = Literal[
+    "confirmed_correct",
+    "safety_block_correct",
+    "expected_rejection_correct",
+    "business_sql_error",
+    "output_contract_error",
+    "schema_context_error",
+    "execution_evidence_unavailable",
+    "other_contract_error",
+]
 
 _PROTECTED_KEYS = {"email", "phone", "authorization", "api_key", "token", "password"}
 _EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -59,9 +70,15 @@ def build_review_bundle(
         replicate_id = artifact_run.get("replicate_id")
         if scenario_id not in scenarios or not isinstance(replicate_id, int):
             raise ValueError(f"artifact scenario identity is invalid: {scenario_id!r}/{replicate_id!r}")
-        checkpoint = _load_checkpoint(checkpoint_root, run_id, scenario_id, replicate_id)
+        checkpoint_path = _checkpoint_path(checkpoint_root, run_id, scenario_id, replicate_id)
+        checkpoint = _load_json_object(checkpoint_path, label="checkpoint")
         _validate_checkpoint(checkpoint, run_id=run_id, scenario_id=scenario_id, replicate_id=replicate_id)
-        records.append(_build_record(scenarios[scenario_id], artifact_run, checkpoint, max_result_rows))
+        record = _build_record(scenarios[scenario_id], artifact_run, checkpoint, max_result_rows)
+        record["source_checkpoint"] = {
+            "path": str(checkpoint_path),
+            "sha256": _sha256_file(checkpoint_path),
+        }
+        records.append(record)
     if not records:
         raise ValueError("completed artifact has no scenario runs to review")
     return {
@@ -74,10 +91,42 @@ def build_review_bundle(
             "catalog_hash": artifact["catalog_hash"],
             "selected_contract_hash": artifact["selected_contract_hash"],
             "artifact_path": str(artifact_path),
+            "artifact_sha256": _sha256_file(artifact_path),
             "checkpoint_root": str(checkpoint_root),
         },
         "records": records,
     }
+
+
+def verify_review_bundle_sources(bundle: dict[str, Any]) -> dict[str, int]:
+    """校验 review bundle 引用的 artifact/checkpoint 从生成后没有被悄悄替换。
+
+    review 是旁路证据，哈希不为它增加评分权力；它只让复核者能确认眼前 SQL/结果预览仍来自
+    当时那个 completed EvalRun。任一短期 checkpoint 被清理、改写或换成别的文件都会明确失败。
+    """
+
+    if bundle.get("review_bundle_schema_version") != REVIEW_BUNDLE_SCHEMA_VERSION:
+        raise ValueError("unsupported review bundle schema")
+    source = bundle.get("source")
+    if not isinstance(source, dict):
+        raise ValueError("review bundle source must be an object")
+    artifact_path = Path(str(source.get("artifact_path", "")))
+    _verify_file_hash(artifact_path, source.get("artifact_sha256"), label="artifact")
+    records = bundle.get("records")
+    if not isinstance(records, list):
+        raise ValueError("review bundle records must be a list")
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("review bundle records must contain objects")
+        checkpoint = record.get("source_checkpoint")
+        if not isinstance(checkpoint, dict):
+            raise ValueError(f"review checkpoint source missing: {record.get('scenario_id')}")
+        _verify_file_hash(
+            Path(str(checkpoint.get("path", ""))),
+            checkpoint.get("sha256"),
+            label=f"checkpoint for {record.get('scenario_id')}",
+        )
+    return {"artifact": 1, "checkpoints": len(records)}
 
 
 def apply_review_verdicts(bundle: dict[str, Any], verdicts: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -97,12 +146,14 @@ def apply_review_verdicts(bundle: dict[str, Any], verdicts: dict[str, dict[str, 
         supplied = verdicts[scenario_id]
         verdict = supplied.get("verdict")
         confidence = supplied.get("confidence")
+        category = supplied.get("category")
         reason = supplied.get("reason")
         evidence = supplied.get("evidence")
         if verdict not in {"pass", "fail", "insufficient_evidence"}:
             raise ValueError(f"invalid review verdict for {scenario_id}: {verdict!r}")
         if confidence not in {"high", "medium", "low"}:
             raise ValueError(f"invalid review confidence for {scenario_id}: {confidence!r}")
+        _validate_review_category(record, verdict, category)
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError(f"review reason is required for {scenario_id}")
         if not isinstance(evidence, list) or not all(isinstance(item, str) and item for item in evidence):
@@ -110,10 +161,12 @@ def apply_review_verdicts(bundle: dict[str, Any], verdicts: dict[str, dict[str, 
         record["review_verdict"] = {
             "verdict": verdict,
             "confidence": confidence,
+            "category": category,
             "reason": _redact_text(reason),
             "evidence": [_redact_text(item) for item in evidence],
         }
         record["reconciliation"] = _reconciliation(str(record["automatic_outcome"]), verdict)
+    copied["review_summary"] = _review_summary(records)
     return copied
 
 
@@ -135,6 +188,12 @@ def write_review_markdown(bundle: dict[str, Any], path: Path) -> None:
         f"- review_bundle_schema_version: `{bundle.get('review_bundle_schema_version', '')}`",
         "- 说明：本文件是独立人工/Codex 复核证据，不改变 EvalRun、自动分母或 Gate。",
     ]
+    summary = bundle.get("review_summary")
+    if isinstance(summary, dict):
+        lines.extend([
+            f"- 人工 verdict 汇总：`{json.dumps(summary.get('verdict_counts', {}), ensure_ascii=False)}`",
+            f"- 人工分类汇总：`{json.dumps(summary.get('category_counts', {}), ensure_ascii=False)}`",
+        ])
     for record in bundle.get("records", []):
         lines.extend([
             "",
@@ -144,6 +203,7 @@ def write_review_markdown(bundle: dict[str, Any], path: Path) -> None:
             f"- 自动结果：**{record['automatic_outcome']}**",
             f"- 执行状态：`{record['execution_status']}`",
             f"- 自动 assertions：{', '.join(record['automatic_assertions'])}",
+            f"- 复核限制：`{record['review_policy']['allowed_verdicts']}`；{record['review_policy']['reason']}",
         ])
         candidate_sql = record["review_evidence"].get("candidate_sql")
         if candidate_sql:
@@ -163,6 +223,7 @@ def write_review_markdown(bundle: dict[str, Any], path: Path) -> None:
         else:
             lines.extend([
                 f"- 人工复核：**{review['verdict']}**（{review['confidence']}）",
+                f"- 人工分类：`{review['category']}`",
                 f"- reconciliation：`{record['reconciliation']}`",
                 f"- 原因：{review['reason']}",
                 f"- 证据：{', '.join(review['evidence'])}",
@@ -180,7 +241,7 @@ def _build_record(scenario: Any, artifact_run: dict[str, Any], checkpoint: dict[
     if not isinstance(artifact_assertions, list) or _assertion_identity(assertions) != _assertion_identity(artifact_assertions):
         raise ValueError(f"checkpoint/artifact assertion mismatch: {scenario.scenario_id}")
     references = [item.spec.reference_sql for item in scenario.assertions if isinstance(item.spec, ResultMatchSpec)]
-    return {
+    record = {
         "scenario_id": scenario.scenario_id,
         "replicate_id": checkpoint["replicate_id"],
         "question": _redact_text(scenario.question),
@@ -211,6 +272,8 @@ def _build_record(scenario: Any, artifact_run: dict[str, Any], checkpoint: dict[
         "review_verdict": None,
         "reconciliation": None,
     }
+    record["review_policy"] = _review_policy(record)
+    return record
 
 
 def _validate_artifact(artifact: dict[str, Any], *, run_id: str) -> None:
@@ -222,9 +285,10 @@ def _validate_artifact(artifact: dict[str, Any], *, run_id: str) -> None:
         raise ValueError(f"unsupported review contract: {artifact.get('contract_version')!r}")
 
 
-def _load_checkpoint(root: Path, run_id: str, scenario_id: str, replicate_id: int) -> dict[str, Any]:
-    path = root / run_id / "checkpoints" / f"{scenario_id}--r{replicate_id}.json"
-    return _load_json_object(path, label="checkpoint")
+def _checkpoint_path(root: Path, run_id: str, scenario_id: str, replicate_id: int) -> Path:
+    """集中约束短期 checkpoint 的命名，避免调用方自行拼路径。"""
+
+    return root / run_id / "checkpoints" / f"{scenario_id}--r{replicate_id}.json"
 
 
 def _validate_checkpoint(checkpoint: dict[str, Any], *, run_id: str, scenario_id: str, replicate_id: int) -> None:
@@ -249,6 +313,25 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
+def _sha256_file(path: Path) -> str:
+    """以流式方式计算文件指纹，不把完整 checkpoint 再复制进内存。"""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_file_hash(path: Path, expected: Any, *, label: str) -> None:
+    if not isinstance(expected, str) or len(expected) != 64:
+        raise ValueError(f"{label} SHA-256 is missing or invalid")
+    if not path.is_file():
+        raise FileNotFoundError(f"{label} missing: {path}")
+    if _sha256_file(path) != expected:
+        raise ValueError(f"{label} SHA-256 mismatch")
+
+
 def _assertion_identity(assertions: list[dict[str, Any]]) -> list[tuple[Any, Any, Any]]:
     return [(item.get("assertion_id"), item.get("kind"), item.get("status")) for item in assertions if isinstance(item, dict)]
 
@@ -265,6 +348,70 @@ def _automatic_outcome(assertions: list[dict[str, Any]]) -> str:
 def _reconciliation(automatic: str, manual: ReviewVerdict) -> str:
     manual_name = "manual_insufficient_evidence" if manual == "insufficient_evidence" else f"manual_{manual}"
     return f"auto_{automatic}_{manual_name}"
+
+
+def _assertion_kinds(record: dict[str, Any]) -> set[str]:
+    contract = record.get("contract")
+    assertions = contract.get("assertions") if isinstance(contract, dict) else []
+    return {str(item.get("kind")) for item in assertions if isinstance(item, dict)}
+
+
+def _review_policy(record: dict[str, Any]) -> dict[str, str]:
+    """把“证据不足不等于 SQL 错”编码为复核者看得见的窄规则。"""
+
+    candidate_sql = record.get("review_evidence", {}).get("candidate_sql")
+    assertion_kinds = _assertion_kinds(record)
+    if candidate_sql:
+        return {"allowed_verdicts": "pass / fail / insufficient_evidence", "reason": "候选 SQL 可供逐题核验。"}
+    if assertion_kinds & {"safety_block", "expected_rejection"}:
+        return {"allowed_verdicts": "pass / fail / insufficient_evidence", "reason": "此题允许以 Guard 的明确拒绝证据复核，无候选 SQL 不自动代表失败。"}
+    return {
+        "allowed_verdicts": "insufficient_evidence only",
+        "reason": "普通业务题没有 candidate SQL，无法判断答案对错；不得臆测为 pass 或 fail。",
+    }
+
+
+def _validate_review_category(record: dict[str, Any], verdict: Any, category: Any) -> None:
+    """验证 verdict 与分类、合同和可见证据互相不矛盾。"""
+
+    allowed_by_verdict = {
+        "pass": {"confirmed_correct", "safety_block_correct", "expected_rejection_correct"},
+        "fail": {"business_sql_error", "output_contract_error", "schema_context_error", "other_contract_error"},
+        "insufficient_evidence": {"execution_evidence_unavailable"},
+    }
+    if verdict not in allowed_by_verdict or category not in allowed_by_verdict[verdict]:
+        raise ValueError(f"invalid review category for {record['scenario_id']}: {category!r}")
+    policy = record.get("review_policy")
+    if isinstance(policy, dict) and policy.get("allowed_verdicts") == "insufficient_evidence only" and verdict != "insufficient_evidence":
+        raise ValueError(f"ordinary scenario without candidate SQL requires insufficient_evidence: {record['scenario_id']}")
+    kinds = _assertion_kinds(record)
+    if category == "safety_block_correct" and "safety_block" not in kinds:
+        raise ValueError(f"safety_block_correct requires safety_block contract: {record['scenario_id']}")
+    if category == "expected_rejection_correct" and "expected_rejection" not in kinds:
+        raise ValueError(f"expected_rejection_correct requires expected_rejection contract: {record['scenario_id']}")
+
+
+def _review_summary(records: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """汇总旁路复核标签，方便定位，不参与任何自动评分或 Gate。"""
+
+    verdict_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+    reconciliation_counts: dict[str, int] = {}
+    for record in records:
+        review = record.get("review_verdict")
+        if not isinstance(review, dict):
+            continue
+        for counts, value in (
+            (verdict_counts, review["verdict"]),
+            (category_counts, review["category"]),
+            (reconciliation_counts, record["reconciliation"]),
+        ):
+            counts[value] = counts.get(value, 0) + 1
+    return {
+        "verdict_counts": verdict_counts,
+        "category_counts": category_counts,
+        "reconciliation_counts": reconciliation_counts,
+    }
 
 
 def _preview_rows(value: Any, max_rows: int) -> list[dict[str, Any]]:

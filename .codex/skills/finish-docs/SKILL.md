@@ -34,8 +34,8 @@ accept-module（最终门禁检查）
 
 ## 阶段 1：读取素材
 
-1. 读取 `docs/notes/<module>-notes.md`——**必读**，包含：改动文件清单、关键决策与取舍（含选项/风险/推荐/用户选择）、注释小结、验证快照、参考资料、遗留。
-2. 读取 `docs/state/AI_CONTEXT.md` 当前状态 / 最新事实快照，确认当前模块、默认配置、最新基线。
+1. 读取 `docs/notes/<module>-notes.md`——**必读**。
+2. 读取 `docs/state/AI_CONTEXT.md` 当前状态 / 最近验证事实 / 当前路线判断，确认当前模块、默认配置、最新基线。
 3. 按需读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 近期变更记录，确认档案格式与最近结论。
 4. 跑 `git status --short` 和 `git diff --name-only` 核对改动范围与 notes.md 一致。
 5. 如果 notes.md 缺失关键素材（例如没有验证快照、没有决策记录），在文档里明确写“过程细节未记录”，并提示用户：可以补跑验证/补记素材后再继续；不要自行脑补。
@@ -368,7 +368,4 @@ accept-module（最终门禁检查）
 
 - 更新了哪些文档（AI_CONTEXT_CHANGELOG / AI_CONTEXT / dev-log）
 - 素材来源（哪个 notes.md，哪些内容来自验证快照）
-- 哪些地方写了“过程细节未记录”（如果有）
 - 有哪些 warning / 遗留
-
-> 全部收工完成后，提示用户可以继续调用 `accept-module` 做最终验收门禁。

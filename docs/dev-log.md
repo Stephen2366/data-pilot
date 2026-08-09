@@ -1332,7 +1332,15 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_audit --tr
 
 - **用反事实守住业务合同**：只在当前 seed 上对比结果，错误 SQL 可能碰巧通过。因此 SCD、退款率和递归分类都有最小 SQLite 反事实：缺少 `valid_to IS NULL`、把 rejected refund 算进分子、漏掉子类时，坏 SQL 必须得到不同结果。这证明的是 **case 合同和 scorer 能区分对错**，不是模型能力已经提升。
 
-- **明确本模块没有做什么**：M27 保存的是脱敏的结构化 artifact（例如行数、fingerprint、Trace 摘要），不默认保存完整结果行、prompt 或凭证；旧 M26 报告也不重算。更重要的是，本次没有跑新的真实 LLM 基线，所以不能声称默认模型在 28 个 Scenario 上的通过率、成本或稳定性已经得到验证；那需要用户单独授权后再建立新的事实锚点。
+- **明确本模块没有做什么**：M27 保存的是脱敏的结构化 artifact（例如行数、fingerprint、Trace 摘要），不默认保存完整结果行、prompt 或凭证；旧 M26 报告也不重算。后续虽已获授权运行 Core，但它只是有限次数的真实快照，不能据此宣称模型稳定能力、成本优势或检索因果。
+
+**后续补记**：M27 主体完成后，又围绕“人工怎么看结果”和“真实 Core 怎么读”做了三项小收口。
+
+1. **补人工复查功能**：新增独立 review bundle，让 Codex/人工能查看脱敏 SQL、有限结果样本和 Trace 摘要；它只帮助解释自动结果，**不改 Gate 和分数**。
+
+2. **吸收 M26 审查教训**：给复查材料加来源 SHA-256、错误分类，并规定普通题没有候选 SQL 时只能写“证据不足”，避免把外部调用失败误说成模型答错。
+
+3. **运行两轮 Core 对照**：`qwen3.7-plus` 与充值后 `qwen3.7-max` 的本地/Milvus Core 都出现 **29 passed / 5 failed / 0 not_observed**；这说明当前稳定暴露的是同一批合同缺口，不足以证明 Milvus 或模型谁更好。
 
 ### 新概念
 

@@ -13,6 +13,24 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [小修] 真实 Eval 的单次执行纪律（2026-08-09）
+
+- runbook 明确：一次用户授权只创建一个 `run_id`；前台等待超时不等于 Eval 停止，必须先检查同 run 的 manifest/checkpoint/artifact。普通 Smoke/Core 不得临时用 `.ps1`、隐藏 PowerShell、计划任务或额外终端重跑；只有原 run 明确失败且没有 completed artifact，才可记录原因后新建 run。
+
+### [实验] M27 Core：Qwen 3.7-max local / Milvus 对照（2026-08-09）
+
+- 用户授权各运行一次 Qwen `qwen3.7-max` 的 M27 Core；但前台工具返回超时后 local 子进程实际继续完成，除主动停止的环境变量错误 `-03` 外，`-01`、`-02`、`-04`、`-05` 都生成 completed artifact。此为执行重复失误，全部产物保留并如实记录：required 分别为 `28/6/0`、`29/5/0`、`13/20/1`、`9/23/2`（passed/failed/not_observed），均 Gate failed，显示该配置的单次波动，不能挑选一条作稳定结论。
+- 完整 local run 为 `m27-core-20260809-qwen37max-local-05`：19 logical / 19 physical，required `9 passed / 23 failed / 2 not_observed`，Gate `failed`，没有 external unavailable 或 pipeline error。Milvus `m27-core-20260809-qwen37max-milvus-01` 的计数和 assertion views 完全相同。
+- Milvus 固定 DashScope `qwen3.7-text-embedding`、1024 dim、weighted，collection `datapilot_schema_docs_m27_qwen37max_qwenemb_20260809_180700` 实测 195 entities、hash `8a8b6626...`。各侧仅一次，结论仅为本轮未观察到 Milvus 改变 qwen3.7-max 结果；不改变模型、检索或 embedding 默认值。
+
+### [模块任务] M27 Review Evidence Hardening（2026-08-09）
+
+- **改动范围**：将旁路 review bundle 升为 `m27-review-bundle-v2`，为 completed artifact 与每条短期 checkpoint 写入 SHA-256；新增 `python -m eval.run_review --verify-bundle <review.json>` 只读校验入口、结构化人工分类和 review 汇总。同步 runbook、cases README、M27 eval baseline 说明与过程 notes。
+- **关键记录**：普通业务题若没有 candidate SQL，只能写 `insufficient_evidence / execution_evidence_unavailable`，不能凭空判模型答对或答错；`safety_block`、`expected_rejection` 则可凭明确拦截证据复核。分类被限制为正确、正确拒绝、业务 SQL / 输出合同 / Schema Context / 其他合同错误或执行证据不可用，并和 verdict / assertion 合同交叉校验。
+- **覆盖策略**：Core / Stress 后复核全部自动失败、退款/SCD/金额/时间/递归等高风险合同，并抽样少量自动通过题。review 仍是定位证据，绝不接入 EvalRun、自动分母、Gate 或 CI。既有 v1 review 保留为没有来源哈希的历史材料；需要新保障时按原 run 生成 v2，不改写自动 artifact。
+- **反事实复用**：M26 指出的 completed 退款 / 整单退款 fallback 已由 `tests/test_m25_eval_trustworthiness.py` 与 `tests/test_m26_targeted_contracts.py` 的 SQLite 最小反例覆盖；本轮确认 M27 canonical SQL 沿用该 `COALESCE` 合同，不复制同义测试。
+- **验证快照**：review、M27 foundation/counterfactual 与 M25/M26 退款保护共 `37 passed, 1 warning`；`eval.run_review --help` 成功展示只读校验入口；`git diff --check` 通过。warning 为既有 Starlette/httpx deprecation；未调用真实 LLM，未改默认运行配置。
+
 ### [实验] M27 Core：Qwen plus local / Milvus 对照（2026-08-09）
 
 - 用户授权各运行一次 `qwen3.7-plus + local` 与 `qwen3.7-plus + Milvus` 的 M27 Core。local 已完成：`m27-core-20260809-qwen37plus-local-01` 固定 inmemory deterministic/weighted、45s/retry0、SQLite deterministic seed、LangFuse off，19 logical Scenario / 19 physical attempts。

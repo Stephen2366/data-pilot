@@ -34,10 +34,12 @@ M27 CLI、真实 LLM 授权边界、artifact 路径和命令见 [docs/state/runb
 
 ### Codex / 人工复核
 
-- `python -m eval.run_review --run-id <run-id>` 会读取 completed M27 artifact、同 run 的短期 checkpoint 和 canonical catalog，生成独立的 review JSON / Markdown。
-- bundle 只保留脱敏 SQL、有限结果 preview、Trace 摘要、合同和自动 assertion 事实，供 Codex 或人工写 `pass` / `fail` / `insufficient_evidence` verdict。
+- `python -m eval.run_review --run-id <run-id>` 会读取 completed M27 artifact、同 run 的短期 checkpoint 和 canonical catalog，生成独立的 v2 review JSON / Markdown；它记录 artifact 与每题 checkpoint 的 SHA-256。
+- `python -m eval.run_review --verify-bundle <review.json>` 可在复核前重算上述哈希；来源文件被清理、改写或替换时必须失败。
+- bundle 只保留脱敏 SQL、有限结果 preview、Trace 摘要、合同和自动 assertion 事实。普通业务题没有 candidate SQL 时只能写 `insufficient_evidence`；`safety_block` / `expected_rejection` 才能以明确拒绝证据判通过。
+- verdict 的结构化分类用于后续汇总：`confirmed_correct`、`safety_block_correct`、`expected_rejection_correct`、`business_sql_error`、`output_contract_error`、`schema_context_error`、`execution_evidence_unavailable`、`other_contract_error`。
 - review 是自动评分之后的旁路证据：不能改写 EvalRun、不能重算分母或 Gate，也不能用 M26 的 `eval.run_audit` 读取。
-- checkpoint 已清理或与 artifact 身份不一致时，命令必须失败；不要从 Markdown 总结猜造人工结论。
+- Core / Stress 后复核全部自动失败和退款/SCD/金额/时间/递归等高风险合同，并抽样少量自动通过题；不要从 Markdown 总结猜造人工结论。
 
 ## Legacy：formal / challenge / diagnostic 三层用例
 
