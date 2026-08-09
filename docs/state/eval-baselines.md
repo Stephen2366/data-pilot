@@ -39,10 +39,18 @@ Gate 也是独立视图：selector / suite policy 决定 assertion 为 `required
 | Run ID | 日期 | Selector / Scenario | Resolved runtime | Oracle / artifact | Assertion views | Gate | 解释边界 |
 |---|---|---|---|---|---|---|---|
 | [`m27-smoke-20260809-02`](../../eval/reports/m27-artifacts/m27-smoke-20260809-02.json) | 2026-08-09 | `smoke`；4 logical Scenario / 4 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；LangFuse off | SQLite deterministic seed；[Markdown report](../../eval/reports/m27-smoke-20260809-02.md)；[Codex review](../../eval/reports/m27-reviews/m27-smoke-20260809-02-review.md) | required：passed 9 / failed 0 / not_observed 0；Codex review 4/4 pass | `passed` | 仅验证 API、Guard、Trace、artifact、report 闭环；不是 Core/Stress 基线，不能与 M26 `25/32` 等旧口径比较。 |
+| [`m27-smoke-20260809-03`](../../eval/reports/m27-artifacts/m27-smoke-20260809-03.json) | 2026-08-09 | `smoke`；4 logical Scenario / 4 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；LangFuse off | SQLite deterministic seed；[Markdown report](../../eval/reports/m27-smoke-20260809-03.md)；[Codex review](../../eval/reports/m27-reviews/m27-smoke-20260809-03-review.md) | required：passed 9 / failed 0 / not_observed 0；Codex review 4/4 pass | `passed` | 与 `-02` 同条件的第二次 Smoke；只说明该小范围链路再次成功，不构成完整能力或可靠性基线。 |
 
 首次 `m27-smoke-20260809-01` 在外部调用期间被工具时限中断，只留下 `running` checkpoint；M27 不支持 resume，该不完整 run 不进入 artifact、Gate 或分数账本。
 
-## 5. 首个真实基线登记模板
+## 5. M27 Core 对照（进行中）
+
+| Run ID | 日期 | Suite | Resolved runtime | Assertion views / Gate | 解释边界 |
+|---|---|---|---|---|---|
+| [`m27-core-20260809-qwen37plus-local-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-local-01.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-local-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 与下方 Milvus 组成一次配对；两侧的失败 assertion 完全相同。单次结果不与 M26 比较，也不推断稳定性。 |
+| [`m27-core-20260809-qwen37plus-milvus-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-milvus-01.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-plus`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-milvus-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 独立 clean collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`：195 docs、hash `8a8b6626...`。与 local 单次一致，只能说本轮未观察到结果变化。 |
+
+## 6. 首个真实基线登记模板
 
 只有用户单独授权真实 LLM 运行后，才在此追加一条记录：
 
@@ -52,7 +60,7 @@ Gate 也是独立视图：selector / suite policy 决定 assertion 为 `required
 
 每条记录至少链接脱敏 EvalRun JSON 与 Markdown report；只引用 `ResolvedRuntimeIdentity`，不以命令行表象替代实际模型、检索和 oracle 事实。
 
-## 6. 历史账本
+## 7. 历史账本
 
 - 要查看 M13–M26 的模型、Milvus、embedding、formal / challenge / diagnostic、triage 与旧报告索引，请读 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 - 历史账本保留其原始口径和数字，便于追溯“当时为什么做这个决定”；它不再定义 M27 的命令、分母或 Gate。

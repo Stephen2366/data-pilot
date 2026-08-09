@@ -13,6 +13,13 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验] M27 Core：Qwen plus local / Milvus 对照（2026-08-09）
+
+- 用户授权各运行一次 `qwen3.7-plus + local` 与 `qwen3.7-plus + Milvus` 的 M27 Core。local 已完成：`m27-core-20260809-qwen37plus-local-01` 固定 inmemory deterministic/weighted、45s/retry0、SQLite deterministic seed、LangFuse off，19 logical Scenario / 19 physical attempts。
+- 结果：Core Gate `failed`；required assertion `29 passed / 5 failed / 0 not_observed`。失败为 `june_product_refund_rate_ranking` 的 result/output/schema_context、`june_actual_amount_sum` 的 metric_mapping、`june_channel_gmv_dashboard` 的 schema_context；无 external unavailable / pipeline error。
+- Docker daemon 恢复后，Milvus `m27-core-20260809-qwen37plus-milvus-01` 已完成：固定 DashScope `qwen3.7-text-embedding`、1024 维、weighted 和新的 collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`。实际 collection 为 195 entities、1024 维、description hash `8a8b6626...`，满足当前 corpus 的 clean 条件。
+- Milvus 结果与 local 完全相同：19 logical Scenario / 19 physical attempts，required `29 passed / 5 failed / 0 not_observed`，Gate `failed`；5 条失败的 Scenario、assertion 和 reason 均一致。该配对只有各一次，且真实 LLM 有非确定性；因此结论仅为“本轮未观察到 Milvus 改变 assertion 结果”，不作 embedding/检索因果、稳定性或默认切换结论。
+
 ### [模块任务] M27 Codex Review Bundle（2026-08-09）
 
 - **改动范围**：新增 `eval/review.py` 深 module、`eval/run_review.py` CLI 与 `tests/test_m27_review.py`；同步 M27 runbook / cases README / state 档案。它是用户在 M27 原计划“暂不实现人工 verdict 工作流”之外明确授权的旁路增补，不改 formal case、EvalRun schema、分母、Gate 或旧 M26 audit。
@@ -25,6 +32,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 用户授权一次 M27 `smoke` selector；固定 Qwen `qwen3.7-plus`、inmemory deterministic/weighted、45s/retry0、SQLite deterministic seed、LangFuse off，未改任何默认配置。
 - 首次 `m27-smoke-20260809-01` 在工具 60 秒时限内被中断，已写 3/4 checkpoint、manifest 保持 `running`；M27 不支持 resume，因此不生成 artifact/report、不参与 Gate 或任何分数解释。
 - 以新 run id `m27-smoke-20260809-02` 重跑并完成：4 logical Scenario / 4 physical attempts，9 条 required assertion 均 passed、failed/not_observed 均为 0，Smoke Gate `passed`。artifact：`eval/reports/m27-artifacts/m27-smoke-20260809-02.json`；report：`eval/reports/m27-smoke-20260809-02.md`。
+- 用户随后再次按同一 selector / runtime 执行 `m27-smoke-20260809-03`：同为 4/4 logical Scenario 完成、9/9 required assertion passed、Gate `passed`，没有 failed/not_observed/unavailable；其独立 Codex review 也为 4/4 high-confidence `pass`、全部 `auto_passed_manual_pass`。它是第二次小范围链路快照，不扩大为完整基线、稳定性统计或 M26 比较。
 - 边界：这是一次小范围链路 Smoke，不是 Core/Stress 主回归，也不建立稳定模型能力、成本或可靠性基线；不得与 M26 `25/32`、`26/32` 等旧口径比较。既有 Starlette/httpx deprecation warning 未影响结果。
 
 ### [模块任务] M27 Diagnostic / Eval Case 体系优化（2026-08-09）

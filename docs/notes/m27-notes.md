@@ -187,6 +187,8 @@
 - 首次 `m27-smoke-20260809-01` 受工具 60 秒时限中断，已完成 `june_gmv`、`unsafe_drop_orders`、`missing_product_supplier_rejection` 的 checkpoint，manifest 保持 `running`。M27 不支持 resume，故该 run 不生成 completed artifact/report，也不进入 Gate。
 - 使用新 run id `m27-smoke-20260809-02` 完成完整 selector：4 个 logical Scenario、4 个 physical attempts、9 条 required assertion 全通过，Gate `passed`，无 failed/not_observed/unavailable。产物为 `eval/reports/m27-artifacts/m27-smoke-20260809-02.json` 和 `eval/reports/m27-smoke-20260809-02.md`；既有 Starlette/httpx deprecation warning 未影响结论。
 - 解释边界：Smoke 仅验证当前运行环境下 API、Guard、Trace、artifact 与报告闭环，不是完整 Core/Stress 评测，不能推出稳定模型能力、成本或可靠性，也不得与 M26 的 `25/32` 等旧口径相比较。
+- 2026-08-09：用户再次执行相同 M27 `smoke`，`m27-smoke-20260809-03` 为 **4/4 logical Scenario 完成、9/9 required assertion passed、Gate passed**，无 failed/not_observed/unavailable。随后 `eval.run_review` 读取同 run artifact/checkpoint/catalog，4 条 Codex verdict 均为 high-confidence `pass`，reconciliation 全为 `auto_passed_manual_pass`。resolved runtime 与 `-02` 相同；它仍只是第二次链路快照，不升级为完整基线或可靠性结论。
+- 2026-08-09：用户授权 M27 Core 的 Qwen plus local / Milvus 对照。local `m27-core-20260809-qwen37plus-local-01` 完成：19/19 logical execution，Core required assertion `29 passed / 5 failed / 0 not_observed`，Gate `failed`。失败集中于退款率排名（result/output/schema context）、实际金额指标绑定、渠道 GMV dashboard schema context；无 external unavailable。Docker daemon 恢复后，Milvus `m27-core-20260809-qwen37plus-milvus-01` 完成：DashScope `qwen3.7-text-embedding`、1024 维、weighted、独立 collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`；实测 195 entities、hash `8a8b6626...`。两侧 assertion 计数、失败 Scenario/断言/reason 均一致。各只运行一次，记录为“本轮未观察到 Milvus 改变结果”，不作因果或默认切换结论。
 
 ## M27 Review Bundle 增补（用户授权，进行中）
 
