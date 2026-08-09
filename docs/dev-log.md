@@ -879,7 +879,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 读完可以试着回答：**如果 QueryPlan 写 `ORDER BY order_count DESC`，为什么合同不能直接使用候选 SQL 的 `COUNT(order_items.id) AS order_count` 来证明它正确？**
 
-## ★ ★ M25 Eval Trustworthiness, Reliability & Evidence-Grounded Attribution
+## ★ M25 治理评测可信度
 
 （2026-08-07）
 
@@ -1128,7 +1128,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cas
 
 **本地启动体验：** M25 没有新增独立页面。可按既有 runbook 启动 FastAPI，在 Swagger 调 `/api/query`；本模块的新增价值主要从 JSONL trace 的 `llm_call`、triage JSON 的 `primary_root_cause/semantic_status` 和 Markdown 的 `M25 Evidence Views` 查看。
 
-## ★ ★ M26 Diagnostic Human Audit / Eval Reconciliation
+## ★ M26 继续治理评测可信度
 
 （2026-08-07）
 
@@ -1308,7 +1308,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_audit --tr
 
 **本地启动体验：** M26 没有新增 Web 页面。阅读 [审计 Markdown](eval/reports/m26-qwen37plus-local-round2-audit.md) 或运行上述 CLI 即可查看逐 case 证据；API 启动方式仍以 `docs/state/runbook.md` 为准。
 
-## ★ ★ M27 Diagnostic / Eval Case 体系优化
+## ★ ★ M27 Eval 体系优化
 
 （2026-08-09）
 
@@ -1397,7 +1397,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_audit --tr
 可复制的确定性验证命令：
 
 ```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.codex/temp_work/pytest-m27-full
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.agent_work/temp/pytest-m27-full
 ```
 
 **本地启动体验：** M27 没有新增 Web 页面；它的入口是评测 CLI。先可无副作用查看新入口：
@@ -1407,10 +1407,5 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --hel
 ```
 
 你会看到 `--selector`、`--suite`、`--scenario`、`--replicate-count` 和 gate 相关参数。真实执行会调用当前配置的模型，因此在未获得新基线授权前，不要以“试一下”为由运行该 CLI；模型、检索与默认配置仍以 `docs/state/runbook.md` 为准。
-
-
-
-
-
 
 

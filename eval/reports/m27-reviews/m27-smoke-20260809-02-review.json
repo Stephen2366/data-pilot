@@ -8,7 +8,7 @@
     "catalog_hash": "61792660460e4eae8b644e9c20307c8955f3d2f99966b7064750a8d068cbf1e8",
     "selected_contract_hash": "22d811a877290b6e81468f0e1fcde59eee9c9358729da38f068cab9c2edb85ed",
     "artifact_path": "D:\\.Work\\Practice\\AI-Project\\data-pilot\\eval\\reports\\m27-artifacts\\m27-smoke-20260809-02.json",
-    "checkpoint_root": "D:\\.Work\\Practice\\AI-Project\\data-pilot\\.codex\\temp_work\\m27-checkpoints"
+    "checkpoint_root": "D:\\.Work\\Practice\\AI-Project\\data-pilot\\.agent_work\\temp\\m27-checkpoints"
   },
   "records": [
     {

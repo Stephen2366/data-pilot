@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -11,18 +12,22 @@ from eval.catalog import CatalogError, load_catalog
 from eval.assertions import score_assertion
 from eval.contracts import AssertionContract, EvalRunSpec, ExecutionEvidence, ExecutionProtocol, MetricMappingSpec, ResolvedRuntimeIdentity
 from eval.evaluator import Evaluator
-from eval.environment import SQLiteRunEnvironmentFactory
+from eval.environment import SQLiteRunEnvironmentFactory, _resolved_runtime_values
 from eval.ports import FileCheckpointStore, MemoryCheckpointStore
 from eval.projectors import SuitePolicy, exit_code_for_gate, project_eval_run
 from eval.reporting import build_langfuse_assertion_payloads, render_markdown
 from eval.selectors import load_selector
+from engine.nl2sql.prompt import build_query_plan_prompt
+from engine.nl2sql.schema_loader import load_domain_schema
+from engine.schema_retrieval.graph import build_schema_graph
+from engine.schema_retrieval.retriever import retrieve_schema
 
 
 def _catalog_file(tmp_path: Path) -> Path:
     path = tmp_path / "catalog.yaml"
     path.write_text(
         """
-contract_version: m27-v1
+contract_version: m27-v2
 scenarios:
   - id: june_gmv
     question: 2026 年 6 月 GMV 是多少？
@@ -106,6 +111,32 @@ def test_evaluator_runs_multiple_assertions_from_one_pipeline_call(tmp_path: Pat
     assert {item.status for item in run.scenario_runs[0].assertion_results} == {"passed"}
     assert len(checkpoints.checkpoints) == 1
     assert environment.closed is True
+
+
+def test_query_plan_timeout_is_external_unavailable_and_not_observed(tmp_path: Path) -> None:
+    """没有候选 SQL 的 provider timeout 不能被空输出投影成业务失败。"""
+
+    class TimeoutPipeline(_FakePipeline):
+        def execute(self, **_: object):
+            self.calls += 1
+            return 200, {"safety_status": "blocked", "error_type": "llm_generation_error", "columns": [], "rows": []}, (
+                {"step_type": "query_plan", "status": "error", "error_type": "llm_generation_error", "metadata": {"error_subtype": "timeout"}},
+            )
+
+    catalog = load_catalog(_catalog_file(tmp_path))
+    run = Evaluator(
+        catalog=catalog,
+        environment_factory=_Factory(_Environment(TimeoutPipeline())),
+        checkpoint_store=MemoryCheckpointStore(),
+    ).evaluate(EvalRunSpec(run_id="m27-timeout", scenario_ids=("june_gmv",)))
+
+    scenario_run = run.scenario_runs[0]
+    assert scenario_run.evidence.execution_status == "external_unavailable"
+    assert {(item.status, item.reason) for item in scenario_run.assertion_results} == {("not_observed", "external_unavailable")}
+
+    projected = project_eval_run(run, SuitePolicy("core", ("june_gmv",), {"core": "required"}, {}, {"june_gmv": "core"}))
+    assert projected.gate.outcome == "inconclusive"
+    assert projected.gate.required_not_observed == 3
 
 
 def test_committed_vertical_slice_catalog_loads() -> None:
@@ -195,7 +226,7 @@ def test_sqlite_environment_scores_expected_rejection_without_llm(tmp_path: Path
     path = tmp_path / "rejection.yaml"
     path.write_text(
         """
-contract_version: m27-v1
+contract_version: m27-v2
 scenarios:
   - id: missing_supplier
     question: 查询商品的供应商名称
@@ -247,6 +278,58 @@ def test_plan_join_and_metric_assertions_use_same_structured_trace_evidence() ->
     missing_join = ExecutionEvidence(**{**evidence.__dict__, "trace_steps": ({"step_type": "query_plan", "status": "success", "metadata": {"plan_steps": [{"step_type": "sql_query", "tables": ["orders"], "joins": [], "metrics": [], "columns": []}]}},)})
     assert score_assertion(join_path, missing_join).status == "failed"
     assert score_assertion(metric, missing_join).status == "failed"
+
+
+def test_actual_amount_metric_contract_accepts_qualified_plan_column() -> None:
+    """合同的 actual_amount 与计划的 orders.actual_amount 是同一业务字段。"""
+
+    catalog = load_catalog(Path("eval/cases/catalog/scenarios.yaml"))
+    scenario = next(item for item in catalog.scenarios if item.scenario_id == "june_actual_amount_sum")
+    metric = scenario.assertions[0]
+    evidence = ExecutionEvidence(
+        run_id="test", scenario_id=scenario.scenario_id, replicate_id=1, execution_status="completed", status_code=200,
+        response={"safety_status": "passed"}, trace_steps=({
+            "step_type": "query_plan", "status": "success", "metadata": {"plan_steps": [{
+                "step_type": "sql_query", "tables": ["orders"], "columns": ["orders.actual_amount"], "metrics": ["net_revenue"],
+            }]},
+        },),
+    )
+
+    assert score_assertion(metric, evidence).status == "passed"
+
+
+def test_channel_gmv_retrieval_keeps_metric_and_snapshot_guidance() -> None:
+    """渠道 GMV 不应被 orders_wide 的字段别名挤掉 gmv metric。"""
+
+    domain_schema = load_domain_schema()
+    question = "查看 2026 年 6 月各渠道 GMV；可使用订单明细口径或 orders_wide 月度快照口径。"
+    result = retrieve_schema(question=question, user_role="ops", top_k=30, domain_schema=domain_schema)
+    graph = build_schema_graph(result.merged_hits, domain_schema=domain_schema)
+    prompt = build_query_plan_prompt(question=question, schema_graph=graph, metrics=domain_schema.metrics)
+
+    assert "gmv" in graph.metrics
+    assert "snapshot_at" in prompt
+
+
+def test_runtime_identity_records_milvus_embedding_and_schema_corpus() -> None:
+    """同为 Milvus 的运行也必须能从 artifact 区分 embedding 与 collection。"""
+
+    settings = SimpleNamespace(
+        llm_provider="qwen", qwen_model="qwen3.7-plus", llm_model="unused",
+        schema_vector_backend="milvus", schema_embedding_provider="dashscope",
+        qwen_embedding_model="qwen3.7-text-embedding", qwen_embedding_dimensions=1024,
+        siliconflow_embedding_model="BAAI/bge-m3", siliconflow_embedding_dimensions=None,
+        milvus_collection="fixture_m27_qwen", llm_timeout_seconds=45.0,
+        llm_max_retries=0, llm_retry_backoff_seconds=1.0,
+    )
+
+    values = _resolved_runtime_values(settings, EvalRunSpec(run_id="runtime-fixture", scenario_ids=("june_gmv",)))
+
+    assert values["schema_embedding_model"] == "qwen3.7-text-embedding"
+    assert values["schema_embedding_dimensions"] == 1024
+    assert values["milvus_collection"] == "fixture_m27_qwen"
+    assert values["schema_docs_count"] == 195
+    assert values["schema_docs_hash"] == "8a8b6626a4cbec6197d9625ec12d5d40668025476f823eaa9458647cecd8d41a"
 
 
 def test_selector_projector_uses_logical_denominators_and_markdown_only_reads_projected_facts(tmp_path: Path) -> None:

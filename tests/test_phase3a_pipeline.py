@@ -277,11 +277,11 @@ def test_pipeline_blocks_extra_projection_before_sql_execution(tmp_path: Path, m
     assert not any(step["name"] == "sql_execution" for step in trace["trace_steps"])
 
 
-def test_default_query_keeps_template_path_without_trace_steps(tmp_path: Path, monkeypatch) -> None:
-    """旧调用方不传 force_new_pipeline 时仍走模板优先，避免破坏 M5/M6 体验。"""
+def test_default_query_uses_new_pipeline_and_writes_trace_steps(tmp_path: Path, monkeypatch) -> None:
+    """普通 API 不传开关时默认进入新 pipeline，而不是静默回到模板路径。"""
 
     _patch_m11_llm(monkeypatch)
-    trace_path = tmp_path / "baseline-traces.jsonl"
+    trace_path = tmp_path / "default-new-pipeline-traces.jsonl"
 
     with _seeded_test_client(trace_path) as client:
         response = client.post(
@@ -294,6 +294,26 @@ def test_default_query_keeps_template_path_without_trace_steps(tmp_path: Path, m
 
     assert response.status_code == 200
     assert body["sql"].startswith("SELECT\n  c.channel_name")
+    assert [step["name"] for step in trace["trace_steps"]][:4] == [
+        "schema_retrieval", "schema_context", "join_path", "query_plan",
+    ]
+
+
+def test_explicit_false_keeps_legacy_baseline_for_compatibility(tmp_path: Path, monkeypatch) -> None:
+    """旧路径只在调用方明确传 false 时保留，方便兼容排障。"""
+
+    _patch_m11_llm(monkeypatch)
+    trace_path = tmp_path / "explicit-baseline-traces.jsonl"
+
+    with _seeded_test_client(trace_path) as client:
+        response = client.post(
+            "/api/query",
+            json={"question": "各渠道订单量是多少？", "user_role": "ops", "force_new_pipeline": False},
+        )
+
+    trace = json.loads(trace_path.read_text(encoding="utf-8").strip())
+
+    assert response.status_code == 200
     assert "trace_steps" not in trace or trace["trace_steps"] == []
 
 

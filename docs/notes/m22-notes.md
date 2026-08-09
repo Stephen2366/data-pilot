@@ -24,14 +24,14 @@
 - 首次全量 pytest：`142 passed, 2 skipped, 1 failed, 1 warning`；失败为 `tests/test_m20_schema_index_hygiene.py` 固定期待 193 docs，但 M22 新 metric 实际构建 194 docs，已更新该基线断言后待复跑。其余 142 条通过；warning 为既有 Starlette/httpx deprecation。
 - 全量 pytest 复跑：`143 passed, 2 skipped, 1 warning`，耗时 `438.67s`；唯一 warning 为既有 Starlette/httpx `TestClient` deprecation。
 - 初次默认 DeepSeek + local deterministic + weighted、`LANGFUSE_ENABLED=false` 的 32 条 diagnostic 为 `26/32`；报告三视图的插入位置随后被发现破坏了 Score Summary Markdown 表格，因此修复布局并添加回归测试后，最终重跑快照为 `25/32`（automated `22/27`，manual `3/5`）。report 为 `eval/reports/m22-default-diagnostic-report.md`，triage 为 `eval/reports/m22-default-diagnostic-triage.json`，trace 为 `eval/traces/m22-default-diagnostic-traces.jsonl`。这是 M22 改动后的口径快照，不能同 M21 `21/32` 直接解释为模型提分。`db_plan_002/003/004` 均结构化通过；`db_prompt_002` 实际 SQL 已采用 SCD overlap 条件。`db_core_004` 仍未在 QueryPlan 中规划排序，下一步补充该题的 QueryPlan prompt 约束；`db_simple_001` 显示 SQL generation 丢了计划中的 products.id ASC，因此被 SQL plan contract 拦截，属于 M22 输出合同发现的真实生成缺口，不扩大到通用列表排序优化。
-- `db_core_004` 单 case 默认链路复测（补充排序 QueryPlan 约束后）：`result_match_ok`，SQL 已生成 `ORDER BY order_count DESC, channels.channel_name ASC`；trace 为 `.codex/temp_work/m22-db-core-004-trace.jsonl`。这是 SQLite deterministic oracle 下的回归证据；仍不把一次实时 LLM 成功外推为整个 32 条快照都已刷新。
+- `db_core_004` 单 case 默认链路复测（补充排序 QueryPlan 约束后）：`result_match_ok`，SQL 已生成 `ORDER BY order_count DESC, channels.channel_name ASC`；trace 为 `.agent_work/temp/m22-db-core-004-trace.jsonl`。这是 SQLite deterministic oracle 下的回归证据；仍不把一次实时 LLM 成功外推为整个 32 条快照都已刷新。
 
 ## 模块名称与改动文件清单
 
 - 模块：M22 Eval Contract / Semantic Output Stabilization。
 - 代码与测试：`engine/nl2sql/semantic_validation.py`、`engine/nl2sql/pipeline.py`、`engine/nl2sql/generator.py`、`engine/nl2sql/prompt.py`、`eval/scorers/rule_scorers.py`、`eval/run_eval.py`、`tests/test_m22_eval_contract.py`、`tests/test_m20_schema_index_hygiene.py`。
 - 事实源与用例：`domain_pack/metrics.yaml`、`eval/cases/database-upgrade-challenge.yaml`、`eval/cases/phase3a-diagnostic-benchmark.yaml`、`eval/cases/phase3a-regression.yaml`。
-- 产物：`eval/reports/m22-default-diagnostic-report.md`、`eval/reports/m22-default-diagnostic-triage.json`、`eval/traces/m22-default-diagnostic-traces.jsonl`（默认 gitignore）、`.codex/temp_work/m22-db-core-004-trace.jsonl`（一次性复测 trace）。`docs/dev-log.md` 和 `docs/state/AI_CONTEXT_CHANGELOG.md` 的已有用户改动不属于 M22，收工时保留并只追加模块档案。
+- 产物：`eval/reports/m22-default-diagnostic-report.md`、`eval/reports/m22-default-diagnostic-triage.json`、`eval/traces/m22-default-diagnostic-traces.jsonl`（默认 gitignore）、`.agent_work/temp/m22-db-core-004-trace.jsonl`（一次性复测 trace）。`docs/dev-log.md` 和 `docs/state/AI_CONTEXT_CHANGELOG.md` 的已有用户改动不属于 M22，收工时保留并只追加模块档案。
 
 ## 阶段 1 注释小结
 

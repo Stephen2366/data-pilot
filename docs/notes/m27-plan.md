@@ -617,7 +617,7 @@ Projector 必须拒绝不支持的 artifact schema version，不能猜测未知�
 - 最终 artifact 先写临时文件、校验完整性后原子替换目标文件；
 - Resume 不是 M27A 硬门，但 checkpoint 格式要为未来 resume 保留稳定 identity 和幂等条件；
 - Resume 未实现前，已存在的 `run_id` 一律拒绝再次启动；重跑必须生成新 run id，不覆盖旧 manifest/checkpoint；
-- 一次性 checkpoint 可写入 `eval/traces/` 或 `.agent_work/temp/`，长期完整 EvalRun JSON 进入 `eval/reports/`；实施时按项目产物纪律确定唯一默认路径。
+- 一次性 checkpoint 写入 `.agent_work/temp/`，长期完整 EvalRun JSON 进入 `eval/reports/`；以共享临时目录作为唯一默认路径。
 
 ### 11.6 长期 artifact 脱敏与证据保留策略
 

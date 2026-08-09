@@ -1,15 +1,16 @@
 # DataPilot Eval Baselines
 
-> 本文从 `m27-v1` 开始记录新的 EvalRun 基线与可比性规则。M26 及以前的 formal / challenge / diagnostic 账本已完整归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)，不与现在的数字直接比较。
+> 本文记录当前 EvalRun 基线与可比性规则。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
 更新时间：2026-08-09
 
 ## 当前状态
 
-- **当前合同**：`m27-v1`；每个业务问题是一个 canonical Scenario，多个 typed assertion 共享一次执行证据。
+- **当前合同**：`m27-v2`；每个业务问题是一个 canonical Scenario，多个 typed assertion 共享一次执行证据。v2 将 QueryPlan timeout 等“没有候选答卷”的情况记为 `external_unavailable / not_observed`，不再伪装成业务 failed。
 - **当前 catalog**：28 个 Scenario；分类为 Core / Stress / Manual Lab。Smoke、Reliability、Database Exception 是 selector，不是复制题面的独立题集。
-- **当前真实 LLM 基线**：**尚未登记正式长期基线**。下方已记录可比较的 Core 快照，但有限次数的运行不代表完整模型通过率、成本或可靠性。
+- **当前真实 LLM 基线**：尚未登记正式长期基线。
 - **默认运行配置**：仍以 [runbook.md](runbook.md) 为准；M27 没有切换模型、检索、embedding、数据库、oracle、timeout 或 retry。
+- **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
 ## 读数与分母
 
@@ -39,18 +40,17 @@ M27 review bundle 是解释自动结果的旁路证据，不是第二套分数�
 
 自 `m27-review-bundle-v2` 起，bundle 保存 artifact 与各 checkpoint 的 SHA-256，复核前可验证来源仍是原文件。普通业务题没有 candidate SQL 时只能记为 `insufficient_evidence`；安全或预期拒绝题可以凭明确拦截证据判通过。人工分类只服务于错误聚合，绝不成为新分母或 Gate 输入。早期 v1 review 是无哈希的历史旁路材料，不能直接和 v2 的来源校验混用。
 
-## 可比较的评测快照
+## 当前有效实验快照
 
-只在这里记录可按同一 M27 合同解释的有效运行。Smoke、运行事故、中断和外部服务异常不作为独立记录进入本账本。
+这里保留仍能帮助判断当前路线的真实运行；它们未必已成为正式长期 baseline，也未必能作严格对照。每条都必须写清楚证据状态和解释边界。Smoke、运行事故、中断和外部服务异常不作为独立记录进入本账本。
 
-| 类型 | Run ID | 日期 | 协议 / resolved runtime | Assertion views / Gate | 解释边界 |
-|---|---|---|---|---|---|
-| Core | [`m27-core-20260809-qwen37plus-local-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-local-01.json) | 2026-08-09 | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off；19 logical / 19 physical | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-local-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 与同合同、同协议的 Core 比较；和下一行构成一次 local/Milvus 配对。 |
-| Core | [`m27-core-20260809-qwen37plus-milvus-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-milvus-01.json) | 2026-08-09 | Qwen `qwen3.7-plus`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-milvus-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 195-doc clean collection、hash `8a8b6626...`；单次与 local 一致，不推断检索因果。 |
-| Core | [`m27-core-20260809-qwen37max-local-06`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-06.json) | 2026-08-09 | Qwen `qwen3.7-max`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-local-06.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 当前有效 max local 快照；样本不足以证明与 plus 等价。 |
-| Core | [`m27-core-20260809-qwen37max-milvus-02`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-milvus-02.json) | 2026-08-09 | Qwen `qwen3.7-max`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-milvus-02.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 195-doc clean collection、hash `8a8b6626...`；单次与 local 一致，不推断检索因果。 |
+| 类型 | 证据状态 | Run ID | 日期 | 协议 / resolved runtime | Assertion views / Gate | 解释边界 |
+|---|---|---|---|---|---|---|
+| Core | 过渡证据 | [`m27-core-20260809-qwen37plus-milvus-02`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-milvus-02.json) | 2026-08-09 | Qwen `qwen3.7-plus`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off；19 logical / 19 physical | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-milvus-02.md)；required：28 passed / 0 failed / 6 not_observed；Gate `inconclusive` | 两个 QueryPlan timeout（商品 Top5、商品退款率排名）没有 candidate SQL，各贡献 3 条 external unavailable。该 run 早于 artifact 补齐 collection / embedding / corpus 字段：可用于解释 P0/P1 首轮结果，但不是严格 Milvus / P1 对照，也未登记长期 baseline。 |
+| Stress | 当前单轮证据 | [`m27-stress-20260809-qwen37plus-milvus-01`](../../eval/reports/m27-artifacts/m27-stress-20260809-qwen37plus-milvus-01.json) | 2026-08-10 | Qwen `qwen3.7-plus`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`；195 docs / hash `8a8b6626...`；45s / retry0；SQLite seed；9 / 9 | [Markdown report](../../eval/reports/m27-stress-20260809-qwen37plus-milvus-01.md)；全部 assertion：7 passed / 14 failed / 4 not_observed；7 completed / 2 external unavailable；required：0 / 0 / 0，Gate `inconclusive` | Stress 全为 advisory，不是硬门。单次样本；失败集中在渠道 GMV、金额对账、递归类目、价格历史、渠道退款率与 schema context，不能据此断言 Milvus 因果或登记长期 baseline。 |
+| Database Exception | 当前单轮证据 | [`m27-database-exception-20260809-qwen37plus-milvus-01`](../../eval/reports/m27-artifacts/m27-database-exception-20260809-qwen37plus-milvus-01.json) | 2026-08-10 | 同上；7 / 7 | [Markdown report](../../eval/reports/m27-database-exception-20260809-qwen37plus-milvus-01.md)；全部 assertion：4 passed / 4 failed / 11 not_observed；3 completed / 4 external unavailable；required：0 / 0 / 0，Gate `inconclusive` | 该 selector 从 Stress 复用异常业务 Scenario，但 policy 独立，不能与 Stress 混算。单次样本；外部不可用较多，未登记长期 baseline。 |
 
-后续运行 Stress、Reliability、Database Exception 时，直接在本表追加一行，以“类型 / 协议 / 解释边界”区分；不与 Core 混算。
+后续当前合同下的 Core、Stress、Reliability、Database Exception 在本表追加一行，不与不同 selector / suite 混算。记录失去当前决策价值后移入文末「历史实验记录」，不按 M28、M29 等模块编号新增同级标题。
 
 ## 正式长期基线登记
 
@@ -58,6 +58,17 @@ M27 review bundle 是解释自动结果的旁路证据，不是第二套分数�
 
 | Run ID | 日期 | Selector / Scenario | Protocol | Resolved runtime | Oracle / artifact | Assertion views | Gate | 解释边界 |
 |---|---|---|---|---|---|---|---|---|
-| *尚无* | — | — | — | — | — | — | — | 已有可比较 Core 快照，但尚未由用户指定哪条 completed run 作为正式长期基线。 |
+| *尚无* | — | — | — | — | — | — | — | 已有当前有效的 Core 过渡快照，但尚未由用户指定哪条 completed run 作为正式长期基线。 |
 
 每条记录至少链接脱敏 EvalRun JSON 与 Markdown report；只引用 `ResolvedRuntimeIdentity`，不以命令行表象替代实际模型、检索和 oracle 事实。
+
+## 历史实验记录
+
+这里保存已经不能支撑当前路线判断、但仍值得追溯的实验。它们不参与当前升降比较，也不因后续模块新增而继续占用「当前有效实验快照」。
+
+| 类型 | Run ID | 日期 | 协议 / resolved runtime | Assertion views / Gate | 转入历史的原因 |
+|---|---|---|---|---|---|
+| Core | [`m27-core-20260809-qwen37plus-local-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-local-01.json) | 2026-08-09 | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off；19 logical / 19 physical | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-local-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | `m27-v1` 冻结快照；退款排名 3 条 failed 混入 timeout 空答卷投影，只保留给 P0 根因追溯，不能与 v2 比。 |
+| Core | [`m27-core-20260809-qwen37plus-milvus-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-milvus-01.json) | 2026-08-09 | Qwen `qwen3.7-plus`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-milvus-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | `m27-v1` 冻结快照；195-doc clean collection、hash `8a8b6626...`；不能与 v2 比。 |
+| Core | [`m27-core-20260809-qwen37max-local-06`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-06.json) | 2026-08-09 | Qwen `qwen3.7-max`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-local-06.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | `m27-v1` 冻结快照；单次样本不足以证明与 plus 等价，不能与 v2 比。 |
+| Core | [`m27-core-20260809-qwen37max-milvus-02`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-milvus-02.json) | 2026-08-09 | Qwen `qwen3.7-max`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-milvus-02.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | `m27-v1` 冻结快照；195-doc clean collection、hash `8a8b6626...`；不能与 v2 比。 |

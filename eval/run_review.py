@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verify-bundle", type=Path, help="只校验既有 review JSON 的 artifact/checkpoint SHA-256")
     parser.add_argument("--catalog", type=Path, default=PROJECT_ROOT / "eval" / "cases" / "catalog" / "scenarios.yaml")
     parser.add_argument("--artifact-dir", type=Path, default=PROJECT_ROOT / "eval" / "reports" / "m27-artifacts")
-    parser.add_argument("--checkpoint-root", type=Path, default=PROJECT_ROOT / ".codex" / "temp_work" / "m27-checkpoints")
+    parser.add_argument("--checkpoint-root", type=Path, default=PROJECT_ROOT / ".agent_work" / "temp" / "m27-checkpoints")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "eval" / "reports" / "m27-reviews")
     parser.add_argument("--reviewer", default="codex")
     parser.add_argument("--verdicts-json", type=Path)

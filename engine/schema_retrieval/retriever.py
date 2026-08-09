@@ -54,7 +54,10 @@ def _keyword_score(question: str, document: SchemaDocument) -> float:
     if document.column and document.column.lower() in question.lower():
         score += 2.0
     if document.metric_key and document.metric_key.lower() in question.lower():
-        score += 2.0
+        # 字段文档会继承表别名；例如 ``orders_wide`` 的“渠道 GMV 看板”会让几十个字段都
+        # 命中“渠道 GMV”。业务指标 key 被题面直接点名时额外提升，确保 gmv 这类定义进入
+        # 局部 SchemaGraph，而不是被同表字段的重复别名挤出 top-k。
+        score += 12.0
     return score
 
 

@@ -16,8 +16,8 @@
 
 | 功能 | 路径 / 组件 | 关系 | 当前默认或边界 |
 |---|---|---|---|
-| API 查询 | baseline / `new_text2sql` | 互斥选择 | API 默认 baseline；M27 Eval 默认 `new_text2sql` |
-| SQL 生成 | 模板 / 全量 Schema LLM / 局部 Schema LLM | 优先级分流 + 显式切换 | 普通 API 模板优先；新链路直接走局部 Schema |
+| API 查询 | legacy baseline / `new_text2sql` | 互斥选择 | API 与 M27 Eval 默认 `new_text2sql`；baseline 仅显式兼容 |
+| SQL 生成 | 模板 / 全量 Schema LLM / 局部 Schema LLM | 优先级分流 + 显式切换 | 普通 API 走新链路的局部 Schema；旧链路才模板优先 |
 | 主模型 | Qwen / DeepSeek / Mock | 互斥选择 | Qwen `qwen3.7-plus` |
 | 检索后端 | InMemory / Milvus | 互斥选择 | InMemory + deterministic |
 | Embedding | Deterministic / SiliconFlow / DashScope-Qwen | 与后端组合 | dense embedding 仅用于 Milvus 实验 |
@@ -34,12 +34,12 @@
 
 | 路径 | 适用情况 | 大致流程 |
 |---|---|---|
-| **baseline** | 普通 API 默认 | 模板匹配 → 全量 Schema LLM（模板未命中时）→ SQL Guard → SQL 执行 → 图表 |
-| **new_text2sql** | `force_new_pipeline=true`；M27 Eval | Schema Retrieval → SchemaGraph → QueryPlan → Plan Validation → SQL 生成 → SQL Guard → SQL 执行 → 图表 |
+| **baseline** | 显式 `force_new_pipeline=false` 的兼容排障 | 模板匹配 → 全量 Schema LLM（模板未命中时）→ SQL Guard → SQL 执行 → 图表 |
+| **new_text2sql** | 普通 API 默认；M27 Eval | Schema Retrieval → SchemaGraph → QueryPlan → Plan Validation → SQL 生成 → SQL Guard → SQL 执行 → 图表 |
 
 可以把 baseline 理解为“老的直达路线”，把 `new_text2sql` 理解为“先做查询计划、再执行的受控路线”。
 
-注意：**API 默认路径**和**评测默认路径**不是同一件事。API 仍默认 baseline，是为了兼容现有行为；M27 Eval 的 canonical 协议默认验证 `new_text2sql`。
+现在 API 默认路径和评测默认路径一致，都是 `new_text2sql`。如果需要回查老模板行为，调用方必须显式传 `force_new_pipeline=false`，避免“少传字段”时悄悄走错链路。
 
 相关代码：`app/api/query.py`、`engine/nl2sql/pipeline.py`。
 
@@ -51,7 +51,7 @@
 | **全量 Schema LLM** | baseline 的模板未命中 | 是 |
 | **局部 Schema LLM** | `new_text2sql`；只使用检索到的 SchemaGraph | 是 |
 
-普通 API 的 baseline 是“模板优先、未命中才调 LLM”。新链路不是在这两条后面再兜底一次，而是一次显式切换：它绕过模板，使用 QueryPlan 和局部 Schema 来约束生成。
+legacy baseline 是“模板优先、未命中才调 LLM”。当前普通 API 的新链路不是在模板后面再兜底一次，而是默认直接使用 QueryPlan 和局部 Schema 来约束生成。
 
 相关代码：`engine/nl2sql/templates.py`、`engine/nl2sql/generator.py`。
 
@@ -149,7 +149,7 @@ review bundle 从 completed EvalRun、短期 checkpoint 和 canonical contract �
 
 | 你的目标 | 应关注的路径 |
 |---|---|
-| 开发或启动普通 API | baseline 默认；需要验证新流程时显式 `force_new_pipeline=true` |
+| 开发或启动普通 API | 默认 `new_text2sql`；只有排查旧兼容行为时显式 `force_new_pipeline=false` |
 | 调试 Schema Retrieval / QueryPlan | `new_text2sql` + 默认 InMemory；Milvus 仅在明确实验时开启 |
 | 做模型或检索对照 | 临时环境变量切换一个变量；阅读 runbook 与 eval-baselines 后执行 |
 | 修改 Eval case / scorer / Gate | 只看 M27 canonical eval；不要使用旧 formal/challenge/diagnostic 分数作新结论 |

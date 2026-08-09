@@ -14,8 +14,9 @@ class QueryRequest(BaseModel):
     """自然语言查询请求。
 
     `user_role` 会进入 SQL Guard 的 RBAC 权限矩阵，决定这个问题能访问哪些表和字段。
-    `force_new_pipeline` 是 M11 给评测用的显式开关：默认 False 保持模板优先，True 才绕过
-    模板进入新 Text2SQL pipeline。
+    `force_new_pipeline` 是新旧 Text2SQL 的兼容开关：默认 True，让普通 API 与 M27 Eval 都走
+    Schema Retrieval → QueryPlan → SQL Guard 的新 pipeline；显式传 False 才暂时回到 legacy
+    baseline，供兼容排障使用。
     `schema_retrieval_profile` 是本地实验开关：默认不传时沿用环境变量；演示页可显式选择
     Milvus + Qwen embedding，方便 Phase 3 RAG / Hybrid 前手动对比。
     `schema_fusion_strategy` 是 M21 的受控实验开关：默认 `weighted` 保持既有排序，只有显式
@@ -24,7 +25,7 @@ class QueryRequest(BaseModel):
 
     question: str = Field(min_length=1)
     user_role: str = Field(default="ops")
-    force_new_pipeline: bool = Field(default=False)
+    force_new_pipeline: bool = Field(default=True)
     schema_retrieval_profile: Literal["default", "milvus_qwen37"] = Field(default="default")
     schema_fusion_strategy: Literal["weighted", "rrf"] = Field(default="weighted")
 

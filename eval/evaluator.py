@@ -88,7 +88,7 @@ class Evaluator:
             pipeline_mode=run_spec.execution_protocol.pipeline_mode,
             fusion_strategy=run_spec.execution_protocol.schema_fusion_strategy,
         )
-        execution_status = _execution_status(status_code, response)
+        execution_status = _execution_status(status_code, response, trace_steps)
         expected_rows, oracle_error = self._oracle_rows(environment.oracle, scenario)
         evidence = ExecutionEvidence(
             run_id=run_spec.run_id,
@@ -157,10 +157,21 @@ class Evaluator:
         )
 
 
-def _execution_status(status_code: int, response: dict[str, Any]) -> str:
-    """把 HTTP/业务响应翻译为中性事实，不在这里判断拒绝是否符合期望。"""
+def _execution_status(status_code: int, response: dict[str, Any], trace_steps: tuple[dict[str, Any], ...]) -> str:
+    """把 HTTP/业务响应翻译为中性事实，不在这里判断拒绝是否符合期望。
 
-    if status_code >= 500 or response.get("error_subtype") in {"timeout", "network_error", "http_429", "http_5xx"}:
+    API 顶层响应为安全起见通常只保留 ``error_type``；更细的 provider 错误种类位于对应
+    trace step 的 ``metadata.error_subtype``。两处都检查，才能把 QueryPlan timeout 这类
+    “没有候选答卷”的情况记成 external_unavailable，而不是误写成业务拒绝。
+    """
+
+    transient_subtypes = {"timeout", "network_error", "http_429", "http_5xx"}
+    trace_subtypes = {
+        str((step.get("metadata") or {}).get("error_subtype"))
+        for step in trace_steps
+        if isinstance(step, dict) and isinstance(step.get("metadata"), dict)
+    }
+    if status_code >= 500 or response.get("error_subtype") in transient_subtypes or trace_subtypes & transient_subtypes:
         return "external_unavailable"
     if status_code != 200:
         return "pipeline_error"

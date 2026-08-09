@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 from typing import Any, Literal
 
-from eval.contracts import CONTRACT_VERSION, Catalog, ResultMatchSpec
+from eval.contracts import CONTRACT_VERSION, LEGACY_REVIEWABLE_CONTRACT_VERSIONS, Catalog, ResultMatchSpec
 
 
 REVIEW_BUNDLE_SCHEMA_VERSION = "m27-review-bundle-v2"
@@ -281,7 +281,8 @@ def _validate_artifact(artifact: dict[str, Any], *, run_id: str) -> None:
         raise ValueError("artifact run_id mismatch")
     if artifact.get("run_status") != "completed":
         raise ValueError("only completed EvalRun may create a review bundle")
-    if artifact.get("contract_version") != CONTRACT_VERSION:
+    supported_versions = {*LEGACY_REVIEWABLE_CONTRACT_VERSIONS, CONTRACT_VERSION}
+    if artifact.get("contract_version") not in supported_versions:
         raise ValueError(f"unsupported review contract: {artifact.get('contract_version')!r}")
 
 

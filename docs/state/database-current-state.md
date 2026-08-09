@@ -1,12 +1,14 @@
-# DataPilot 数据库当前状态速查（Phase 2.7 / 2.7.1 后）
+# DataPilot 数据库当前事实速查
 
-> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和后续写 plan 时的边界。Trigger：只要涉及 SQL、字段、表、指标、seed、expected SQL、`result_match` 或数据库事实，必须先读本文。当前数据库事实以本文档和 migrations `20260722_0002` / `20260722_0003` 为准；归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」Phase 2.7 / 2.7.1 条目。
+> 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和 SQL 业务边界。Trigger：只要涉及 SQL、字段、表、指标、seed、expected SQL、`result_match` 或数据库事实，必须先读本文。
+>
+> **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/state/AI_CONTEXT_CHANGELOG.md`。
 
-更新时间：2026-08-05
+更新时间：2026-08-09
 
 ## 一句话结论
 
-DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 张物理表**，并通过 `20260722_0003` polish 补齐宽表字段、优惠券有效期索引和价格历史调价原因字段。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。Phase 3A 之后的 Text2SQL / Eval / RAG-Hybrid 工作都默认基于这个 14 表新库，不再回到旧 7 表库。
+DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 张物理表**，并通过 `20260722_0003` polish 补齐宽表字段、优惠券有效期索引和价格历史调价原因字段。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。当前 Text2SQL 与 Eval 都以这套 14 表库为业务底座，不再回到旧 7 表库。
 
 ## 关键入口
 
@@ -19,9 +21,9 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - 结构化关系事实源：`domain_pack/schema_desc/relations.yaml`
 - 指标口径事实源：`domain_pack/metrics.yaml`
 - Few-shot 示例：`domain_pack/sql_examples/basic.yaml`
-- 数据库升级挑战集：`eval/cases/database-upgrade-challenge.yaml`
-- Phase 3A 正式回归输入：`eval/cases/phase3a-regression.yaml`（10 条 formal 主硬门）
-- Phase 3A challenge 输入：`eval/cases/database-upgrade-challenge.yaml`（16 条 challenge superset，包含 10 条 formal question）
+- M27 当前 case catalog：`eval/cases/catalog/scenarios.yaml`
+- 当前 Eval 运行入口与 Gate：`docs/state/runbook.md`
+- 当前 Eval 基线与失败归因：`docs/state/eval-baselines.md`
 - 数据库升级测试：`tests/test_database_upgrade.py`
 - Seed 摘要输出：`eval/reports/database-upgrade-seed-summary.md`
 
@@ -42,7 +44,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 | `order_coupons` | 3000 | 订单-优惠券桥接 | 优惠券使用率、券渠道分析 | 多对多桥接表，一单可多券，订单数要去重 |
 | `user_behavior_log` | 10000 | 用户行为事件 | 加购到支付转化率、设备分析 | 转化率按 `event_type` 事件计数，不是订单表 |
 | `product_price_history` | 150 | 商品价格版本 | 历史售价、指定时间价格 | 查询历史价格必须匹配 `valid_from` / `valid_to` |
-| `orders_wide` | 10000 | 订单宽表快照 | 看板类渠道 / 商品 / 用户 / 退款汇总 | 含预聚合退款字段，适合快速汇总，不适合强一致明细追溯 |
+| `orders_wide` | 10000 | 订单宽表快照 | 看板类渠道 / 商品 / 用户 / 退款汇总 | 月度看板按 `snapshot_at`；精确明细、退款链路回星型表 |
 
 ## 兼容字段和新旧口径
 
@@ -52,8 +54,16 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - `orders.paid_at` 现在允许为空；GMV、净收入等成交口径默认排除 `paid_at IS NULL`。
 - `order_status` 完整取值：`delivered`（3371）、`paid`（3091）、`shipped`（3089）、`cancelled`（421，双 l）、`pending_payment`（20，即 `paid_at IS NULL` 的 20 条）、`canceled`（8，单 l）。成交口径需同时排除 `cancelled` 和 `canceled`；`pending_payment` 不需要显式排除（`paid_at IS NOT NULL` 已将其过滤），但写 prompt / schema_desc 时不应漏掉此状态。
 - `orders.source_order_no` / `orders.external_order_no` 格式为 `SRC-2026-XXXXX`，`orders.order_no` 格式为 `ORD-2026-XXXXX`——两者是**不同的编号体系，不能 join**。`refunds.source_order_no` 同为 SRC 格式，模拟外部源系统追溯；退款关联订单的唯一正确路径是 `refunds.order_id -> orders.id`。
-- `orders_wide` 保留 `refund_count` / `total_refund` / `has_refund` / `item_count` 等快照字段，用于看板选表挑战；强一致诊断仍回到星型模型。
+- `orders_wide` 保留 `refund_count` / `total_refund` / `has_refund` / `item_count` 等快照字段，用于快速看板汇总；强一致诊断仍回到星型模型。
 - `product_price_history.price_source` 是数据来源，`change_reason` 是业务调价原因；后续写 prompt / plan 时不要混成一个字段。
+
+## 宽表使用规则
+
+`orders_wide` 是为看板查询准备的订单快照，不是星型模型的替代品：
+
+- **按月看板**：按 `orders_wide.snapshot_at` 过滤月份；不要拿 `created_at` 代替快照业务日期。
+- **渠道 / 商品 / 用户的快速汇总**：可使用宽表已有的快照与预聚合字段。
+- **精确订单金额、退款归因、复杂 Join 或强一致对账**：回到 `orders`、`order_items`、`refunds` 等星型明细表，并套用对应指标口径。
 
 ## 关键关系
 
@@ -102,53 +112,31 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 
 这些事实由 `scripts/seed_data.py` 的 `verify_business_facts()` 用真实 SQL 查询得出。不要依赖自增 ID 从 1 开始定位这些事实，必须使用 `sku`、`coupon_code`、`channel_code`、`category.name`、`device_type` 等稳定业务键。
 
-## 数据质量设计
+## 数据质量与易错规则
 
-Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问题：
+Phase 2.7 的 seed 有意保留少量真实业务异常，供 Text2SQL 诊断使用；它们不是默认要清掉的脏数据。写 SQL 或排查结果时，优先按下表处理：
 
-- 未支付订单：20 条 `order_status = 'pending_payment'` 且 `paid_at IS NULL`。成交指标必须用 `paid_at IS NOT NULL` 排除；不要猜 `order_status = 'unpaid'`——该状态不存在。
-- 取消状态拼写差异：`cancelled`（421 条，双 l）/ `canceled`（8 条，单 l）都可能出现，成交口径要同时排除。
-- 外部源系统单号重复：各 20 条重复（10000 条中 9980 distinct），不破坏主键和唯一约束。
-- 外部源系统单号命名空间不兼容：`source_order_no` 格式为 `SRC-2026-XXXXX`，`order_no` 为 `ORD-2026-XXXXX`，**不能 join**。退款关联订单的唯一正确路径是 `refunds.order_id -> orders.id`。
-- 整单退款：`refunds.order_item_id` 有 100 条为空（10%），只通过 `order_id` 关联。商品维度退款率必须 LEFT JOIN `order_items`；INNER JOIN 会丢失这 100 条。
-- 负数退款冲销：3 条 `refund_amount = -20.00`，状态分别为 completed / requested / rejected。
-- 金额不一致样例：固定 5 条 `orders.order_amount ≠ SUM(order_items.line_amount)`。
+| 场景 | 应该怎么写 / 查 | 当前事实 | 容易错在哪里 |
+|---|---|---|---|
+| 未支付订单 | 成交指标使用 `paid_at IS NOT NULL` | `pending_payment` 20 条，`paid_at IS NULL` | 多算 GMV / 净收入；误写不存在的 `unpaid` 状态 |
+| 取消状态拼写差异 | 同时排除 `cancelled` 和 `canceled` | 双 l 421 条；单 l 8 条 | 只排一种拼写，成交指标偏高 |
+| 外部单号 | 退款只按 `refunds.order_id -> orders.id` 关联 | `SRC-*` 与 `ORD-*` 是两套编号；外部单号各有 20 条重复 | 用不同命名空间的单号 join，得到空或错结果；把外部单号当唯一主键 |
+| 整单退款 | 商品退款率用 LEFT JOIN；空 `order_item_id` 回退 `refunds.product_id` | 100 条退款单的 `order_item_id` 为空 | INNER JOIN 丢掉整单退款；把退款重复分给同订单每个商品 |
+| 负数退款冲销 | `completed` 退款按 `processed_at` 聚合，保留带符号金额 | 3 条 `refund_amount=-20.00` | 擅自过滤负数，破坏财务冲销口径 |
+| 订单头 / 明细金额 | `gmv` 用订单头，`item_gmv` 用明细；需要时单独对账 | 5 条 `orders.order_amount ≠ SUM(order_items.line_amount)` | 混用两种金额，导致结果或判分争议 |
 
-写 plan 时不要把这些当成 bug 清掉，除非用户明确要求“清洗数据”。它们是后续 Text2SQL 诊断能力的训练素材。
+## 数据库相关 Eval 失败排查入口
 
-## 数据异常菜单
+> 本表更新于 M27 时期
 
-| 异常 / 彩蛋 | 表 / 字段 | 数量 | 设计目的 | 容易导致的 eval 问题 |
-|---|---|---:|---|---|
-| 未支付订单 | `orders.order_status='pending_payment'`，`paid_at IS NULL` | 20 | 检查成交口径是否用 `paid_at IS NOT NULL` 过滤 | GMV / 净收入多算；模型幻想不存在的 `unpaid` 状态 |
-| 取消状态拼写差异 | `orders.order_status` | `cancelled=421`，`canceled=8` | 检查状态枚举鲁棒性 | 只排除一种拼写导致成交指标偏高 |
-| 外部源系统单号重复 | `orders.source_order_no` / `external_order_no` | 各 20 条重复；9980 distinct | 模拟外部系统幂等 / 去重边界 | 错把外部单号当唯一业务主键 |
-| 外部单号命名空间不兼容 | `source_order_no` vs `order_no` | 全量格式不同 | 检查 join path 是否尊重真实关系 | 用 `SRC-*` join `ORD-*` 导致空结果或错结果 |
-| 整单退款 | `refunds.order_item_id IS NULL` | 100（退款单 10%） | 检查商品退款率的 LEFT JOIN / 归因边界 | INNER JOIN 丢退款；商品维度退款率偏低 |
-| 负数退款冲销 | `refunds.refund_amount=-20.00` | 3 | 模拟退款冲销 / 财务修正 | 退款金额求和、异常值过滤口径争议 |
-| 订单头与明细金额不一致 | `orders.order_amount` vs `SUM(order_items.line_amount)` | 5 | 检查订单头口径和明细口径能否区分 | `result_match` 争议；模型混用 `gmv` / `item_gmv` |
-
-排查 eval 时，先判断失败是否撞上了这张菜单。菜单里的异常是**有意设计的数据质量素材**，不是默认要修掉的脏数据。
-
-### 与当前 M23 eval / 异常专项的关系
-
-这张菜单是数据库事实源；具体哪些异常进入评测、怎样判定，统一看 `docs/state/eval-baselines.md` §2.5 的异常专项。当前重点边界如下：
-
-- 成交类 case（GMV、净收入、商品 GMV、渠道 GMV）在 reference SQL 中同时排除 `cancelled` / `canceled`，并通过 `paid_at` 时间条件排除 `paid_at IS NULL` 的未支付订单。
-- 优惠券使用订单数使用 `COUNT(DISTINCT orders.id)`，避免一单多券放大订单数；价格历史 reference 使用 `valid_to IS NULL OR valid_to > 窗口开始` 的时间窗口。
-- M23 后 `db_core_002` 的商品退款率 reference 已按成交订单过滤，并在整单退款 `order_item_id IS NULL` 时回退 `refunds.product_id`。
-- 异常专项新增：`db_anomaly_001` 验证 completed 退款按 `processed_at` 的带符号净退款金额；`db_anomaly_002` 验证退款经内部外键关联订单/渠道；`db_anomaly_003` 验证订单头 / 明细金额不一致的对账结果。专项清单不复制旧 case 定义，见 `eval/cases/database-exception-suite.yaml`。
-
-## Eval 失败排查入口
-
-| failure_stage / 现象 | 优先查什么 | 不要先做什么 |
+| assertion / 现象 | 优先查什么 | 不要先做什么 |
 |---|---|---|
-| `result_match` | 固定业务事实、指标默认口径、数据异常菜单、expected SQL 是否使用正确粒度 | 不要立刻改模型 prompt 或放宽 scorer |
+| `result_match` | 固定业务事实、指标默认口径、数据质量与易错规则、oracle 是否使用正确粒度 | 不要立刻改模型 prompt 或放宽 scorer |
 | `schema_context` / 漏列 | 字段是否真实存在、`domain_pack/schema_desc/*.md` 是否漏写、字段别名是否清楚 | 不要直接把缺列写进 eval case 当标准 |
 | `schema_retrieval` / 漏表 | 当前 14 表用途、`relations.yaml`、指标依赖的表和 join path | 不要让 LLM 临场猜 join |
 | 安全拦截相关 | RBAC / 敏感字段策略、SQL Guard 是否正确识别只读和敏感字段 | 不要为了通过率放宽安全策略 |
 | 指标口径争议 | `domain_pack/metrics.yaml`、本文件「指标默认口径」、固定业务事实 | 不要混用订单头 GMV 和明细 GMV |
-| Qwen / DeepSeek 重跑差异 | `docs/state/eval-baselines.md` 的重复 case 波动说明 | 不要把三次独立 LLM run 当作同一次 superset 切片 |
+| timeout / `not_observed` | 同一 `run_id` 的 checkpoint、artifact 与运行环境 | 不要把外部不可用误当成业务 failed；处理方式看 `runbook.md` |
 
 ## RBAC / 安全边界
 
@@ -161,15 +149,11 @@ Phase 2.7 的 seed 不是纯净玩具数据，包含少量真实业务常见问�
 
 权限事实源是 `engine/sql_guard/rbac.py`。新增表或新增角色时，要同步测试安全 case。
 
-## Phase 3A 历史使用边界
+## 历史 Eval 材料（只读）
 
-- Phase 3A M8 baseline 直接跑在 14 表新库上，不做旧 7 表 vs 新 14 表对照。
-- `eval/cases/phase3a-regression.yaml` 是 Phase 3A 正式 10 条 formal 回归输入，是 M8-M12 主硬门。
-- `eval/cases/database-upgrade-challenge.yaml` 是 16 条 challenge superset，包含 10 条 formal question，并额外覆盖 6 条数据库复杂度诊断题；后续每个模块应同步运行并记录诊断摘要。
-- 数据库升级阶段已经验证结构、seed、固定事实、challenge 基础用例、安全和 pytest；不要要求 Phase 3A `trace_steps` 在这个阶段全部通过。
-- `schema_retrieval`、`join_path`、`query_plan`、`trace_steps` 属于 Phase 3A M9-M12 的主线工作，不要倒灌回 Phase 2.7。
+旧 formal / challenge / diagnostic YAML、Phase 3A 运行策略和历史分数不再定义当前评测；需要追溯时看 `docs/archive-versions/eval-baselines-old.md` 与 `docs/state/AI_CONTEXT_CHANGELOG.md`，不要把旧合同混入 M27 结论。
 
-## 后续 Phase 3 / RAG-Hybrid 使用注意
+## 后续 RAG-Hybrid 使用注意
 
 - 新 SQL 链路需要能区分订单头指标和订单明细指标。
 - Schema Retrieval 不应只召回表名，还要召回字段、指标、关系和聚合风险。
@@ -197,9 +181,10 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
 D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.agent_work/temp/pytest-db-current
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --cases eval\cases\smoke.yaml --report eval\reports\latest.md --trace eval/traces/db-current-smoke-traces.jsonl
 git diff --check
 ```
+
+真实 Eval 的 selector、`run_id`、Gate 和执行授权规则统一看 `docs/state/runbook.md`；不要从本文件复制命令。
 
 Phase 2.7 历史验收快照：
 
@@ -218,4 +203,4 @@ Phase 2.7 历史验收快照：
 - 如果要写 SQL / Text2SQL plan，读本文件、`domain_pack/metrics.yaml`、`domain_pack/schema_desc/relations.yaml`。
 - 如果要改数据库，先读本文档和当前 Alembic head；如需理解历史设计取舍，再读 `docs/archive-versions/database-upgrade-plan-v5.md`。
 - 如果看到测试中自增 ID 不从 1 开始，不要修成依赖 ID；改用稳定业务键。
-- 如果遇到 challenge 用例失败，先判断是数据库固定事实坏了，还是旧 Text2SQL 链路能力不足；不要误判为 Phase 3A 已失败。
+- 如果 M27 数据库相关 Scenario 失败，先判断是数据库固定事实、指标 / 关系定义，还是 Text2SQL 链路问题；不要把旧 Phase 3A 口径混进当前结论。

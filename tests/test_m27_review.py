@@ -21,7 +21,7 @@ def _catalog_file(tmp_path: Path) -> Path:
     path = tmp_path / "catalog.yaml"
     path.write_text(
         """
-contract_version: m27-v1
+contract_version: m27-v2
 scenarios:
   - id: normal
     question: 查询演示商品
@@ -99,7 +99,7 @@ def _write_run(tmp_path: Path) -> tuple[Path, Path, str]:
     artifact = {
         "run_id": run_id,
         "run_status": "completed",
-        "contract_version": "m27-v1",
+        "contract_version": "m27-v2",
         "artifact_schema_version": "m27-artifact-v1",
         "catalog_hash": "fixture-catalog",
         "selected_contract_hash": "fixture-selected",
@@ -133,6 +133,24 @@ def test_review_bundle_joins_completed_artifact_contract_and_raw_checkpoint(tmp_
     assert normal["review_evidence"]["candidate_result_preview"] == [{"product_name": "demo", "email": "[redacted]"}]
     assert normal["review_evidence"]["reference_result_preview"] == [{"product_name": "demo", "email": "[redacted]"}]
     assert normal["automatic_outcome"] == "passed"
+
+
+def test_review_bundle_keeps_m27_v1_artifact_readable_after_v2_contract_upgrade(tmp_path: Path) -> None:
+    """合同升级不能让已经完成的 v1 artifact 失去只读人工复核能力。"""
+
+    artifact_path, checkpoint_root, run_id = _write_run(tmp_path)
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["contract_version"] = "m27-v1"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+
+    bundle = build_review_bundle(
+        run_id=run_id,
+        catalog=load_catalog(_catalog_file(tmp_path)),
+        artifact_path=artifact_path,
+        checkpoint_root=checkpoint_root,
+    )
+
+    assert bundle["source"]["contract_version"] == "m27-v1"
     blocked = next(record for record in bundle["records"] if record["scenario_id"] == "blocked")
     assert blocked["review_evidence"]["answer_summary"] == "已拦截"
     assert blocked["review_evidence"]["blocked_reason"] == "只允许 SELECT"

@@ -13,6 +13,41 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验] M27 Stress / Database Exception：Qwen plus + Milvus（2026-08-10）
+
+- 用户各授权一次：Stress `m27-stress-20260809-qwen37plus-milvus-01`（9 logical / 9 physical）与 Database Exception `m27-database-exception-20260809-qwen37plus-milvus-01`（7 / 7）。两轮都固定 Qwen `qwen3.7-plus`、Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim、clean collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`、195-doc hash `8a8b6626...`、weighted、45s/retry0、SQLite deterministic oracle、LangFuse off；新 artifact 已完整记录 runtime identity。
+- Stress 全部 assertion 为 `7 passed / 14 failed / 4 not_observed`，7 completed / 2 external unavailable；Database Exception 为 `4 / 4 / 11`，3 completed / 4 external unavailable。两套 suite policy 的 required 都是 `0 / 0 / 0`，Gate `inconclusive` 反映没有 required 硬门结论，不是“业务硬门失败”。均为单轮 advisory 证据，不作模型 / Milvus 因果结论、不登记长期 baseline。未改任何默认配置。
+
+### [小修] Eval 实验快照按决策价值分层（2026-08-09）
+
+- `eval-baselines.md` 不再按 v1 / v2 或模块编号持续新增快照标题，改为「当前有效实验快照 → 正式长期基线 → 历史实验记录」：仍可支持当前路线判断的运行留在前者，用户指定的 completed run 才进入长期基线，合同或条件已过时的记录移入历史。首个 v2 Core 明确标为“过渡证据”，不是严格 Milvus/P1 对照；四条 v1 Core 转为历史追溯。仅整理账本结构，未运行真实 LLM、未改合同、分母、Gate 或默认配置。
+
+### [小修] 数据库当前事实文档对齐 M27（2026-08-09）
+
+- `database-current-state.md` 保留 14 表、指标、seed 与改库事实，但移除了旧 Phase 3A / M23 Eval 入口、`--cases` 命令和过时的异常专项映射；当前评测统一链接到 M27 catalog、runbook 和 eval-baselines。补充事实来源分工，以及 `orders_wide` 的月度 `snapshot_at` 与星型明细回退规则；重复的数据质量说明收敛为一张“应该怎么查 / 容易错在哪里”表。未运行数据库或真实 LLM，未改 schema、seed、指标、oracle 或默认配置。
+
+### [小修] M27 Milvus runtime identity 与速查收敛（2026-08-09）
+
+- resolved runtime identity 新增 embedding 模型/维度、Milvus collection、schema document count/hash，确保未来 M27 artifact 能区分同为 Milvus 的不同语料和 embedding 条件；只读取配置与 domain pack，不连接或写入 Milvus。首个 v2 Core 早于该字段扩展，已在 eval-baselines 标为过渡快照。`schema-retrieval-milvus-embedding.md` 移除失效 legacy CLI / 数字，明确 DashScope/Qwen 是唯一文档化 M27 Milvus 路径，SiliconFlow 仅保留实现历史。M27 foundation/review `23 passed, 1 warning`；未调用真实 LLM、未切默认配置。
+
+### [小修] M27 临时目录统一与 Gate 操作指引（2026-08-09）
+
+- 用户确认将 M27 checkpoint 与所有 AI 临时产物统一到 `.agent_work/temp/`：`eval.run_eval` 默认 checkpoint 根目录已迁移，旧临时目录的 66 个直接子项已移动到共享目录；长期 artifact/report/trace 不移动。runbook 同时补齐前台等待超时的精确检查路径，以及 `passed` / `failed` / `inconclusive` 的操作边界。未调用 LLM、未改变 Eval 合同、默认模型或可靠性配置。
+
+### [实验] M27 v2 Core：Qwen plus + Milvus（2026-08-09）
+
+- 用户授权一次运行 `m27-core-20260809-qwen37plus-milvus-02`：Qwen `qwen3.7-plus`、Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim、weighted、45s/retry0、SQLite deterministic oracle、LangFuse off，19 logical / 19 physical。
+- completed artifact 结果为 required `28 passed / 0 failed / 6 not_observed`、Gate `inconclusive`。17 个 Scenario 完成；`june_product_sales_top5` 与 `june_product_refund_rate_ranking` 都在 QueryPlan timeout、没有 candidate SQL，P0 正确将各自 Result / Output / Schema Context 投影为 `external_unavailable / not_observed`，没有伪造业务失败。
+- P1 的两项相关断言本轮通过：`june_actual_amount_sum` metric mapping、`june_channel_gmv_dashboard` schema context；后者的 QueryPlan 含 `orders_wide.snapshot_at`、`orders_wide.order_amount` 和 `gmv`。各仅一轮，不作稳定性、模型、Milvus 或 embedding 因果结论，也不切默认配置。
+- 这是当前首个 M27 v2 Core 快照，已列入 eval-baselines 的“当前可比较快照”，但未由用户指定为正式长期 baseline；不得与 v1 `29/5/0` 直接比较。
+
+### [模块任务] M27 v2：P0 timeout 判卷修正、P1 Core 定向优化与 API 默认迁移（2026-08-09）
+
+- **改动范围**：M27 canonical contract 升为 `m27-v2`；Evaluator 从 QueryPlan trace 读取 transient `error_subtype`，将无候选答卷的 timeout/network/429/5xx 记为 `external_unavailable`；metric scorer 统一带表前缀与裸字段；渠道 GMV 提升 `gmv` metric 召回并补 `orders_wide.snapshot_at` 计划提示。普通 API 默认切到 `new_text2sql`，Eval adapter 对新旧路径都显式传 `force_new_pipeline`，legacy baseline 保持显式 `false` 回退。
+- **关键记录**：用户确认这次 P0 可以改变正式分母/Gate，因此 v1 的 timeout 空答卷不再伪装成业务 failed；相关 assertion 变为 `not_observed`，required Gate 为 `inconclusive`。这是正式可比性变化，故不重写旧 artifact，而是冻结为 v1 追溯快照；review 保持 v1/v2 artifact 只读兼容。`net_revenue = SUM(orders.actual_amount)` 不是业务 binding 错误，修的是命名空间比较；渠道 GMV 不放宽 Scenario/scorer，而是让正确 metric 与快照时间口径进入上下文。
+- **验证快照**：`tests/test_m27_foundation.py tests/test_m27_review.py` 为 `22 passed, 1 warning`（含 v1 artifact 只读 review 兼容）；新 API 默认/显式 legacy 测试为 `2 passed, 1 warning`；`tests/test_phase3a_eval.py` 为 `23 passed, 1 warning`；`eval.run_eval --help` 显示 `m27-v2`。warning 均为既有 Starlette/httpx deprecation。未调用真实 LLM，未改模型、检索、embedding、数据库、oracle 或 45s/retry0 默认可靠性配置。
+- **遗留/后续**：尚未运行 M27 v2 真实 Core，也未登记新的正式长期基线；将来运行须单独授权，且不可将 v2 与 v1 的 `29 passed / 5 failed / 0 not_observed` 直接升降比较。M27 仍待 `accept-module`。
+
 ### [小修] 真实 Eval 的单次执行纪律（2026-08-09）
 
 - runbook 明确：一次用户授权只创建一个 `run_id`；前台等待超时不等于 Eval 停止，必须先检查同 run 的 manifest/checkpoint/artifact。普通 Smoke/Core 不得临时用 `.ps1`、隐藏 PowerShell、计划任务或额外终端重跑；只有原 run 明确失败且没有 completed artifact，才可记录原因后新建 run。
@@ -41,7 +76,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 - **改动范围**：新增 `eval/review.py` 深 module、`eval/run_review.py` CLI 与 `tests/test_m27_review.py`；同步 M27 runbook / cases README / state 档案。它是用户在 M27 原计划“暂不实现人工 verdict 工作流”之外明确授权的旁路增补，不改 formal case、EvalRun schema、分母、Gate 或旧 M26 audit。
 - **关键记录**：review bundle 以 completed M27 artifact、同 run 的短期 raw checkpoint、canonical catalog 三者的 `(run_id, scenario_id, replicate_id)` 和 assertion identity 对齐为前提。它仅输出脱敏 candidate/reference SQL、最多 3 行结果 preview、trace 摘要和合同；缺 checkpoint / 身份不一致即失败，不由 Markdown 猜造人工证据。Codex/manual verdict 固定为 `pass/fail/insufficient_evidence`，另记录 confidence、reason、evidence 与 auto/manual reconciliation，始终独立于自动评分事实。
-- **验证快照**：`pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.codex/temp_work/pytest-m27-review-final`：`38 passed, 1 warning`；warning 为既有 Starlette/httpx deprecation。review CLI 已对既有 completed M27 输入完成定向校验；未调用新的真实 LLM。
+- **验证快照**：`pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.agent_work/temp/pytest-m27-review-final`：`38 passed, 1 warning`；warning 为既有 Starlette/httpx deprecation。review CLI 已对既有 completed M27 输入完成定向校验；未调用新的真实 LLM。
 - **遗留/后续**：review bundle 依赖短期 checkpoint，清理后不能重建，这符合默认不长期存完整 rows/prompt 的安全策略。若未来确需长期独立人工复核，应另行确认保留期、访问控制和更严格的 SQL / 结果样本脱敏策略；不得把它接入 Gate 或改写旧 M26 audit。
 
 ### [模块任务] M27 Diagnostic / Eval Case 体系优化（2026-08-09）
@@ -51,7 +86,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - **业务/安全边界**：商品退款率采用完整排名而非旧 Top1 projection；SCD 开放 `valid_to`、completed refund、递归子类都以 SQLite counterfactual 证明。completed artifact 仅保存 allowlist response/trace 摘要、row count 与 result fingerprint，不保存 rows/prompt/answer/凭证；`interrupted` 与遗留 `running -> abandoned` 不能进入 projector。旧 M26 artifact、YAML、报告与 audit 不覆盖、不重算。
 - **验证快照**：M27 foundation + counterfactual `14 passed, 1 warning`；legacy Eval 合同 `37 passed, 1 warning`；pipeline + M27 `21 passed, 1 warning`；全仓 `208 passed, 1 warning`（509.65s）；`git diff --check` 通过。warning 均为既有 Starlette/httpx deprecation。
 - **参考资料**：`m27-plan.md`、M26 notes、项目 state/runbook/database facts、现有 runner/scorer/trace/audit 实现；未检索或照搬外部平台。
-- **遗留/后续**：M27 未验收（待 `accept-module`）。真实 LLM `m27-v1` 基线仍须用户单独确认范围/调用数/成本；不要将其与旧 25/32、26/32 等口径直接升降比较。LangFuse 目前只构造严格 allowlist payload，实际上传仍需显式授权。
+- **遗留/后续**：M27 未验收（待 `accept-module`）。真实 LLM `m27-v1` 基线仍须用户单独确认范围/调用数/成本；不要将其与旧 25/32、26/32 等口径直接升降比较。LangFuse 目前只构造严格 allowlist payload，实际上传仍需显式授权。**⚠️ 注（2026-08-09）**：后续 P0 修正了 timeout 的正式判卷语义，当前合同已升为 `m27-v2`；v1 artifact 只读保留，新的真实基线必须按 v2 单独登记。
 
 ### [审查] M26-v1 第二轮 Qwen plus 人工 SQL 审查（2026-08-08）
 
@@ -165,7 +200,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 验证：20 条 reference SQL 在当前 MySQL 与 deterministic SQLite 均可执行、逐条行数一致；focused `42 passed, 1 warning`；全量 pytest `152 passed, 1 warning`。warning 均为既有 Starlette/httpx `TestClient` deprecation。
 - Milvus 复用补丁：M23 语义文本改变后发现，旧实现只校验 row_count / dimension，194 条旧向量会被错误映射为 194 条新文档。现将 `schema_docs_hash` 写入 collection schema description，复用时强制校验；随后新增 `net_refund_amount` 使当前 corpus 进一步变为 195 条 / `ce04fe4f...`，缺少标记或 hash 不同的 M20/M22 collection 必须新建或显式 reset。
 - 异常专项：将异常彩蛋规则从 M22 实验卡片提升为 `eval-baselines.md` §2.5 长期章节；新增 `net_refund_amount` 指标和 `db_anomaly_001/002/003`，并由 `database-exception-suite.yaml` 引用既有 case，避免 formal / challenge / diagnostic 的重复 YAML。专项为 6 条自动 + 1 条人工素材；新增三条 reference SQL 已在 SQLite 与当前 MySQL 执行成功，相关 focused `32 passed, 1 warning`。
-- 真实 LLM 快照（2026-08-06）：首次无代理运行在所有 case 的 QueryPlan 阶段报 `WinError 10013`，作为网络失败不记分；配置本地代理后，Qwen `qwen3.7-plus` + `new_text2sql` + local deterministic / weighted 完成 7 条专项，结果 `1/7`（自动 `1/6`、人工 `0/1 review`）。唯一自动通过为 `db_anomaly_001`，证明 signed completed refund reference 能进入端到端链路；其余失败分别显示成交订单缺 limit、coupon 输出列不符、退款率结果不符、退款渠道关联缺 `orders/channels`、对账输出列缺失，`db_join_003` 为 LLM generation error。单次诊断不切默认。报告/trace/triage 位于 `.codex/temp_work/m23-exception-suite-retry-20260806_145019-*`。
+- 真实 LLM 快照（2026-08-06）：首次无代理运行在所有 case 的 QueryPlan 阶段报 `WinError 10013`，作为网络失败不记分；配置本地代理后，Qwen `qwen3.7-plus` + `new_text2sql` + local deterministic / weighted 完成 7 条专项，结果 `1/7`（自动 `1/6`、人工 `0/1 review`）。唯一自动通过为 `db_anomaly_001`，证明 signed completed refund reference 能进入端到端链路；其余失败分别显示成交订单缺 limit、coupon 输出列不符、退款率结果不符、退款渠道关联缺 `orders/channels`、对账输出列缺失，`db_join_003` 为 LLM generation error。单次诊断不切默认。报告/trace/triage 已随临时目录统一迁至 `.agent_work/temp/m23-exception-suite-retry-20260806_145019-*`。
 - 遗留/后续：SQLite 仍是离线 oracle，MySQL 仍仅做只读审计；外部单号、负数退款和订单头/明细金额对账尚无独立自动 case。M22 真实 LLM 总分属于旧合同历史快照，下一轮 retrieval 假设必须从 M23 新合同重新建基线。
 
 ### [评测审计] M22 数据库异常彩蛋覆盖边界（2026-08-05）
@@ -213,7 +248,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 - 改动范围：Context scorer、plan-validation scorer/case、SQL contract trace、`db_simple_002`、M22 计划与临时产物纪律。
 - 记录：补齐 Context 的 join key 硬检查，以及表数/禁表 warn；`accept_paths` 现按 `(blocked_via, issue_tag)` 成对验证，三类 M22 语义拒绝统一声明 `semantic_request_validation`。SQL Plan Contract 暂不改 AST，只在失败 trace 写候选 SQL 摘要与计划/观察到的排序、limit，先积累误拦证据。用户确认“已支付订单”case 使用“成交订单”口径并排除取消状态。
-- 产物：`.codex/temp_work/m22-db-core-004-trace.jsonl` 已取消 Git 跟踪并加入 ignore；历史 commit 不重写，本地一次性文件可保留供本机排障。
+- 产物：`.agent_work/temp/m22-db-core-004-trace.jsonl` 已取消 Git 跟踪并加入 ignore；历史 commit 不重写，本地一次性文件可保留供本机排障。
 - 验证：M22 专属 `14 passed, 1 warning`；相关回归 `64 passed, 1 warning`；全量 `147 passed, 2 skipped, 1 warning`，均仅有既有 Starlette/httpx warning。
 - 遗留/后续：三条默认快照 SQL contract failure 的真实/误拦比例需以后续 trace 判断；是否采用 AST 比较需单独确认。真实 LLM default diagnostic 未因本次修复重跑，`25/32` 仍是修复前 C0 快照。Qwen/Milvus/RRF 新口径实验仍待用户确认，不在本修复中执行。
 

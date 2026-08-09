@@ -999,7 +999,7 @@ def main(argv: list[str] | None = None) -> int:
     不在测试或导入阶段发请求。
     """
 
-    parser = argparse.ArgumentParser(description="Run DataPilot m27-v1 canonical evaluation.")
+    parser = argparse.ArgumentParser(description="Run DataPilot m27-v2 canonical evaluation.")
     parser.add_argument("--catalog", type=Path, default=PROJECT_ROOT / "eval" / "cases" / "catalog" / "scenarios.yaml")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--selector", default="smoke", help="selector 文件名（位于 eval/cases/catalog/selectors/）或 YAML 路径。")
@@ -1010,7 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--replicate-count", type=int, default=None)
     parser.add_argument("--run-id", default=datetime.now().strftime("m27-%Y%m%d-%H%M%S"))
     parser.add_argument("--artifact-dir", type=Path, default=PROJECT_ROOT / "eval" / "reports" / "m27-artifacts")
-    parser.add_argument("--checkpoint-dir", type=Path, default=PROJECT_ROOT / ".codex" / "temp_work" / "m27-checkpoints")
+    parser.add_argument("--checkpoint-dir", type=Path, default=PROJECT_ROOT / ".agent_work" / "temp" / "m27-checkpoints")
     parser.add_argument("--trace-dir", type=Path, default=PROJECT_ROOT / "eval" / "traces")
     parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--fail-closed-inconclusive", action="store_true")

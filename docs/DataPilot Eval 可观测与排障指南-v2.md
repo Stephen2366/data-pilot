@@ -26,7 +26,7 @@ projector 生成 Gate 和 Markdown report（展示视图）
 |---|---|---|---|
 | **EvalRun artifact** | `eval/reports/m27-artifacts/<run-id>.json` | completed run 的长期、脱敏事实源 | 不适用；它就是自动事实 |
 | **Markdown report** | `eval/reports/<name>.md` | 阅读 Gate、执行统计、assertion views | 否；它由 artifact 投影生成 |
-| **checkpoint** | `.codex/temp_work/m27-checkpoints/<run-id>/` | 短期排障、人工复核所需的候选 SQL / 有限结果证据 | 否 |
+| **checkpoint** | `.agent_work/temp/m27-checkpoints/<run-id>/` | 短期排障、人工复核所需的候选 SQL / 有限结果证据 | 否 |
 | **JSONL trace** | `eval/traces/` | 单次请求的过程调试 | 否 |
 | **review bundle** | `eval/reports/m27-reviews/` | Codex / 人工逐题业务复核 | 否；永远不改分母、Gate、CI |
 
@@ -75,6 +75,8 @@ observed = passed + failed
 ```
 
 **Gate 不是能力率。** Gate 只消费当前 suite policy 中标为 `required` 的 assertion，输出 `passed`、`failed` 或 `inconclusive`。所以可能出现“某个 view 通过率不错，但 Core Gate 仍 failed”；也可能出现外部不可用导致 Gate `inconclusive`。
+
+例如 QueryPlan 调模型 timeout，系统没有拿到候选 SQL：这属于 `external_unavailable`，相关 assertion 应为 `not_observed`，不是把空列、空结果误叫业务 failed。只有已经拿到答卷、再发现结果或合同不符时，才记 `failed`。
 
 Reliability 的多次 replicate 也不会把同一个业务问题重复算进逻辑 Scenario 分母。
 

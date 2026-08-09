@@ -198,10 +198,13 @@ def _metric_mapping(contract: AssertionContract, evidence: ExecutionEvidence) ->
         return _missing(contract, evidence, "missing_query_plan")
     spec = contract.spec
     assert isinstance(spec, MetricMappingSpec)
-    actual_columns = set(plan.get("columns") or [])
+    # Contract 可以写业务友好的 ``actual_amount``，而 QueryPlan 为了可读性通常写
+    # ``orders.actual_amount``。两者是同一字段，必须在同一命名空间比较；否则会把正确计划
+    # 误判为 metric_mapping_mismatch。
+    actual_columns = _unqualified(list(plan.get("columns") or []))
     missing = {
         "tables": sorted(set(spec.tables) - set(plan.get("tables") or [])),
-        "columns": sorted(set(spec.columns) - actual_columns),
+        "columns": sorted(_unqualified(list(spec.columns)) - actual_columns),
         "metrics": sorted(set(spec.metrics) - set(plan.get("metrics") or [])),
     }
     missing = {key: value for key, value in missing.items() if value}

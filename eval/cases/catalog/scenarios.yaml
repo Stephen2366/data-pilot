@@ -1,6 +1,6 @@
 # M27 canonical catalog。旧 formal / challenge / diagnostic YAML 保持只读历史证据；
 # 本文件只承载已确认且已由 typed scorer 覆盖的新合同。
-contract_version: m27-v1
+contract_version: m27-v2
 
 scenarios:
   - id: june_gmv

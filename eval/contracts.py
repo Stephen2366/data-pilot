@@ -18,7 +18,11 @@ ExecutionStatus = Literal["completed", "rejected", "pipeline_error", "external_u
 AssertionStatus = Literal["passed", "failed", "not_observed"]
 RunStatus = Literal["running", "completed", "interrupted", "failed"]
 
-CONTRACT_VERSION = "m27-v1"
+# M27 v2 修正了 provider timeout 的正式判卷语义：没有生成候选答卷时，依赖答卷的
+# assertion 记为 not_observed，而不是把空响应当业务错误。旧 v1 artifact 仍可只读复核，
+# 但不能与 v2 的基线直接比较。
+CONTRACT_VERSION = "m27-v2"
+LEGACY_REVIEWABLE_CONTRACT_VERSIONS = frozenset({"m27-v1"})
 ARTIFACT_SCHEMA_VERSION = "m27-artifact-v1"
 PROJECTOR_VERSION = "m27-projector-v1"
 
