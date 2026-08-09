@@ -22,7 +22,7 @@
 | 默认本地检索 | `SCHEMA_VECTOR_BACKEND=inmemory`；`SCHEMA_EMBEDDING_PROVIDER=deterministic` | 当前主线默认，轻量、稳定、无需外部服务。 |
 | Milvus 向量库 | `SCHEMA_VECTOR_BACKEND=milvus` | 只显式实验时开启；需要本地 Milvus 服务可用。 |
 | SiliconFlow embedding | `SCHEMA_VECTOR_BACKEND=milvus`；`SCHEMA_EMBEDDING_PROVIDER=siliconflow`；`SILICONFLOW_EMBEDDING_MODEL=BAAI/bge-m3` | 可用但未切默认；真实 API 调用放 smoke / A/B。 |
-| DashScope/Qwen embedding | `SCHEMA_VECTOR_BACKEND=milvus`；`SCHEMA_EMBEDDING_PROVIDER=dashscope` 或 `qwen`；`DASHSCOPE_EMBEDDING_MODEL=qwen3.7-text-embedding` | formal 曾略好，但差距小且受 LLM 波动影响，后续 RAG / Hybrid 再评估。 |
+| DashScope/Qwen embedding | `SCHEMA_VECTOR_BACKEND=milvus`；`SCHEMA_EMBEDDING_PROVIDER=dashscope`；`QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding`；`QWEN_EMBEDDING_DIMENSIONS=1024` | 显式实验路径；当前不切默认，模型/检索结论需看同条件重复快照。 |
 
 ## LangFuse / Trace 链路
 
