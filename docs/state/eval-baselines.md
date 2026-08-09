@@ -1,6 +1,6 @@
 # DataPilot Eval Baselines
 
-> 本文从 `m27-v1` 开始记录**新的** EvalRun 基线与可比性规则。M26 及以前的 formal / challenge / diagnostic 账本已完整归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)，**不与现在的数字直接比较**。
+> 本文从 `m27-v1` 开始记录新的 EvalRun 基线与可比性规则。M26 及以前的 formal / challenge / diagnostic 账本已完整归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)，不与现在的数字直接比较。
 
 更新时间：2026-08-09
 
@@ -8,7 +8,7 @@
 
 - **当前合同**：`m27-v1`；每个业务问题是一个 canonical Scenario，多个 typed assertion 共享一次执行证据。
 - **当前 catalog**：28 个 Scenario；分类为 Core / Stress / Manual Lab。Smoke、Reliability、Database Exception 是 selector，不是复制题面的独立题集。
-- **当前真实 LLM 基线**：**尚未登记正式长期基线**。已完成 Smoke/Core 真实快照（见第 4、5 节），但有限次数的运行不代表完整模型通过率、成本或可靠性。
+- **当前真实 LLM 基线**：**尚未登记正式长期基线**。下方已记录可比较的 Core 快照，但有限次数的运行不代表完整模型通过率、成本或可靠性。
 - **默认运行配置**：仍以 [runbook.md](runbook.md) 为准；M27 没有切换模型、检索、embedding、数据库、oracle、timeout 或 retry。
 
 ## 读数与分母
@@ -39,34 +39,25 @@ M27 review bundle 是解释自动结果的旁路证据，不是第二套分数�
 
 自 `m27-review-bundle-v2` 起，bundle 保存 artifact 与各 checkpoint 的 SHA-256，复核前可验证来源仍是原文件。普通业务题没有 candidate SQL 时只能记为 `insufficient_evidence`；安全或预期拒绝题可以凭明确拦截证据判通过。人工分类只服务于错误聚合，绝不成为新分母或 Gate 输入。早期 v1 review 是无哈希的历史旁路材料，不能直接和 v2 的来源校验混用。
 
-## 已运行的真实 LLM Smoke（非基线）
+## 可比较的评测快照
 
-| Run ID | 日期 | Selector / Scenario | Resolved runtime | Oracle / artifact | Assertion views | Gate | 解释边界 |
-|---|---|---|---|---|---|---|---|
-| [`m27-smoke-20260809-02`](../../eval/reports/m27-artifacts/m27-smoke-20260809-02.json) | 2026-08-09 | `smoke`；4 logical Scenario / 4 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；LangFuse off | SQLite deterministic seed；[Markdown report](../../eval/reports/m27-smoke-20260809-02.md)；[Codex review](../../eval/reports/m27-reviews/m27-smoke-20260809-02-review.md) | required：passed 9 / failed 0 / not_observed 0；Codex review 4/4 pass | `passed` | 仅验证 API、Guard、Trace、artifact、report 闭环；不是 Core/Stress 基线，不能与 M26 `25/32` 等旧口径比较。 |
-| [`m27-smoke-20260809-03`](../../eval/reports/m27-artifacts/m27-smoke-20260809-03.json) | 2026-08-09 | `smoke`；4 logical Scenario / 4 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；LangFuse off | SQLite deterministic seed；[Markdown report](../../eval/reports/m27-smoke-20260809-03.md)；[Codex review](../../eval/reports/m27-reviews/m27-smoke-20260809-03-review.md) | required：passed 9 / failed 0 / not_observed 0；Codex review 4/4 pass | `passed` | 与 `-02` 同条件的第二次 Smoke；只说明该小范围链路再次成功，不构成完整能力或可靠性基线。 |
+只在这里记录可按同一 M27 合同解释的有效运行。Smoke、运行事故、中断和外部服务异常不作为独立记录进入本账本。
 
-首次 `m27-smoke-20260809-01` 在外部调用期间被工具时限中断，只留下 `running` checkpoint；M27 不支持 resume，该不完整 run 不进入 artifact、Gate 或分数账本。
-
-## M27 已运行 Core 快照（未登记正式长期基线）
-
-| Run ID | 日期 | Suite | Resolved runtime | Assertion views / Gate | 解释边界 |
+| 类型 | Run ID | 日期 | 协议 / resolved runtime | Assertion views / Gate | 解释边界 |
 |---|---|---|---|---|---|
-| [`m27-core-20260809-qwen37plus-local-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-local-01.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-local-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 与下方 Milvus 组成一次配对；两侧的失败 assertion 完全相同。单次结果不与 M26 比较，也不推断稳定性。 |
-| [`m27-core-20260809-qwen37plus-milvus-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-milvus-01.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-plus`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-milvus-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 独立 clean collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`：195 docs、hash `8a8b6626...`。与 local 单次一致，只能说本轮未观察到结果变化。 |
-| [`m27-core-20260809-qwen37max-local-05`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-05.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-max`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-local-05.md)；required：9 passed / 23 failed / 2 not_observed；Gate `failed` | **Qwen `account_arrearage` 污染**；不用于模型能力或检索比较。 |
-| [`m27-core-20260809-qwen37max-milvus-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-milvus-01.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-max`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-milvus-01.md)；required：9 passed / 23 failed / 2 not_observed；Gate `failed` | **Qwen `account_arrearage` 污染**；不用于模型能力或检索比较。 |
-| [`m27-core-20260809-qwen37max-local-06`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-06.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-max`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-local-06.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 充值后连通性检查成功再运行；与下方 Milvus 当前快照一致，但样本仍不足以证明 max 与 plus 等价。 |
-| [`m27-core-20260809-qwen37max-milvus-02`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-milvus-02.json) | 2026-08-09 | `core`；19 logical Scenario / 19 physical attempts | Qwen `qwen3.7-max`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-milvus-02.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | clean collection `datapilot_schema_docs_m27_qwen37max_qwenemb_20260809_183000`：195 docs、hash `8a8b6626...`。与 local 当前快照一致，不证明检索因果。 |
+| Core | [`m27-core-20260809-qwen37plus-local-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-local-01.json) | 2026-08-09 | Qwen `qwen3.7-plus`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off；19 logical / 19 physical | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-local-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 与同合同、同协议的 Core 比较；和下一行构成一次 local/Milvus 配对。 |
+| Core | [`m27-core-20260809-qwen37plus-milvus-01`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37plus-milvus-01.json) | 2026-08-09 | Qwen `qwen3.7-plus`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37plus-milvus-01.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 195-doc clean collection、hash `8a8b6626...`；单次与 local 一致，不推断检索因果。 |
+| Core | [`m27-core-20260809-qwen37max-local-06`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-local-06.json) | 2026-08-09 | Qwen `qwen3.7-max`；inmemory deterministic / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-local-06.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 当前有效 max local 快照；样本不足以证明与 plus 等价。 |
+| Core | [`m27-core-20260809-qwen37max-milvus-02`](../../eval/reports/m27-artifacts/m27-core-20260809-qwen37max-milvus-02.json) | 2026-08-09 | Qwen `qwen3.7-max`；Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim / weighted；45s / retry0；SQLite seed；LangFuse off；19 / 19 | [Markdown report](../../eval/reports/m27-core-20260809-qwen37max-milvus-02.md)；required：29 passed / 5 failed / 0 not_observed；Gate `failed` | 195-doc clean collection、hash `8a8b6626...`；单次与 local 一致，不推断检索因果。 |
 
-> **欠费污染与重复执行记录**：`m27-core-20260809-qwen37max-local-04/-05` 与 `...milvus-01` 的 `13/20/1`、`9/23/2`、`9/23/2` 均遇到 Qwen `account_arrearage`；正常业务题缺少 candidate SQL，却被当时 scorer 投影为 result/output failed，**不参与模型或 Milvus 比较**。`local-01/-02` 是前台超时后仍完成的重复 local 快照（28/6/0、29/5/0）；全部保留追溯，但不作为计划内重复实验。
+后续运行 Stress、Reliability、Database Exception 时，直接在本表追加一行，以“类型 / 协议 / 解释边界”区分；不与 Core 混算。
 
-## 首个真实基线登记模板
+## 正式长期基线登记
 
-只有用户单独授权真实 LLM 运行后，才在此追加一条记录：
+只有用户明确指定某条 completed run 后，才在这里登记为正式长期基线：
 
 | Run ID | 日期 | Selector / Scenario | Protocol | Resolved runtime | Oracle / artifact | Assertion views | Gate | 解释边界 |
 |---|---|---|---|---|---|---|---|---|
-| *尚无* | — | — | — | — | — | — | — | 已有真实 Smoke/Core 快照，但尚未由用户指定哪条 completed run 作为正式长期基线。 |
+| *尚无* | — | — | — | — | — | — | — | 已有可比较 Core 快照，但尚未由用户指定哪条 completed run 作为正式长期基线。 |
 
 每条记录至少链接脱敏 EvalRun JSON 与 Markdown report；只引用 `ResolvedRuntimeIdentity`，不以命令行表象替代实际模型、检索和 oracle 事实。

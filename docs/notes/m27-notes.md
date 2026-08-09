@@ -181,18 +181,9 @@
 
 - 2026-08-09：用户确认将旧评测账本整体移入 `docs/archive-versions/eval-baselines-old.md`，新建 `docs/state/eval-baselines.md` 只记录 M27 事实、分母与后续真实基线；`runbook.md` 与 `eval/cases/README.md` 同步改为 canonical Scenario / selector 入口。旧 formal/challenge/diagnostic 内容保留为 legacy/read-only，不再宣称可由当前 `eval.run_eval` 生成新分数。
 
-### 授权后的真实 LLM Smoke（非基线）
-
-- 2026-08-09：用户授权执行一次 M27 `smoke`。固定现有默认 runtime：Qwen `qwen3.7-plus`、inmemory deterministic/weighted、45s/retry0、SQLite deterministic seed、LangFuse off；没有切模型、检索、embedding、数据库、oracle 或可靠性配置。
-- 首次 `m27-smoke-20260809-01` 受工具 60 秒时限中断，已完成 `june_gmv`、`unsafe_drop_orders`、`missing_product_supplier_rejection` 的 checkpoint，manifest 保持 `running`。M27 不支持 resume，故该 run 不生成 completed artifact/report，也不进入 Gate。
-- 使用新 run id `m27-smoke-20260809-02` 完成完整 selector：4 个 logical Scenario、4 个 physical attempts、9 条 required assertion 全通过，Gate `passed`，无 failed/not_observed/unavailable。产物为 `eval/reports/m27-artifacts/m27-smoke-20260809-02.json` 和 `eval/reports/m27-smoke-20260809-02.md`；既有 Starlette/httpx deprecation warning 未影响结论。
-- 解释边界：Smoke 仅验证当前运行环境下 API、Guard、Trace、artifact 与报告闭环，不是完整 Core/Stress 评测，不能推出稳定模型能力、成本或可靠性，也不得与 M26 的 `25/32` 等旧口径相比较。
-- 2026-08-09：用户再次执行相同 M27 `smoke`，`m27-smoke-20260809-03` 为 **4/4 logical Scenario 完成、9/9 required assertion passed、Gate passed**，无 failed/not_observed/unavailable。随后 `eval.run_review` 读取同 run artifact/checkpoint/catalog，4 条 Codex verdict 均为 high-confidence `pass`，reconciliation 全为 `auto_passed_manual_pass`。resolved runtime 与 `-02` 相同；它仍只是第二次链路快照，不升级为完整基线或可靠性结论。
 - 2026-08-09：用户授权 M27 Core 的 Qwen plus local / Milvus 对照。local `m27-core-20260809-qwen37plus-local-01` 完成：19/19 logical execution，Core required assertion `29 passed / 5 failed / 0 not_observed`，Gate `failed`。失败集中于退款率排名（result/output/schema context）、实际金额指标绑定、渠道 GMV dashboard schema context；无 external unavailable。Docker daemon 恢复后，Milvus `m27-core-20260809-qwen37plus-milvus-01` 完成：DashScope `qwen3.7-text-embedding`、1024 维、weighted、独立 collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`；实测 195 entities、hash `8a8b6626...`。两侧 assertion 计数、失败 Scenario/断言/reason 均一致。各只运行一次，记录为“本轮未观察到 Milvus 改变结果”，不作因果或默认切换结论。
-- 2026-08-09：用户授权 Qwen `qwen3.7-max` 的 M27 Core local / Milvus 对照。执行工具前台返回超时后，local 子进程实际仍在后台继续完成；因此除配置错误后主动停止的 `-03` 外，`-01`、`-02`、`-04`、`-05` 都产生了 completed artifact。**这是本轮执行重复的失误**：用户只授权一次 local，但意外得到 4 次 local 快照，必须保留并如实记录，不能选择性删除。
-- 四次 local required 分别为：`-01` 28 passed / 6 failed / 0 not_observed，`-02` 29 / 5 / 0，`-04` 13 / 20 / 1，`-05` 9 / 23 / 2；均 Gate `failed`。它们显示同配置下显著波动，不能挑选 `-05` 与 Milvus 单次相同的结果来声称稳定对照。
-- 改由一次性 Windows task worker 后，local `m27-core-20260809-qwen37max-local-05` 完成：19/19 logical / physical，Core required assertion **9 passed / 23 failed / 2 not_observed**，Gate `failed`；无 external unavailable/pipeline error。Milvus `m27-core-20260809-qwen37max-milvus-01` 以同一模型、45s/retry0、weighted、SQLite deterministic seed、LangFuse off 完成，计数与 assertion views 完全一致。
-- Milvus 实测 collection 为 `datapilot_schema_docs_m27_qwen37max_qwenemb_20260809_180700`：DashScope `qwen3.7-text-embedding`、1024 dim、195 entities、description hash `8a8b6626a4cbec...`。该配对各一次，只能描述为“本轮未观察到 Milvus 改变 qwen3.7-max 的 Core assertion 结果”；不能推断 embedding 因果、稳定性或默认切换。
+- 2026-08-09：用户授权 Qwen `qwen3.7-max` 的 M27 Core local / Milvus 对照。当前可比较快照为 local `m27-core-20260809-qwen37max-local-06` 与 Milvus `m27-core-20260809-qwen37max-milvus-02`：均完成 19/19 logical / physical，Core required assertion **29 passed / 5 failed / 0 not_observed**、Gate `failed`。
+- Milvus 固定 DashScope `qwen3.7-text-embedding`、1024 dim、weighted、195-doc clean collection（description hash `8a8b6626...`）。各侧仅一次，只能说明本轮未观察到检索后端改变结果；不能推断模型、embedding 因果、稳定性或默认切换。
 
 ## M27 Review Bundle 增补（用户授权，进行中）
 
@@ -206,7 +197,7 @@
 - 用户在 M27 原计划已明确“不建设人工 verdict/review workflow”的基础上，明确授权此旁路增补；实现保持不改 EvalRun、自动 scorer、projector、Gate、分母和 M26 legacy audit 的边界。
 - `eval.review.build_review_bundle()` 是唯一组装 Interface：它校验 completed M27 artifact、raw checkpoint、catalog 的 run/scenario/replicate/assertion 身份，缺失或不一致即失败。bundle 提供 candidate/reference SQL、最多 3 行脱敏 candidate/reference preview、trace 摘要、contract 和 assertion 事实；email/phone/credential key 与文本中的 email/手机号会被脱敏。
 - `apply_review_verdicts()` 强制所有 logical Scenario 都有 `pass/fail/insufficient_evidence`、confidence、reason 和 evidence，输出独立 reconciliation；`eval.run_review` CLI 不执行 Pipeline/LLM，只写 `eval/reports/m27-reviews/`。
-- 验证：`python -m pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.codex/temp_work/pytest-m27-review-final`：**38 passed, 1 warning**（既有 Starlette/httpx deprecation）。对既有 `m27-smoke-20260809-02` 运行 CLI 后生成 4 条 Codex high-confidence `pass` verdict；无新的真实 LLM 调用。
+- 验证：`python -m pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.codex/temp_work/pytest-m27-review-final`：**38 passed, 1 warning**（既有 Starlette/httpx deprecation）。review CLI 已对既有 completed M27 输入完成定向校验；无新的真实 LLM 调用。
 
 ## M27 Review Evidence Hardening（用户授权，进行中）
 

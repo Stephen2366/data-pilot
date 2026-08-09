@@ -36,18 +36,16 @@
 | 日期 | 事实 |
 |---|---|
 | 2026-08-09 | M27 有 28 个 canonical Scenario；一个 Scenario 一次执行，多条 typed assertion 共用证据。旧 formal/challenge/diagnostic 只读冻结，不能与 M27 数字比较。 |
-| 2026-08-09 | 两次 Smoke 都为 4/4 Scenario、9/9 required assertion passed、Gate passed；它只验证链路，不代表 Core 能力或稳定性。 |
 | 2026-08-09 | 当前可比的 Core：Qwen `qwen3.7-plus` 与充值后的 `qwen3.7-max`，各自 local / Milvus 都为 **29 passed / 5 failed / 0 not_observed**、Gate failed。稳定失败是商品退款率排名（result/output/schema context）、实际金额指标映射、渠道 GMV dashboard schema context。 |
 | 2026-08-09 | Milvus 实验均使用 DashScope `qwen3.7-text-embedding`、1024 dim、195-doc clean collection、hash `8a8b6626...`；当前样本不足以判断模型或 Milvus 优劣，不切默认。 |
 | 2026-08-09 | Review v2 是自动评分后的旁路证据：来源 SHA-256、结构化分类、无候选 SQL 的普通题只能 `insufficient_evidence`；它不改 EvalRun、分母、Gate 或 CI。 |
-| 2026-08-09 | 已有真实 Smoke/Core 快照，但尚未登记长期正式 M27 基线；完整 run、重复 run 和欠费污染记录见 `eval-baselines.md`。 |
+| 2026-08-09 | 已有可比较 Core 快照，但尚未登记长期正式 M27 基线；长期账本见 `eval-baselines.md`。 |
 
 ## 当前路线判断
 
-- 优先修复 M27 Core 稳定暴露的 5 条合同失败，再讨论模型或检索优化。
-- Qwen `account_arrearage`、timeout 等 generation error 必须按外部不可用处理，不能当作 SQL 语义失败。
-- 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
-- M22–M26 的旧模型分数、RRF、M25/M26 合同取舍仅作历史参考，不定义当前 M27 路线。
+- (2026-08-09) 优先修复 M27 Core 稳定暴露的 5 条合同失败，再讨论模型或检索优化。
+- (2026-08-09) 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
+- (2026-08-09) M22–M26 的旧模型分数、RRF、M25/M26 合同取舍仅作历史参考，不定义当前 M27 路线。
 
 ## 已知的坑（活跃列表）
 
@@ -58,7 +56,6 @@
 | 工作树可能含用户/其他工具未提交改动 | 容易误回滚 | 动文件前先看 `git status --short`，不回滚非本次改动。 |
 | 旧 Milvus collection `datapilot_schema_docs` 有重复灌入污染 | 历史 A/B 不可信 | 新 eval 用唯一/clean collection；校验 row count、dimension、schema docs hash。 |
 | QueryPlan 可能过宽，或 SQL 与计划不一致 | contract pass 不等于答案正确 | 保持保守 AST 边界，用 output/result/trace 共同定位。 |
-| M27 外部 generation error 可能被 scorer 投影成 result/output failed | 外部不可用会被误读成模型语义错误 | 先查 checkpoint `error_subtype`；修 scorer 前不用于模型/Milvus比较。 |
 | Windows 宿主保留 9091 | Milvus health 检查失败 | 使用 `19091:9091` host 映射。 |
 
 ## 历史入口

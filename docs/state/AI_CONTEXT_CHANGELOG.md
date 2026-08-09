@@ -19,9 +19,8 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ### [实验] M27 Core：Qwen 3.7-max local / Milvus 对照（2026-08-09）
 
-- 用户授权各运行一次 Qwen `qwen3.7-max` 的 M27 Core；但前台工具返回超时后 local 子进程实际继续完成，除主动停止的环境变量错误 `-03` 外，`-01`、`-02`、`-04`、`-05` 都生成 completed artifact。此为执行重复失误，全部产物保留并如实记录：required 分别为 `28/6/0`、`29/5/0`、`13/20/1`、`9/23/2`（passed/failed/not_observed），均 Gate failed，显示该配置的单次波动，不能挑选一条作稳定结论。
-- 完整 local run 为 `m27-core-20260809-qwen37max-local-05`：19 logical / 19 physical，required `9 passed / 23 failed / 2 not_observed`，Gate `failed`，没有 external unavailable 或 pipeline error。Milvus `m27-core-20260809-qwen37max-milvus-01` 的计数和 assertion views 完全相同。
-- Milvus 固定 DashScope `qwen3.7-text-embedding`、1024 dim、weighted，collection `datapilot_schema_docs_m27_qwen37max_qwenemb_20260809_180700` 实测 195 entities、hash `8a8b6626...`。各侧仅一次，结论仅为本轮未观察到 Milvus 改变 qwen3.7-max 结果；不改变模型、检索或 embedding 默认值。
+- 用户授权后，当前可比较快照为 local `m27-core-20260809-qwen37max-local-06` 与 Milvus `m27-core-20260809-qwen37max-milvus-02`：均执行 19 logical / 19 physical，required assertion 均为 `29 passed / 5 failed / 0 not_observed`、Gate `failed`。
+- Milvus 固定 DashScope `qwen3.7-text-embedding`、1024 dim、weighted，使用 195-doc clean collection（description hash `8a8b6626...`）。该单次配对只说明本轮未观察到 local/Milvus 改变结果；不推断模型、检索或 embedding 因果，不改默认配置。
 
 ### [模块任务] M27 Review Evidence Hardening（2026-08-09）
 
@@ -42,16 +41,8 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 - **改动范围**：新增 `eval/review.py` 深 module、`eval/run_review.py` CLI 与 `tests/test_m27_review.py`；同步 M27 runbook / cases README / state 档案。它是用户在 M27 原计划“暂不实现人工 verdict 工作流”之外明确授权的旁路增补，不改 formal case、EvalRun schema、分母、Gate 或旧 M26 audit。
 - **关键记录**：review bundle 以 completed M27 artifact、同 run 的短期 raw checkpoint、canonical catalog 三者的 `(run_id, scenario_id, replicate_id)` 和 assertion identity 对齐为前提。它仅输出脱敏 candidate/reference SQL、最多 3 行结果 preview、trace 摘要和合同；缺 checkpoint / 身份不一致即失败，不由 Markdown 猜造人工证据。Codex/manual verdict 固定为 `pass/fail/insufficient_evidence`，另记录 confidence、reason、evidence 与 auto/manual reconciliation，始终独立于自动评分事实。
-- **验证快照**：`pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.codex/temp_work/pytest-m27-review-final`：`38 passed, 1 warning`；warning 为既有 Starlette/httpx deprecation。`python -m eval.run_review --run-id m27-smoke-20260809-02 --verdicts-json ...` 生成 4 条 Codex high-confidence `pass` review record；未调用新的真实 LLM。
+- **验证快照**：`pytest -q tests/test_m27_review.py tests/test_m27_foundation.py tests/test_phase3a_eval.py --basetemp=.codex/temp_work/pytest-m27-review-final`：`38 passed, 1 warning`；warning 为既有 Starlette/httpx deprecation。review CLI 已对既有 completed M27 输入完成定向校验；未调用新的真实 LLM。
 - **遗留/后续**：review bundle 依赖短期 checkpoint，清理后不能重建，这符合默认不长期存完整 rows/prompt 的安全策略。若未来确需长期独立人工复核，应另行确认保留期、访问控制和更严格的 SQL / 结果样本脱敏策略；不得把它接入 Gate 或改写旧 M26 audit。
-
-### [实验] M27 Smoke selector 真实 LLM 验证（2026-08-09）
-
-- 用户授权一次 M27 `smoke` selector；固定 Qwen `qwen3.7-plus`、inmemory deterministic/weighted、45s/retry0、SQLite deterministic seed、LangFuse off，未改任何默认配置。
-- 首次 `m27-smoke-20260809-01` 在工具 60 秒时限内被中断，已写 3/4 checkpoint、manifest 保持 `running`；M27 不支持 resume，因此不生成 artifact/report、不参与 Gate 或任何分数解释。
-- 以新 run id `m27-smoke-20260809-02` 重跑并完成：4 logical Scenario / 4 physical attempts，9 条 required assertion 均 passed、failed/not_observed 均为 0，Smoke Gate `passed`。artifact：`eval/reports/m27-artifacts/m27-smoke-20260809-02.json`；report：`eval/reports/m27-smoke-20260809-02.md`。
-- 用户随后再次按同一 selector / runtime 执行 `m27-smoke-20260809-03`：同为 4/4 logical Scenario 完成、9/9 required assertion passed、Gate `passed`，没有 failed/not_observed/unavailable；其独立 Codex review 也为 4/4 high-confidence `pass`、全部 `auto_passed_manual_pass`。它是第二次小范围链路快照，不扩大为完整基线、稳定性统计或 M26 比较。
-- 边界：这是一次小范围链路 Smoke，不是 Core/Stress 主回归，也不建立稳定模型能力、成本或可靠性基线；不得与 M26 `25/32`、`26/32` 等旧口径比较。既有 Starlette/httpx deprecation warning 未影响结果。
 
 ### [模块任务] M27 Diagnostic / Eval Case 体系优化（2026-08-09）
 
@@ -184,6 +175,39 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 未独立覆盖：外部单号重复 / 命名空间、负数退款、订单头与明细金额对账。`db_core_002` 当前只按 `refunds.order_item_id` 做商品退款率 reference，会排除整单退款，且未显式排除取消订单；`db_join_003` 为 manual review，不能补足自动判定。
 - 影响：C0-refresh/C1/C2/C3 首轮结果仍在相同 194-doc、case/scorer、SQLite seed 下可比，但只能解释当前 eval 合同下的模型/检索波动，不能宣称异常数据鲁棒性。是否补充异常 case 或改变退款率口径属于长期评测结构选择，待用户确认；在确认前不修改 case、不重写首轮结果。
 - 参考：`docs/state/database-current-state.md`「与当前 M22 eval 的关系」、`docs/state/eval-baselines.md`「M22 异常彩蛋覆盖审计」、`docs/notes/m22-notes.md`。
+
+### [实验] M22 C0-C3 三次重复稳定性（2026-08-05）
+
+- 在不改变当前 case/scorer、194-doc corpus、oracle、LangFuse 开关和 `new_text2sql` 的前提下，完成 C0-C3 首轮、第2次和第3次端到端 diagnostic。
+- 结果：C0 `24/24/25`，C1 `27/28/28`，C2 `25/27/25`，C3 `24/26/27`（均为 32 条总分）。C2 第2次首次启动被工具 120 秒上限中断，重启后的 `r2b` 才计入有效样本。
+- 结论：C1 在三次中均最高或并列最高；C2/C3 没有稳定超过 C1 的证据，因此不切换默认模型、Milvus 或 RRF。retrieval-only 的 RRF 提升不等于端到端提升。
+- 所有 Milvus 复测使用独立 collection、194 rows 和同一 schema hash；本轮只说明当前评测合同下的波动与稳定性，不覆盖此前审计到的全部数据库异常彩蛋。
+
+### [实验] M22 Qwen 3.8 追加对照（2026-08-05）
+
+- 按用户要求执行 `qwen3.8-max + inmemory/deterministic + weighted`，固定当前 M22 32 条 diagnostic、`new_text2sql`、SQLite deterministic oracle、LangFuse disabled 和现有 case/scorer。
+- 完整结果为 `22/32`；模型调用可用，故未继续备用 `qwen3.7-max`。该单次快照不改变默认模型，不能与三次重复稳定性结果混为同一组。
+- 报告 `eval/reports/m22-qwen38-local-weighted-report.md`，trace `eval/traces/m22-qwen38-local-weighted-traces.jsonl`，triage `eval/reports/m22-qwen38-local-weighted-triage.json`。
+
+### [实验] M22 Qwen 3.7 Max 追加对照（2026-08-05）
+
+- 在相同条件下执行 `qwen3.7-max + inmemory/deterministic + weighted`，完整 diagnostic 结果为 `26/32`。
+- 该结果高于 Qwen 3.8 的 `22/32`，但仍是单次追加快照，不纳入 C0-C3 三次重复矩阵，也不自动改变默认模型。
+- 报告 `eval/reports/m22-qwen37max-local-weighted-report.md`，trace `eval/traces/m22-qwen37max-local-weighted-traces.jsonl`，triage `eval/reports/m22-qwen37max-local-weighted-triage.json`。
+
+### [审计] M22 C1 本地 vs C2 embedding 逐 case 初步差异（2026-08-05）
+
+- 三次配对通过数：`27→25`、`28→27`、`28→25`。C2 并非全面退化，首轮 `db_core_002` 由 C1 失败、C2 通过。
+- C2 额外失败集中在 `db_core_004`、`db_plan_001`、`db_prompt_002`、`db_join_003`、`db_schema_003`、`db_trace_002`。其中多项 trace 显示 schema context 已包含目标表，失败发生在 SQL 生成后的别名/排序合同或输出列大小写；不能直接归因于 embedding 召回。
+- 初步排查顺序：先比较同 case 的 retrieval top docs/context 表字段，再区分“上下文缺目标”与“上下文有但 SQL 未使用”，最后单独核对 QueryPlan 与候选 SQL 的 alias/order/limit 及 scorer 列名大小写。任何 AST 合同升级、别名规范化或默认 retrieval 调整都需另行确认。
+
+### [默认配置] 主模型切换为 Qwen qwen3.7-plus（2026-08-05）
+
+- 用户在查看 M22 三次重复结果后确认，将默认主模型切换为 Qwen `qwen3.7-plus`。
+- 实际配置：`.env` 使用 `LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`；`LLM_MODEL=deepseek-v4-flash` 保留为显式切回 DeepSeek provider 的备用入口。
+- 检索默认不变：`inmemory + deterministic + weighted`；未切换 embedding、Milvus、RRF、case、scorer 或 oracle。
+- 验证：`get_default_llm_client()` 解析为 `QwenChatClient / qwen3.7-plus`；配置与 NL2SQL 相关测试 `11 passed, 1 warning`。warning 为既有 Starlette/httpx deprecation。
+- 后续影响：真实请求默认依赖 DashScope Qwen key，延迟/费用/输出格式需按新默认持续观察；DeepSeek `deepseek-v4-flash` 仍可通过显式 provider 配置使用。
 
 ### [修复] M22 契约完整性与收口证据（2026-08-04）
 
@@ -1045,32 +1069,3 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - 参考资料：未查阅外部参考（通用 FastAPI 骨架，无需借鉴项目结构）
 - 验证快照：pytest 5 passed；`Settings()` 能读 `.env` 且 `DATABASE_URL` 指向 `datapilot_dev`；`pymysql` 可导入
 - 遗留：已由 M1 完成（ORM、Alembic、seed）
-## [实验] M22 C0-C3 三次重复稳定性（2026-08-05）
-
-- 在不改变当前 case/scorer、194-doc corpus、oracle、LangFuse 开关和 `new_text2sql` 的前提下，完成 C0-C3 首轮、第2次和第3次端到端 diagnostic。
-- 结果：C0 `24/24/25`，C1 `27/28/28`，C2 `25/27/25`，C3 `24/26/27`（均为 32 条总分）。C2 第2次首次启动被工具 120 秒上限中断，重启后的 `r2b` 才计入有效样本。
-- 结论：C1 在三次中均最高或并列最高；C2/C3 没有稳定超过 C1 的证据，因此不切换默认模型、Milvus 或 RRF。retrieval-only 的 RRF 提升不等于端到端提升。
-- 所有 Milvus 复测使用独立 collection、194 rows 和同一 schema hash；本轮只说明当前评测合同下的波动与稳定性，不覆盖此前审计到的全部数据库异常彩蛋。
-## [实验] M22 Qwen 3.8 追加对照（2026-08-05）
-
-- 按用户要求执行 `qwen3.8-max + inmemory/deterministic + weighted`，固定当前 M22 32 条 diagnostic、`new_text2sql`、SQLite deterministic oracle、LangFuse disabled 和现有 case/scorer。
-- 完整结果为 `22/32`；模型调用可用，故未继续备用 `qwen3.7-max`。该单次快照不改变默认模型，不能与三次重复稳定性结果混为同一组。
-- 报告 `eval/reports/m22-qwen38-local-weighted-report.md`，trace `eval/traces/m22-qwen38-local-weighted-traces.jsonl`，triage `eval/reports/m22-qwen38-local-weighted-triage.json`。
-
-## [实验] M22 Qwen 3.7 Max 追加对照（2026-08-05）
-
-- 在相同条件下执行 `qwen3.7-max + inmemory/deterministic + weighted`，完整 diagnostic 结果为 `26/32`。
-- 该结果高于 Qwen 3.8 的 `22/32`，但仍是单次追加快照，不纳入 C0-C3 三次重复矩阵，也不自动改变默认模型。
-- 报告 `eval/reports/m22-qwen37max-local-weighted-report.md`，trace `eval/traces/m22-qwen37max-local-weighted-traces.jsonl`，triage `eval/reports/m22-qwen37max-local-weighted-triage.json`。
-## [审计] M22 C1 本地 vs C2 embedding 逐 case 初步差异（2026-08-05）
-
-- 三次配对通过数：`27→25`、`28→27`、`28→25`。C2 并非全面退化，首轮 `db_core_002` 由 C1 失败、C2 通过。
-- C2 额外失败集中在 `db_core_004`、`db_plan_001`、`db_prompt_002`、`db_join_003`、`db_schema_003`、`db_trace_002`。其中多项 trace 显示 schema context 已包含目标表，失败发生在 SQL 生成后的别名/排序合同或输出列大小写；不能直接归因于 embedding 召回。
-- 初步排查顺序：先比较同 case 的 retrieval top docs/context 表字段，再区分“上下文缺目标”与“上下文有但 SQL 未使用”，最后单独核对 QueryPlan 与候选 SQL 的 alias/order/limit 及 scorer 列名大小写。任何 AST 合同升级、别名规范化或默认 retrieval 调整都需另行确认。
-## [默认配置] 主模型切换为 Qwen qwen3.7-plus（2026-08-05）
-
-- 用户在查看 M22 三次重复结果后确认，将默认主模型切换为 Qwen `qwen3.7-plus`。
-- 实际配置：`.env` 使用 `LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`；`LLM_MODEL=deepseek-v4-flash` 保留为显式切回 DeepSeek provider 的备用入口。
-- 检索默认不变：`inmemory + deterministic + weighted`；未切换 embedding、Milvus、RRF、case、scorer 或 oracle。
-- 验证：`get_default_llm_client()` 解析为 `QwenChatClient / qwen3.7-plus`；配置与 NL2SQL 相关测试 `11 passed, 1 warning`。warning 为既有 Starlette/httpx deprecation。
-- 后续影响：真实请求默认依赖 DashScope Qwen key，延迟/费用/输出格式需按新默认持续观察；DeepSeek `deepseek-v4-flash` 仍可通过显式 provider 配置使用。
