@@ -13,6 +13,13 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [实验] M27 Smoke selector 真实 LLM 验证（2026-08-09）
+
+- 用户授权一次 M27 `smoke` selector；固定 Qwen `qwen3.7-plus`、inmemory deterministic/weighted、45s/retry0、SQLite deterministic seed、LangFuse off，未改任何默认配置。
+- 首次 `m27-smoke-20260809-01` 在工具 60 秒时限内被中断，已写 3/4 checkpoint、manifest 保持 `running`；M27 不支持 resume，因此不生成 artifact/report、不参与 Gate 或任何分数解释。
+- 以新 run id `m27-smoke-20260809-02` 重跑并完成：4 logical Scenario / 4 physical attempts，9 条 required assertion 均 passed、failed/not_observed 均为 0，Smoke Gate `passed`。artifact：`eval/reports/m27-artifacts/m27-smoke-20260809-02.json`；report：`eval/reports/m27-smoke-20260809-02.md`。
+- 边界：这是一次小范围链路 Smoke，不是 Core/Stress 主回归，也不建立稳定模型能力、成本或可靠性基线；不得与 M26 `25/32`、`26/32` 等旧口径比较。既有 Starlette/httpx deprecation warning 未影响结果。
+
 ### [模块任务] M27 Diagnostic / Eval Case 体系优化（2026-08-09）
 
 - **改动范围**：新增 `m27-v1` typed contract/catalog/environment/ports/assertion/evaluator/projector/reporting/selector 模块、28 条 canonical Scenario、三个 selector、反事实与接口测试；`engine/nl2sql/pipeline.py` 补安全的 QueryPlan `plan_steps` 摘要；`eval.run_eval` CLI 切换为 M27 Interface。完整过程素材见 `docs/notes/m27-notes.md`。

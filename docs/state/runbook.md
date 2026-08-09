@@ -2,7 +2,7 @@
 
 > 本文是 DataPilot 的运行入口：只说明“怎么开启哪条链路、怎么跑命令、哪些默认不能随手改”。Trigger：只要要运行命令、切模型、开 LangFuse、跑 eval、改环境变量，必须先读本文。当前状态先读 `docs/state/AI_CONTEXT.md`，评测数字和错因追溯读 `docs/state/eval-baselines.md`，Milvus / embedding 细节读 `docs/state/schema-retrieval-milvus-embedding.md`。
 
-更新时间：2026-08-05
+更新时间：2026-08-09
 
 ## 模型链路
 
@@ -11,7 +11,7 @@
 | 默认 Qwen 主链路 | `LLM_PROVIDER=qwen`；`QWEN_MODEL=qwen3.7-plus` | 当前默认。Qwen provider 读取 `QWEN_MODEL`，不是 `LLM_MODEL`。`.env` 中的 `LLM_MODEL=deepseek-v4-flash` 仅作为显式切回 DeepSeek 时的备用入口。 |
 | DeepSeek 主模型对照 | `LLM_PROVIDER=deepseek`；`LLM_MODEL=deepseek-v4-flash` | 显式切换时使用；`LLM_MODEL` 在现有代码语义里主要服务 DeepSeek provider。 |
 | LLM 可靠性配置 | `LLM_TIMEOUT_SECONDS=45`；`LLM_MAX_RETRIES=0`；`LLM_RETRY_BACKOFF_SECONDS=1` | M25 默认不自动重试。只对明确标记为 transient 的 timeout / 网络 / 429 / 5xx 生效；聚焦实验在当前 shell 临时覆盖，不直接改 `.env` 默认。 |
-| L3 judge | `EVAL_JUDGE_MODEL=<模型名>` 或 CLI `--judge-model <模型名>` | 默认关闭；只影响 eval 追加的 L3 judge，不改变业务 NL2SQL 主模型。 |
+| Legacy L3 judge | `EVAL_JUDGE_MODEL=<模型名>` | 仅服务冻结旧 runner 语义；当前 M27 CLI 不提供 `--judge-model`，也不把 LLM-as-Judge 作为默认裁决器。 |
 
 ## Schema Retrieval / Embedding 链路
 
@@ -28,35 +28,29 @@
 
 | 目标 | 环境变量 / 命令 | 说明 |
 |---|---|---|
-| 本地 JSONL trace | 默认即可，或在测试中指定 `--trace eval/traces/<name>.jsonl` | 默认不依赖 LangFuse；JSONL 默认不提交。 |
-| 本地 eval + triage | `LANGFUSE_ENABLED=false`；`python -m eval.run_eval ... --triage-json eval/reports/<name>-triage.json` | 生成 Markdown report 和本地 triage JSON；`langfuse_triage_scores` 显示 skipped 属正常。 |
-| LangFuse Cloud trace/score | `LANGFUSE_ENABLED=true`，必要时 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` | Cloud 是旁路增强；写入失败不应影响本地 eval 结果。 |
+| 本地 JSONL trace | M27 默认写入 `eval/traces/`，可用 `--trace-dir eval/traces` 指定目录 | 默认不依赖 LangFuse；JSONL 默认不提交。 |
+| 本地 M27 eval | `LANGFUSE_ENABLED=false`；按下方 selector 命令运行 | completed EvalRun JSON + Markdown report 是新事实源；M27 不生成旧 triage JSON。 |
+| LangFuse Cloud trace/score | `LANGFUSE_ENABLED=true`，必要时 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` | Cloud 仍是旁路增强；M27 当前只构造严格 allowlist assertion payload，实际上传需显式授权，不能影响本地 EvalRun。 |
 | LangFuse smoke | `python scripts\smoke_phase3b_langfuse.py`；Cloud 硬门禁加 `--require-langfuse` | M18 的主验证入口，用于 API / JSONL / trace mapping / score / visibility。 |
 
 ## Eval 命令入口
 
-> Eval 集合关系：
->
-> - `formal`：主线回归集，文件为 `eval/cases/phase3a-regression.yaml`，当前 10 条。
-> - `challenge`：数据库升级压力集，文件为 `eval/cases/database-upgrade-challenge.yaml`，当前 16 条；其中 10 条与 `formal` 重复 / 等价，因此它不是与 formal 互斥的新样本集。
-> - `diagnostic`：排障扩展 run，当前命令为 `database-upgrade-challenge.yaml + phase3a-diagnostic-benchmark.yaml`；也就是完整包含 `challenge`，并通过 challenge 间接覆盖那 10 条 formal 重复 / 等价 case。
-> - 真实 LLM eval 有非确定性；同一个 case 分开跑两次，结果可能不同。
->
-> - 做日常验收或冒烟时，可按需要分别跑 `formal` / `challenge` / `diagnostic`：`formal` 看主线回归，`challenge` 看数据库升级压力，`diagnostic` 看失败结构和排障线索。
->
-> - 做严谨对比或排查重复 case 稳定性时，优先跑一次 `diagnostic` 作为统一采样入口，再按 `case_id` / 来源切出 `formal`、`challenge` 子集统计；不要用三次独立 run 直接互相比。
+> 当前正式入口为 **M27 canonical eval**：一个 Scenario 只执行一次，Result / Context / Plan / Trace / Safety 等 typed assertion 共享同一份证据。旧 formal / challenge / diagnostic YAML、报告与分数是只读历史证据；它们不再由当前 `eval.run_eval` CLI 生成新结果。历史口径与数字见 `docs/archive-versions/eval-baselines-old.md`。
 
-| 目标 | 命令骨架 | 说明 |
-|---|---|---|
-| smoke | `python -m eval.run_eval --cases eval\cases\smoke.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-traces.jsonl --report eval/reports/<name>-report.md --triage-json eval/reports/<name>-triage.json` | 快速确认链路活着，不替代 benchmark。 |
-| formal | `python -m eval.run_eval --cases eval\cases\phase3a-regression.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-formal-traces.jsonl --report eval/reports/<name>-formal-report.md --triage-json eval/reports/<name>-formal-triage.json` | 主线回归对照。 |
-| challenge | `python -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-challenge-traces.jsonl --report eval/reports/<name>-challenge-report.md --triage-json eval/reports/<name>-challenge-triage.json` | 更难的数据库升级题。 |
-| diagnostic | `python -m eval.run_eval --cases eval\cases\database-upgrade-challenge.yaml --extra-cases eval\cases\phase3a-diagnostic-benchmark.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-diagnostic-traces.jsonl --report eval/reports/<name>-diagnostic-report.md --triage-json eval/reports/<name>-diagnostic-triage.json` | 定位边界和失败结构，不追满分。 |
-| database exception suite | `python -m eval.run_eval --case-set eval\cases\database-exception-suite.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-exception-traces.jsonl --report eval/reports/<name>-exception-report.md --triage-json eval/reports/<name>-exception-triage.json` | M23 异常专项：6 条自动 + 1 条人工素材；复用原 case，不复制 YAML。 |
-| M25 reliability suite | `python -m eval.run_eval --case-set eval\cases\m25-reliability-suite.yaml --pipeline-mode new_text2sql --trace eval/traces/<name>-m25-reliability-traces.jsonl --report eval/reports/<name>-m25-reliability-report.md --triage-json eval/reports/<name>-m25-reliability-triage.json` | 仅 4 条历史超时题。分别临时设置 timeout / retry 候选并重复运行；不是能力总分，不能替代完整评测。 |
-| M26 audit（冻结审计） | `python -m eval.run_audit --cases <cases.yaml> [--extra-cases <diag.yaml> ...] --trace <frozen>.jsonl --report <frozen>.md --triage <frozen>.json --run-id <id> --runtime-metadata-json <meta>.json --output-json eval\reports\<name>-audit.json --output-report eval\reports\<name>-audit.md [--verdicts-json <verdicts>.json]` | M26 审计入口：把已冻结的 case/trace/report/triage 组装成逐题审计卷，不调用 LLM、不重跑 scorer；`--verdicts-json` 可选写入人工 verdict。示例：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_audit --trace <frozen-trace.jsonl> --report <frozen-report.md> --triage <frozen-triage.json> --output-prefix eval\reports\m26-audit`。 |
-| failure distribution 对比 | `python -m eval.run_eval --compare-triage-left <left>.json --compare-triage-right <right>.json --compare-triage-report eval/reports/<name>-compare.md` | M19 A/B 入口，看失败结构变化，不只看总分。 |
-| schema retrieval embedding-only | `python -m eval.run_schema_retrieval_benchmark --report eval/reports/<name>-schema-retrieval-report.md --top-k 12 --fusion-strategy weighted` | M21 的检索隔离评测；`--fusion-strategy rrf` 只作显式候选对比，不调用 LLM / SQL。Milvus + Qwen embedding 版本需先临时设置 `SCHEMA_VECTOR_BACKEND=milvus`、`SCHEMA_EMBEDDING_PROVIDER=dashscope`、`QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding`、`QWEN_EMBEDDING_DIMENSIONS=1024`，并不要复用旧污染 `MILVUS_COLLECTION`。 |
+> 真实 LLM eval 默认不自动运行。用户明确要求执行某个 eval（如“跑 Smoke”“执行 Core eval”）即视为该命令的授权，直接按当前默认配置运行。
+
+| 目标 | 适用场景 / 数量 | 命令骨架 | 说明 |
+|---|---|---|---|
+| 查看 M27 CLI（无模型调用） | 想确认参数；0 次调用 | `python -m eval.run_eval --help` | 确认 `--selector`、`--suite`、`--scenario`、`--replicate-count` 等新参数。 |
+| Smoke selector | 改完链路先冒烟；4 题 / 4 次调用 | `python -m eval.run_eval --selector smoke --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 检查 API、Guard、Trace、artifact 与报告；不代表完整能力。 |
+| Core suite | 正式主回归；19 题 / 19 次调用 | `python -m eval.run_eval --suite core --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | required assertion 参与主 Gate。 |
+| Stress suite | 验证复杂业务边界；9 题 / 9 次调用 | `python -m eval.run_eval --suite stress --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 覆盖递归、SCD、退款、复杂 Join；默认 advisory。 |
+| Reliability selector | 看波动与可用性；2 题 / 6 次调用 | `python -m eval.run_eval --selector reliability --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 每题 3 个 replicate；分母仍是 2 个逻辑 Scenario。 |
+| Database Exception selector | 验证异常数据口径；7 题 / 7 次调用 | `python -m eval.run_eval --selector database-exception --run-id <run-id> --artifact-dir eval/reports/m27-artifacts --report eval/reports/<name>.md` | 选择 canonical Stress Scenario，不复制异常题正文。 |
+| M26 audit（冻结审计，无模型调用） | 复核历史 run；数量随冻结输入 | `python -m eval.run_audit --trace <frozen-trace.jsonl> --report <frozen-report.md> --triage <frozen-triage.json> --output-prefix eval/reports/m26-audit` | 只读取旧 case/trace/report/triage；不调用 LLM、不重跑旧 scorer。 |
+| schema retrieval embedding-only | 只测检索召回；10 条 query | `python -m eval.run_schema_retrieval_benchmark --report eval/reports/<name>-schema-retrieval-report.md --top-k 12 --fusion-strategy weighted` | 不调用 PipelinePort / LLM SQL；Milvus 与 embedding 开关见 state 文档。 |
+
+M27 artifact 默认写入 `eval/reports/m27-artifacts/`，短期 checkpoint 写入 `.codex/temp_work/m27-checkpoints/`，JSONL trace 写入 `eval/traces/`。报告中的 `eligible / observed / passed / failed / not_observed`、Gate 和可比性规则见 `docs/state/eval-baselines.md`。
 
 ## 运行纪律
 

@@ -1,9 +1,40 @@
 # eval/cases 用例集说明
 
-> 三层评测（formal / challenge / diagnostic）的**当前落地口径**单一事实源，AI 续接跑 eval 或加 case 先读这里。
-> 设计动机、能力维度和 32 条 case 构成的历史提案见 `docs/archive-dormant/phase3a-diagnostic-benchmark-proposal-v5.md`（已归档，仅作设计背景参考，落地口径以本文件为准）。
+> **当前落地口径是 M27 canonical Scenario catalog**。一条业务问题只在 `eval/cases/catalog/scenarios.yaml` 定义一次；结果、Context、Plan、Trace、安全等检查作为它的 typed assertions 共享同一份执行证据。旧 formal / challenge / diagnostic YAML 保留为只读历史证据，不能用当前 `eval.run_eval` CLI 生成新的 M27 分数。
 
-## 三类用例的包含关系
+## M27 当前目录与维护规则
+
+```text
+eval/cases/
+  catalog/
+    scenarios.yaml             # 28 个 canonical Scenario 的唯一事实源
+    selectors/
+      smoke.yaml               # 轻量链路选择，不复制题面
+      reliability.yaml         # 复用 Scenario + 明确 replicate protocol
+      database-exception.yaml  # 选择异常/边界 Scenario
+  *.yaml                       # formal/challenge/diagnostic 等 legacy 输入，只读保留
+```
+
+### Scenario、assertion 与 selector
+
+- **Scenario**：一个唯一的业务问题，例如“六月各渠道 GMV 排名”。它声明题面、分类（Core / Stress / Manual Lab）和多个 assertion。
+- **Assertion**：同一次答题的一个判卷规则。M27 支持 `result_match`、`output_contract`、`schema_context`、`query_plan`、`trace_complete`、`safety_block`、`expected_rejection`、`join_path`、`metric_mapping`；未知 kind 会在加载 catalog 时失败，禁止默认通过。
+- **Selector**：从 canonical Scenario 中选题并定义 protocol / gate policy。Smoke、Reliability、Database Exception 不复制 YAML 正文，也不创建新的业务问题分母。
+
+### 加 case / 改合同前的规则
+
+- 新业务问题只加到 `catalog/scenarios.yaml`；同题的多个检查必须增加 assertion，不能复制成多条 case。
+- 改题面、reference SQL、分母、Gate、selector、长期 artifact 或真实 LLM 基线范围前，先按 M27 确认门整理方案并取得用户确认。
+- `result_match` 的候选和 reference SQL 必须共享同一 RunEnvironment snapshot；高风险口径需要 SQLite counterfactual，不能只依赖当前 seed 恰好通过。
+- 旧 YAML、旧 report、trace、triage 和 M26 audit 只能读取/追溯；不要移动、重算或改写历史分数。
+
+### 怎么运行
+
+M27 CLI、真实 LLM 授权边界、artifact 路径和命令见 [docs/state/runbook.md](../../docs/state/runbook.md)。分母、Gate、首次真实基线和旧数字隔离见 [docs/state/eval-baselines.md](../../docs/state/eval-baselines.md)。
+
+## Legacy：formal / challenge / diagnostic 三层用例
+
+> 以下内容描述 M27 前的历史结构，只为理解冻结 YAML、旧 report 和 audit 输入保留；不再是当前加 case 或运行 eval 的规则。
 
 当前三层不是三套完全独立的题，而是逐层扩展：
 
@@ -21,7 +52,7 @@ diagnostic 32 = challenge 16 + diagnostic extra 16
 - **challenge** 是 formal 的加难版：多看 6 条更复杂的数据库问题。
 - **diagnostic** 是能力体检：在 challenge 基础上再加 16 条专项题，用来定位边界，不追满分。
 
-## 四份用例文件
+## Legacy 文件清单
 
 | 文件 | 条数 | 定位 |
 |---|---|---|
@@ -30,13 +61,13 @@ diagnostic 32 = challenge 16 + diagnostic extra 16
 | `database-upgrade-challenge.yaml` | 16 | **challenge superset**：包含全部 10 条 formal 问题 + 额外 6 条扩展数据库复杂度；轻量诊断门，每模块陪跑 |
 | `phase3a-diagnostic-benchmark.yaml` | 16 | **diagnostic extra**：只维护新增 16 条 capability-focused case，不复制 challenge（32 条由 runner 合并） |
 
-## 三层结构
+## Legacy 三层结构
 
 - **formal（10）**：主硬门，验收与回归对照用
 - **challenge（16）**：superset（含 formal 10 + 额外 6），日常陪跑诊断
 - **diagnostic（32）**：16 challenge + 16 extra（`--cases + --extra-cases` 合并），**能力体检，不追满分**——定位边界和下一步问题
 
-## 什么时候跑哪套
+## Legacy 运行选择
 
 | 场景 | 建议跑法 | 目的 |
 |---|---|---|
@@ -47,7 +78,7 @@ diagnostic 32 = challenge 16 + diagnostic extra 16
 | 做 A/B 对比 | 固定 formal 或 challenge 同一套 case | 保证对比口径稳定 |
 | 排查具体失败 | 单条 case 或 diagnostic | 缩小问题范围，避免大批量日志干扰 |
 
-## 关键口径
+## Legacy 关键口径
 
 - **capability 标签**：`schema_retrieval / join_path / query_plan / local_schema_prompt / trace_steps / security_guard`——diagnostic 报告按能力维度汇总，跑完直接看下一步修哪块
 - **`skipped_due_to_pipeline_mode`**：旧链路跑新能力专属 check 时标记，**不算过也不算挂**，不伪装未实现的能力
@@ -55,14 +86,14 @@ diagnostic 32 = challenge 16 + diagnostic extra 16
 - **expected_value**：固定事实数值校验（如 GMV `11285752.00`），不依赖列名，堵住"NULL 也算对"的伪通过
 - **result_match**：最小结果集对比（执行 expected_sql 后按行/列值比较），当前仅 5 条核心 challenge case 启用
 
-## 加 case 的规则
+## Legacy 加 case 的规则
 
 - formal 是验收硬门，**要克制**：只加真正的主链路能力题
 - alias 只放**语义等价**别名，绝不用 alias 掩盖缺表或错表
 - diagnostic 定位边界，**不怕失败**；不为了好看把失败 case 改弱
 - expected_value / 固定检查值**以数据事实为准**（用参考 SQL 在确定性 seed 上执行得到），不拍脑袋
 
-## 不要怎么做
+## Legacy 注意事项
 
 - 不要为了通过率把 diagnostic 失败 case 改弱；diagnostic 的价值就是暴露边界。
 - 不要把 challenge 当 formal 硬门；challenge 是复杂度压力测试，主要用于观察退化和定位问题。
@@ -70,7 +101,7 @@ diagnostic 32 = challenge 16 + diagnostic extra 16
 - 不要把 `skipped` 当 `passed`；skipped 只表示当前执行模式不支持或本次不适用。
 - 不要把 5 条 LangFuse Dataset workflow smoke 当完整 benchmark；它只证明流程能跑，不证明模型能力稳定。
 
-## 怎么看结果
+## Legacy 结果解读
 
 1. 先看 summary：`passed / failed / skipped` 是否低于当前基线。
 2. 再看 Score Summary：是哪类 scorer 失败，例如 `rule:table_hit`、`rule:expected_value`、`rule:result_match`。
@@ -80,7 +111,7 @@ diagnostic 32 = challenge 16 + diagnostic extra 16
 
 > M19 会进一步把失败 case 归因为 `failure_stage / failure_reason / needs_action`。本文件只定义 case 分层、运行口径和维护规则；失败归因规则以 Phase 3B M19 计划与实现为准。
 
-## 怎么运行
+## Legacy CLI 命令（不再适用于当前 `eval.run_eval`）
 
 （默认在项目 Python 环境中运行，`<项目 Python>` 见 CLAUDE.md；真实 LLM 用例需要 DeepSeek key）
 
@@ -103,7 +134,7 @@ $py = "D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe"
 & $py -m eval.run_eval --cases eval/cases/phase3a-regression.yaml --pipeline-mode new_text2sql --report eval/reports/phase3a-new-pipeline.md
 ```
 
-## 当前基线
+## Legacy 基线
 
 最新真实 LLM 基线与默认配置以 `docs/state/AI_CONTEXT.md`「最新评测基线」为准。
 

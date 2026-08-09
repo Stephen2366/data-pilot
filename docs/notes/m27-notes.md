@@ -176,3 +176,14 @@
 
 - 参考资料：本模块未检索外部资料；以 `m27-plan.md`、M26 notes、已有代码/trace 合同和项目 state 文档为依据，没有照搬外部评测平台。
 - 后续：用户人工检查后可运行 `accept-module`。真实 LLM `m27-v1` 新基线仍须单独确认运行范围/调用数/成本；LangFuse 当前只提供严格 payload adapter，实际上传策略保持显式授权。
+
+### 文档迁移补记
+
+- 2026-08-09：用户确认将旧评测账本整体移入 `docs/archive-versions/eval-baselines-old.md`，新建 `docs/state/eval-baselines.md` 只记录 M27 事实、分母与后续真实基线；`runbook.md` 与 `eval/cases/README.md` 同步改为 canonical Scenario / selector 入口。旧 formal/challenge/diagnostic 内容保留为 legacy/read-only，不再宣称可由当前 `eval.run_eval` 生成新分数。
+
+### 授权后的真实 LLM Smoke（非基线）
+
+- 2026-08-09：用户授权执行一次 M27 `smoke`。固定现有默认 runtime：Qwen `qwen3.7-plus`、inmemory deterministic/weighted、45s/retry0、SQLite deterministic seed、LangFuse off；没有切模型、检索、embedding、数据库、oracle 或可靠性配置。
+- 首次 `m27-smoke-20260809-01` 受工具 60 秒时限中断，已完成 `june_gmv`、`unsafe_drop_orders`、`missing_product_supplier_rejection` 的 checkpoint，manifest 保持 `running`。M27 不支持 resume，故该 run 不生成 completed artifact/report，也不进入 Gate。
+- 使用新 run id `m27-smoke-20260809-02` 完成完整 selector：4 个 logical Scenario、4 个 physical attempts、9 条 required assertion 全通过，Gate `passed`，无 failed/not_observed/unavailable。产物为 `eval/reports/m27-artifacts/m27-smoke-20260809-02.json` 和 `eval/reports/m27-smoke-20260809-02.md`；既有 Starlette/httpx deprecation warning 未影响结论。
+- 解释边界：Smoke 仅验证当前运行环境下 API、Guard、Trace、artifact 与报告闭环，不是完整 Core/Stress 评测，不能推出稳定模型能力、成本或可靠性，也不得与 M26 的 `25/32` 等旧口径相比较。
