@@ -18,11 +18,11 @@ ExecutionStatus = Literal["completed", "rejected", "pipeline_error", "external_u
 AssertionStatus = Literal["passed", "failed", "not_observed"]
 RunStatus = Literal["running", "completed", "interrupted", "failed"]
 
-# M27 v2 修正了 provider timeout 的正式判卷语义：没有生成候选答卷时，依赖答卷的
-# assertion 记为 not_observed，而不是把空响应当业务错误。旧 v1 artifact 仍可只读复核，
-# 但不能与 v2 的基线直接比较。
-CONTRACT_VERSION = "m27-v2"
-LEGACY_REVIEWABLE_CONTRACT_VERSIONS = frozenset({"m27-v1"})
+# M27 v3 把 Schema Context 的物理字段、metric key、输出 alias 三个命名空间彻底分开，
+# 并在 catalog 加载时验证合同确实能由当前 domain schema 满足。旧 v1/v2 artifact 仍可
+# 只读复核，但合同 hash 和判分语义不同，不能与 v3 直接比较。
+CONTRACT_VERSION = "m27-v3"
+LEGACY_REVIEWABLE_CONTRACT_VERSIONS = frozenset({"m27-v1", "m27-v2"})
 ARTIFACT_SCHEMA_VERSION = "m27-artifact-v1"
 PROJECTOR_VERSION = "m27-projector-v1"
 

@@ -35,7 +35,7 @@
 
 ## Eval 命令入口
 
-> 当前正式入口为 **M27 v2 canonical eval**：一个 Scenario 只执行一次，Result / Context / Plan / Trace / Safety 等 typed assertion 共享同一份证据。旧 formal / challenge / diagnostic YAML、报告与分数，以及 M27 v1 artifact，都是只读历史证据；它们不再由当前 `eval.run_eval` CLI 生成新结果。历史口径与数字见 `docs/archive-versions/eval-baselines-old.md` 和 `docs/state/eval-baselines.md`。
+> 当前正式入口为 **M27 v3 canonical eval**：一个 Scenario 只执行一次，Result / Context / Plan / Trace / Safety 等 typed assertion 共享同一份证据。v3 增加 Schema Context 物理字段/metric 静态校验，并修正宽表业务时间合同。旧 formal / challenge / diagnostic YAML、报告与分数，以及 M27 v1/v2 artifact，都是只读历史证据；它们不再由当前 `eval.run_eval` CLI 生成新结果。历史口径与数字见 `docs/archive-versions/eval-baselines-old.md` 和 `docs/state/eval-baselines.md`。
 
 > 真实 LLM eval 默认不自动运行。用户明确说“执行 / 跑 <selector 或 suite>”时，即授权**恰好一次**运行该命令；直接按当前默认配置执行，不重复询问授权。该授权覆盖既定临时环境变量、唯一 run ID、artifact/report/checkpoint 写入和状态轮询，但不覆盖扩大范围、额外重复运行或切换默认配置。
 
@@ -71,6 +71,8 @@
 | schema retrieval embedding-only | 只测检索召回；10 条 query | `python -m eval.run_schema_retrieval_benchmark --report eval/reports/<name>-schema-retrieval-report.md --top-k 12 --fusion-strategy weighted` | 不调用 PipelinePort / LLM SQL；Milvus 与 embedding 开关见 state 文档。 |
 
 M27 artifact 默认写入 `eval/reports/m27-artifacts/`，短期 checkpoint 写入 `.agent_work/temp/m27-checkpoints/`，JSONL trace 写入 `eval/traces/`。报告中的 `eligible / observed / passed / failed / not_observed`、Gate 和可比性规则见 `docs/state/eval-baselines.md`。
+
+新 Text2SQL Eval 会在一个 EvalRun 开始时构建一次 Schema vector index，注入该 run 的全部 Scenario，并在环境关闭时释放；artifact 的 resolved runtime identity 记录 `schema_vector_index_reuse=run_scoped` 及可用的 Milvus row count。若观察到逐题重建/重复整批 embedding，应视为生命周期回归，而不是正常耗时。
 
 ### 前台等待超时：到哪里检查
 

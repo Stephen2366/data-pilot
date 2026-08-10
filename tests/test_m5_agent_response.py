@@ -57,7 +57,7 @@ def test_query_response_contains_m5_contract_and_writes_trace(tmp_path: Path) ->
     with _seeded_test_client(trace_path) as client:
         response = client.post(
             "/api/query",
-            json={"question": "各渠道订单量是多少？", "user_role": "ops"},
+            json={"question": "各渠道订单量是多少？", "user_role": "ops", "force_new_pipeline": False},
         )
 
     body = response.json()
@@ -97,7 +97,7 @@ def test_query_blocked_response_keeps_m5_contract_and_trace(tmp_path: Path) -> N
     with _seeded_test_client(trace_path) as client:
         response = client.post(
             "/api/query",
-            json={"question": "DROP TABLE orders", "user_role": "admin"},
+            json={"question": "DROP TABLE orders", "user_role": "admin", "force_new_pipeline": False},
         )
 
     body = response.json()
@@ -124,15 +124,15 @@ def test_aggregation_questions_generate_three_basic_chart_shapes(tmp_path: Path)
     with _seeded_test_client(trace_path) as client:
         channel_orders = client.post(
             "/api/query",
-            json={"question": "各渠道订单量是多少？", "user_role": "ops"},
+            json={"question": "各渠道订单量是多少？", "user_role": "ops", "force_new_pipeline": False},
         ).json()
         refund_rate = client.post(
             "/api/query",
-            json={"question": "2026年6月退款率最高的商品是什么？", "user_role": "ops"},
+            json={"question": "2026年6月退款率最高的商品是什么？", "user_role": "ops", "force_new_pipeline": False},
         ).json()
         june_gmv = client.post(
             "/api/query",
-            json={"question": "2026年6月本月GMV是多少？", "user_role": "ops"},
+            json={"question": "2026年6月本月GMV是多少？", "user_role": "ops", "force_new_pipeline": False},
         ).json()
 
     assert channel_orders["chart_spec"]["mark"] == "bar"

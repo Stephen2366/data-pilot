@@ -146,8 +146,8 @@ def _format_query_plan_notes(question: str, schema_graph: SchemaGraph) -> str:
         )
     if "渠道" in question and "gmv" in question.lower() and "orders_wide" in schema_graph.tables:
         notes.append(
-            "使用 `orders_wide` 做渠道 GMV 月度快照时，业务月份必须按 `orders_wide.snapshot_at` "
-            "过滤，不能把写入时间 `created_at` 当成快照月份；GMV 聚合 `orders_wide.order_amount`，"
+            "使用 `orders_wide` 做渠道 GMV 时，业务月份必须按 `orders_wide.paid_at` 过滤；"
+            "`snapshot_at` / `batch_id` 只用于选择快照版本；GMV 聚合 `orders_wide.order_amount`，"
             "并在计划中声明 `gmv` metric。"
         )
     if (

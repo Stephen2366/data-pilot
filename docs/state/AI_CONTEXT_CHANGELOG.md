@@ -15,6 +15,15 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M28 Text2SQL 收尾确定性修复（2026-08-10）
+
+- **改动范围**：因本模块没有单独起始 commit，范围依据为 `git status --short` 与 `git diff --name-only`；逐项对照 M28 notes 后归并为 `engine/nl2sql/prompt.py`、`eval/{contracts,catalog,environment,run_eval}.py`、`eval/cases/catalog/*`、相关 `tests/*`，以及 `docs/{notes,state,dev-log}.md`。工作树中另有用户/其他工具修改的 `docs/ref-discussion/RAG 的讨论.md` 与 `.codex/skills/finish-docs/SKILL.md`，均不属于 M28，未触碰。
+- **关键记录**：用户确认实施审查中“建议现在处理”的四项问题。canonical contract 升为 `m27-v3`：Schema Context 将物理字段、metric key、输出 alias 分离，并在 catalog load 阶段校验当前 domain schema 可满足；修正 5 条错位合同，渠道 GMV dashboard 增加 Result/Output，避免零行假通过。`orders_wide.paid_at` 负责业务月份，`snapshot_at/batch_id` 只选快照版本；未改数据库 schema、seed 或 oracle snapshot。
+- **关键记录**：`SQLiteRunEnvironmentFactory` 恢复一轮 EvalRun 只构建一次 Schema vector index，通过 `app.state` 注入全部 Scenario，结束时关闭；runtime identity 新增 `schema_vector_index_reuse` 与 Milvus initial/final row count。pytest autouse guard 默认禁止未 mock 的真实 provider；legacy 测试显式走旧路径，新 pipeline/smoke 显式注入 fake。旧 v1/v2 artifact 继续只读兼容。
+- **参考资料**：`docs/notes/m28-text2sql-review-notes.md`、M27 计划/笔记、四份 state 事实源、当前 Text2SQL/Schema Retrieval/Eval/Review/Trace 实现与既有 artifact/checkpoint；未新增外部资料。
+- **验证快照**：聚焦 M27/Review/数据库测试 `28 passed`；legacy API/Trace `22 passed`；M18 smoke `4 passed`；新 pipeline `8 passed`；全仓确定性 pytest `223 passed, 1 warning`（既有 Starlette/httpx deprecation，`464.31s`）。另通过 `compileall` 与 `eval.run_eval --help`。全程无真实 provider 调用。
+- **遗留/后续**：Text2SQL 可以暂时收尾并进入 RAG。F5 Projector 完整性、F6 Review 长期证据、F7 Cloud 脱敏不阻塞阶段切换；F7 必须在 RAG/Hybrid 重新启用 LangFuse Cloud 前处理。未切换模型、检索、embedding、数据库、oracle、timeout/retry 或产品 API 默认，未运行真实 LLM Eval；现有 v2 快照不与 v3 直接比较。
+
 ### [实验] M27 Stress / Database Exception：Qwen plus + Milvus（2026-08-10）
 
 - 用户各授权一次：Stress `m27-stress-20260809-qwen37plus-milvus-01`（9 logical / 9 physical）与 Database Exception `m27-database-exception-20260809-qwen37plus-milvus-01`（7 / 7）。两轮都固定 Qwen `qwen3.7-plus`、Milvus + DashScope `qwen3.7-text-embedding` / 1024 dim、clean collection `datapilot_schema_docs_m27_qwen37plus_qwenemb_20260809_164000`、195-doc hash `8a8b6626...`、weighted、45s/retry0、SQLite deterministic oracle、LangFuse off；新 artifact 已完整记录 runtime identity。
@@ -33,6 +42,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - completed artifact 结果为 required `28 passed / 0 failed / 6 not_observed`、Gate `inconclusive`。17 个 Scenario 完成；`june_product_sales_top5` 与 `june_product_refund_rate_ranking` 都在 QueryPlan timeout、没有 candidate SQL，P0 正确将各自 Result / Output / Schema Context 投影为 `external_unavailable / not_observed`，没有伪造业务失败。
 - P1 的两项相关断言本轮通过：`june_actual_amount_sum` metric mapping、`june_channel_gmv_dashboard` schema context；后者的 QueryPlan 含 `orders_wide.snapshot_at`、`orders_wide.order_amount` 和 `gmv`。各仅一轮，不作稳定性、模型、Milvus 或 embedding 因果结论，也不切默认配置。
 - 这是当前首个 M27 v2 Core 快照，已列入 eval-baselines 的“当前可比较快照”，但未由用户指定为正式长期 baseline；不得与 v1 `29/5/0` 直接比较。
+- **⚠️ 注（2026-08-10）**：M28 发现 dashboard 将抽取时间 `snapshot_at` 误作业务月份且只有 Context 断言，旧 run 的该项通过不能证明结果正确；当前已由 `m27-v3` 改为 `paid_at` 并补 Result/Output。该 v2 run 现仅作修复前历史证据。
 
 ### [模块任务] M27 v2：P0 timeout 判卷修正、P1 Core 定向优化与 API 默认迁移（2026-08-09）
 
@@ -41,6 +51,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - **验证快照**：`tests/test_m27_foundation.py tests/test_m27_review.py` 为 `22 passed, 1 warning`（含 v1 artifact 只读 review 兼容）；新 API 默认/显式 legacy 测试为 `2 passed, 1 warning`；`tests/test_phase3a_eval.py` 为 `23 passed, 1 warning`；`eval.run_eval --help` 显示 `m27-v2`。warning 均为既有 Starlette/httpx deprecation。未调用真实 LLM，未改模型、检索、embedding、数据库、oracle 或 45s/retry0 默认可靠性配置。
 - **参考资料**：`docs/notes/m27-notes.md`「Core 失败复盘与 P0/P1 实施」、`docs/notes/m27-plan.md` §13、v1 冻结快照 artifact（`eval/reports/m27-artifacts/`）、既有 runner/scorer 实现。
 - **遗留/后续**：尚未运行 M27 v2 真实 Core，也未登记新的正式长期基线；将来运行须单独授权，且不可将 v2 与 v1 的 `29 passed / 5 failed / 0 not_observed` 直接升降比较。M27 仍待 `accept-module`。
+- **⚠️ 注（2026-08-10）**：本节的 `orders_wide.snapshot_at` 月份 guidance 已被 M28 证实为业务语义错误；当前合同为 `m27-v3`，业务月份使用 `paid_at`，v1/v2 artifact 均只读保留。
 
 ### [小修] 真实 Eval 的单次执行纪律（2026-08-09）
 
@@ -80,7 +91,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - **业务/安全边界**：商品退款率采用完整排名而非旧 Top1 projection；SCD 开放 `valid_to`、completed refund、递归子类都以 SQLite counterfactual 证明。completed artifact 仅保存 allowlist response/trace 摘要、row count 与 result fingerprint，不保存 rows/prompt/answer/凭证；`interrupted` 与遗留 `running -> abandoned` 不能进入 projector。旧 M26 artifact、YAML、报告与 audit 不覆盖、不重算。
 - **验证快照**：M27 foundation + counterfactual `14 passed, 1 warning`；legacy Eval 合同 `37 passed, 1 warning`；pipeline + M27 `21 passed, 1 warning`；全仓 `208 passed, 1 warning`（509.65s）；`git diff --check` 通过。warning 均为既有 Starlette/httpx deprecation。
 - **参考资料**：`m27-plan.md`、M26 notes、项目 state/runbook/database facts、现有 runner/scorer/trace/audit 实现；未检索或照搬外部平台。
-- **遗留/后续**：M27 未验收（待 `accept-module`）。真实 LLM `m27-v1` 基线仍须用户单独确认范围/调用数/成本；不要将其与旧 25/32、26/32 等口径直接升降比较。LangFuse 目前只构造严格 allowlist payload，实际上传仍需显式授权。**⚠️ 注（2026-08-09）**：后续 P0 修正了 timeout 的正式判卷语义，当前合同已升为 `m27-v2`；v1 artifact 只读保留，新的真实基线必须按 v2 单独登记。
+- **遗留/后续**：M27 未验收（待 `accept-module`）。真实 LLM `m27-v1` 基线仍须用户单独确认范围/调用数/成本；不要将其与旧 25/32、26/32 等口径直接升降比较。LangFuse 目前只构造严格 allowlist payload，实际上传仍需显式授权。**⚠️ 注（2026-08-09）**：后续 P0 将合同升为 `m27-v2` 并修正 timeout 语义。**⚠️ 注（2026-08-10）**：M28 又将当前合同升为 `m27-v3`，v1/v2 artifact 均只读保留，新的真实基线必须按 v3 单独登记。
 
 ### [审查] M26-v1 第二轮 Qwen plus 人工 SQL 审查（2026-08-08）
 

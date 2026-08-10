@@ -464,7 +464,7 @@ def test_api_response_contract_hides_langfuse_internal_fields(tmp_path: Path) ->
     with _seeded_test_client(trace_path) as client:
         response = client.post(
             "/api/query",
-            json={"question": "各渠道订单量是多少？", "user_role": "ops"},
+            json={"question": "各渠道订单量是多少？", "user_role": "ops", "force_new_pipeline": False},
         )
 
     body = response.json()

@@ -6,16 +6,62 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import scripts.smoke_phase3b_langfuse as smoke
 from app.core.config import Settings
 
 
+class _SmokeLLMClient:
+    """为 smoke 的真实 API/Trace seam 提供确定性 Plan 与 SQL，不访问 provider。"""
+
+    def complete(self, *, prompt: str) -> str:
+        if "QueryPlan JSON Schema" in prompt:
+            return json.dumps(
+                {
+                    "steps": [
+                        {
+                            "step_id": "step_1",
+                            "step_index": 1,
+                            "step_type": "sql_query",
+                            "purpose": "按渠道统计订单量",
+                            "depends_on": [],
+                            "task_type": "aggregation",
+                            "tables": ["channels", "orders"],
+                            "columns": ["channels.channel_name", "orders.id", "orders.channel_id"],
+                            "metrics": ["order_count"],
+                            "filters": [],
+                            "joins": ["orders_channel"],
+                            "aggregations": ["COUNT(orders.id)"],
+                            "group_by": ["channels.channel_name"],
+                            "order_by": ["order_count DESC", "channels.channel_name ASC"],
+                            "limit": None,
+                            "output_columns": ["channels.channel_name", "order_count"],
+                            "output_expressions": {"order_count": "COUNT(orders.id)"},
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "sql": "SELECT c.channel_name, COUNT(o.id) AS order_count FROM channels c JOIN orders o ON o.channel_id = c.id GROUP BY c.id, c.channel_name ORDER BY order_count DESC, c.channel_name ASC",
+                "tables_used": ["channels", "orders"],
+                "confidence": 0.9,
+                "reasoning_summary": "确定性测试 SQL",
+            },
+            ensure_ascii=False,
+        )
+
+
 def test_smoke_passes_api_and_jsonl_when_langfuse_disabled(tmp_path: Path, monkeypatch) -> None:
     """默认禁用 LangFuse 时，API/JSONL 必须照常 PASS，Cloud 检查显示 SKIP。"""
 
     monkeypatch.setattr(smoke, "get_settings", lambda: Settings(_env_file=None, LANGFUSE_ENABLED="false"))
+    from engine.nl2sql import pipeline
+
+    monkeypatch.setattr(pipeline, "get_default_llm_client", lambda: _SmokeLLMClient())
 
     results = smoke.run_smoke(
         trace_path=tmp_path / "m18-disabled.jsonl",
@@ -35,6 +81,9 @@ def test_require_langfuse_fails_when_disabled(tmp_path: Path, monkeypatch) -> No
     """显式 `--require-langfuse` 时，禁用或缺 key 不能被误报成通过。"""
 
     monkeypatch.setattr(smoke, "get_settings", lambda: Settings(_env_file=None, LANGFUSE_ENABLED="false"))
+    from engine.nl2sql import pipeline
+
+    monkeypatch.setattr(pipeline, "get_default_llm_client", lambda: _SmokeLLMClient())
 
     results = smoke.run_smoke(
         trace_path=tmp_path / "m18-require.jsonl",

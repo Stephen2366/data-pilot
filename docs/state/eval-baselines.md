@@ -2,13 +2,13 @@
 
 > 本文记录当前 EvalRun 基线与可比性规则。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
-更新时间：2026-08-09
+更新时间：2026-08-10
 
 ## 当前状态
 
-- **当前合同**：`m27-v2`；每个业务问题是一个 canonical Scenario，多个 typed assertion 共享一次执行证据。v2 将 QueryPlan timeout 等“没有候选答卷”的情况记为 `external_unavailable / not_observed`，不再伪装成业务 failed。
+- **当前合同**：`m27-v3`；延续 v2 的 `external_unavailable / not_observed` 语义，并把 Schema Context 的物理字段、metric key、输出 alias 分开静态校验；`orders_wide` 的业务月份统一按 `paid_at`，`snapshot_at/batch_id` 只表示快照版本。
 - **当前 catalog**：28 个 Scenario；分类为 Core / Stress / Manual Lab。Smoke、Reliability、Database Exception 是 selector，不是复制题面的独立题集。
-- **当前真实 LLM 基线**：尚未登记正式长期基线。
+- **当前真实 LLM 基线**：尚未登记正式长期基线；现有真实运行均为 v2，只能作为修复前过渡证据，不能与 v3 直接比较。
 - **默认运行配置**：仍以 [runbook.md](runbook.md) 为准；M27 没有切换模型、检索、embedding、数据库、oracle、timeout 或 retry。
 - **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
@@ -43,6 +43,8 @@ M27 review bundle 是解释自动结果的旁路证据，不是第二套分数�
 ## 当前有效实验快照
 
 这里保留仍能帮助判断当前路线的真实运行；它们未必已成为正式长期 baseline，也未必能作严格对照。每条都必须写清楚证据状态和解释边界。Smoke、运行事故、中断和外部服务异常不作为独立记录进入本账本。
+
+> 2026-08-10 注：下表均为 `m27-v2` 修复前快照。它们仍可解释当时的模型行为和 M28 问题来源，但已不属于 `m27-v3` 可比序列；本轮未运行真实 LLM Eval。
 
 | 类型 | 证据状态 | Run ID | 日期 | 协议 / resolved runtime | Assertion views / Gate | 解释边界 |
 |---|---|---|---|---|---|---|

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,9 @@ from app.main import app
 from eval.contracts import EvalRunSpec, ResolvedRuntimeIdentity
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.schema_retrieval.document_builder import build_schema_documents, schema_documents_hash
+from engine.schema_retrieval.objects import SchemaDocument
+from engine.schema_retrieval.retriever import build_configured_schema_vector_index
+from engine.schema_retrieval.vector_index import VectorIndex
 from scripts.seed_data import seed_database
 
 
@@ -28,20 +32,66 @@ class SQLiteRunEnvironmentFactory:
     确定性 snapshot。它不改动模型、检索或 retry 默认值，只记录当前 resolved 设置。
     """
 
-    def __init__(self, *, trace_root: Path) -> None:
+    def __init__(
+        self,
+        *,
+        trace_root: Path,
+        vector_index_builder: Callable[..., tuple[VectorIndex, list[SchemaDocument], str]] = build_configured_schema_vector_index,
+    ) -> None:
         self._trace_root = trace_root
+        self._vector_index_builder = vector_index_builder
 
     def create(self, run_spec: EvalRunSpec) -> "SQLiteRunEnvironment":
         """解析当前默认配置并先完成显式 requested/resolved 对账。"""
         settings = get_settings()
-        values = _resolved_runtime_values(settings, run_spec)
+        domain_schema = load_domain_schema()
+        # 先用纯本地配置做一次对账；明显不匹配时不要先连接 Milvus/embedding provider。
+        configured_values = _resolved_runtime_values(settings, run_spec)
+        configured_mismatches = {
+            key: (expected, configured_values.get(key))
+            for key, expected in run_spec.requested_runtime_constraints.items()
+            if key not in {"milvus_initial_row_count", "milvus_final_row_count"}
+            and configured_values.get(key) != expected
+        }
+        if configured_mismatches:
+            raise ValueError(f"requested/resolved runtime mismatch: {configured_mismatches}")
+        vector_index: VectorIndex | None = None
+        schema_documents: list[SchemaDocument] | None = None
+        schema_docs_hash: str | None = None
+        if run_spec.execution_protocol.pipeline_mode != "baseline":
+            # ★ 索引属于整个 EvalRun，而不是某一个 Scenario。Milvus 下这能避免每题重新
+            # embedding 全部 Schema 文档；in-memory 下也让所有题共享同一份预计算向量。
+            vector_index, schema_documents, schema_docs_hash = self._vector_index_builder(domain_schema=domain_schema)
+        values = _resolved_runtime_values(
+            settings,
+            run_spec,
+            schema_documents=schema_documents,
+            schema_docs_hash_value=schema_docs_hash,
+            vector_index=vector_index,
+        )
         mismatches = {key: (expected, values.get(key)) for key, expected in run_spec.requested_runtime_constraints.items() if values.get(key) != expected}
         if mismatches:
+            _close_vector_index(vector_index)
             raise ValueError(f"requested/resolved runtime mismatch: {mismatches}")
-        return SQLiteRunEnvironment(trace_path=self._trace_root / f"{run_spec.run_id}.jsonl", resolved_runtime_identity=ResolvedRuntimeIdentity(values))
+        try:
+            return SQLiteRunEnvironment(
+                trace_path=self._trace_root / f"{run_spec.run_id}.jsonl",
+                resolved_runtime_identity=ResolvedRuntimeIdentity(values),
+                schema_vector_index=vector_index,
+            )
+        except Exception:
+            _close_vector_index(vector_index)
+            raise
 
 
-def _resolved_runtime_values(settings: Any, run_spec: EvalRunSpec) -> dict[str, Any]:
+def _resolved_runtime_values(
+    settings: Any,
+    run_spec: EvalRunSpec,
+    *,
+    schema_documents: list[SchemaDocument] | None = None,
+    schema_docs_hash_value: str | None = None,
+    vector_index: VectorIndex | None = None,
+) -> dict[str, Any]:
     """冻结本轮实际会影响 Schema Retrieval 可比性的配置与语料指纹。
 
     M27 artifact 过去只记录 backend/provider，无法区分“同为 Milvus 但 collection、embedding
@@ -60,7 +110,8 @@ def _resolved_runtime_values(settings: Any, run_spec: EvalRunSpec) -> dict[str, 
         embedding_model = None
         embedding_dimensions = None
 
-    schema_documents = build_schema_documents(load_domain_schema())
+    active_documents = schema_documents if schema_documents is not None else build_schema_documents(load_domain_schema())
+    is_new_pipeline = run_spec.execution_protocol.pipeline_mode != "baseline"
     values: dict[str, Any] = {
             "llm_provider": settings.llm_provider,
             "llm_model": settings.qwen_model if settings.llm_provider.lower() == "qwen" else settings.llm_model,
@@ -68,10 +119,17 @@ def _resolved_runtime_values(settings: Any, run_spec: EvalRunSpec) -> dict[str, 
             "schema_vector_backend": settings.schema_vector_backend,
             "schema_embedding_provider": embedding_provider,
             "schema_embedding_model": embedding_model,
-            "schema_embedding_dimensions": embedding_dimensions,
-            "milvus_collection": settings.milvus_collection if settings.schema_vector_backend.lower() == "milvus" else None,
-            "schema_docs_count": len(schema_documents),
-            "schema_docs_hash": schema_documents_hash(schema_documents),
+            "schema_embedding_dimensions": getattr(vector_index, "dimension", embedding_dimensions),
+            "milvus_collection": (
+                getattr(vector_index, "collection_name", settings.milvus_collection)
+                if settings.schema_vector_backend.lower() == "milvus" and is_new_pipeline
+                else None
+            ),
+            "milvus_initial_row_count": getattr(vector_index, "initial_row_count", None),
+            "milvus_final_row_count": getattr(vector_index, "final_row_count", None),
+            "schema_docs_count": len(active_documents),
+            "schema_docs_hash": schema_docs_hash_value or schema_documents_hash(active_documents),
+            "schema_vector_index_reuse": "run_scoped" if is_new_pipeline else "not_applicable",
             "schema_fusion_strategy": run_spec.execution_protocol.schema_fusion_strategy,
             "llm_timeout_seconds": settings.llm_timeout_seconds,
             "llm_max_retries": settings.llm_max_retries,
@@ -84,8 +142,19 @@ def _resolved_runtime_values(settings: Any, run_spec: EvalRunSpec) -> dict[str, 
 class SQLiteRunEnvironment:
     """真实 FastAPI/TestClient + SQLite snapshot 的 RunEnvironment adapter。"""
 
-    def __init__(self, *, trace_path: Path, resolved_runtime_identity: ResolvedRuntimeIdentity) -> None:
+    def __init__(
+        self,
+        *,
+        trace_path: Path,
+        resolved_runtime_identity: ResolvedRuntimeIdentity,
+        schema_vector_index: VectorIndex | None = None,
+    ) -> None:
         self.resolved_runtime_identity = resolved_runtime_identity
+        self._schema_vector_index = schema_vector_index
+        self._missing = object()
+        self._previous_db_override = app.dependency_overrides.get(get_db, self._missing)
+        self._previous_trace_path = getattr(app.state, "trace_path", self._missing)
+        self._previous_schema_vector_index = getattr(app.state, "schema_vector_index", self._missing)
         self._trace_path = trace_path
         self._trace_path.parent.mkdir(parents=True, exist_ok=True)
         self._trace_path.write_text("", encoding="utf-8")
@@ -100,17 +169,41 @@ class SQLiteRunEnvironment:
 
         app.dependency_overrides[get_db] = override_get_db
         app.state.trace_path = self._trace_path
+        app.state.schema_vector_index = self._schema_vector_index
         self._client = TestClient(app)
         self.pipeline = _FastApiPipelinePort(self._client, self._trace_path)
         self.oracle = _SQLiteOraclePort(self._engine)
 
     def close(self) -> None:
         """撤销 FastAPI override 并释放本轮专属 SQLite snapshot。"""
-        app.dependency_overrides.clear()
-        if hasattr(app.state, "trace_path"):
-            delattr(app.state, "trace_path")
+        self._client.close()
+        if self._previous_db_override is self._missing:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = self._previous_db_override
+        _restore_app_state("trace_path", self._previous_trace_path, self._missing)
+        _restore_app_state("schema_vector_index", self._previous_schema_vector_index, self._missing)
+        _close_vector_index(self._schema_vector_index)
         Base.metadata.drop_all(self._engine)
         self._engine.dispose()
+
+
+def _restore_app_state(name: str, previous: object, missing: object) -> None:
+    """只恢复本环境接管的 app.state 字段，不清空其他测试/服务组件的状态。"""
+
+    if previous is missing:
+        if hasattr(app.state, name):
+            delattr(app.state, name)
+    else:
+        setattr(app.state, name, previous)
+
+
+def _close_vector_index(vector_index: VectorIndex | None) -> None:
+    """VectorIndex 协议只要求 search；支持 close 的外部 adapter 才执行释放。"""
+
+    close = getattr(vector_index, "close", None)
+    if callable(close):
+        close()
 
 
 class _FastApiPipelinePort:

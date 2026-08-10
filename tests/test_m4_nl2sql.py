@@ -232,19 +232,19 @@ def test_query_api_uses_template_first_then_llm_and_applies_policy(monkeypatch: 
     with _seeded_test_client() as client:
         llm_allowed = client.post(
             "/api/query",
-            json={"question": "查询 active 商品列表前 10 条", "user_role": "ops"},
+            json={"question": "查询 active 商品列表前 10 条", "user_role": "ops", "force_new_pipeline": False},
         ).json()
         sensitive_blocked = client.post(
             "/api/query",
-            json={"question": "查询用户邮箱", "user_role": "ops"},
+            json={"question": "查询用户邮箱", "user_role": "ops", "force_new_pipeline": False},
         ).json()
         role_blocked = client.post(
             "/api/query",
-            json={"question": "查询订单", "user_role": "customer_service"},
+            json={"question": "查询订单", "user_role": "customer_service", "force_new_pipeline": False},
         ).json()
         template_first = client.post(
             "/api/query",
-            json={"question": "各渠道订单量是多少？", "user_role": "ops"},
+            json={"question": "各渠道订单量是多少？", "user_role": "ops", "force_new_pipeline": False},
         ).json()
 
     assert llm_allowed["safety_status"] == "passed"

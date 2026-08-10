@@ -1408,4 +1408,115 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --hel
 
 你会看到 `--selector`、`--suite`、`--scenario`、`--replicate-count` 和 gate 相关参数。真实执行会调用当前配置的模型，因此在未获得新基线授权前，不要以“试一下”为由运行该 CLI；模型、检索与默认配置仍以 `docs/state/runbook.md` 为准。
 
+## ★ M28 Text2SQL 收尾型技术体检
+
+（2026-08-10）
+
+**简述**：没有继续追模型分数，而是对 Text2SQL 做了一次**确定性工程收尾**：修正宽表时间语义、Eval 合同、运行级索引生命周期和测试网络隔离，确认模块可以暂时告一段落并进入 RAG。
+
+### 先用大白话讲
+
+这次工作像项目交付前的“查漏补缺”。功能表面上能跑，并不代表可以放心离开：可能存在一条提示把业务日期说错、一个评分规则永远无法通过、一次评测重复初始化昂贵资源，或者普通单元测试偷偷访问真实模型。
+
+M28 没有尝试让模型再多答对几题，而是把这些**可确定证明、可本地修复**的问题清理掉。最终 Text2SQL 仍有递归查询、两阶段聚合等能力上限，但它们已经属于未来专项优化，不再阻塞 RAG 阶段。
+
+### 这次做了什么
+
+本模块的核心矛盾是：已有 Core/Stress 数字能提供线索，但其中混有**业务口径错误、评测假失败和运行基础设施回归**，不能直接拿失败数去调模型。于是先审计证据，再只处理确定性问题，最后用完全不访问真实 provider 的测试闭环验证。
+
+1. **修正宽表的业务时间语义**
+
+   原来的 QueryPlan 提示要求按 `orders_wide.snapshot_at` 过滤 6 月 GMV，但该字段实际是**抽取快照的时间**；seed 中所有记录都在 7 月 1 日抽取，因此正确照做反而会返回空结果。M28 将业务月份统一到 `paid_at`，把 `snapshot_at/batch_id` 限定为选择快照版本，并为渠道 GMV dashboard 增加 Result/Output 断言。
+
+   这里没有新增一个看似方便的 `business_month` 字段，因为当前数据只有单批快照，贸然扩表会制造没有真实数据生命周期支撑的概念。确定性测试证明宽表与星型表的渠道 GMV 一致，也证明误用 `snapshot_at` 会得到空集；但它**没有证明真实 LLM 每次都会选对字段**。
+
+2. **让 Eval 合同在执行前就可满足**
+
+   旧 Schema Context 把 `refund_rate`、`avg_price` 等输出 alias 当成物理字段检查，造成 SQL 和结果正确也必然失败。M28 将合同升级为 **`m27-v3`**，明确区分物理字段、metric key 和输出 alias，并让 catalog loader 在调用 LLM 前校验表、字段、metric 是否真实存在。
+
+   没有选择放宽 scorer、让“字段或 metric 任意命中都算过”，因为那会把错误合同变成宽松判分，继续掩盖问题。旧 v1/v2 artifact 保持只读，不能与 v3 数字直接比较；本模块也没有运行新的真实 LLM Eval，所以**尚未建立 v3 能力基线**。
+
+3. **恢复 EvalRun 级索引生命周期**
+
+   M27 新 runner 曾丢失 run-scoped index，一轮评测中的每道题都会重新构建 Schema vector index；在 Milvus + 在线 embedding 下，这会重复对整批 Schema 文档做 embedding，放大耗时、费用和失败面。现在由 `SQLiteRunEnvironmentFactory` 在一轮开始时构建一次，通过 FastAPI `app.state` 注入所有 Scenario，并在环境关闭时释放。
+
+   这个设计类似 Spring 容器里的 **singleton bean 生命周期**：资源属于整轮运行，而不是某次请求。关闭时只恢复本环境接管的 override/state，不再粗暴清空全局状态。fake index 测试验证了初始化、检索和关闭边界；这证明生命周期正确，但不等于已经重新测量真实 Milvus 的性能收益。
+
+4. **恢复全仓测试的确定性边界**
+
+   API 默认切到新 Text2SQL 后，部分旧测试没有显式选择 legacy 路径，普通 pytest 可能意外访问 Qwen。M28 增加 autouse **provider fail-fast guard**：未显式注入 fake 的新 pipeline 调用会立即失败；旧合同测试显式 `force_new_pipeline=false`，新 pipeline 与 smoke 测试显式提供 fake client。
+
+   最终全仓 **223 passed, 1 warning**，证明本地测试不再依赖网络、凭证和模型可用性。这个数字只能证明确定性工程回归通过，不能被包装成 Text2SQL 端到端准确率提升。
+
+### 新概念
+
+- **Contract satisfiability（合同可满足性）**：一条评测规则必须先能被系统的数据模型满足。例如要求“物理字段中必须出现 `avg_price`”，但数据库根本没有这个字段，这条规则就永远无法通过。M28 把这种错误提前到 catalog 加载阶段。
+- **Run-scoped lifecycle（运行级生命周期）**：资源在一整轮任务开始时创建、供多次请求共享、结束时统一释放。它介于“全局永久单例”和“每次请求重建”之间，适合 Eval 的数据库快照、向量索引和 Trace 文件。
+- **Hermetic test（封闭测试）**：测试结果只依赖仓库内的 fixture/fake，不依赖网络、云服务、真实密钥或模型状态。它像给单元测试拉了一条隔离带，任何意外外连都会快速暴露。
+
+### 代码阅读路线
+
+1. **先看业务口径入口**：`engine/nl2sql/prompt.py` 与 `docs/state/database-current-state.md`
+   先理解 `paid_at` 和 `snapshot_at` 的职责差异，再看 QueryPlan 提示如何把这条规则告诉模型；阅读重点是**业务时间与数据抽取时间不能混用**。
+
+2. **再看版本化评测合同**：`eval/contracts.py`、`eval/cases/catalog/scenarios.yaml`、`eval/catalog.py`
+   `CONTRACT_VERSION` 定义当前 `m27-v3` 身份，Scenario 声明各类 assertion，loader 则在执行前做可满足性校验。这三处共同保证“合同改变就换版本、错误合同不进入运行期”。
+
+3. **接着看资源生命周期**：`eval/environment.py`
+   从 `SQLiteRunEnvironmentFactory.create()` 开始，依次看 index 构建、runtime identity、`app.state.schema_vector_index` 注入和 `close()` 恢复。重点理解为什么资源所有权放在 RunEnvironment，而不是散落在每个 Scenario 中。
+
+4. **最后看测试隔离**：`tests/conftest.py` 与 M4/M5/M16/M18/M27 相关测试
+   autouse fixture 默认禁止真实 provider；需要新 pipeline 行为的测试自行覆盖 fake，legacy 测试明确传 `force_new_pipeline=false`。这形成了“默认安全、按需显式开放”的测试边界。
+
+核心协作链路是：
+
+`m27-v3 catalog`
+→ `静态可满足性校验`
+→ `RunEnvironment 初始化一次 index`
+→ `多个 Scenario 共享`
+→ `typed assertions 判分`
+→ `环境关闭并恢复状态`
+
+### 设计要点
+
+- **先修确定性问题，不继续无边界调分**：业务口径、合同和生命周期错误都能用本地证据证明，应先清理；模型能力缺口则留给未来专项实验。
+- **升级合同而不是重写历史**：`m27-v3` 改变了判分语义，旧 v1/v2 artifact 继续只读，避免把不可比数字拼成趋势。
+- **默认禁止测试外连**：测试需要模型行为时必须显式注入 fake，避免网络、费用和偶发超时污染日常回归。
+- **边界**：Projector 完整性、Review 长期证据和 LangFuse Cloud 脱敏仍在 backlog；其中 Cloud 脱敏必须在 RAG/Hybrid 重新启用上传前完成。
+
+### 面试怎么讲
+
+我在 Text2SQL 阶段结束前做了一次技术体检，没有继续盲目调模型，而是从真实 Eval artifact、checkpoint、Trace 和代码路径中定位确定性问题。最终修了四类缺陷：宽表把快照时间误当业务时间、Schema Context 合同混淆物理字段和输出 alias、Eval runner 丢失运行级向量索引复用、pytest 可能意外访问真实模型。我把合同升级到 `m27-v3`，让 loader 提前检查可满足性，由 RunEnvironment 统一管理索引生命周期，并用 fail-fast guard 隔离 provider。全仓 223 个确定性测试通过，但我明确没有把它说成模型准确率提升，因为尚未运行 v3 真实 LLM 基线。
+
+1. **[基础追问] 你怎么判断一个失败应该修合同，而不是调模型？**
+
+   先看失败是否具有**确定性反例**。例如 `avg_price` 根本不是物理字段，但合同要求它出现在 physical fields 中，那么无论模型多强都无法通过；优惠券 GMV 的 SQL、结果和输出都正确，只因该字段检查失败，也说明问题在合同。只有排除业务口径、scorer 和运行基础设施问题后，剩余失败才适合归因到模型或计划能力。
+
+2. **[工程/深挖追问] 为什么把向量索引放进 RunEnvironment，而不是做全局单例？**
+
+   Eval 需要记录每轮明确的 embedding、collection、语料 hash 和 row count，全局单例容易跨 run 污染身份，也难以保证关闭时机；每题重建又成本过高。RunEnvironment 正好拥有一轮运行的开始和结束，因此能够做到**一轮一次、身份可记录、结束可释放**。
+
+3. **[压力追问] 你做了不少工程修复，但没有新的真实模型分数，这是不是无法证明有价值？**
+
+   这个质疑对“模型能力提升”成立，所以我没有声称准确率提高。M28 的目标是让后续分数值得相信：错误时间口径会产生空结果，错误合同会制造假失败，重复 index 会放大费用和超时，测试外连会让回归不可复现。**223 个本地测试证明的是这些确定性边界已修复**。如果未来需要发布级能力声明，再在相同 `m27-v3` 合同和完整 runtime identity 下做受控真实复测。
+
+### 验证与下一步
+
+- **验证**：聚焦 M27/Review/数据库 `28 passed`；legacy API/Trace `22 passed`；M18 smoke `4 passed`；new pipeline `8 passed`；全仓 **`223 passed, 1 warning in 464.31s`**。
+- **Warning**：既有 Starlette/httpx deprecation，不影响 M28 结论。
+- **边界**：没有运行真实 LLM Eval，没有切换模型、检索、embedding、数据库、oracle、timeout/retry 或产品 API 默认。
+- **下一步**：M28 仍待 `accept-module`；Text2SQL 可以暂时告一段落，进入 RAG。重新启用 LangFuse Cloud 前先处理 question/answer 脱敏。
+
+可复制的确定性验证命令：
+
+```powershell
+# 全仓回归；预计看到 223 passed 和 1 条既有 deprecation warning。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.agent_work\temp\pytest-m28-full
+
+# 只查看当前 Eval CLI 参数，不调用真实 LLM。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --help
+```
+
+**本地启动体验：** M28 没有新增独立页面，它修的是现有 Text2SQL/Eval 的正确性和工程边界。API 的启动与 Swagger 体验仍按 `docs/state/runbook.md` 执行；不要把 `eval.run_eval` 的真实运行当成本模块演示，因为它会调用当前配置的模型，必须另行明确授权。
+
 

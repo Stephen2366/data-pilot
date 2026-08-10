@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import ForeignKey, create_engine, inspect
 from sqlalchemy.orm import Session
 
@@ -142,6 +144,18 @@ def test_m1_seed_data_counts_roles_and_business_facts_are_stable() -> None:
         assert facts["top_add_to_pay_device_type"] == "mobile_app"
         assert facts["orders_wide_matches_star_gmv_by_channel"] is True
         assert facts["amount_mismatch_order_count"] == 5
+
+        # ★ snapshot_at 是整批数据的抽取版本（本批为 7 月 1 日），不是 6 月订单的业务时间。
+        # 如果误按 snapshot_at 过滤 6 月会得到空集；上面的 paid_at 对账可防止该错误回归。
+        wrong_business_month_count = (
+            session.query(OrderWide)
+            .filter(
+                OrderWide.snapshot_at >= datetime(2026, 6, 1),
+                OrderWide.snapshot_at < datetime(2026, 7, 1),
+            )
+            .count()
+        )
+        assert wrong_business_month_count == 0
 
         wide_refund_summary = session.query(OrderWide).filter(OrderWide.has_refund.is_(True)).count()
         assert wide_refund_summary > 0

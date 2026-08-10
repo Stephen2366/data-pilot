@@ -20,7 +20,7 @@ rag 过时了，用 Agentic rag 啊，把 rag 编排进 agent tools 里，而不
 意图识别
 ```
 
-**4. Agentic RAG 注意点**
+**4. **
 
 ```
 最近review几个RAG项目,发现一个普遍现象：所有人都说自己做的是"Agentic RAG",但代码一拉:retrieve一次 → stuff到context → 让LLM生成。这哪门子agentic?说5个踩坑总结的关键能力:
@@ -95,5 +95,11 @@ Multi-Agent RAG：一群Agent协同作战，核心是加了个“总指挥”—
 - 都是通过 MCP Servers 统一对接各种数据源
 - 最后所有结果汇总回 Aggregator Agent，再交给生成模型输出
 特点：分工协作 + 统一调度，能处理更复杂、跨数据源
+```
+
+**10.**
+
+```
+现在都要工业级agent项目，不是玩具demo，你的项目可监控吗，中间有环节出问题了你能实时监测到吗，工具调用失败了怎么办，如何提高缓存命中，成本控制怎么做的，高并发如何处理。
 ```
 

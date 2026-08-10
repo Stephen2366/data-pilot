@@ -1,6 +1,6 @@
 # M27 canonical catalog。旧 formal / challenge / diagnostic YAML 保持只读历史证据；
 # 本文件只承载已确认且已由 typed scorer 覆盖的新合同。
-contract_version: m27-v2
+contract_version: m27-v3
 
 scenarios:
   - id: june_gmv
@@ -450,7 +450,7 @@ scenarios:
         spec: {columns: [product_name, refund_rate], column_aliases: {product_name: [name, product], refund_rate: [product_refund_rate]}}
       - id: schema_context
         kind: schema_context
-        spec: {required_tables: [products, order_items, orders, refunds], required_columns: [product_name, refund_rate], required_metrics: [refund_rate]}
+        spec: {required_tables: [products, order_items, orders, refunds], required_columns: [product_name, product_id, order_id, paid_at, order_status, refund_status], required_metrics: [refund_rate]}
 
   - id: digital_electronics_recursive_item_gmv
     question: 统计 2026 年 6 月“数码电子”及其所有子分类的商品明细成交额（item GMV）。
@@ -480,7 +480,7 @@ scenarios:
         spec: {columns: [root_category, item_gmv], column_aliases: {root_category: [category, category_name], item_gmv: [category_gmv, sales]}}
       - id: schema_context
         kind: schema_context
-        spec: {required_tables: [product_categories, products, order_items, orders], required_columns: [root_category, item_gmv]}
+        spec: {required_tables: [product_categories, products, order_items, orders], required_columns: [name, parent_id, category_id, product_id, line_amount, paid_at, order_status]}
 
   - id: june_avg_price_history
     question: 统计 2026 年 6 月每个商品有效售价区间的平均价格；必须覆盖 valid_to 为空的当前价格记录。
@@ -505,7 +505,7 @@ scenarios:
         spec: {columns: [product_name, avg_price], column_aliases: {product_name: [name, product], avg_price: [average_price]}}
       - id: schema_context
         kind: schema_context
-        spec: {required_tables: [products, product_price_history], required_columns: [product_name, avg_price]}
+        spec: {required_tables: [products, product_price_history], required_columns: [product_name, product_id, price, valid_from, valid_to]}
 
   - id: june_actual_amount_sum
     question: 统计 2026 年 6 月非取消订单的实际成交金额合计，使用 orders.actual_amount 的业务口径。
@@ -518,17 +518,32 @@ scenarios:
         spec: {tables: [orders], columns: [actual_amount], metrics: [net_revenue]}
 
   - id: june_channel_gmv_dashboard
-    question: 查看 2026 年 6 月各渠道 GMV；可使用订单明细口径或 orders_wide 月度快照口径。
+    question: 查看 2026 年 6 月各渠道 GMV；可使用订单明细口径或 orders_wide 快照口径。业务月份按订单支付时间统计。
     user_role: ops
     classification: core
     tags: [database, schema_alternative, gmv]
     assertions:
+      - id: semantic_result
+        kind: result_match
+        spec:
+          reference_sql: |
+            SELECT c.channel_name, ROUND(SUM(o.order_amount), 2) AS gmv
+            FROM channels c JOIN orders o ON o.channel_id = c.id
+            WHERE o.paid_at >= '2026-06-01 00:00:00' AND o.paid_at < '2026-07-01 00:00:00'
+              AND o.order_status NOT IN ('cancelled', 'canceled')
+            GROUP BY c.id, c.channel_name ORDER BY gmv DESC, c.channel_name ASC
+          columns: [channel_name, gmv]
+          tolerance: 0.01
+          column_aliases: {channel_name: [channel, name], gmv: [channel_gmv, sales]}
+      - id: output_contract
+        kind: output_contract
+        spec: {columns: [channel_name, gmv], column_aliases: {channel_name: [channel, name], gmv: [channel_gmv, sales]}}
       - id: schema_context
         kind: schema_context
         spec:
           alternatives:
-            - {tables: [orders_wide], columns: [channel_name, gmv, snapshot_at]}
-            - {tables: [channels, orders], columns: [channel_name, order_amount, paid_at, channel_id]}
+            - {tables: [orders_wide], columns: [channel_name, order_amount, paid_at], metrics: [gmv]}
+            - {tables: [channels, orders], columns: [channel_name, order_amount, paid_at, channel_id], metrics: [gmv]}
 
   - id: june_channel_refund_rate_ranking
     question: 统计 2026 年 6 月各渠道退款率并按从高到低排序；分子只统计已完成退款的去重订单数。
@@ -559,7 +574,7 @@ scenarios:
         spec: {columns: [channel_name, refund_rate], column_aliases: {channel_name: [channel, name], refund_rate: [channel_refund_rate]}}
       - id: schema_context
         kind: schema_context
-        spec: {required_tables: [channels, orders, refunds], required_columns: [channel_name, refund_rate], required_metrics: [refund_rate]}
+        spec: {required_tables: [channels, orders, refunds], required_columns: [channel_name, channel_id, order_id, paid_at, order_status, refund_status], required_metrics: [refund_rate]}
 
   - id: june_coupon_type_gmv
     question: 统计 2026 年 6 月各优惠券类型关联订单的 GMV，并按 GMV 从高到低排序。
@@ -584,4 +599,4 @@ scenarios:
         spec: {columns: [coupon_type, gmv], column_aliases: {coupon_type: [type, coupon], gmv: [coupon_gmv, sales]}}
       - id: schema_context
         kind: schema_context
-        spec: {required_tables: [coupons, order_coupons, orders], required_columns: [coupon_type, gmv], required_metrics: [gmv]}
+        spec: {required_tables: [coupons, order_coupons, orders], required_columns: [coupon_type, coupon_id, order_id, order_amount, paid_at, order_status], required_metrics: [gmv]}

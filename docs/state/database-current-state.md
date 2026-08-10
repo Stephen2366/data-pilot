@@ -44,7 +44,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 | `order_coupons` | 3000 | 订单-优惠券桥接 | 优惠券使用率、券渠道分析 | 多对多桥接表，一单可多券，订单数要去重 |
 | `user_behavior_log` | 10000 | 用户行为事件 | 加购到支付转化率、设备分析 | 转化率按 `event_type` 事件计数，不是订单表 |
 | `product_price_history` | 150 | 商品价格版本 | 历史售价、指定时间价格 | 查询历史价格必须匹配 `valid_from` / `valid_to` |
-| `orders_wide` | 10000 | 订单宽表快照 | 看板类渠道 / 商品 / 用户 / 退款汇总 | 月度看板按 `snapshot_at`；精确明细、退款链路回星型表 |
+| `orders_wide` | 10000 | 订单宽表快照 | 看板类渠道 / 商品 / 用户 / 退款汇总 | 业务月份按 `paid_at`；`snapshot_at/batch_id` 只选快照版本；精确明细、退款链路回星型表 |
 
 ## 兼容字段和新旧口径
 
@@ -61,7 +61,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 
 `orders_wide` 是为看板查询准备的订单快照，不是星型模型的替代品：
 
-- **按月看板**：按 `orders_wide.snapshot_at` 过滤月份；不要拿 `created_at` 代替快照业务日期。
+- **按月看板**：按 `orders_wide.paid_at` 过滤订单业务月份；`snapshot_at` 是抽取时间，`batch_id` 是快照批次，二者只用于选择版本。
 - **渠道 / 商品 / 用户的快速汇总**：可使用宽表已有的快照与预聚合字段。
 - **精确订单金额、退款归因、复杂 Join 或强一致对账**：回到 `orders`、`order_items`、`refunds` 等星型明细表，并套用对应指标口径。
 

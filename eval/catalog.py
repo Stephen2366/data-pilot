@@ -28,6 +28,7 @@ from eval.contracts import (
     SchemaContextSpec,
     TraceCompleteSpec,
 )
+from engine.nl2sql.schema_loader import DomainSchema, load_domain_schema
 
 
 class CatalogError(ValueError):
@@ -47,7 +48,7 @@ _SPEC_BY_KIND = {
 }
 
 
-def load_catalog(path: Path) -> Catalog:
+def load_catalog(path: Path, *, domain_schema: DomainSchema | None = None) -> Catalog:
     """加载 canonical Scenario YAML，并在 IO 后立刻完成类型/ID/合同校验。"""
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -59,8 +60,54 @@ def load_catalog(path: Path) -> Catalog:
     scenarios = tuple(_parse_scenario(item) for item in raw_scenarios)
     scenario_ids = [scenario.scenario_id for scenario in scenarios]
     _assert_unique("scenario_id", scenario_ids)
+    # ★ Schema Context 只允许引用 domain pack 里的物理表/字段和 metric key。这样把输出
+    # alias（例如 avg_price）误填进 required_columns 时，会在任何 LLM/网络调用前直接失败。
+    _validate_schema_context_contracts(scenarios, domain_schema or load_domain_schema())
     normalized = _normalize_catalog(scenarios)
     return Catalog(contract_version=CONTRACT_VERSION, scenarios=scenarios, catalog_hash=_hash(normalized))
+
+
+def _validate_schema_context_contracts(scenarios: tuple[ScenarioContract, ...], domain_schema: DomainSchema) -> None:
+    """验证每条 Schema Context assertion 在当前领域 Schema 中可满足。"""
+
+    all_tables = set(domain_schema.tables)
+    all_metrics = set(domain_schema.metrics)
+    for scenario in scenarios:
+        for assertion in scenario.assertions:
+            if assertion.kind != "schema_context":
+                continue
+            spec = assertion.spec
+            if not isinstance(spec, SchemaContextSpec):
+                raise AssertionError("schema_context assertion must carry SchemaContextSpec")
+            branches = spec.alternatives or (
+                {
+                    "tables": spec.required_tables,
+                    "columns": spec.required_columns,
+                    "metrics": spec.required_metrics,
+                    "join_keys": spec.required_join_keys,
+                },
+            )
+            for branch_index, branch in enumerate(branches, start=1):
+                label = f"scenario {scenario.scenario_id} assertion {assertion.assertion_id} branch {branch_index}"
+                tables = set(branch.get("tables", ()))
+                missing_tables = sorted(tables - all_tables)
+                if missing_tables:
+                    raise CatalogError(f"{label}: unknown physical tables={missing_tables}")
+                searchable_tables = tables or all_tables
+                physical_columns = {
+                    field_name
+                    for table_name in searchable_tables
+                    for field_name in domain_schema.tables[table_name].fields
+                }
+                declared_columns = set(branch.get("columns", ())) | set(branch.get("join_keys", ()))
+                missing_columns = sorted(declared_columns - physical_columns)
+                if missing_columns:
+                    raise CatalogError(
+                        f"{label}: columns must be physical fields of declared tables; unknown={missing_columns}"
+                    )
+                missing_metrics = sorted(set(branch.get("metrics", ())) - all_metrics)
+                if missing_metrics:
+                    raise CatalogError(f"{label}: unknown metric keys={missing_metrics}")
 
 
 def select_scenarios(catalog: Catalog, scenario_ids: tuple[str, ...]) -> tuple[ScenarioContract, ...]:

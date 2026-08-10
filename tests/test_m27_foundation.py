@@ -20,14 +20,14 @@ from eval.selectors import load_selector
 from engine.nl2sql.prompt import build_query_plan_prompt
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.schema_retrieval.graph import build_schema_graph
-from engine.schema_retrieval.retriever import retrieve_schema
+from engine.schema_retrieval.retriever import build_configured_schema_vector_index, retrieve_schema
 
 
 def _catalog_file(tmp_path: Path) -> Path:
     path = tmp_path / "catalog.yaml"
     path.write_text(
         """
-contract_version: m27-v2
+contract_version: m27-v3
 scenarios:
   - id: june_gmv
     question: 2026 年 6 月 GMV 是多少？
@@ -223,10 +223,33 @@ def test_completed_artifact_does_not_persist_result_rows_or_pii(tmp_path: Path) 
 def test_sqlite_environment_scores_expected_rejection_without_llm(tmp_path: Path) -> None:
     """真实 FastAPI/SQLite adapter 的拒绝路径在语义校验前结束，不发起模型调用。"""
 
+    built_indexes = []
+
+    class ClosingIndex:
+        """记录 run-scoped adapter 的检索和关闭次数。"""
+
+        def __init__(self, delegate) -> None:
+            self.delegate = delegate
+            self.search_calls = 0
+            self.close_calls = 0
+
+        def search(self, query: str, *, top_k: int):
+            self.search_calls += 1
+            return self.delegate.search(query, top_k=top_k)
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    def build_counting_index(**kwargs):
+        index, documents, docs_hash = build_configured_schema_vector_index(**kwargs)
+        wrapped = ClosingIndex(index)
+        built_indexes.append(wrapped)
+        return wrapped, documents, docs_hash
+
     path = tmp_path / "rejection.yaml"
     path.write_text(
         """
-contract_version: m27-v2
+contract_version: m27-v3
 scenarios:
   - id: missing_supplier
     question: 查询商品的供应商名称
@@ -244,13 +267,20 @@ scenarios:
     )
     run = Evaluator(
         catalog=load_catalog(path),
-        environment_factory=SQLiteRunEnvironmentFactory(trace_root=tmp_path / "traces"),
+        environment_factory=SQLiteRunEnvironmentFactory(
+            trace_root=tmp_path / "traces",
+            vector_index_builder=build_counting_index,
+        ),
         checkpoint_store=MemoryCheckpointStore(),
     ).evaluate(EvalRunSpec(run_id="m27-rejection", scenario_ids=("missing_supplier",)))
 
     assert run.run_status == "completed"
     assert run.scenario_runs[0].evidence.execution_status == "rejected"
     assert run.scenario_runs[0].assertion_results[0].status == "passed"
+    assert len(built_indexes) == 1
+    assert built_indexes[0].search_calls == 1
+    assert built_indexes[0].close_calls == 1
+    assert run.resolved_runtime_identity.values["schema_vector_index_reuse"] == "run_scoped"
 
 
 def test_plan_join_and_metric_assertions_use_same_structured_trace_evidence() -> None:
@@ -298,17 +328,37 @@ def test_actual_amount_metric_contract_accepts_qualified_plan_column() -> None:
     assert score_assertion(metric, evidence).status == "passed"
 
 
-def test_channel_gmv_retrieval_keeps_metric_and_snapshot_guidance() -> None:
-    """渠道 GMV 不应被 orders_wide 的字段别名挤掉 gmv metric。"""
+def test_channel_gmv_retrieval_keeps_metric_and_business_time_guidance() -> None:
+    """渠道 GMV 应使用 paid_at 统计业务月份，同时保留快照版本字段的正确职责。"""
 
     domain_schema = load_domain_schema()
-    question = "查看 2026 年 6 月各渠道 GMV；可使用订单明细口径或 orders_wide 月度快照口径。"
+    question = "查看 2026 年 6 月各渠道 GMV；可使用订单明细口径或 orders_wide 快照口径。业务月份按订单支付时间统计。"
     result = retrieve_schema(question=question, user_role="ops", top_k=30, domain_schema=domain_schema)
     graph = build_schema_graph(result.merged_hits, domain_schema=domain_schema)
     prompt = build_query_plan_prompt(question=question, schema_graph=graph, metrics=domain_schema.metrics)
 
     assert "gmv" in graph.metrics
+    assert "orders_wide.paid_at" in prompt
     assert "snapshot_at" in prompt
+    assert "只用于选择快照版本" in prompt
+
+
+def test_catalog_rejects_output_alias_in_schema_context_columns(tmp_path: Path) -> None:
+    """输出 alias 不是物理字段，不能再悄悄进入一个永远无法通过的 Schema Context。"""
+
+    path = _catalog_file(tmp_path)
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload["scenarios"][0]["assertions"].append(
+        {
+            "id": "bad_context",
+            "kind": "schema_context",
+            "spec": {"required_tables": ["orders"], "required_columns": ["imaginary_gmv_alias"]},
+        }
+    )
+    path.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="columns must be physical fields"):
+        load_catalog(path)
 
 
 def test_runtime_identity_records_milvus_embedding_and_schema_corpus() -> None:
@@ -330,6 +380,7 @@ def test_runtime_identity_records_milvus_embedding_and_schema_corpus() -> None:
     assert values["milvus_collection"] == "fixture_m27_qwen"
     assert values["schema_docs_count"] == 195
     assert values["schema_docs_hash"] == "8a8b6626a4cbec6197d9625ec12d5d40668025476f823eaa9458647cecd8d41a"
+    assert values["schema_vector_index_reuse"] == "run_scoped"
 
 
 def test_selector_projector_uses_logical_denominators_and_markdown_only_reads_projected_facts(tmp_path: Path) -> None:
