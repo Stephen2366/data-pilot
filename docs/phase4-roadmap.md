@@ -2,7 +2,7 @@
 
 > **文档定位**：本文记录已经确认的 Phase 4 路线，并将其转化为可推进、可验收的能力建设路线。它位于“阶段方向”和“模块施工计划”之间：固定能力顺序、依赖、交付物、验收语义和决策门，但不提前固定逐文件实现、具体类名、模型、chunk、top-k、阈值、循环次数或性能分数。
 >
-> **效力关系**：本文是 Phase 4 高层边界、核心合同、能力顺序和决策门的唯一推进事实源；`docs/phase4-reference.md` 只作为外部项目与技术取舍的辅助参考。当前运行、Eval、数据库和索引事实分别以 `docs/state/` 下对应文档为准。进入某个能力切片后，再为该切片编写 module plan 与 `docs/notes/<module>-notes.md`，不能把本文直接当成逐函数施工清单。
+> **效力关系**：本文是 Phase 4 高层边界、核心合同、能力顺序和决策门的唯一推进事实源；`docs/phase4-reference.md` 不拥有路线决策权，但它是制定 module plan 和实施关键技术前必须按能力切片阅读的参考地图。当前运行、Eval、数据库和索引事实分别以 `docs/state/` 下对应文档为准。进入某个能力切片后，应结合本文、最新 state/失败证据和 reference 中的定点源码入口编写 module plan 与 `docs/notes/<module>-notes.md`，不能只读 roadmap 后直接施工，也不能把本文直接当成逐函数施工清单。
 >
 > **规划基线**：2026-08-11。当前为 M28 Text2SQL 收尾文档完成、待人工审查与 `accept-module`；Phase 4 尚未开工。
 
@@ -63,9 +63,9 @@ Phase 4 实现应满足以下入口条件：
 
 M28 的验收是阶段入口门禁，不意味着必须先补做新的真实 LLM Eval。若用户没有单独授权，Phase 4 不以重跑旧 Text2SQL Eval 作为开工前置。
 
-### 2.4 历史分析口径说明
+### 2.4 参考分析与路线决策关系
 
-`docs/phase4-reference.md` 是较早的横向分析，其中仍把 LangGraph 固定状态图写成“条件采用”。当前 roadmap 已按用户确认将顶层 LangGraph 固定为主线，因此两者冲突时以本文为准：**顶层 LangGraph 必做，但开放循环、持久化、多 Agent 和其他高级能力不会随之自动进入范围。** 这属于时间上的决策演进，不是需要重新选择的冲突。
+`docs/phase4-reference.md` 保存横向分析、优先源码入口、可借鉴设计、反例和重新评估条件；本文保存经过确认后的当前路线。两者可以双向导航，但权威关系单向：若参考项目、旧分析或其采纳状态与本文冲突，以本文为准。参考结论也不是封闭候选集；进入具体模块时必须结合最新 state、失败证据和当时源码重新核对，必要时可以补充新项目或官方资料。
 
 ## 3. 总体架构与控制权
 
@@ -208,6 +208,10 @@ Scenario 还必须按用途隔离：
 
 把当前 Text2SQL 产品合同与 Phase 4 新语义之间的兼容问题前置解决，先定义可评测的正确行为，再选择实现细节。
 
+### 参考检查点
+
+P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `docs/phase4-reference.md` 的“当前基础”“Eval、运行身份与失败归因”和“路线对齐状态”。外部项目此时主要用于发现合同缺口与反例，不能替代现状 inventory；P0 module plan 必须留下首份参考复核记录，格式见第 16.1 节。
+
 ### 主要交付物
 
 - Phase 4 能力 inventory：确认 `/api/query`、`AgentResponse`、Trace、Eval、RBAC、Schema Retrieval、`knowledge_docs` 与 seed 的当前边界；
@@ -237,6 +241,10 @@ Scenario 还必须按用途隔离：
 ### 目标
 
 建立 RAG、Hybrid、Trace 和 Eval 共用的事实基础，使知识原件、运行时投影、Evidence、citation、权限和出站都具备稳定语义。
+
+### 参考检查点
+
+重点复核 WrenAI 的 source/index 分离与成功后推进版本、Alibaba DataAgent 的替换式更新，以及 GustoBot、DB-GPT 中来源未贯穿 Tool/回答的反例。借鉴发布纪律和 interface seam，不照搬完整语义编译层、平台服务结构或新旧知识接口并存。
 
 ### 能力范围
 
@@ -300,6 +308,10 @@ Scenario 还必须按用途隔离：
 
 先做一个可复现、可隔离测试的 RAG 基线。P2 使用 Knowledge Tool 外部的薄应用流程串起“取证 → Evidence Gate → Answer Composer → Citation Validator”，证明完整闭环；这些共享组件在 P3 由 LangGraph 直接复用，不形成第二套回答链。
 
+### 参考检查点
+
+重点复核 agentic-rag-for-dummies 的文档切分、Knowledge Tool 和实际 retrieval context 留存，以及 DB-GPT Resource reference 与新 Tool 返回合同的差异；GustoBot 用作“最终拼 sources 但中间身份断裂”的反例。首版只吸收稳定身份、真实上下文和 citation 闭环，不继承参考项目的 chunk、top-k、parent/child 或检索默认值。
+
 ### 能力范围
 
 - Knowledge Tool 对外只暴露当前问题/已确认条件、调用者、证据要求、预算与既往尝试，返回 RetrievalOutcome、Document Evidence、稳定 reason code 和诊断 reference；
@@ -356,6 +368,10 @@ Scenario 还必须按用途隔离：
 
 让 LangGraph 成为唯一顶层 Agent Harness，在不拆散现有深模块的前提下，完成 SQL/RAG 路由、Tool 调度、Observation 保存、Evidence Gate 和统一响应状态。
 
+### 参考检查点
+
+重点复核 agentic-rag-for-dummies 的 `graph.py`、`graph_state.py`、`nodes.py` 中主图/子图职责、conditional edge、state reducer 和终止路径；用 Alibaba DataAgent 的固定编排理解深模块如何接入，用 GustoBot 检查多数据面 Router 的取舍。不得复制复杂 fan-out、多层 Prompt，或把 Text2SQL 内部步骤拆成顶层浅节点。
+
 ### 能力范围
 
 - Router 按“是否需要重新取证、需要何种 Evidence”分类；明显问题可走确定性快路径，模糊问题可走结构化模型判断；具体比例与阈值不在 roadmap 固定；
@@ -398,6 +414,10 @@ Scenario 还必须按用途隔离：
 ### 目标
 
 在顶层 Harness 内形成真正受控的 `Action → Observation → Evidence Gate → Next Action`，同时支持同一 thread 的澄清恢复与有限追问，而不进入开放 ReAct 或长期记忆平台。
+
+### 参考检查点
+
+重点复核 agentic-rag-for-dummies 的预算、状态 reducer、澄清/恢复、fallback 与停止路径；DB-GPT 的 ReAct、长上下文压缩和通用工具体系主要作为复杂度与权限面反例。只借鉴有界状态迁移和最小上下文方法，不继承开放动作空间、默认长历史压缩或平台化 memory。
 
 ### 能力范围
 
@@ -462,6 +482,10 @@ Scenario 还必须按用途隔离：
 
 把数据库事实与业务规则组合成有出处的分析结论，同时让分支失败、冲突和展示增强失败都具备清楚边界。
 
+### 参考检查点
+
+重点复核 Alibaba DataAgent 的业务 Evidence 贯穿问题增强、计划和报告的固定链，以及 GustoBot 的多数据面路由与 sources 汇合。借鉴跨能力只保留薄计划、核心结果优先的思想，不消费两个自然语言子答案，不照搬完整 Plan 模型或“任一后端命中即可合成”的假设。
+
 ### 能力范围
 
 - 顶层只使用很薄的跨能力计划，表达子任务类型、依赖、期望 Evidence、required/optional 和失败后允许保留的结果；
@@ -500,6 +524,10 @@ Scenario 还必须按用途隔离：
 ### 目标
 
 在不改变 Knowledge Tool、Evidence、ACL、Router、Hybrid、Trace 和 Eval 合同的前提下，完成一个小型、有界的 RAG Subgraph adapter，并用同 corpus A/B 回答“Agentic RAG 是否值得成为默认路径”。
+
+### 参考检查点
+
+重点复核 agentic-rag-for-dummies 的 `graph.py`、`nodes.py`、`graph_state.py` 和 `tools.py`，核对主图/研究子图边界、Tool loop、context accumulation、fallback 与终止。参考的目的，是设计一个同合同的实验 adapter；不默认采用其 fan-out、强制搜索、parent/child、query rewrite 或 history compact，恢复动作仍必须来自 DataPilot 的 dev 失败簇。
 
 ### 实验约束
 
@@ -549,6 +577,10 @@ Scenario 还必须按用途隔离：
 ### 目标
 
 把前面逐步建立的能力收成一条企业化、可解释、可评测、可展示的 Phase 4 基线；P7 不再新增大能力。
+
+### 参考检查点
+
+P7 以 DataPilot 的 M27 Scenario/typed assertion、JSONL Trace 和最新 Phase 4 运行证据为主；外部项目只用于复查 citation 断裂、路径能力不一致、成功样本均值和平台复杂度等反例。不得用外部项目自带 notebook、总分或 demo 代替本项目 required Gate 与 held-out 决策证据。
 
 ### Trace 收口
 
@@ -670,9 +702,45 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 
 **建议**：采用 A。最终允许哪些文档、query、SQL rows 和答案发送给哪个 provider、哪个模型节点用途，必须在 G1 逐类确认；不能从当前 Qwen 已在用推导 Router、充分性判断、答案合成或 Eval Judge 自动获批。
 
-## 16. 参考项目使用地图
+## 16. 参考项目使用合同与导航
 
-参考顺序是“先读 DataPilot 自己的合同与失败证据，再定点看外部源码”。没有任何参考项目同时覆盖 Evidence、ACL、出站、Hybrid 与 Eval，因此外部项目只提供局部做法或反例，不成为 DataPilot interface 的事实源。
+外部项目参考是 Phase 4 的必需输入，但不是路线事实源。参考顺序固定为“当前 roadmap 合同 → 最新 state 与失败证据 → `docs/phase4-reference.md` 对应分析 → 外部项目定点源码”；没有任何项目同时覆盖 Evidence、ACL、出站、Hybrid 与 Eval，因此只能按问题借鉴局部设计或反例。
+
+### 16.1 Module plan 的参考复核门禁
+
+每个 Phase 4 module plan 定稿前必须完成一次与该能力切片相称的参考复核，并在 plan 或 `docs/notes/<module>-notes.md` 留下精简记录：
+
+| 必填项 | 要回答的问题 |
+|---|---|
+| 当前问题与证据 | 当前代码缺口或 Eval 失败簇是什么，为什么需要这项设计？ |
+| 优先参考与源码入口 | 参考哪个项目、哪份 analysis、哪些直接相关源码？ |
+| 借鉴内容 | 借鉴 interface、控制权、状态、失败处理还是评测方法？ |
+| DataPilot 适配 | 现有 Text2SQL、安全、Trace、Eval 和规模约束要求怎样调整？ |
+| 明确不照搬 | 哪些平台能力、参数、Prompt、类结构或默认行为不进入本模块？ |
+| 验证方式 | 用什么合同测试、Scenario、A/B 或安全 case 判断是否真正有收益？ |
+
+执行时还要遵守以下纪律：
+
+1. 不能只引用 analysis 摘要；影响 interface、控制权、安全或默认路径的结论，必须在开工时重新定点查看源码；
+2. 不因参考项目采用某能力就继承其模型、Prompt、chunk、top-k、阈值、循环次数、存储组合或默认参数；
+3. 当前项目的合同与失败证据优先。参考做法若不适配，可以明确不采用，也可以补充新项目、论文或官方文档；当前清单不是封闭候选集；
+4. 新外部资料只能提供候选设计，默认路径切换仍由 DataPilot 自己的 required Gate、未污染 held-out 和可比运行证据决定；
+5. 不为纯机械修改强行绑定参考项目。只有形成可复用设计结论、修正旧分析或新增重要入口时，才更新 `phase4-reference.md`。
+
+### 16.2 里程碑与参考重点
+
+| 里程碑 | 优先参考方向 | 主要使用方式 |
+|---|---|---|
+| P0 | DataPilot state、M27 Eval；reference 的现状与 Eval 章节 | 识别合同缺口和外部反例，不让外部架构替代当前事实 |
+| P1 | WrenAI、Alibaba DataAgent、GustoBot、DB-GPT | 知识发布、替换式更新、Evidence/citation seam 与断裂反例 |
+| P2 | agentic-rag-for-dummies、DB-GPT、GustoBot | 检索单元、真实 Tool context、结构化 reference 与 citation 闭环 |
+| P3 | agentic-rag-for-dummies、Alibaba DataAgent、GustoBot | 顶层 Graph/state、固定编排、Router 与深 Tool 边界 |
+| P4 | agentic-rag-for-dummies；DB-GPT 作为边界反例 | 有界状态迁移、预算、澄清恢复、停止和最小 Context |
+| P5 | Alibaba DataAgent、GustoBot | 薄 Hybrid plan、原始 Evidence 汇合、核心结果与增强降级 |
+| P6 | agentic-rag-for-dummies | 同 Tool 合同的 RAG Subgraph、内部循环与 fallback 对照 |
+| P7 | DataPilot M27/Phase 4 证据优先；五项目反例 | Trace/Eval 收口、citation/路径一致性与复杂度复查 |
+
+### 16.3 优先源码入口
 
 | 能力 | 优先项目与源码入口 | 借鉴什么 | 明确不照搬什么 |
 |---|---|---|---|
@@ -685,7 +753,19 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 | 来源字段反例 | GustoBot：`references/GustoBot/gustobot/infrastructure/knowledge/vector_store.py` | 检查 source/url/anchor 是否真的贯穿索引和最终回答 | 只在最终响应拼 `sources` 就宣称 citation 闭环 |
 | Knowledge Tool seam 与 reference 差异 | DB-GPT：`references/DB-GPT/packages/dbgpt-app/src/dbgpt_app/openapi/api_v1/tools/knowledge_retrieve.py`、`references/DB-GPT/packages/dbgpt-core/src/dbgpt/agent/resource/knowledge.py` | 比较“只返回编号正文”的新 Tool 与“结构化 references”的 Resource，识别 interface 漂移 | 通用 Resource 平台、新旧接口并存、动态工具生态与整套 Agent 平台 |
 
-以上路径均相对于 `D:/.Work/Practice/Python-Practice/`。实现前先读对应项目的 analysis 文档，再只读取与当前能力切片直接相关的源码入口；不为每个小步骤强行绑定参考项目。
+以上路径均相对于 `D:/.Work/Practice/Python-Practice/`。优先入口的完整分析、适用条件和路线对齐状态见 `docs/phase4-reference.md`。
+
+### 16.4 参考漂移与更新规则
+
+出现以下任一情况时，module plan 必须重新核对相关源码，必要时同步更新 `docs/phase4-reference.md`：
+
+- 准备引入此前仅为条件项或 Phase 4 后能力的设计；
+- 参考项目版本、目录或关键行为变化，旧入口已无法证明原结论；
+- DataPilot Eval 出现旧分析未覆盖的新失败簇；
+- 新设计会改变全局控制权、Evidence、ACL、出站、状态或默认路径；
+- 发现更合适的新项目、官方文档或研究证据。
+
+更新 reference 时应记录“新证据修正了什么结论”，而不是删除历史语境后写成一直如此；若只是某个模块的一次性实现细节，留在 module notes，不膨胀公共参考地图。
 
 ## 17. 风险与控制
 
@@ -718,6 +798,14 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 7. **收工按项目流程执行**：每个完整模块结束时先固化 notes 和验证，再更新 state/dev-log，最后人工检查与 `accept-module`；README 只在阶段结束统一整理。
 
 ## 19. 修订记录
+
+2. **2026-08-11 参考联动优化**：
+
+   - 明确 `phase4-reference.md` 是无路线决策权但按能力切片必读的技术参考地图，并建立 roadmap → reference → 外部源码的读取顺序；
+
+   - 为 P0–P7 增加参考检查点，将参考复核纳入 module plan 门禁，补充不机械照搬、允许新增参考和默认切换仍由本项目 Eval 决定的规则；
+
+   - 第 16 节扩展为参考使用合同、里程碑映射、源码导航与漂移更新规则，避免参考项目只停留在阶段末尾的一张孤立表格。
 
 1. **2026-08-11 审查修订**：
 
