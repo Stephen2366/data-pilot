@@ -1519,4 +1519,178 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --hel
 
 **本地启动体验：** M28 没有新增独立页面，它修的是现有 Text2SQL/Eval 的正确性和工程边界。API 的启动与 Swagger 体验仍按 `docs/state/runbook.md` 执行；不要把 `eval.run_eval` 的真实运行当成本模块演示，因为它会调用当前配置的模型，必须另行明确授权。
 
+## ★ ★ ★ Phase 3B 下半阶段总结：M20–M28
+
+（2026-08-10）
+
+**简述**：这一阶段没有只追求 Text2SQL 多答对几题，而是把一条“能运行但证据不够可信”的链路，逐步建设成了**索引可追溯、业务口径明确、SQL 合同可裁决、失败可归因、评测可复核**的工程系统，并在 M28 完成确定性收尾，为进入 RAG 阶段腾出了空间。
+
+### 先用大白话讲
+
+M20 开始时，DataPilot 已经能把自然语言转成 SQL，也有几十道 Eval 题，但当时最危险的问题不是“分数低”，而是**分数可能解释错**：Milvus collection 被重复灌入，换 embedding 后的提升可能来自脏索引；同一个业务问题在不同 case 中重复请求模型，得到的不是同一张答卷；有些规则检查的是字符串或输出列，却被报告成检索失败；模型超时后没有 SQL，仍可能被记成业务答案错误。
+
+这就像体检仪器没有校准：继续比较药物效果，数字越多反而越容易误判。因此本阶段先校准实验环境，再统一数据库与业务事实，然后把 QueryPlan、SQL、结果、Trace 和人工复核放进同一条证据链。最终系统不仅会说“通过或失败”，还会回答：**执行到哪一步、拿到了什么证据、哪条合同没满足、是业务错误还是外部不可用、这个数字能不能与历史比较**。
+
+阶段结束时，Text2SQL 并没有被包装成“已经完美”。递归类目、两阶段聚合、最小投影、稳定排序和复杂 Join 仍有真实能力缺口；但索引污染、时间口径、合同命名空间、资源生命周期和测试外连等确定性问题已经清理，继续无边界调分的边际收益已经不高，因而可以**暂时收尾并进入 RAG**。
+
+### 这次做了什么
+
+这一阶段的核心工作，可以概括为：先让实验数据可信，再让业务答案可判，最后让整个评测过程可追溯、可复核。它不是九个孤立模块的堆叠，而是一条逐层收紧“证据可信度”的主线。
+
+1. **先修实验地基：证明实际用了什么索引、语料和 embedding**
+
+   阶段初期发现，固定 Milvus collection 曾把约 193 份 Schema 文档重复写到约 1.9 万行。这样的 A/B 即使分数变化，也无法区分是 embedding、融合算法还是脏数据造成的。于是建立了 **collection hygiene**：实验使用唯一 collection，运行前后检查 row count、维度和 Schema 文档 hash，同一 EvalRun 复用一次索引，并把 oracle、backend、embedding、collection 与 corpus identity 写进报告。
+
+   在 clean collection 上，retrieval-only benchmark 观察到 Qwen embedding 的 vector recall 为 **0.929**，高于 deterministic 的 **0.787**；RRF 还把 Qwen 路径的 merged recall 从 **0.738 提到 0.929**。但端到端并没有同步受益：固定 `qwen3.7-plus` 时 weighted 为 **21/32**，RRF 为 **20/32**；DeepSeek 对照中 weighted 为 **21/32**，RRF 首轮为 **18/32**。这证明了一个关键工程结论：**离线召回提升不等于最终 Text2SQL 提升**，所以默认仍保持 `inmemory + deterministic + weighted`，Milvus/Qwen embedding 只作为显式实验路径。
+
+   没有因为某个离线指标更好就直接切默认，是因为 Text2SQL 的后半程还包含 SchemaGraph 组装、QueryPlan、SQL 生成、安全检查和结果合同。召回更多内容也可能增加噪声，把选择压力转移给模型。这个阶段真正得到的不是“某个 embedding 获胜”，而是一套以后做 RAG 检索实验也能复用的**单变量、可追溯实验纪律**。
+
+2. **再校准业务与数据库事实：让标准答案先站得住**
+
+   Eval 可信不只取决于模型，还取决于题面、指标、Schema 描述、reference SQL 和数据库数据是否说的是同一件事。本阶段把 MySQL 与 SQLite deterministic oracle 对齐到同一套 **14 表业务底座**，并通过确定性 seed 固化取消订单、未支付订单、一单多券、整单退款、负退款、订单头与明细金额不一致、SCD 时间重叠等反例。
+
+   退款率、GMV、净退款额等口径被明确到可执行规则。例如商品退款率使用 completed 退款、按订单去重，并通过 `COALESCE(order_items.product_id, refunds.product_id)` 兼容整单退款；多表 Join 后统计订单必须 `COUNT(DISTINCT order_id)`；SCD 采用半开时间区间；`SRC-*` 与 `ORD-*` 属于不同编号空间，不能直接关联。reference SQL 不再只是文档示例，而是会在确定性 oracle 上真实执行并与候选结果比较。
+
+   这一步也暴露出“标准答案自身会出错”：后来 M28 发现 `orders_wide.snapshot_at` 是抽取时间，不是业务发生时间。按旧提示查询 6 月数据会得到空集，因此最终统一为业务月份按 `paid_at`，`snapshot_at/batch_id` 只负责选择快照版本。这个修正说明，**业务语义优先于模型分数**；如果标准答案或提示错了，让模型迎合它只会把错误固化。
+
+3. **把 QueryPlan 到 SQL 的约束从字符串升级为可解释合同**
+
+   早期 Eval 容易把不同问题混在一起：Context 是否召回、计划是否正确、SQL 是否忠于计划、最终列是否满足 API、结果是否正确。M22 先拆出 Context、Output、Result 和 Manual 等维度，并对超出 Schema 能力的问题增加语义拒绝；M24 再用 **SQLGlot AST** 替代字符串包含检查，比较投影表达式、alias 绑定、排序方向、排序优先级和 LIMIT。
+
+   AST 合同采用 `passed / failed / indeterminate` 三态。只有已证明安全的同一顶层 SELECT、唯一列绑定和显式 alias 才自动裁决；CTE、derived table、歧义字段或未支持语法会保守阻断，而不是猜测等价。SQL Guard 仍先做只读、RBAC 和敏感字段检查，fidelity 只证明“SQL 是否忠于已验证计划”，不能替代业务结果验证。
+
+   受控的 Local/Milvus 六轮交错实验中，Local 为 **24/24/25**，Milvus 为 **25/25/25**；一分差不足以证明 embedding 因果收益。更有价值的发现是：历史 alias/限定名误拦被压住后，剩余问题集中到 QueryPlan 投影过宽、生成表达式不忠实和真实结果语义。这让优化方向从“继续放宽 scorer”转向了更准确的计划表达与结果合同。
+
+4. **把失败归因从“猜原因”升级为“沿证据链定位”**
+
+   M25 将旧 42 条 raw case 审计为 **26 个独立语义组**，避免把同一问题重复计入分母；同时把状态拆成三条正交轴：执行停在哪个 stage、root cause 属于代码/模型/检索/外部服务/Eval 合同中的哪类、业务语义是 `observed_correct`、`observed_wrong` 还是 `not_observed`。QueryPlan 和 SQL generation 的每次物理调用都记录 provider、实际模型、timeout、attempt、latency、稳定错误 subtype 和 outcome。
+
+   一个很重要的否定实验是 retry：固定 4 条历史超时题，retry0 为 **4 次物理调用、1/4 得到有效响应、179.7 秒**；retry1 为 **8 次物理调用、0/4 有效、377.9 秒**。样本很小，不能外推整体 SLA，但足以说明“超时就默认重试一次”在当前链路中没有证据支持，因此保持 **45s、retry0**。
+
+   M26 随后冻结历史 run 做人工 SQL 审计，而不是重新调用模型。多轮自动结果看起来接近，但人工复核发现了 **3 条自动通过、业务语义实际错误**的 SQL，例如漏 completed 退款过滤、错误处理 SCD 的 `NULL` 开放区间、漏掉 6 月 30 日生效记录。这一结果直接证明：**自动通过数不是业务正确率的同义词**，Result oracle、反事实数据和人工旁证必须共同存在。
+
+5. **重构 Eval 的基本单位：一题一次执行，多条 typed assertion 共享证据**
+
+   M27 将旧 formal/challenge/diagnostic 的 42 条输入、26 个旧语义组，重新整理为 **28 个 canonical Scenario**。Scenario 是唯一业务问题；Result、Output、Schema Context、QueryPlan、Trace、Safety、Expected Rejection、JoinPath、Metric Mapping 等是围绕同一张答卷的 **typed assertion**。一个 `(run, scenario, replicate)` 只调用一次 Pipeline，候选 SQL 与 reference SQL 共享同一 SQLite snapshot，所有 scorer 都读取同一份结构化 evidence。
+
+   `Evaluator` 还引入了版本化 catalog/selector/policy/run identity、原子 checkpoint、completed artifact、`interrupted/abandoned` 生命周期和 Gate projector。Reliability 的 replicate 会先归约成一个逻辑结果，不会扩大题目或断言分母；Stress 与 Database Exception 即使复用 Scenario，也不能把数字直接相加。人工 Review bundle 是自动评分后的**旁路证据**，有来源 SHA-256、受限分类和 `insufficient_evidence` 规则，但绝不反写 EvalRun、分母或 Gate。
+
+   M27 v1 曾把 QueryPlan timeout 后的空答卷投影成多条业务失败；v2 修正为 `external_unavailable → not_observed → Gate inconclusive`。单轮 v2 Core 观察到 required assertion **28 passed / 0 failed / 6 not_observed**，其中 17 个 Scenario 完成、2 个 QueryPlan timeout；Stress 为 **7 passed / 14 failed / 4 not_observed**，Database Exception 为 **4 / 4 / 11**。这些都是历史单轮证据，不是稳定长期基线，而且 selector 有重叠，不能相加。
+
+6. **最后做收尾体检：只修确定性问题，不再无边界调分**
+
+   M28 没有运行新的真实 LLM Eval，而是从 artifact、checkpoint、Trace、合同和测试路径中找出四个确定性问题：宽表业务时间误用 `snapshot_at`；Schema Context 把 metric/output alias 当物理字段；M27 新 runner 丢失 run-scoped vector index；pytest 可能意外访问真实 Qwen。四项都已修复。
+
+   当前合同升级为 **`m27-v3`**：物理字段、metric key 与输出 alias 分开，catalog 加载时先检查合同是否能被 domain schema 满足；RunEnvironment 一轮只构建和关闭一次索引；测试默认用 provider fail-fast guard 阻止未 mock 的真实调用。最终全仓 **223 passed, 1 warning**，且没有调用真实 provider。
+
+   这份验证证明的是工程边界已经收紧，不是模型准确率提升。当前还没有 `m27-v3` 真实 LLM 基线；旧 v1/v2 artifact 只读保留，不能与 v3 直接比较。除非要做发布级能力声明，否则没有必要为了进入 RAG 立即补跑。
+
+### 阶段主线图
+
+`自然语言问题`
+→ `Schema Retrieval（clean corpus / hash / runtime identity）`
+→ `SchemaGraph（字段、指标与 JoinPath）`
+→ `QueryPlan（结构化计划）`
+→ `SQL Guard（只读 / RBAC / 敏感字段）`
+→ `Plan-to-SQL Fidelity（AST 保真）`
+→ `SQLite/MySQL 业务事实与 Result Oracle`
+→ `Scenario 的多条 typed assertion`
+→ `EvalRun artifact / checkpoint`
+→ `Projector / Gate / Markdown / Review bundle`
+→ `证据驱动的失败归因与下一轮决策`
+
+从实验治理角度看，则是：
+
+`唯一 collection + corpus hash`
+→ `retrieval-only 指标`
+→ `端到端单变量 A/B`
+→ `失败 stage / root cause / semantic status`
+→ `人工审计与反事实`
+→ `是否切默认或暂不采用`
+
+### 关键知识点串联
+
+- **Offline retrieval vs end-to-end quality**：离线召回只回答“相关 Schema 是否被找到”，端到端还取决于上下文噪声、计划、生成、安全和结果语义。M21 的 RRF 就是典型例子：召回显著提高，但最终 SQL 没有提高。
+- **Scenario / assertion / evidence**：Scenario 是唯一业务题，assertion 是不同评分维度，evidence 是同一次执行留下的答卷。三者分离后，才能避免同题重复调用和跨答卷归因。
+- **Oracle / counterfactual**：Oracle 是可执行的标准答案；counterfactual 是专门让错误 SQL 与正确 SQL 产生不同结果的反例数据。没有反事实，错误逻辑可能在巧合数据上通过。
+- **Execution status / semantic status / Gate**：执行不可用不等于答案错误；`not_observed` 表示没有足够证据判业务能力；Gate `inconclusive` 也不等于 failed。状态正交能避免把网络超时算进模型错误。
+- **Runtime identity / reproducibility**：模型名只是身份的一部分，还要记录 timeout/retry、oracle snapshot、embedding、collection、corpus hash、融合策略和索引复用方式，才知道两轮是否真的可比。
+- **AST contract / conservative validation**：SQLGlot AST 能看懂表达式结构，但不应被扩成通用 SQL 证明器。对未知 scope 返回 `indeterminate`，比宽松放过一个可能错误的 SQL 更符合安全与评测可信度。
+- **Hermetic test / external Eval**：单元测试必须封闭、快速、无费用；真实 LLM Eval 则天然有网络和采样波动。两者分开，才能既保证日常回归稳定，又诚实记录线上能力证据。
+
+### 阶段设计取舍
+
+- **不因单次高分切默认**：Qwen、Milvus、RRF 和不同 embedding 都出现过局部优势，但样本少、LLM 非确定、合同还在演进。默认只在同合同、多轮、单变量证据下讨论切换。
+- **不把检索标签泄漏进线上链路**：`expected_tables`、`expected_columns`、metric/relation 标注只用于离线评分，不能参与 retriever/reranker，否则得到的是“看过答案的高分”。
+- **不重写历史分数**：合同版本改变时升级版本，旧 report/artifact 只读保留。历史数字用于解释演进，不能伪装成同一排行榜。
+- **不让 scorer 猜业务等价**：AST 只实现有正反例支持的窄等价；结果、输出、计划和 Context 各自裁决，避免一个宽松规则同时掩盖多类错误。
+- **不把人工复核变成自动 Gate**：Review bundle 提供旁证和错因分类，但自动评测与人工意见保持独立，防止人工结论悄悄改变 CI 分母。
+- **不为进入 RAG 强行补 v3 分数**：M28 的确定性问题已闭环；没有 v3 真实基线是“尚未复测”，不是“代码没收尾”。需要发布级声明时再按新合同受控运行。
+
+### 面试怎么讲
+
+我负责了 DataPilot Phase 3B 下半阶段的 Text2SQL 工程化与评测可信度建设。项目最初已经能生成 SQL，但实验存在 Milvus 重复灌库、业务口径不统一、同题重复调用、字符串 scorer 误判、超时被当成业务失败等问题。我先治理向量索引和 runtime identity，再把 14 表数据库事实、退款/SCD/金额口径与 deterministic oracle 对齐；随后用 SQLGlot AST 建立 QueryPlan-to-SQL 保真合同，并把 42 条旧 case 重构为 28 个 canonical Scenario，每题只执行一次，由 Result、Output、Context、Plan、Trace、Safety 等 typed assertion 共享同一份证据和数据库 snapshot。评测运行支持 checkpoint、版本化 artifact、Gate 和独立人工 Review，还通过反事实数据发现了自动通过但业务错误的 SQL。最终 M28 修复宽表时间、合同可满足性、运行级索引复用和测试外连，完成 223 个确定性测试。整个阶段最重要的成果不是把某个单轮分数调高，而是让后续每个分数都能解释、复现和审计，并据此判断 Text2SQL 可以暂时收尾、进入 RAG。
+
+可用于简历的一句话是：
+
+> **围绕企业 Text2SQL 构建可追溯 EvalOps-lite：治理 Milvus 索引污染与运行身份，统一 14 表业务 oracle，以 SQLGlot AST 和 28 个 canonical Scenario/typed assertions 实现一题一次执行、共享快照评分、失败归因、checkpoint 与人工旁路复核，完成 223 项确定性回归。**
+
+1. **[基础追问] 这一阶段为什么没有把“准确率提升”作为唯一目标？**
+
+   因为当实验地基、业务口径和评分合同不可信时，准确率变化没有明确含义。重复灌库可能制造检索假提升，错误 reference SQL 会奖励错误答案，timeout 误投影会把外部不可用算成模型失败。本阶段先保证数字能被解释，再决定是否调模型；这比追一个无法复现的高分更有工程价值。
+
+2. **[基础追问] 你怎么判断 Text2SQL 已经可以暂时收尾？**
+
+   我看三类条件：第一，已发现的确定性 P0 问题是否关闭，包括业务时间、合同可满足性、索引生命周期和测试隔离；第二，剩余失败是否已经能归类，而不是仍混着工具 bug；第三，继续优化是否有明确、高价值入口。M28 后前两项已满足，剩余递归、两阶段聚合、输出稳定性等问题也有清晰切入口，但不阻塞系统进入 RAG，因此适合阶段性收尾。
+
+3. **[工程/深挖追问] 离线检索 recall 提升到 0.929，为什么仍不切 Qwen embedding 和 RRF？**
+
+   recall 只证明目标 Schema 文档更容易进入候选集，不证明模型能从更多上下文中做出更好的计划。受控端到端实验里，RRF 在 Qwen plus 下反而从 21/32 变成 20/32；Local/Milvus 的多轮差异也只有约一题，无法隔离 LLM 波动。因此我保留它们为显式实验路径，默认选择成本低、可复现的 deterministic/weighted，等未来有同合同、多轮、单变量证据再切换。
+
+4. **[工程/深挖追问] 为什么 M27 要重构成 Scenario + typed assertion，而不是继续补旧 scorer？**
+
+   旧结构把一个 check 当成一道题，同一个业务问题为了检查 Result、Plan 和 Trace 会重复调用模型；不同 scorer 看到的可能是不同 SQL，归因天然不可信。新结构让 Scenario 只执行一次，多条纯 scorer 读取同一 evidence 和 snapshot；selector 只选择题，不复制题；replicate 只衡量可靠性，不扩大逻辑分母。这样复杂度集中在一个清晰的 `Evaluator` seam 中，而不是继续散落补丁。
+
+5. **[工程/深挖追问] 你如何避免 Eval 自己“测错了还很自信”？**
+
+   我用了四层防线：合同加载时检查字段和 metric 可满足；reference SQL 在 deterministic oracle 上真实执行；关键业务规则用 counterfactual fixture 区分正确与错误 SQL；最后用 Review bundle 对高风险自动通过样本做人工旁证。M26 人工审查找出的 3 条 false pass，正说明任何单层 scorer 都不够。
+
+6. **[压力追问] 你做了大量评测基础设施，但最终没有正式 v3 基线，这是不是过度设计？**
+
+   这个质疑对“已经证明模型更强”是成立的，我没有做这种声明。但本阶段发现的都是会直接扭曲结论的问题：脏 collection、错误时间字段、不可满足合同、超时假失败和测试真实外连。如果不解决，跑更多基线只是在扩大错误证据。当前 v3 没有真实基线是明确边界；当需要发布级能力声明时，可以在可信合同和完整 runtime identity 下直接运行，而不用再次重建评测地基。
+
+7. **[压力追问] 223 个测试通过，为什么不能说 Text2SQL 已经稳定？**
+
+   因为这 223 个是 deterministic regression，证明代码、合同、fixture、生命周期和测试隔离稳定；它们不包含真实 LLM 的采样、网络、端点延迟和长提示行为。真实 v2 Core 仍有两题 QueryPlan timeout，Stress 也暴露递归和两阶段聚合能力缺口。工程稳定性与模型能力稳定性必须分别报告。
+
+8. **[压力追问] 既然 Stress 还有 14 条 failed，为什么不继续修完再做 RAG？**
+
+   首先，14 条 assertion failed 不等于 14 道独立业务题失败，其中有输出 alias、tie-break、投影和同一 Scenario 的多维断言；Database Exception 还与 Stress 复用 Scenario，不能相加。其次，M28 已把确定性假失败清理并将真实缺口定位到递归计划、嵌套聚合和输出合同。这些适合未来专项优化，但项目目标还包括文档问答和混合推理；继续只优化 SQL 会推迟更关键的系统闭环，因此现在进入 RAG 是范围和收益上的主动取舍。
+
+### 阶段成果与边界
+
+- **完成了实验可信度治理**：clean/unique Milvus collection、row count/dimension/hash 校验、run-scoped index 与完整 runtime identity。
+- **完成了业务事实对齐**：14 表数据库、确定性 seed、退款/SCD/金额/时间/Join 规则与可执行 oracle。
+- **完成了计划与 SQL 合同化**：QueryPlan 结构化证据、SQLGlot AST fidelity、Output/Result/Context/Safety 等分层裁决。
+- **完成了失败证据链**：调用 attempt、稳定错误 subtype、execution/root-cause/semantic 三轴归因，以及 external unavailable 的 `not_observed` 语义。
+- **完成了新 Eval 架构**：28 个 canonical Scenario、一题一次执行、多 typed assertion、共享 snapshot、selector、projector、Gate、checkpoint、artifact 与 Review 旁路。
+- **完成了确定性收尾**：`m27-v3` 合同、宽表时间修复、索引生命周期恢复、provider fail-fast guard；全仓 **223 passed, 1 warning**。
+- **没有完成、也没有假装完成**：当前没有正式长期 Text2SQL baseline，也没有 `m27-v3` 真实 LLM run；旧 v1/v2 数字只作历史解释。
+- **刻意没有切换**：默认模型仍为 Qwen `qwen3.7-plus`，默认检索仍为 `inmemory + deterministic + weighted`，timeout/retry 仍为 45s/0；单轮 A/B 不触发默认变更。
+- **仍有能力边界**：递归类目、两阶段聚合、最小投影、稳定 tie-break、复杂 JoinPath 和 QueryPlan 延迟，留作未来 Text2SQL 专项。
+- **仍有基础设施 backlog**：Projector closed-world 完整性、Review 长期证据保留、catalog provenance 与 LangFuse Cloud 脱敏；其中 Cloud 脱敏应在重新启用上传前处理。
+
+### 下一阶段怎么接
+
+下一阶段进入 **RAG** 时，可以直接复用这一阶段形成的方法，而不是从“调 embedding 参数”重新开始：
+
+1. **先定义 RAG 的业务合同**：哪些问题只查文档、哪些必须引用证据、哪些允许 SQL+文档混合；把 unsupported request 和安全边界写清楚。
+2. **建立可追溯语料身份**：记录文档版本、chunk 策略、embedding、collection 与 corpus hash，延续 M20 的 clean index 纪律。
+3. **分开离线与端到端指标**：离线评 retrieval recall，端到端评 answer correctness、citation/faithfulness 和拒答；不把召回提升直接当答案提升。
+4. **沿用 Scenario + typed assertion**：一个知识问题执行一次，由 retrieval、citation、faithfulness、output 和 safety assertion 共享证据，避免重复调用和分母膨胀。
+5. **最后再接 Router / Hybrid**：先分别把 Text2SQL 与 RAG 的能力、证据和失败状态说清楚，再评 SQL、RAG、Hybrid 路由是否选对；不要用一个总分掩盖不同链路。
+6. **重新启用 LangFuse Cloud 前先做脱敏**：本地 JSONL 可以保留调试材料，但上传 question/answer/document chunk 前要建立统一 allowlist/redaction，避免把业务内容直接送入云端。
+
+这意味着 Phase 3B 下半阶段留下的不只是一个 Text2SQL 模块，而是一套可以继续支撑 **RAG、Hybrid Agent 与后续 EvalOps** 的工程方法：先保证事实与证据可信，再讨论模型和策略优化。
+
 
