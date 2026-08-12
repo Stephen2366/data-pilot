@@ -210,7 +210,7 @@ Scenario 还必须按用途隔离：
 
 ### 参考检查点
 
-P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `docs/phase4-reference.md` 的“当前基础”“Eval、运行身份与失败归因”和“路线对齐状态”。外部项目此时主要用于发现合同缺口与反例，不能替代现状 inventory；P0 module plan 必须留下首份参考复核记录，格式见第 16.1 节。
+P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `docs/phase4-reference.md` 的使用规则以及“Trace 与 RAG/Hybrid Eval”能力导航。外部项目此时主要用于发现合同缺口与反例，不能替代现状 inventory；P0 module plan 必须留下首份参考复核记录，格式见第 16.1 节。
 
 ### 主要交付物
 
@@ -244,7 +244,7 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 
 ### 参考检查点
 
-重点复核 WrenAI 的 source/index 分离与成功后推进版本、Alibaba DataAgent 的替换式更新，以及 GustoBot、DB-GPT 中来源未贯穿 Tool/回答的反例。借鉴发布纪律和 interface seam，不照搬完整语义编译层、平台服务结构或新旧知识接口并存。
+重点复核 WrenAI 的 source/index 分离与“reindex 成功后才推进已观察 fingerprint”、Alibaba DataAgent 的 best-effort 替换式更新，以及 GustoBot、DB-GPT 中来源未贯穿 Tool/回答的反例。它们只提供发布纪律和 interface seam 的局部证据，不证明 DataPilot 所需的原子发布、完整回滚或 active index 切换，也不应带入完整语义编译层、平台服务结构或新旧知识接口并存。
 
 ### 能力范围
 
@@ -731,7 +731,7 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 
 | 里程碑 | 优先参考方向 | 主要使用方式 |
 |---|---|---|
-| P0 | DataPilot state、M27 Eval；reference 的现状与 Eval 章节 | 识别合同缺口和外部反例，不让外部架构替代当前事实 |
+| P0 | DataPilot state、M27 Eval；reference 的使用规则与 Trace/Eval 导航 | 识别合同缺口和外部反例，不让外部架构替代当前事实 |
 | P1 | WrenAI、Alibaba DataAgent、GustoBot、DB-GPT | 知识发布、替换式更新、Evidence/citation seam 与断裂反例 |
 | P2 | agentic-rag-for-dummies、DB-GPT、GustoBot | 检索单元、真实 Tool context、结构化 reference 与 citation 闭环 |
 | P3 | agentic-rag-for-dummies、Alibaba DataAgent、GustoBot | 顶层 Graph/state、固定编排、Router 与深 Tool 边界 |
@@ -740,20 +740,9 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 | P6 | agentic-rag-for-dummies | 同 Tool 合同的 RAG Subgraph、内部循环与 fallback 对照 |
 | P7 | DataPilot M27/Phase 4 证据优先；五项目反例 | Trace/Eval 收口、citation/路径一致性与复杂度复查 |
 
-### 16.3 优先源码入口
+### 16.3 能力卡与源码入口
 
-| 能力 | 优先项目与源码入口 | 借鉴什么 | 明确不照搬什么 |
-|---|---|---|---|
-| 知识源与索引生命周期 | WrenAI：`references/WrenAI/core/wren/src/wren/memory/index_backend.py`、`references/WrenAI/core/wren/src/wren/memory/watch.py` | Markdown/source 与派生 index 分离；fingerprint 变化触发重建；成功后才推进版本 | 完整语义编译层、watch daemon 和其默认 backend |
-| 替换式索引更新 | Alibaba DataAgent：`references/DataAgent/data-agent-management/src/main/java/com/alibaba/cloud/ai/dataagent/service/vectorstore/AgentVectorStoreServiceImpl.java` | 先形成新版本、失败清理、避免先删后写造成知识全失 | Java 类结构、平台服务层和在线管理体系 |
-| 业务 Evidence 贯穿分析链 | Alibaba DataAgent：`references/DataAgent/data-agent-management/src/main/java/com/alibaba/cloud/ai/dataagent/config/DataAgentConfiguration.java` | Evidence → 问题增强 → Schema/Plan → 分析/报告的固定控制思路；核心结果与展示增强分离 | 复制其完整计划模型、Prompt 串联方式或让知识覆盖数据库事实 |
-| LangGraph state、主图/子图与实际 retrieval context | agentic-rag-for-dummies：`references/agentic-rag-for-dummies/project/rag_agent/graph.py`、`references/agentic-rag-for-dummies/project/rag_agent/graph_state.py`、`references/agentic-rag-for-dummies/project/rag_agent/nodes.py` | 主图/子图职责、conditional edge、Tool loop、state reducer、fallback/终止，以及实际工具结果留给回答与 Eval | 复杂 fan-out、开放研究循环、强制搜索、默认 parent/child 和复杂 history compact |
-| 文档切分与上下文扩展 | agentic-rag-for-dummies：`references/agentic-rag-for-dummies/project/document_chunker.py`、`references/agentic-rag-for-dummies/project/rag_agent/tools.py` | Markdown 结构切分、child 命中后按需取 parent 的思想 | 直接继承其 chunk 参数、稳定 ID 方式或默认让所有短政策走 parent/child |
-| Router 与多数据面 | GustoBot：`references/GustoBot/gustobot/application/agents/kg_sub_graph/agentic_rag_agents/workflows/multi_agent/multi_tool.py` | 按数据形态和证据需求区分 SQL/知识等路径；观察 fallback 与 sources 汇合方式 | 多 Agent、多层 prompt、多存储包装和“某后端命中就天然正确”的级联假设 |
-| 来源字段反例 | GustoBot：`references/GustoBot/gustobot/infrastructure/knowledge/vector_store.py` | 检查 source/url/anchor 是否真的贯穿索引和最终回答 | 只在最终响应拼 `sources` 就宣称 citation 闭环 |
-| Knowledge Tool seam 与 reference 差异 | DB-GPT：`references/DB-GPT/packages/dbgpt-app/src/dbgpt_app/openapi/api_v1/tools/knowledge_retrieve.py`、`references/DB-GPT/packages/dbgpt-core/src/dbgpt/agent/resource/knowledge.py` | 比较“只返回编号正文”的新 Tool 与“结构化 references”的 Resource，识别 interface 漂移 | 通用 Resource 平台、新旧接口并存、动态工具生态与整套 Agent 平台 |
-
-以上路径均相对于 `D:/.Work/Practice/Python-Practice/`。优先入口的完整分析、适用条件和路线对齐状态见 `docs/phase4-reference.md`。
+能力到 reference ID、源码符号、已复核事实、适用边界和“不照搬”项，统一维护在 `docs/phase4-reference.md` 第 2.1–2.3 节。module plan 先按第 16.2 节确定当前里程碑的参考方向，再读取对应能力卡和源码入口；roadmap 不重复维护 reference ID 映射，避免两处结论漂移。
 
 ### 16.4 参考漂移与更新规则
 
@@ -798,6 +787,18 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 7. **收工按项目流程执行**：每个完整模块结束时先固化 notes 和验证，再更新 state/dev-log，最后人工检查与 `accept-module`；README 只在阶段结束统一整理。
 
 ## 19. 修订记录
+
+4. **2026-08-12 参考源码校准**：
+
+   - 修正外部项目对发布生命周期的实际保证边界，补齐 Graph 路由、RAG/Eval 和符号级源码入口，并明确 Hybrid、ACL/outbound、citation 与 Eval 的外部覆盖性质；
+
+   - 第 16.3 节收敛为 reference 的单向入口，能力到 reference ID、源码事实和不照搬项只在 `phase4-reference.md` 维护。
+
+3. **2026-08-12 reference 精简联动**：
+
+   - `phase4-reference.md` 收敛为能力导航、项目速写、精确源码入口和维护规则，不再复制 DataPilot 当前事实、roadmap 决策状态和能力边界；
+
+   - 修正 P0 与里程碑表的旧章节指针，第 16.3 节改用 reference ID，精确路径和源码事实只在 reference 维护一份；参考复核门禁与 P0–P7 检查点保持不变。
 
 2. **2026-08-11 参考联动优化**：
 
