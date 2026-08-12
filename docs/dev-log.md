@@ -1505,7 +1505,7 @@ M28 没有尝试让模型再多答对几题，而是把这些**可确定证明�
 - **验证**：聚焦 M27/Review/数据库 `28 passed`；legacy API/Trace `22 passed`；M18 smoke `4 passed`；new pipeline `8 passed`；全仓 **`223 passed, 1 warning in 464.31s`**。
 - **Warning**：既有 Starlette/httpx deprecation，不影响 M28 结论。
 - **边界**：没有运行真实 LLM Eval，没有切换模型、检索、embedding、数据库、oracle、timeout/retry 或产品 API 默认。
-- **下一步**：M28 仍待 `accept-module`；Text2SQL 可以暂时告一段落，进入 RAG。重新启用 LangFuse Cloud 前先处理 question/answer 脱敏。
+- **下一步**：M28 已验收（2026-08-12）；Text2SQL 可以暂时告一段落，进入 RAG。重新启用 LangFuse Cloud 前先处理 question/answer 脱敏。
 
 可复制的确定性验证命令：
 

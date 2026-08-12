@@ -59,7 +59,7 @@ ls -la
 
 模块实时进度的唯一权威是 `docs/state/AI_CONTEXT.md`「当前状态」（自 2026-07-18 起，计划文件的「模块总览」不再维护状态列）。核对以下三点：
 
-1. `docs/state/AI_CONTEXT.md`「当前状态」：当前模块、上一模块验收、阻塞项、更新时间是否为最新事实。
+1. `docs/state/AI_CONTEXT.md`「当前状态」：当前模块、阻塞项、更新时间是否为最新事实。
 2. `dev-log.md` 最新一条模块日志的「验证与下一步」：其"下一步"应与「当前状态」指向同一个模块。
 3. 当前阶段计划文件存在该模块对应小节（范围 / 验收标准 / 模块验证命令仍可查到）。
 
@@ -201,7 +201,7 @@ PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:c
 
 报告落点（验收结论的持久化位置，防止结论只活在聊天里）：
 
-- 更新 `docs/state/AI_CONTEXT.md`「当前状态」的「上一模块验收」：全部通过 → 「Mx 已验收（日期）」；有 ❌ → 「Mx 验收未通过（日期）」，修复复检通过后再改写为已验收。验收事件不写入 `docs/state/AI_CONTEXT_CHANGELOG.md`。
+- 更新 `docs/state/AI_CONTEXT.md`「当前状态」的「当前模块」：全部通过 → 「Mx 已验收（日期）」；有 ❌ → 「Mx 验收未通过（日期）」，修复复检通过后再改写为已验收。验收事件不写入 `docs/state/AI_CONTEXT_CHANGELOG.md`。
 - ⚠️ / 遗留项不允许只写在报告里：需要跟进的，登记进 `docs/state/AI_CONTEXT.md`「已知的坑」或下一模块任务清单，让后续验收的检查 3 / 4 能自然看到它。
 
 ## 报告后提醒

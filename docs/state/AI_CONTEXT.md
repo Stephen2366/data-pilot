@@ -4,12 +4,10 @@
 
 ## 当前状态（唯一权威出处）
 
-- 当前阶段计划：`docs/notes/m27-plan.md`
-- 当前模块：M28 Text2SQL 收尾技术体检与确定性工程修复（收工文档完成，待人工审查）
-- 当前模块验收：M28 未验收（待 `accept-module`）
-- 上一模块验收：M26 已验收（2026-08-08）；M27 已验收（2026-08-10）
+- 当前阶段计划：`docs/notes/m28-text2sql-review-notes.md`（M28 已完成；Phase 4 RAG 规划见 `docs/phase4-roadmap.md`）
+- 当前模块：M28 已验收（2026-08-12）；待进入 Phase 4 RAG（规划中）
 - 阻塞项：无
-- 更新时间：2026-08-10
+- 更新时间：2026-08-12
 
 ## 必读规则
 
@@ -63,6 +61,7 @@
 | 旧 Milvus collection `datapilot_schema_docs` 有重复灌入污染 | 历史 A/B 不可信 | 新 eval 用唯一/clean collection；校验 row count、dimension、schema docs hash。 |
 | QueryPlan 可能过宽，或 SQL 与计划不一致 | contract pass 不等于答案正确 | 保持保守 AST 边界，用 output/result/trace 共同定位。 |
 | M27 v1 将 QueryPlan timeout 投影成业务 failed | 旧 Core 的失败数混入外部不可用 | v2 统一为 `external_unavailable / not_observed`；v1 artifact 只读追溯，不再作 v2 基线。 |
+| LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭；重新启用前先做 allowlist/redaction 策略。 |
 | Windows 宿主保留 9091 | Milvus health 检查失败 | 使用 `19091:9091` host 映射。 |
 
 ## 历史入口
