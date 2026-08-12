@@ -4,7 +4,7 @@
 >
 > **效力关系**：本文是 Phase 4 高层边界、核心合同、能力顺序和决策门的唯一推进事实源；`docs/phase4-reference.md` 不拥有路线决策权，但它是制定 module plan 和实施关键技术前必须按能力切片阅读的参考地图。当前运行、Eval、数据库和索引事实分别以 `docs/state/` 下对应文档为准。进入某个能力切片后，应结合本文、最新 state/失败证据和 reference 中的定点源码入口编写 module plan 与 `docs/notes/<module>-notes.md`，不能只读 roadmap 后直接施工，也不能把本文直接当成逐函数施工清单。
 >
-> **规划基线**：2026-08-11。当前为 M28 Text2SQL 收尾文档完成、待人工审查与 `accept-module`；Phase 4 尚未开工。
+> **路线决策基线**：2026-08-11。**最近事实与参考复核**：2026-08-12。当前模块、验收状态和运行事实不在本文持续维护，统一以 `docs/state/AI_CONTEXT.md` 及其必读 state 文档为准。
 
 ## 1. 阶段目标与完成故事
 
@@ -49,19 +49,21 @@ Phase 4 的目标不是“给 SQL Agent 接一个向量库”，而是把 DataPi
 - `knowledge_docs` 同时出现在数据库、RBAC、Schema 描述和 Schema Retrieval 中，通用 Text2SQL 目前可能看到知识正文；
 - 当前响应和 Trace 没有稳定的 document revision、chunk、anchor、Evidence 与 claim-to-citation 关系；
 - 当前 Eval 合同主要面向 Text2SQL，尚无 RAG/Hybrid 的 retrieval、citation、ACL、partial 与 Agent loop typed assertions；
+- 当前 `user_role` 是请求体中由客户端直接提交的字符串，不是经过认证的可信 caller identity；现有 RBAC 能验证角色策略，但不能据此宣称已形成生产级身份安全边界；
 - 项目依赖中尚未正式引入 LangGraph；具体版本与 API 应在对应 module plan 中根据当时官方文档确定，本文不固定。
 
 ### 2.3 Phase 4 开工门禁
 
-Phase 4 实现应满足以下入口条件：
+进入 P0 前应满足以下条件：
 
 1. M28 已完成人工审查和 `accept-module`，Text2SQL 当前合同、默认配置和遗留问题已冻结为 Phase 4 输入；
 2. 工作树中的既有改动已确认归属，不把其他工具或用户改动混入 Phase 4 首个模块；
 3. `docs/state/AI_CONTEXT.md` 的当前阶段已切换到 Phase 4，并链接本文；
-4. 第一能力切片的 notes 已建立 implementation checklist；
-5. 下文 G0、G1 中会改变公开合同或知识安全边界的事项已由用户确认。
+4. 第一能力切片的 notes 已建立 implementation checklist。
 
 M28 的验收是阶段入口门禁，不意味着必须先补做新的真实 LLM Eval。若用户没有单独授权，Phase 4 不以重跑旧 Text2SQL Eval 作为开工前置。
+
+P0 可以在 G0、G1 尚未最终确认时开展 inventory 和决策材料准备，但不得提前实施会改变公开合同、发布正式 corpus、建立正式索引或外发新增数据类别的动作。G0、G1 由 P0 的实际 inventory 支撑：G0 必须在公开响应实现前生效；G1 必须在正式 corpus 发布、正式索引构建或对应正文/结果外发前生效。用户可以提前表达倾向，但不能用调查前的假设替代最终确认。
 
 ### 2.4 参考分析与路线决策关系
 
@@ -71,23 +73,23 @@ M28 的验收是阶段入口门禁，不意味着必须先补做新的真实 LLM
 
 ```text
 API / Demo
-  │  question + caller identity + thread identity
+  │  question + trusted caller context + thread identity
   ▼
 LangGraph Agent Harness（唯一全局控制者）
   ├─ Router：是否需要重新取证、需要哪类 Evidence
   ├─ Controller：预算、允许状态迁移、澄清、停止、partial
-  ├─ Evidence Gate：硬约束检查 + 结构化充分性判断
+  ├─ Shared Answer Evidence Gate：硬约束检查 + 结构化充分性判断
   ├─ Context Builder：按节点选择最小必要上下文
   │
   ├─ Text2SQL Tool ── SQL Guard / execution ── SQL Evidence
   │
   └─ Knowledge Tool ── ACL / retrieval / Evidence 构造
          ├─ 默认：确定性 RAG Pipeline
-         └─ 实验：有界 LangGraph RAG Subgraph adapter
+         └─ 条件实验：有界 LangGraph RAG Subgraph adapter
   │
   ▼
 RetrievalOutcome + Document Evidence / SQL Evidence
-  → Evidence Gate
+  → Gate Decision（来自上方同一 Shared Answer Evidence Gate）
   → Answer Composer / Hybrid Synthesizer
   → Citation Validator
   → complete / partial / clarification / insufficient / refusal
@@ -106,6 +108,8 @@ RetrievalOutcome + Document Evidence / SQL Evidence
 - 顶层 controller 是 route、execution、answer、safety 四轴及 `insufficient_evidence` 等最终产品状态的唯一裁决者；Tool 只报告 `no_candidate`、`no_authorized_evidence`、`stale_revision`、`retrieval_unavailable` 等更具体的取证事实；
 - RAG Subgraph 只管理文档取证，不能调用 Text2SQL、生成跨来源结论、放宽 ACL 或扩大全局预算；
 - 模型可以提出结构化动作，确定性 controller 只允许合同内状态迁移；模型不能自行覆盖权限、citation、必需分支或预算。
+
+可信 caller context 是 SQL RBAC、文档 ACL、thread 所有权和 Evidence 复用的共同前置。生产入口不能直接信任请求体角色；Phase 4 首版允许由测试/demo adapter 注入明确标注的可信身份，并如实说明尚未建设生产认证。JWT/OAuth、企业用户目录和完整登录系统不属于本阶段主线。
 
 ## 4. 跨里程碑不变量
 
@@ -126,7 +130,7 @@ Evidence 采用精简公共外壳加 typed payload：
 
 - 公共外壳只表达本轮 Evidence 身份、类型、权威来源与 revision/content identity、允许用途、受控内容和稳定 reference；
 - Document payload 表达 document/chunk 身份、标题、知识类型、anchor 与当前消费者实际可用片段；
-- SQL payload 表达已通过 Guard 的 SQL、列、行数、结果 fingerprint、数据库快照身份和允许展示的结果视图；
+- SQL payload 表达已通过 Guard 的 SQL、列、行数、结果 fingerprint、查询时间、数据库/runtime identity 和允许展示的结果视图；只有运行环境确实提供可靠业务数据版本时才能声明 snapshot identity；
 - 授权决策、检索诊断、runtime identity 和对外安全投影是独立对象或 reference，不形成所有模块都依赖的万能 Evidence 大对象。
 
 Evidence 流转至少区分四个阶段：
@@ -137,6 +141,8 @@ Evidence 流转至少区分四个阶段：
 4. 最终被 citation 使用的 Evidence。
 
 Citation ID 由代码分配和校验，只能指向第 3 阶段中本轮实际可见、用途允许的 Evidence，并记录支持的 claim 或答案片段。引用存在性、身份、权限、revision 与可回查性由确定性代码裁决；开放语义支持度可由 gold、人工或 advisory judge 辅助，但不能取代真实性校验。
+
+Document revision 的“当前运行可用性”与“历史审计可证明性”必须分开：inactive/revoked revision 不得进入新的回答；历史运行仍应保留当时的 revision、content identity、anchor 和授权决策证据，但不因此继续向当前用户展示或永久保存已撤销正文。后续 revision 变化不能反向改写历史运行事实；删除或保留期结束后可以只保留不可逆 identity/hash 与审计事件。
 
 职责边界固定为：Tool 构造 typed Evidence，Evidence Gate 决定能否回答，Answer Composer / Hybrid Synthesizer 生成用户可见 claim，Citation Validator 校验引用，顶层 controller 投影最终状态。P2 的薄应用流程与 P3 的 LangGraph 必须复用这些组件，禁止在 Tool 内外各生成一次答案。
 
@@ -160,6 +166,7 @@ Hybrid 还需保留每个分支自己的 execution 状态。`external_unavailabl
 - outbound policy 按接收方、模型节点用途、数据类别和字段集合默认拒绝、显式放行；即使使用同一 provider，Router、Evidence 充分性判断、答案合成、Query Rewriting、Eval Judge、embedding、rerank 与 Cloud observability 也分别登记和授权；
 - 每个模型节点调用前都必须取得 OutboundDecision。Router 通常不应看完整正文，Eval Judge 不继承线上 generation 的授权；未获授权的充分性判断器走确定性保守降级，不能静默发送 Document Evidence；
 - 本地 JSONL 是默认运行证据事实源。当前远程 Qwen generation 只算待登记和审查的既有行为，不自动获得 Document Evidence 等新增数据类别的出站权限。
+- “本地保存”不等于无需治理：默认长期 Trace 只保存安全摘要、EvidenceRef/hash、状态和白名单诊断；更完整的 debug bundle 只能显式开启、受限访问并具备清理语义；Eval artifact 只保存按合同完成评分和追溯所需的脱敏证据。具体保留期由对应 module plan 和数据分类决定。
 
 ### 4.5 State 与 Context 不变量
 
@@ -167,12 +174,17 @@ Hybrid 还需保留每个分支自己的 execution 状态。`external_unavailabl
 - Context Builder 决定某一节点此刻能看到什么，不能把完整 State 或历史消息无差别塞入 prompt；
 - SQL 节点不接收全部文档，RAG 节点不接收完整数据库结果，生成器只接收最终选中的 Evidence；
 - thread 内只保留当前任务、已确认条件、必要指代、安全摘要和仍有效的 Evidence reference；
-- 复用旧 Evidence 前复核调用者、权限、document revision、数据库快照和用途；失效时重新取证；
+- thread 必须绑定可信 caller；恢复时重新校验调用者、权限和 Evidence 用途，不允许通过猜测 thread ID 接管他人状态；
+- Document Evidence 复用前复核权限、revision 和用途；没有可靠数据版本/freshness 合同时，SQL Evidence 默认不跨轮复用，追问重新取证；
+- 短期状态必须定义过期、显式清理、进程重启、重复请求和并发旧状态覆盖的保守语义；首版可以拒绝冲突或声明内存态失效，不要求建设分布式会话平台；
+- 持久 checkpoint 真正引入时才实现完整 schema migration，但状态从首版起应携带可识别版本，不兼容状态必须拒绝恢复；
 - 不保存或展示模型原始思维链，只记录结构化 Action、Observation、Gate 决策、reason code 和状态迁移。
 
 ### 4.6 Eval 不变量
 
 - 一个 Scenario 只执行一次，同一 ExecutionEvidence 支撑 route、retrieval、citation、answer、Hybrid、safety、Trace 等多条 typed assertion；
+- M27 当前合同与历史 artifact 保持只读；Phase 4 新增 RAG/Hybrid 语义必须使用新的版本化合同，不能原地扩写 `m27-v3`。artifact schema 是版本化扩展还是新 family，由首个 Phase 4 Eval module plan 按实际结构决定；
+- completed run 进入报告、Gate 或长期基线前，必须做 closed-world 完整性校验：selected Scenario、replicate、assertion 及 policy/contract identity 恰好匹配，不允许缺失、额外或重复结果形成看似可信的通过；
 - 离线 retrieval benchmark 与端到端 Eval 分开，召回命中不自动等于答案正确；
 - `eligible = passed + failed + not_observed`，外部服务不可用和 judge 失败不能伪装成业务错误；
 - 预期的 `insufficient_evidence`、澄清或安全拒绝是可观察行为，可以判为正确，不是 `not_observed`；
@@ -189,18 +201,20 @@ Scenario 还必须按用途隔离：
 
 ## 5. 能力路线总览
 
+P0–P7 是能力里程碑，不默认与开发模块一一对应。一个里程碑可以拆成多个最小可验收 module plan，也不要求在同一会话或一次施工中完成。
+
 | 里程碑 | 能力切片 | 主要依赖 | 关键结果 | 路线属性 |
 |---|---|---|---|---|
 | P0 | 阶段入口与合同冻结 | M28 验收 | 当前/目标差距、状态/API 迁移方案、首批 Scenario 与安全清单 | 主线必做 |
 | P1 | 可信知识、Evidence 与安全地基 | P0 | 单一事实源、可重建发布、Text2SQL 隔离、Evidence/citation、outbound seam | 主线必做 |
 | P2 | 确定性 RAG 垂直切片 | P1 | 独立 Knowledge Tool、ACL 双检、citation 闭环、RAG baseline 与首批 Eval | 主线必做 |
-| P3 | 顶层 LangGraph Harness 与 Router | P2、现有 Text2SQL | SQL/RAG 路由、统一状态、受控 Tool 接入、首版 Evidence Gate | 主线必做 |
+| P3 | 顶层 LangGraph Harness 与 Router | P2、现有 Text2SQL | SQL/RAG 路由、统一状态、受控 Tool 接入、复用回答充分性 Gate | 主线必做 |
 | P4 | 有界 Agent Loop、短期状态与上下文治理 | P3 | 结构化失败恢复、澄清恢复、Evidence 复用/失效、最小 Context Builder | 主线必做 |
 | P5 | 保守 Hybrid | P3、P4 | 薄计划、双 Evidence 合成、partial/conflict/增强降级 | 主线必做 |
-| P6 | 有界 RAG Subgraph 对照 | P2、P4 的失败证据 | 同 interface 实验 adapter、held-out A/B、默认路径决策 | 实验 adapter 必做；默认化条件引入 |
-| P7 | 安全、Trace、Eval 与演示收口 | P5、P6 及全部横切合同 | required Gate、runtime identity、回归与阶段验收故事 | 主线必做 |
+| P6 | 有界 RAG Subgraph 决策门 | P2、P4 的失败证据审查 | go/no-go 证据；条件满足时才实现同 interface adapter 并做 held-out A/B | 证据审查必做；实现与默认化条件引入 |
+| P7 | 安全、Trace、Eval 与演示收口 | P5、P6 go/no-go 及全部横切合同 | required Gate、runtime identity、回归与阶段验收故事 | 主线必做 |
 
-主干为 `P0 → P1 → P2 → P3 → P4`；P4 之后分成 `P5 Hybrid` 与 `P6 RAG Subgraph A/B` 两条能力支线，二者都完成后进入 P7 收口。这里表示依赖而非要求并行开发：实际可以按当时失败证据先做 P5 或 P6。Eval、Trace、安全和出站不是最后才补的横切模块：P0 先定义合同，P1/P2 建首批断言，后续每个里程碑同步扩展，P7 只负责完整门禁和阶段收口。
+主干为 `P0 → P1 → P2 → P3 → P4 → P5`。P4 后必须完成 P6 的失败证据审查，但只有出现合格入场证据时才展开 RAG Subgraph 实现与 A/B；没有入场证据时，记录“不实施”的 go/no-go 结论即可进入 P7。这里表示能力依赖，不要求按里程碑一对一建模块。Eval、Trace、安全和出站不是最后才补的横切模块：P0 先定义合同，P1/P2 建首批断言，后续每个里程碑同步扩展，P7 只负责完整门禁和阶段收口。
 
 ## 6. P0：阶段入口与合同冻结
 
@@ -215,9 +229,11 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 ### 主要交付物
 
 - Phase 4 能力 inventory：确认 `/api/query`、`AgentResponse`、Trace、Eval、RBAC、Schema Retrieval、`knowledge_docs` 与 seed 的当前边界；
+- caller 信任 inventory 与最小身份合同：区分客户端声明、测试/demo 注入和生产可信来源，明确 caller、role、thread owner 的绑定与当前认证能力边界；
 - 状态四轴和稳定 reason code 的语义草案，覆盖 SQL/RAG/Hybrid、clarify、unsupported、insufficient evidence、partial、blocked 与 external unavailable；
 - 公开响应迁移方案：内部 Evidence 与状态先稳定，再决定对外字段如何兼容投影；
 - 首批 canonical Scenario 设计：至少覆盖纯 SQL 回归、纯 RAG、Hybrid、证据不足、ACL、文档投毒、外部不可用、partial 和澄清，并在 catalog 设计中区分 diagnostic/dev、held-out decision 与 required contract/security 三种用途；
+- Phase 4 Eval 版本迁移与完整性方案：冻结 `m27-v3`，定义新合同的兼容边界，以及 completed run 进入 Gate 前的 closed-world identity 校验；
 - 首批知识 inventory：把 10 条 seed 逐条标为采用、重写、拆分、合并或淘汰，并为拟纳入内容指定权威来源、用途、数据分类和角色；
 - 当前 Text2SQL 远程 Qwen payload inventory，以及 RAG 新增数据类别的初始 outbound policy 草案；Router、Evidence 充分性判断、答案合成、Query Rewriting 和 Eval Judge 等模型节点按用途分别登记；
 - P1/P2 的 deterministic fixture 与测试边界，不要求真实 provider 才能验证核心合同。
@@ -229,12 +245,13 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 3. 知识 inventory 中不存在“数据库 seed 和 Markdown 同时是权威正文”的条目；
 4. 已列出 `knowledge_docs` 从 Text2SQL 全部入口迁出的检查范围，而不只修改 RBAC；
 5. 未确定的模型、索引、检索与循环参数仍保持开放；
-6. G0、G1 的用户选择已记录，后续 module plan 不需要重新猜语义。
+6. caller 信任边界明确，后续 ACL/thread 设计不会把请求体角色误当成生产可信身份；
+7. P0 inventory 已形成足够的 G0、G1 决策材料，用户选择已记录，后续 module plan 不需要重新猜语义。
 
 ### 决策门
 
-- **G0：公开响应迁移**。在“同一端点增量扩展并提供兼容投影”与“新版本端点/响应模型”之间确认；见第 15 节。
-- **G1：首批正式 corpus 与数据分类**。确认具体文档、用途、角色 allowlist 和允许的外部接收方；没有确认的内容不得进入正式索引或远程模型。
+- **G0：公开响应迁移**。P0 完成响应/消费者 inventory 后，在“同一端点增量扩展并提供兼容投影”与“新版本端点/响应模型”之间确认；在公开响应实现前生效，见第 15 节。
+- **G1：首批正式 corpus 与数据分类**。P0 完成知识和 payload inventory 后，确认具体文档、用途、角色 allowlist 和允许的外部接收方；没有确认的内容不得发布为正式 corpus、进入正式索引或发送给对应远程节点。
 
 ## 7. P1：可信知识、Evidence 与安全地基
 
@@ -253,6 +270,7 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 - 把已确认的 seed 草稿整理成可审查 Markdown；短政策优先保持天然知识单元，不为了向量检索强制切碎；
 - 指标说明由 `metrics.yaml` 生成或校验，明确“回答证据 / 分析约束 / 生成上下文”用途；
 - 建立稳定 document、revision、content identity、anchor、status、有效期、ACL、data classification 与 corpus identity；
+- 区分 revision 的当前可用性与历史审计语义：撤销/失效版本不能服务新回答，历史 run 只保留足以证明当时引用身份和授权决定的安全证据；
 - ingestion 输出 manifest，能够从 document revision 定位全部派生 chunk；
 - 新 revision 采用构建、校验、切换的发布顺序，失败不推进 active corpus identity；
 - 索引可删除重建，重建不修改权威原件。
@@ -274,6 +292,7 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 
 - 建立统一 Evidence 公共外壳和 Document/SQL typed payload；
 - 明确内部完整 Evidence、节点 Context、JSONL Trace、长期 Eval artifact 和 AgentResponse 的不同投影；
+- 为默认长期 Trace、显式短期 debug bundle 和 Eval artifact 定义不同的数据最小化、访问与清理语义；
 - citation ID、EvidenceRef、claim support 与 anchor 由代码构造和校验；
 - AuthorizationDecision、RetrievalDiagnostics、RuntimeIdentity 与 OutboundDecision 独立演进；OutboundDecision 还要区分模型节点用途，不能因 provider 相同而继承授权；
 - 长期 artifact 默认保存 identity、hash、摘要和白名单诊断，不保存完整敏感正文、完整结果行或密钥。
@@ -289,13 +308,14 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 
 ### 验收标准
 
-1. 任一 Document Evidence 能回到明确 document revision 和原文 anchor；
+1. 当前有效的 Document Evidence 必须能回到明确 document revision 和原文 anchor；历史已撤销或按保留策略删除的 Evidence 必须能证明当时的 revision/content identity、anchor identity 和授权决策，但不要求继续保存或展示正文；
 2. 删除派生索引后可从权威源重建：corpus hash 与来源 revision 一致，相同 build recipe 可识别和比较；新的物理索引具有独立 build/index identity，并通过 manifest 指回来源与构建配置；构建失败不会切换到半成品或诱导复用旧脏索引；
 3. Text2SQL 的 Schema、retrieval、prompt、RBAC 和测试路径都不再暴露知识正文；
 4. 未授权内容在候选、生成上下文、citation、响应和长期 Trace 中都不可见；
 5. 指标说明与 `metrics.yaml` 不形成第二套可独立编辑口径；
 6. outbound 默认拒绝，缺少显式策略的 adapter 或模型节点不能静默外发；同一 provider 的不同用途有独立授权与保守降级测试；
-7. 合同测试不依赖真实向量库或远程模型。
+7. `knowledge_docs` 隔离完成后立即更新 Schema corpus count/hash、runtime identity 和当前 state，并通过 canonical catalog 静态校验、SQL Guard/security 与确定性 Text2SQL 回归；历史 artifact 不改写；
+8. 合同测试不依赖真实向量库或远程模型；真实 LLM 回归仍按用户单次授权执行，不作为隔离代码完成的自动前置。
 
 ### 决策门
 
@@ -330,7 +350,7 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 
 - route 与 answer status；
 - gold Evidence 候选覆盖和最终上下文覆盖；
-- citation integrity 与原文可回查；
+- citation integrity：当前有效 Evidence 可回到原文，历史已删除正文则校验 revision/content identity、anchor identity 与当时授权证据；
 - 可结构化政策事实和适用条件；
 - insufficient evidence；
 - public/allowed/denied ACL；
@@ -359,7 +379,7 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 
 ### 决策门
 
-- **G4：首个在线检索默认**。从已验证 adapter 中选择 P3 的默认 RAG Pipeline；选择依据是闭环可靠性与可解释性，不是某次单项召回最高。
+- **G4：首个 Knowledge Tool 运行时默认 adapter**。从已验证 adapter 中选择 P3 的默认 RAG Pipeline；选择依据是闭环可靠性与可解释性，不预设必须远程、向量检索，也不以某次单项召回最高为准。
 - 混合检索、rerank、parent/child 和远程 embedding 此时可以进入候选实验清单，但不得仅因参考项目采用就切默认。
 
 ## 9. P3：顶层 LangGraph Harness、Router 与统一状态
@@ -395,7 +415,7 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 - 顶层 LangGraph 固定状态图和稳定 Graph invocation seam；
 - Router 数据集与确定性/模型 fallback 行为；
 - Text2SQL/Knowledge 两个受控 Tool adapter；
-- 首版 Evidence Gate、结构化 action/reason code 和保守降级；
+- 接入并复用 P2 已验证的回答充分性 Gate、Answer Composer 和 Citation Validator，并补结构化 action/reason code 与保守降级；
 - AgentResponse/Trace/Eval 的状态兼容迁移；
 - SQL 与 RAG 代表场景的 Graph 垂直回归。
 
@@ -428,19 +448,21 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 - 重复动作没有新增 Evidence 时应停止，不通过“换一种说法再试”掩盖失败；
 - P4 的顶层 Loop 只负责全局恢复：用户澄清后恢复、决定是否允许重新调用 Tool、跨 Tool 补齐另一类 Evidence、Evidence 失效后的重新取证、partial、全局预算与停止；
 - 顶层再次调用 Knowledge Tool 时只表达“仍缺少哪类 Evidence”和新的已确认条件，不直接指定 query rewrite、parent expansion、rerank 或其他内部检索策略；
-- P4 至少跑通一种顶层恢复切片，优先选择用户澄清后恢复或结构化 Tool 失败后的保守处理；RAG 内部改写和上下文扩展统一留给 P6 Subgraph。
+- P4 至少跑通一种顶层恢复切片，优先选择用户澄清后恢复或结构化 Tool 失败后的保守处理；P4 不实现或控制 RAG 内部的 query rewrite、parent/context expansion 等检索策略，这些能力按第 14.1 节分别通过证据门。
 
 #### 10.2 澄清与 thread 内状态
 
 - 缺少月份、对象、范围或其他必要条件时暂停并返回结构化澄清；
 - 用户补充条件后从同一 thread 恢复，复用仍有效的任务状态，不重新生成一张无关答卷；
 - 支持基于上一轮结果的有限追问，但必须重新判断旧 Evidence 是否支持新 claim；
+- thread 与可信 caller 绑定，恢复时重新授权；定义过期、显式清理、进程重启和状态版本不兼容时的可预测结果；
+- 重复请求或同一 thread 的并发旧状态不得静默重复执行或覆盖新状态；首版允许检测后拒绝/重试，不要求建设通用分布式幂等与锁平台；
 - 采用 LangGraph thread state 或轻量 checkpoint 形成暂停/恢复能力；不在此阶段建设跨会话画像、长期偏好或通用记忆检索。
 
 #### 10.3 Context Builder
 
 - 根据当前节点选择问题、已确认条件、必要历史和最终 Evidence；
-- Tool 长结果使用安全结构化摘要、fingerprint 和 EvidenceRef，Trace 可以保留更完整诊断，但不原样回灌模型；
+- Tool 长结果使用安全结构化摘要、fingerprint 和 EvidenceRef；需要更完整诊断时写入显式、受限且可清理的短期 debug bundle，不写入默认长期 Trace，也不原样回灌模型；
 - 对话增长时先裁剪无关历史，保留政策例外、时间条件、适用角色和 SQL 口径等高风险事实的原始 reference；
 - 摘要和压缩不能替代 Evidence identity，复杂多层 compact 留到长会话 Eval 证明需要之后。
 
@@ -450,6 +472,7 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 - 无意义重复调用与停止正确性；
 - 运行时 Evidence Gate 的结构化输出、失败降级和允许状态迁移；
 - 澄清后恢复、指代解析、Evidence 复用与 revision/权限变化后的失效；
+- caller/thread 所有权、过期/清理、进程重启、重复请求、并发旧状态和不兼容 state version 的保守行为；
 - Context Builder 实际入模内容和裁剪后关键条件保真；
 - 顶层重新调用 Knowledge Tool 时只传递缺失 Evidence requirement 和已确认条件，不能越权干预 adapter 内部检索动作。
 
@@ -470,11 +493,12 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 5. 旧 Evidence 失效时重新取证，不能把历史答案当永久事实；
 6. Trace 不保存模型原始思维链，但能解释 Action、Observation、Gate 与 Next Action；
 7. Context Builder 的输入可以被 Eval 直接检查，不靠最终答案反推模型看见了什么；
-8. 顶层 Loop 不直接改写检索 query 或执行 parent/context expansion，也不会与 P6 Subgraph 对同一失败各循环一次。
+8. 顶层 Loop 不直接改写检索 query 或执行 parent/context expansion；确定性单步增强由 Pipeline adapter 自己管理，需要根据 Observation 继续选择动作的多步再取证才进入 P6，且两层不会对同一失败各循环一次。
+9. 没有可靠数据版本/freshness 合同时，SQL Evidence 不跨轮直接复用；重新取证不会丢失用户已确认条件。
 
 ### 决策门
 
-- **G5：首个顶层恢复切片**。在条件澄清恢复、Evidence 失效后重调 Tool、跨 Tool 补证据或结构化失败后的安全 partial/停止中选择一个最有真实价值的切片；query rewrite 和上下文扩展不在此门决定。
+- **G5：首个顶层恢复切片**。在条件澄清恢复、Evidence 失效后重调 Tool、跨 Tool 补证据或结构化失败后的安全 partial/停止中选择一个最有真实价值的切片；RAG 内部增强不在此门决定，按第 14.1 节独立裁决。
 
 ## 11. P5：保守 Hybrid
 
@@ -519,20 +543,30 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 
 - **G6：optional 分支放宽**。只有 Eval 证明某类分支确实只是增强项，且不会造成误导或侧信道，才允许从 required 调整为 optional；不先用 best-effort 提高表面完成率。
 
-## 12. P6：有界 LangGraph RAG Subgraph 实验
+## 12. P6：有界 LangGraph RAG Subgraph 决策门与条件实验
 
 ### 目标
 
-在不改变 Knowledge Tool、Evidence、ACL、Router、Hybrid、Trace 和 Eval 合同的前提下，完成一个小型、有界的 RAG Subgraph adapter，并用同 corpus A/B 回答“Agentic RAG 是否值得成为默认路径”。
+必须回答“当前失败证据是否足以支持建设 Agentic RAG”。只有满足入场条件时，才在不改变 Knowledge Tool、Evidence、ACL、Router、Hybrid、Trace 和 Eval 合同的前提下，实现一个小型、有界的 RAG Subgraph adapter，并用同 corpus A/B 判断它是否值得成为默认路径。没有入场证据时，保留确定性 Pipeline 并记录不实施理由，即视为完成本里程碑。
 
 ### 参考检查点
 
 重点复核 agentic-rag-for-dummies 的 `graph.py`、`nodes.py`、`graph_state.py` 和 `tools.py`，核对主图/研究子图边界、Tool loop、context accumulation、fallback 与终止。参考的目的，是设计一个同合同的实验 adapter；不默认采用其 fan-out、强制搜索、parent/child、query rewrite 或 history compact，恢复动作仍必须来自 DataPilot 的 dev 失败簇。
 
+### 实验入场条件
+
+以下条件全部满足才进入 Subgraph 实现；否则只完成 go/no-go 记录：
+
+- 确定性 Pipeline 存在可复现、非 corpus/ACL/gold/外部不可用导致的检索失败簇；
+- 能提出一个边界清楚、可能新增 Evidence 的恢复假设，而不是为了展示把固定 Pipeline 拆成 Graph；
+- diagnostic/dev Scenario 足以开发该动作，并能在调试前冻结未污染的 held-out decision Scenario；
+- 额外调用、延迟、出站和调试复杂度有可观察、可比较的预算。
+
 ### 实验约束
 
 - Pipeline 与 Subgraph 通过同一 Knowledge Tool interface；调用者不知道内部 adapter；
-- Subgraph 必须体现 `Action → Observation → Evidence Gate → Next Action`，不能把固定 Pipeline 机械拆成节点；
+- Subgraph 必须体现 `Action → Observation → Retrieval Progress Policy → Next Action`，不能把固定 Pipeline 机械拆成节点；这里的检索进展策略只判断当前 Evidence requirement 是否满足、是否还有允许的取证动作，不生成答案，也不是第二个回答充分性 Gate；
+- 已在 Pipeline adapter 内完成的确定性单步增强，不得为了使用 Subgraph 再包装成循环节点；只有需要根据 Observation 选择下一取证动作的多步恢复才属于本实验；
 - 只选择一种由真实失败簇驱动的再取证动作，例如受控改写、上下文扩展或独立证据需求拆分；
 - Subgraph 无权调用 SQL、放宽 ACL、自行合成 Hybrid、决定最终用户答案、扩大顶层预算或绕过 outbound policy；
 - 顶层 controller 为一次 Knowledge Tool 调用分配子预算；Subgraph 的模型调用、检索动作和上下文扩展全部计入顶层总预算，只能消费分配给它的剩余预算；
@@ -553,23 +587,23 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 
 ### 主要交付物
 
-- 有界 RAG Subgraph adapter；
-- Pipeline/Subgraph 的 dev 诊断报告、held-out 默认决策报告和 contract/security 回归视图；
-- 恢复动作的收益、失败结构、成本和适用范围说明；
-- 默认 adapter 与 fallback 的决策记录。
+- 必做：失败证据审查、入场条件逐项结论和 go/no-go 决策记录；
+- 若 go：有界 RAG Subgraph adapter；Pipeline/Subgraph 的 dev 诊断报告、held-out 默认决策报告和 contract/security 回归视图；恢复动作的收益、失败结构、成本和适用范围说明；默认 adapter 与 fallback 的决策记录；
+- 若 no-go：保持确定性 Pipeline，记录缺少哪项入场证据、为何不实现，以及未来重新评估的触发条件。
 
 ### 验收标准
 
-1. 两种 adapter 的 Knowledge Tool 调用合同与返回 Evidence 语义一致；
-2. Subgraph 没有第二个全局控制权，ACL、出站和父子预算测试无法被子图绕过；
-3. 顶层 controller 与 Subgraph 不会对同一文档取证失败形成嵌套重复循环；
-4. A/B 能区分真正新增 Evidence、只增加调用和偶然模型波动；
-5. held-out decision Scenario 在默认决策前未参与恢复动作、Prompt 或参数调整；若被用于调试则有明确污染记录并退出保留集；
-6. 无论是否切默认，都保留可复盘的实验证据；若没有多轮稳定净收益，Pipeline 继续作为默认和回退路径，不把“已实现 Subgraph”写成效果提升。
+1. 无论 go/no-go，入场判断都能由当前失败证据复核，不以技术热度或参考项目代替；
+2. 若 no-go，未实现无真实恢复假设的 Subgraph，确定性 Pipeline 继续作为默认，并记录重开条件；
+3. 若 go，两种 adapter 的 Knowledge Tool 调用合同与返回 Evidence 语义一致；
+4. 若 go，Subgraph 没有第二个全局控制权或回答充分性 Gate，ACL、出站和父子预算测试无法被子图绕过；citation 校验失败后的最终状态迁移者仍是顶层 controller；
+5. 若 go，顶层 controller 与 Subgraph 不会对同一文档取证失败形成嵌套重复循环；
+6. 若 go，A/B 能区分真正新增 Evidence、只增加调用和偶然模型波动；held-out decision Scenario 在默认决策前未参与恢复动作、Prompt 或参数调整，污染后退出保留集；
+7. 若 go，无论是否切默认都保留可复盘的实验证据；没有多轮稳定净收益时 Pipeline 继续作为默认和回退路径，不把“已实现 Subgraph”写成效果提升。
 
 ### 决策门
 
-- **G7：RAG Subgraph 是否默认化**。只有证据覆盖、答案质量或停止/恢复正确性的稳定收益能够抵偿额外调用、延迟与调试成本时才切默认；否则保留实验 adapter 和面试复盘价值。
+- **G7：RAG Subgraph go/no-go 与是否默认化**。先按入场条件决定是否实现；只有进入实验后，证据覆盖、答案质量或停止/恢复正确性的稳定收益能够抵偿额外调用、延迟与调试成本时才切默认。no-go、实验后不默认化和默认化都是合法结论。
 - **G8：检索增强是否进入默认**。parent/child、hybrid retrieval、rerank、query rewrite 等各自按单变量证据决定，不能打包成不可归因的“高级 RAG”。
 
 ## 13. P7：安全、Trace、Eval 与演示收口
@@ -598,6 +632,8 @@ P7 以 DataPilot 的 M27 Scenario/typed assertion、JSONL Trace 和最新 Phase 
 
 JSONL 继续作为本地主事实。LangFuse Cloud 只有在上传 allowlist、脱敏、data classification 和旁路失败降级通过安全 case 后才能由用户明确恢复；即使恢复也不能成为业务或 Eval 唯一依赖。
 
+JSONL 的“主事实”指稳定身份、状态迁移和安全诊断的权威记录，不表示默认长期保存完整 question、answer、Document Evidence 或 SQL rows。需要原始材料排障时使用显式、受限且可清理的短期 debug bundle；长期 Trace 与 Eval artifact 分别按自己的 allowlist 投影。
+
 ### Eval 收口
 
 Phase 4 canonical catalog 按第 4.6 节同时维护 diagnostic/dev、held-out decision 和 required contract/security 三种用途，并形成以下分层能力视图：
@@ -616,11 +652,13 @@ Phase 4 canonical catalog 按第 4.6 节同时维护 diagnostic/dev、held-out d
 
 最终基线仍遵守同合同、同 corpus、同 runtime identity 的可比性纪律。任何默认模型、embedding、检索策略或 Subgraph 切换都必须使用未污染的 held-out decision Scenario，并有单变量、多轮证据和用户确认；dev 结果用于诊断，不单独承担默认切换结论。真实 LLM Eval 仍按 runbook 的一次精确授权执行。
 
+Phase 4 completed run 在进入报告、Gate 或基线前必须通过 closed-world identity 校验；不能仅因现有结果全部通过，就忽略缺失的 Scenario、replicate 或 assertion。历史 M27 artifact 保持只读，不补写 Phase 4 字段或与新合同直接混算。
+
 ### 项目展示与面试交付
 
 - 一个 SQL、一个 RAG、一个 Hybrid、一个澄清恢复、一个安全拒绝/证据不足的可复现实例；
 - 每个实例都能从用户答案回到 citation/Evidence，再回到 Tool Observation 和 Trace；
-- Pipeline vs RAG Subgraph 的真实 A/B 故事，能够解释为什么采用或不采用更复杂 Agentic RAG；
+- P6 的真实决策故事：若进入实验，展示 Pipeline vs RAG Subgraph 的可比 A/B；若 no-go，展示失败证据为何不足以支持增加 Agentic RAG 复杂度；
 - 文档 ACL 与 Text2SQL 隔离的反绕过案例；
 - 外部 provider 失败时仍能展示状态正交、partial 或保守停止；
 - 一份 Phase 4 capability matrix，区分已完成、实验保留、未进入范围。
@@ -634,7 +672,7 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 3. Knowledge Tool 只负责取证，Gate/Composer/Validator 与顶层 controller 的职责唯一，RAG citation 可回查且缺证据不乱答；
 4. 顶层 LangGraph、有界全局 Loop、短期状态和 Context Builder 可观察、可终止，不与 RAG Subgraph 形成双循环；
 5. Hybrid 的必需分支、partial、conflict 和增强降级语义通过验收；
-6. Pipeline 与 RAG Subgraph 完成未污染 held-out、多轮、同合同 A/B，并留下明确默认/fallback 决策；
+6. P6 的 go/no-go 证据审查完成；仅在满足入场条件并实际启动 Subgraph 实验时，才要求完成未污染 held-out、多轮、同合同 A/B 并留下明确默认/fallback 决策；
 7. outbound policy 覆盖实际接收方、模型节点用途和数据类别，未授权节点保守降级，Cloud 未授权时保持关闭；
 8. Trace 与 Eval 使用同次运行真实 Evidence，状态、分母、runtime identity 和 `not_observed` 语义可信；
 9. Text2SQL 核心回归通过，并完成 `finish-module → finish-docs → 用户人工检查 → accept-module`。
@@ -654,6 +692,9 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 | PDF / 长文档 | 正式 Scenario 需要且 Markdown 不能代表原始来源 | OCR、多格式与复杂 anchor 会扩大阶段范围 |
 | LLM Judge required | 与人工 gold 稳定对齐，失败语义、成本和可用性可接受 | Judge 失败不能影响确定性安全门 |
 | LangFuse Cloud 恢复 | 上传 allowlist、脱敏、分类与失败降级通过安全 case | 外部观测不是主事实源 |
+| RAG Subgraph 实现 | 确定性 Pipeline 出现可复现失败簇，存在明确恢复假设、未污染 held-out 和可比较预算 | 没有入场证据时实现只会增加循环、延迟与重复控制 |
+
+这些候选按能力和单变量证据独立裁决，不与 Subgraph 捆绑：一次固定的 parent 补取、邻近上下文扩展、hybrid retrieval 或 rerank 可以在 Pipeline adapter 内实验；只有需要读取 Observation 后继续决定 query rewrite、子问题检索或下一次扩展的多步动作，才进入 P6 Subgraph 的入场审查。
 
 ### 14.2 Phase 4 结束后再评估
 
@@ -664,6 +705,7 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 - GraphRAG、Neo4j、LightRAG 或另一套知识体系；
 - 任意 Python/Shell 执行、自动写库、发消息等有副作用 Tool；
 - 动态 Skills/Connector、多模型 Worker、通用知识管理/多租户平台；
+- 生产身份提供方、SSO/OAuth/JWT 与企业用户目录集成；Phase 4 只建立可信 caller seam 和如实标注的 demo/test adapter；
 - OCR、多格式全覆盖和大规模增量同步；
 - WrenAI 级别的完整语义编译层；
 - 在 DataPilot 内扩张成独立完整 Eval 平台。
@@ -672,7 +714,7 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 
 ## 15. 需要用户确认的问题
 
-以下事项不阻塞本文作为 roadmap 成立，但会改变 P0/P1 的具体 module plan；在进入对应实现前需要用户确认，本文暂不替用户固定。
+以下事项不阻塞本文作为 roadmap 成立，也不阻塞 P0 开展 inventory；它们会改变 P0 之后的具体 module plan，必须在对应公开合同实现、正式发布/索引或数据外发前由用户确认，本文暂不替用户固定。
 
 ### 15.1 公开响应如何迁移四轴状态
 
@@ -737,8 +779,8 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 | P3 | agentic-rag-for-dummies、Alibaba DataAgent、GustoBot | 顶层 Graph/state、固定编排、Router 与深 Tool 边界 |
 | P4 | agentic-rag-for-dummies；DB-GPT 作为边界反例 | 有界状态迁移、预算、澄清恢复、停止和最小 Context |
 | P5 | Alibaba DataAgent、GustoBot | 薄 Hybrid plan、原始 Evidence 汇合、核心结果与增强降级 |
-| P6 | agentic-rag-for-dummies | 同 Tool 合同的 RAG Subgraph、内部循环与 fallback 对照 |
-| P7 | DataPilot M27/Phase 4 证据优先；五项目反例 | Trace/Eval 收口、citation/路径一致性与复杂度复查 |
+| P6 | agentic-rag-for-dummies | 先做失败证据 go/no-go；只有 go 时才参考同 Tool 合同的 RAG Subgraph、内部循环与 fallback 对照 |
+| P7 | DataPilot M27/Phase 4 证据优先；五项目反例 | Trace/Eval 收口、citation/路径一致性与复杂度复查；P6 no-go 也是可验收结论 |
 
 ### 16.3 能力卡与源码入口
 
@@ -765,15 +807,18 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 | Graph 变成浅节点集合 | 节点只转发参数，业务逻辑散落在边上 | 只有独立状态迁移/失败语义才成为节点；深模块保留内部控制 |
 | 双事实源 | Markdown 与数据库正文可分别修改 | 单向发布、content identity 校验、投影漂移即失败 |
 | ACL 只在向量 filter | 未授权候选已进入 prompt 或 Trace | 检索前过滤 + 生成前复核 + 侧信道测试 |
+| 客户端自报角色被当成可信身份 | 修改请求体 `user_role` 即获得更高权限或恢复他人 thread | 可信 caller seam、thread owner 绑定、恢复时重新授权；demo/test 注入与生产认证边界明确 |
 | Text2SQL 旁路 | Schema Retrieval 仍召回 `knowledge_docs.content` | 跨 RBAC/Schema/prompt/few-shot/case 的迁移清单与反绕过测试 |
 | citation 只有文件名 | 引用无法定位 revision/anchor 或不是入模证据 | 代码分配 ID、四阶段 Evidence、claim-to-Evidence 校验 |
 | Agent loop 掩盖知识缺失 | 重复搜索但 Evidence 没变化 | reason code allowlist、预算、无增量停止、调用冗余 assertion |
 | 顶层与 RAG 子图双循环 | 同一取证失败被两层分别改写和重搜 | 顶层只管 Evidence requirement/全局恢复；子图只管文档内部动作；父预算覆盖子预算 |
 | Eval 只看最终答案 | 不能区分没召回、没使用、引用错或合成错 | 一题一次执行、多 typed assertion、实际 context 进入 evidence |
 | Agentic RAG 对照过拟合 | 用同一批题发现失败、调方案并证明收益 | dev/held-out/contract-security 分集；污染的 holdout 退出默认决策集 |
+| 为展示强造 Agentic RAG | 没有稳定失败簇仍实现 Subgraph 并要求 A/B | P6 先做入场审查；证据不足时记录 no-go，不实现 adapter |
 | 检索实验不可比较 | corpus、provider、参数和 case 同时变化 | resolved runtime identity、同 corpus/合同、单变量、多轮证据 |
 | 远程能力静默扩大出站 | 新 adapter 直接发送 query/chunk/rows | outbound seam 默认拒绝，接收方/用途/数据类别逐项授权 |
 | 短期状态变长期隐私仓库 | 完整历史和原文无限保存 | thread scope、最小状态、失效/清理语义、安全摘要与 reference |
+| 本地 Trace 变成敏感数据仓库 | 默认 JSONL 长期保存完整问题、答案、正文或结果行 | 长期安全投影、短期受限 debug bundle、Eval artifact 三类治理 |
 | 项目展示压过主线 | 为 UI 同时引入长报告、多 Agent、GraphRAG | 演示围绕 SQL/RAG/Hybrid/Evidence/失败闭环，增强项可降级 |
 
 ## 18. Phase 4 推进原则
@@ -785,8 +830,25 @@ Phase 4 只有在以下条件全部满足后才进入收工：
 5. **失败也是产品输出**：澄清、证据不足、partial、blocked 与 external unavailable 都要有稳定、可验收语义。
 6. **复杂度必须有删除测试**：如果移除某层不会降低合同、可测试性或真实能力，就不应为了展示保留它。
 7. **收工按项目流程执行**：每个完整模块结束时先固化 notes 和验证，再更新 state/dev-log，最后人工检查与 `accept-module`；README 只在阶段结束统一整理。
+8. **滚动规划，不预制整阶段施工单**：每次只为当前最小可验收能力切片制定 module plan，只冻结本模块接口、依赖、非目标、验证和决策门。模块经过 `finish-module → finish-docs → 用户人工检查 → accept-module` 后，先更新 state，再依据最新代码、失败证据、roadmap 和对应 reference 能力卡决定下一切片；不提前锁定后续参数、文件结构、adapter 或复杂能力。
 
 ## 19. 修订记录
+
+6. **2026-08-12 citation 与 RAG 增强边界校准**：
+
+   - 区分当前有效 citation 的原文可回查与历史已删除正文的身份/授权审计证据，避免保留策略与验收措辞冲突；
+
+   - 将确定性 Pipeline 单步增强与 P6 多步再取证分开，parent/child、rerank 等继续按单变量证据独立裁决；架构图明确两处 Gate 表示同一个共享回答充分性组件。
+
+5. **2026-08-12 开工闭环与滚动规划修订**：
+
+   - 增加可信 caller seam，明确客户端自报角色不构成生产身份；调整 G0/G1 为 P0 inventory 后、对应实现或发布前生效；
+
+   - P6 改为证据审查必做、Subgraph 实现与 A/B 条件引入，区分回答充分性 Gate、检索进展策略和 Citation Validator；
+
+   - 补充 Phase 4 Eval 版本与 closed-world 完整性、SQL Evidence 不跨轮默认复用、短期状态生命周期、本地 Trace 治理、隔离即时回归和历史 citation 撤销/审计语义；
+
+   - 明确 P0–P7 是能力里程碑，并采用单模块计划、验收、更新 state 后再选择下一切片的滚动推进方式。
 
 4. **2026-08-12 参考源码校准**：
 
