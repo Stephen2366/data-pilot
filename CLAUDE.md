@@ -2,7 +2,7 @@
 
 企业数据分析 Agent 系统。接受自然语言问题，自动判断查 SQL / 查文档 / 混合推理，生成结果 + 可视化 + 分析报告。
 
-> **总路线**：[LEARNING_ROADMAP.md](D:/.Work/Practice/Python-Practice/LEARNING_ROADMAP_v3.md) — 总体规划。日常模块开发优先读 `CLAUDE.md / AGENTS.md`、`docs/state/AI_CONTEXT.md` 和当前阶段计划文件（见 `docs/state/AI_CONTEXT.md`「当前状态」）；阶段切换、范围调整或技术取舍等情况再读完整总 ROADMAP。
+> **总路线**：[LEARNING_ROADMAP.md](D:/.Work/Practice/Python-Practice/LEARNING_ROADMAP_v3.md) — 总体规划。日常模块开发优先读 `CLAUDE.md / AGENTS.md`、`docs/state/AI_CONTEXT.md`、当前阶段路线与约束文件，以及 `AI_CONTEXT.md` 指向的当前活动模块 plan；阶段切换、范围调整或重大技术取舍时再读完整总 ROADMAP。
 >
 > **技术档案**：[AI_CONTEXT.md](docs/state/AI_CONTEXT.md) — AI 续接 / 查 bug 优先阅读，只保留当前状态、默认配置、最新基线、关键结论和活跃坑；运行入口 / 模型链路 / LangFuse / eval 命令矩阵见 [runbook.md](docs/state/runbook.md)，完整改动历史见 [AI_CONTEXT_CHANGELOG.md](docs/state/AI_CONTEXT_CHANGELOG.md)，长期评测账本见 [eval-baselines.md](docs/state/eval-baselines.md)，数据库状态速查见 [database-current-state.md](docs/state/database-current-state.md)。
 >
@@ -64,12 +64,11 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
     runbook.md          # AI / 本地运行入口，模型、检索、LangFuse、eval 命令矩阵
     eval-baselines.md   # 长期评测基线、A/B 结果、失败结构和错因账本
     database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
-  notes/                # 模块过程素材库（mX-notes.md）
+  notes/                # 模块计划与过程素材库（mX-plan.md / mX-notes.md）
   ref-discussion/       # 网上技术讨论原文收集（未筛选素材）
   dev-log(M0-M19).md    # 用户学习复盘（M0~M19）
   dev-log.md            # 用户学习复盘（M20以后）
-  phase3a-plan.md       # 阶段三A模块计划（历史；当前阶段计划见 docs/state/AI_CONTEXT.md「当前状态」）
-  phase3b-langfuse-plan-v6.md # 当前阶段（Phase 3B）计划文件
+  module-plan-template.md # 模块计划模板（新模块开工时复制为 docs/notes/<m>-plan.md）
 
 
 demo/                   # Streamlit 演示页
@@ -86,7 +85,7 @@ tests/                  # pytest 测试
 
 - 所有 AI 工具共享同一个临时目录：`.agent_work/temp/`，用于存放脚本中间产物、一次性 JSON、缓存、临时 smoke 摘要等。
 - 可复用运行数据不要放临时目录：模块 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），Agent Trace 写入 `eval/traces/`，eval 报告（report / triage / compare）写入 `eval/reports/`，开发过程中的 notes / 实验 / 审查等 写入 `docs/notes/`（见「开发素材与收工」）；smoke 的一次性输出摘要仍放临时目录。
-- 路径、验收数字、Schema、命名只保留一个权威定义，优先登记在当前阶段计划文件的“单一事实源”章节。
+- 当前阶段的能力顺序和长期边界以阶段 roadmap 为准；当前模块合同和验收以独立 `<module>-plan.md` 为准；运行配置、Eval、数据库和索引事实分别以对应 state 文档为准。模块 plan 只引用这些事实源，不复制形成第二份权威定义。
 - README 只在阶段结束时统一整理和更新。
 
 ## 开发素材与收工

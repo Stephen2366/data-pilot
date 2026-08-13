@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from engine.nl2sql.schema_loader import DEFAULT_QUERYABLE_TABLE_NAMES
+
 
 @dataclass(frozen=True)
 class RolePolicy:
@@ -17,32 +19,19 @@ class RolePolicy:
     allow_sensitive_fields: bool = False
 
 
-ALL_TABLES = {
-    "users",
-    "products",
-    "channels",
-    "orders",
-    "order_items",
-    "refunds",
-    "tickets",
-    "knowledge_docs",
-    "product_categories",
-    "coupons",
-    "order_coupons",
-    "user_behavior_log",
-    "product_price_history",
-    "orders_wide",
-}
+# 历史名称保留给现有调用者，但语义已明确为“全部可查询分析表”，不是全部物理表。
+# 集合从默认 Domain Schema 文件发现结果派生，避免 admin/ops 与 prompt 各维护一份表名单。
+ALL_TABLES = set(DEFAULT_QUERYABLE_TABLE_NAMES)
 
 ROLE_POLICIES: dict[str, RolePolicy] = {
     "admin": RolePolicy(allowed_tables=set(ALL_TABLES), allow_sensitive_fields=False),
     "ops": RolePolicy(allowed_tables=set(ALL_TABLES), allow_sensitive_fields=False),
     "customer_service": RolePolicy(
-        allowed_tables={"tickets", "knowledge_docs"},
+        allowed_tables={"tickets"},
         allow_sensitive_fields=False,
     ),
     "demo_user": RolePolicy(
-        allowed_tables={"products", "channels", "knowledge_docs", "product_categories", "orders_wide"},
+        allowed_tables={"products", "channels", "product_categories", "orders_wide"},
         allow_sensitive_fields=False,
     ),
 }

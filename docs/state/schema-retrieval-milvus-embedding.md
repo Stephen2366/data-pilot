@@ -2,14 +2,15 @@
 
 > 本文只保留当前 Schema Retrieval、Milvus 和 embedding 的运行事实。真实 Eval 命令见 [runbook.md](runbook.md)，M27 分母、Gate 与快照见 [eval-baselines.md](eval-baselines.md)，完整历史实验见 [AI_CONTEXT_CHANGELOG.md](AI_CONTEXT_CHANGELOG.md)。
 
-更新时间：2026-08-09
+更新时间：2026-08-13
 
 ## 当前结论
 
 - 默认仍是 **`inmemory + deterministic + weighted`**：不依赖 Docker 或网络，是本地开发和默认 Eval 的主线。
 - Milvus 只在用户明确要求时启用。当前唯一文档化的 M27 Milvus embedding 路径是 **DashScope `qwen3.7-text-embedding` / 1024 维**；它不是默认切换结论。
 - SiliconFlow embedding 的代码和配置入口仍保留，但不再是日常/M27 Eval 入口；没有用户明确指定时，不选择它。
-- 当前 schema document corpus 为 **195 条**，hash 为 `8a8b6626a4cbec6197d9625ec12d5d40668025476f823eaa9458647cecd8d41a`。
+- M30 隔离 `knowledge_docs` 后，当前 Text2SQL schema document corpus 为 **186 条**，hash 为 `6b67606d782ec834efa2ffcdb94b3cbb8af148223f5a92a176b64f849e2e418d`。
+- 历史 M27 Milvus artifact/collection 的 195-doc hash `8a8b6626...` 仍是只读历史身份；它与当前 186-doc corpus 不匹配，后续新运行不得直接复用这些 collection。
 - M27 v2 首个 Qwen plus + Milvus Core 为 `28 passed / 0 failed / 6 not_observed`、Gate `inconclusive`；两题 QueryPlan timeout，不足以判断 Milvus 或 embedding 的收益。详见 [eval-baselines.md](eval-baselines.md)。
 
 ## 当前配置与选择规则

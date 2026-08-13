@@ -378,8 +378,8 @@ def test_runtime_identity_records_milvus_embedding_and_schema_corpus() -> None:
     assert values["schema_embedding_model"] == "qwen3.7-text-embedding"
     assert values["schema_embedding_dimensions"] == 1024
     assert values["milvus_collection"] == "fixture_m27_qwen"
-    assert values["schema_docs_count"] == 195
-    assert values["schema_docs_hash"] == "8a8b6626a4cbec6197d9625ec12d5d40668025476f823eaa9458647cecd8d41a"
+    assert values["schema_docs_count"] == 186
+    assert values["schema_docs_hash"] == "6b67606d782ec834efa2ffcdb94b3cbb8af148223f5a92a176b64f849e2e418d"
     assert values["schema_vector_index_reuse"] == "run_scoped"
 
 

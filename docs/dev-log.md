@@ -1804,4 +1804,139 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 **本地启动体验：** M29 暂无独立可交互入口，因为它交付的是后续 RAG 的合同和安全边界，没有修改 `/api/query` 的当前运行行为。要人工复盘，建议并排阅读 M29 plan/notes 与上述代码阅读路线；真正的知识问答体验要等 P1 安全发布和 P2 RAG 垂直切片完成后再开放。
 
+## ★ M30 可信知识原件、Catalog Prototype 与 Text2SQL 隔离
+
+（2026-08-13）
+
+**简述**：把政策与指标整理成可审查、可重建、失败关闭的 **staged catalog**，并彻底封住 `knowledge_docs` 的 Text2SQL 查询旁路；根据 G2 选择保留 source-backed catalog 与隔离的 legacy 物理表。
+
+### 先用大白话讲
+
+M29 发现一个**危险的中间状态**：知识政策只是数据库 seed 里的几段字符串，同时又被 Text2SQL 当成普通表暴露。这样未来即使 RAG 做了 ACL，模型仍可能绕过 Knowledge Tool，直接生成 `SELECT content FROM knowledge_docs`。
+
+M30 把这个问题完整关掉了。政策和规则现在有可审查的 **Markdown 权威原件**；指标说明不再手抄，而是从 `metrics.yaml` 自动生成；一个确定性的 builder 会校验完整 metadata、ACL、revision、anchor 和 identity，任何错误都整体失败。与此同时，`knowledge_docs` 从 Text2SQL 的 Schema、retrieval、prompt 和 SQL Guard 全部消失。数据库仍有 **14 张物理表**，但自然语言 SQL 只能看到 **13 张分析表**。
+
+### 这次做了什么
+
+本模块处理的核心矛盾是：**知识既没有可信原件，又能被 SQL 旁路读取**。最终方案不是先堆一个向量检索 demo，而是先让知识来源、构建身份和不可查询边界都能被代码验证。价值在于后续 Knowledge Tool 可以站在一个明确地基上继续实现 Evidence/citation/ACL，而不需要重新猜正文从哪里来、哪个版本有效、Text2SQL 是否还能绕过。全仓确定性回归和 MySQL seed 验证证明现有 SQL/数据库能力没有被破坏；但本模块没有运行真实 RAG，因此不能宣称召回或回答质量已经提升。
+
+1. **把“数据库里的草稿”升级为可信原件**
+
+   退款总则、质量问题、物流延迟、发票、VIP、敏感数据和 demo scope 被整理成 7 份 Markdown 原件。每份都带 document key、revision、anchor、status、data class、用途和 allowed roles。正文也做了业务纠偏：例如 admin 不能因为角色名就经自然语言 Text2SQL 查看敏感明文；VIP 文档只定义资格规则，不记录某个客户当前是否达标。
+
+   **原来的影响**是数据库草稿既不方便 code review，也无法表达稳定版本和访问用途；更宽松地继续使用旧表，会让手工编辑、ACL 丢失和版本漂移同时存在。现在每条旧 seed 都有 disposition 和 authority 映射，合同测试检查必需 metadata 与非法 ACL；这证明原件结构可审计，但**尚未证明这些政策已经通过业务法务审批**，它们仍是项目演示域内的受控语料。
+
+2. **让指标说明只有一个事实源**
+
+   GMV、优惠券和行为漏斗的公式已经在 `metrics.yaml`。如果再在知识文档里复制一遍，两个地方迟早会改得不一样。M30 的 projection 配置只声明 metric key 和展示/访问 metadata，正文在构建时由对应 metric 确定性生成。
+
+   旧 `coupon_rule` 同时描述优惠券使用订单数和使用率，实际上对应两个不同指标。本次把它拆成 `coupon_order_count` 与 `coupon_usage_rate` 两个 entry，所以旧 10 条 seed 最终形成 11 个 catalog 条目。这不是多写了一份口径，而是把原来混在一起的两个概念分开。
+
+   如果选择“projection YAML 也填写 formula”会更直观，却会重新制造第二事实源。因此测试明确检查 projection 文件没有 formula/description，且生成正文包含 `metrics.yaml` 的真实公式；**已经证明单一 authority 和确定性派生成立**，但没有证明未来所有指标都适合直接作为回答证据，公开用途仍需后续 ACL/outbound 模块裁决。
+
+3. **实现一个小入口、深实现的 staged catalog**
+
+   调用者只需要使用 `build_staged_catalog()`。文件发现、Markdown/YAML 解析、metric 派生、closed-world 校验、稳定排序、manifest 和 hash 都封装在内部。成功返回 immutable `StagedCatalog`；任何条目非法就抛出有限 reason code，不会返回“前 10 条成功、第 11 条失败”的半成品。
+
+   M30 特意区分两类身份：content identity 表达知识语义，用来发现换 key 后重复塞入同样内容；corpus identity 包含 document/revision/authority/anchor/ACL 等完整 manifest，用来判断整套 catalog 是否发生治理或内容变化。mtime、目录遍历顺序和 YAML key 顺序不会制造假漂移。
+
+   更简单的“发现几个文件就返回几个对象”无法阻止半成功和静默默认值。M30 用反例测试覆盖缺字段、未知 enum/role/purpose、重复 revision/anchor/content、未知 metric key、inactive 泄漏和 expected identity 漂移；同输入重建 identity 一致，正文变化会改变 identity。**这证明 staged 构建合同成立，不代表 active 发布、在线原子切换或回滚已经实现。**
+
+4. **封住 Text2SQL 知识旁路**
+
+   `schema_desc/knowledge_docs.md` 和 retrieval alias 被移除，四种角色的 SQL allowlist 都不再包含知识表。SQL Guard 的全部分析表集合从默认 Domain Schema 派生，减少 prompt 与权限名单各写一份造成的漂移。即使模型手工伪造 QueryPlan，planner 会因表不在局部 Schema 拒绝；即使跳过 planner 直接提交 SQL，SQL Guard 仍会拒绝。
+
+   只在 prompt 里写“不要查”更省代码，但模型提示不是安全边界。测试同时验证 prompt 不可见、Schema Retrieval 无字段文档、伪造 planner 输出失败和四角色手工 SQL 被 Guard 拦截；M27 canonical 归因题仍返回 `unsupported_relation`。Schema corpus 因此从历史 195 docs 变为 **186 docs/new hash**；旧报告仍可追溯，但旧 Milvus collection 不能冒充当前索引。
+
+5. **在证据出来后完成 G2，而不是提前拍脑袋选数据库结构**
+
+   prototype 证明当前没有 API、Tool、生成器、retriever 或 demo 读取 `KnowledgeDoc`。用户比较三种方案后选择 B：运行时从 authority source 构建 catalog，物理表暂留为 legacy 兼容存储。seed 删除手写 `_KB_CONTENTS`，改为从同一个 catalog 生成 11 行；没有新增 migration，也没有删表。
+
+   方案 A 会为尚不存在的多实例/运营后台提前冻结数据库 projection schema；方案 C 会立刻承担删表、外部消费者和回滚风险。方案 B 的代价是保留一个**有损 legacy 表**，因此代码和 state 明确禁止从它恢复正式 ACL。MySQL `datapilot_dev` 已 reset 验证 14 表计数、11 条知识投影和固定事实；这证明兼容 seed 可重建，**不能证明仓库外永远没有旧表消费者**，未来退役仍需重新审计。
+
+### 新概念
+
+- **Authority source（权威原件）**：发生冲突时谁说了算。政策正文以 Markdown 原件为准，指标公式以 `metrics.yaml` 为准；数据库 legacy 行不是第三份真相。
+- **Derived projection（派生投影）**：为了兼容或查询方便，从原件生成的副本。它可以随时重建，不能反向覆盖原件，也不能承担原件没有表达的 ACL 语义。
+- **Fail closed（失败关闭）**：遇到未知字段、非法角色、重复 identity 或缺少 authority 时，整个构建失败。系统不能猜一个默认值后继续，因为“猜错权限”比“暂时不可用”危险得多。
+- **Staged vs active**：原件状态 `active` 只表示这条 revision 可以进入 staged usable set；catalog 仍没有通过 G3 发布。可类比代码已经通过单元测试并进入 release candidate，但还没有部署到生产流量。
+- **Physical schema vs queryable schema**：数据库里存在的表不等于自然语言 Agent 有权查询的表。就像 Java 项目里某个 Repository 存在，不代表每个 Controller 都应该暴露它。
+
+### 代码阅读路线
+
+1. **从权威输入开始**：`domain_pack/kb_docs/*.md`、`domain_pack/kb_docs/metric_projections.yaml`、`domain_pack/metrics.yaml`
+   先看政策 front matter 如何表达 revision、anchor、ACL 和用途，再对照 projection 配置为什么只有 metric key、没有公式正文。阅读重点是理解**政策正文与指标 authority 是两种来源**；不用先死记每个字段取值。
+2. **沿唯一构建入口理解完整流程**：`engine/rag/catalog.py`
+   从主角函数 `build_staged_catalog()` 开始，先看它如何加载两类 source，然后看 `_validated_metadata()` 怎样失败关闭，最后看 `CatalogEntry`、`StagedCatalog`、content/corpus/build identity 如何协作。关键设计是调用者不编排半成品步骤，避免不同消费者各自漏掉一项校验。
+3. **查看方案 B 的兼容投影**：`scripts/seed_data.py::_build_knowledge_docs`
+   这里消费 staged catalog 并生成旧 ORM 行。重点理解 `audience_role` 只是有损兼容字段，不能反向恢复完整 ACL；这解释了为什么物理表可以暂留，却不能重新成为 runtime catalog。
+4. **沿 Text2SQL 双重防线检查旁路**：`engine/nl2sql/schema_loader.py` → `engine/schema_retrieval/document_builder.py` → `engine/sql_guard/rbac.py`
+   先看 `DEFAULT_QUERYABLE_TABLE_NAMES` 如何从分析 Schema 派生，再看 retrieval 不再生成知识字段文档，最后看 SQL Guard 如何复用同一 universe。三者协作实现“模型看不见 + 最终执行仍拒绝”。
+5. **用反例和过程证据收尾**：`tests/test_m30_knowledge_catalog.py` → `docs/notes/m30-notes.md`
+   测试覆盖 identity、失败关闭、inactive、metric authority、seed 派生和 SQL 反绕过；notes 则保存 10 条旧 seed disposition、G2 选项/风险/用户选择以及真实验证快照。二者分别回答“合同是否机器可验”和“为什么这样决策”。
+
+核心数据流是：
+
+`Markdown 政策原件 + metrics.yaml`
+→ `build_staged_catalog()`
+→ `immutable staged entries + manifest identity`
+→ `legacy seed projection（兼容，不是 authority）`
+
+Text2SQL 隔离链是：
+
+`13 表 DomainSchema`
+→ `Schema Retrieval / prompt / QueryPlan`
+→ `SQL Guard 最终 allowlist`
+
+### 设计要点
+
+- **深模块减少调用者认知负担**：外部只有一次完整构建；解析与校验细节留在 implementation 内部。
+- **正文与治理 identity 分层**：既能识别重复内容，又能追踪 revision/authority/ACL 变化。
+- **两道安全门**：prompt/planner 看不见知识表，SQL Guard 最终仍拒绝；不依赖模型“自觉不查”。
+- **旧证据不改写**：历史 M27 的 195-doc hash 继续解释旧 artifact；当前 corpus 是 186 docs/new hash，不能复用不匹配的 Milvus collection。
+- **滚动规划**：短文尚未出现 chunk 失败，不引入 parent/child、embedding、rerank 或在线发布机制。
+
+### 面试怎么讲
+
+**可直接复述**：我在接入 RAG 前先治理知识事实源和 SQL 旁路。原系统把政策写在数据库 seed 中，指标口径又与 `metrics.yaml` 重复，而且 `knowledge_docs` 被 NL2SQL Schema 与 RBAC 暴露。我的实现把政策迁到带 revision、anchor、ACL 和 data class 的 Markdown authority，指标正文从唯一 metric key 派生；再用一个失败关闭的纯函数 builder 生成 immutable staged catalog 和稳定 identity。安全上，我区分 14 张物理表与 13 张 Text2SQL queryable tables，并在 Schema/prompt/planner 与 SQL Guard 两层封住知识表。最后根据 consumer scan 让用户选择 source-backed catalog + legacy 表方案，避免为尚不存在的多实例和运营后台需求提前做数据库 migration。验证包括全仓 231 passed、MySQL seed/固定事实和 canonical `unsupported_relation`；边界是 catalog 仍为 staged，没有宣称 RAG 召回、citation 或 active 发布已经上线。
+
+1. **[基础追问] 为什么不直接把数据库表当知识库？**
+
+   数据库适合做派生查询结构，但原表字段没有 revision、authority、anchor、完整 ACL 和 build identity，也允许被独立修改。直接把它当事实源会让内容审查、重建和漂移定位都变得含糊。保留表可以兼容，但读取方向必须从原件到投影，而不是反过来。
+
+2. **[工程/深挖追问] 为什么 content identity 不包含 document key 和 revision？**
+
+   如果包含，复制同一正文后只改 key 就会得到不同 hash，重复内容检测失效。content identity 只描述语义内容；document key、revision、anchor 和 authority 由 corpus manifest identity 追踪。两个 identity 分工后，重复检测和版本审计都能成立。
+
+3. **[工程/深挖追问] 既然 planner 看不到 `knowledge_docs`，为什么 SQL Guard 还要拦一次？**
+
+   planner 是能力引导，不是最终安全边界。调用方可能传入手工 SQL，模型也可能因 bug 绕过局部 Schema。最终执行前必须按 AST 提取真实物理表并用 allowlist 再判一次，这类似 Controller 参数校验不能替代数据库事务层的权限检查。
+
+4. **[压力追问] 你保留一个没人用的 legacy 表，不就是在留下技术债吗？**
+
+   这个质疑有合理部分：legacy 表确实是技术债，所以 M30 没把它包装成正式投影。模块目标是先关闭双 authority 和 SQL 旁路，而仓库扫描只能证明仓库内没有消费者，不能证明外部脚本不存在。立即删表会引入 migration、数据删除和回滚成本，却不给当前功能带来收益。现在通过 Text2SQL 隔离、source-backed seed 和 state 风险登记控制它；未来出现明确退役窗口、多实例或运营后台需求时，再用消费者审计决定删除或升级。
+
+### 验证与下一步
+
+- **聚焦验证**：seed/数据库/核心合同 `70 passed, 1 warning`。
+- **全仓验证**：`231 passed, 3 skipped, 1 warning`；warning 是既有 Starlette/httpx 弃用提示，skip 是未启用的 Milvus/远端 embedding 条件测试。
+- **身份快照**：Text2SQL 为 13 tables / 186 docs / hash `6b67606d...`；staged catalog 为 11 entries / corpus identity `abdc9aed...`。
+- **MySQL 验证**：`datapilot_dev` 已按当前 seed 确定性重建；Alembic head/check 正常，14 表计数匹配，`knowledge_docs=11`，固定业务事实保持不变。
+- **尚未证明**：没有运行真实 LLM、embedding、Milvus 或 LangFuse；M30 不代表回答质量、召回率或 citation 已上线。
+- **下一步**：继续 P1 的 trusted caller、Document Evidence/citation、ACL/outbound 和安全发布，经过 G3 后才能把 staged catalog 交给生成器。
+
+可复制验证命令：
+
+```powershell
+# Catalog、Text2SQL 隔离和历史归因合同；预计 37 passed，另有既有 deprecation warning。
+python -m pytest tests/test_m30_knowledge_catalog.py tests/test_phase3a_schema_retrieval.py tests/test_m22_eval_contract.py -q --basetemp=.agent_work/temp/pytest-m30-review
+
+# 全仓确定性回归；当前结果为 231 passed、3 skipped。
+python -m pytest -q --basetemp=.agent_work/temp/pytest-m30-full-review
+
+# 只读查看 staged manifest；不调用网络，也不会 active 发布。
+python -c "from engine.rag import build_staged_catalog; print(build_staged_catalog().manifest())"
+```
+
+**本地启动体验：** 本模块暂无独立 API 或页面，因为它只建立 staged catalog 和 Text2SQL 安全地基，尚未通过 G3 接入 Knowledge Tool。人工体验可先阅读 `domain_pack/kb_docs/`，再运行上面的只读 manifest 命令，重点检查 `lifecycle_status=staged`、11 个 entry、authority reference 和 identity；环境未激活时，把 `python` 换成 `AGENTS.md` 中的项目 Python 完整路径。
 

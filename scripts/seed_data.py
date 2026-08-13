@@ -34,6 +34,7 @@ from app.models import (
     User,
     UserBehaviorLog,
 )
+from engine.rag import build_staged_catalog
 
 EXPECTED_SEED_COUNTS = {
     "users": 200,
@@ -44,7 +45,7 @@ EXPECTED_SEED_COUNTS = {
     "order_items": 18_000,
     "refunds": 1_000,
     "tickets": 300,
-    "knowledge_docs": 10,
+    "knowledge_docs": 11,
     "coupons": 10,
     "order_coupons": 3_000,
     "user_behavior_log": 10_000,
@@ -803,33 +804,28 @@ def _build_product_price_history(products: list[Product]) -> list[ProductPriceHi
     return rows
 
 
-_KB_CONTENTS: dict[str, tuple[str, str, str, str]] = {
-    "refund_policy_basic": ("基础退款政策", "refund_policy", "customer_service", "支持 7 天无理由、质量问题、物流损坏和价保补差。质量问题退款需提供照片、订单号和必要视频，审核通过后原路退款。"),
-    "refund_policy_quality": ("质量问题退款规则", "refund_policy", "customer_service", "质量问题包括功能故障、外观严重瑕疵、保质期异常和配件缺失。平台质检确认后全额退款并补偿优惠券。"),
-    "shipping_delay_rule": ("物流延迟处理规则", "support_rule", "customer_service", "现货 48 小时内出库，物流超过 120 小时无更新视为延迟。延迟补偿按天发放优惠券。"),
-    "invoice_rule": ("发票开具规则", "support_rule", "customer_service", "支持电子普通发票和增值税专用发票，发票金额以订单实付金额为准，红冲重开需在 7 天内申请。"),
-    "vip_service_rule": ("高价值客户服务规则", "support_rule", "ops", "近 12 个月累计消费超过 20000 元的客户进入 VIP 通道，享受专属客服和更长退货窗口。"),
-    "sensitive_data_policy": ("敏感字段访问规范", "security_policy", "admin", "邮箱、手机号、精确地址和行为轨迹属于敏感数据。非 admin 角色默认只看脱敏或匿名化结果。"),
-    "demo_user_scope": ("演示账号数据范围", "security_policy", "demo_user", "demo_user 只能访问 seed 生成的模拟数据，默认关闭导出、删除和外部系统集成能力。"),
-    "gmv_metric_note": ("GMV 指标口径说明", "metric_definition", "ops", "GMV 统计已支付且未取消订单的 order_amount，不含运费，不扣优惠，退款不回冲 GMV。"),
-    "coupon_rule": ("优惠券核销规则", "metric_definition", "ops", "优惠券分析以 order_coupons 为准。一单多券时统计订单量必须 COUNT(DISTINCT orders.id)。"),
-    "behavior_funnel_rule": ("行为漏斗口径说明", "metric_definition", "ops", "加购到支付转化率以 user_behavior_log 中 payment_success / add_to_cart 计算，duration_ms 为空不影响事件数。"),
-}
-
-
 def _build_knowledge_docs() -> list[KnowledgeDoc]:
-    """构建 10 篇知识库文档，补入优惠券和行为漏斗口径。"""
+    """从可信原件构建 legacy 兼容行，而不是维护第二份正文。
+
+    ★ G2 方案 B 明确：运行时 catalog 直接读取 authority sources；物理
+    ``knowledge_docs`` 暂留只是历史兼容存储，既不是 authority，也不进入 Text2SQL。
+    旧表只有单个 ``audience_role`` 字段，因此这里把角色集合稳定序列化为逗号分隔文本；
+    后续代码不得从这个有损投影恢复正式 ACL。
+    """
+
+    catalog = build_staged_catalog()
 
     return [
         KnowledgeDoc(
-            doc_key=doc_key,
-            title=title,
-            doc_type=doc_type,
-            audience_role=audience_role,
-            status="active",
-            content=content,
+            doc_key=entry.document_key,
+            title=entry.title,
+            doc_type=entry.knowledge_type,
+            audience_role=",".join(sorted(entry.allowed_roles)) if entry.allowed_roles else "public",
+            # 这里保存的是原件 revision 状态，不代表 catalog 已通过 G3 active 发布。
+            status=entry.status,
+            content=entry.content,
         )
-        for doc_key, (title, doc_type, audience_role, content) in _KB_CONTENTS.items()
+        for entry in catalog.entries
     ]
 
 

@@ -17,6 +17,13 @@ SCHEMA_DESC_DIR = PROJECT_ROOT / "domain_pack" / "schema_desc"
 METRICS_PATH = PROJECT_ROOT / "domain_pack" / "metrics.yaml"
 SQL_EXAMPLES_PATH = PROJECT_ROOT / "domain_pack" / "sql_examples" / "basic.yaml"
 
+# ★ `schema_desc/*.md` 是自然语言 SQL 的 queryable universe，不是 SQLAlchemy metadata
+# 的机械全集。物理表可以因兼容或迁移继续存在，但只有这里有描述的分析表才会进入
+# planner、Schema Retrieval 和 prompt。SQL Guard 也复用这份默认集合。
+DEFAULT_QUERYABLE_TABLE_NAMES = frozenset(
+    path.stem for path in SCHEMA_DESC_DIR.glob("*.md") if path.name != ".gitkeep"
+)
+
 
 @dataclass(frozen=True)
 class FieldDescription:

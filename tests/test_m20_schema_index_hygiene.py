@@ -93,8 +93,8 @@ def test_eval_run_can_prebuild_shared_milvus_index(monkeypatch) -> None:
 
     assert index is not None
     assert metadata["schema_vector_index_reuse"] == "run_scoped"
-    # M23 新增 net_refund_amount 指标，Schema document corpus 因此从 194 增至 195。
-    assert metadata["schema_docs_count"] == 195
+    # M30 将 knowledge_docs 的 9 个字段文档从 Text2SQL corpus 隔离：195 -> 186。
+    assert metadata["schema_docs_count"] == 186
     assert metadata["milvus_collection"] == "m20_unit_unique"
     assert metadata["result_match_oracle_backend"] == "sqlite_deterministic_seed"
     assert fake_module.MilvusClient.insert_calls == 1

@@ -353,7 +353,11 @@ def test_challenge_and_diagnostic_schema_capabilities_have_recall_summary() -> N
         )
         graph = build_schema_graph(result.merged_hits, domain_schema=domain_schema, relations_path=RELATIONS_PATH)
         if case.expected_tables:
-            missing = sorted(set(case.expected_tables) - set(graph.tables))
+            # M30 后历史 diagnostic 仍可记录当时设想的 knowledge_docs，但当前 Text2SQL
+            # 召回合同只能要求 queryable DomainSchema 内的表。不可查询关系由对应 case 的
+            # semantic_validation / unsupported_relation 合同验证，不能反向要求重新暴露表。
+            queryable_expected = set(case.expected_tables) & set(domain_schema.tables)
+            missing = sorted(queryable_expected - set(graph.tables))
             if missing:
                 table_misses[case.case_id] = missing
         if "join_path" in case.phase3a_capabilities and len(graph.tables) > 1:

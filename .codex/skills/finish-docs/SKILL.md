@@ -1,36 +1,44 @@
 ---
 name: finish-docs
-description: 模块收工后半程：基于 <module>-notes.md 固化的素材和验证快照，更新 AI_CONTEXT / AI_CONTEXT_CHANGELOG / dev-log。Use when the user says 写技术档案、写日志、写复盘、finish docs、finish-docs.
+description: 模块收工后半程：严格基于 <module>-notes.md 更新 AI_CONTEXT、AI_CONTEXT_CHANGELOG 和 dev-log，并执行逐项清单、完整回读和硬性交付门。Use when the user says 写技术档案、写日志、写复盘、finish docs、finish-docs.
 ---
 
 # Module Finish · Docs（技术档案与复盘写作）
 
-本 skill 是模块收工整理的**后半程**，负责基于固化素材写三份文档：**AI_CONTEXT_CHANGELOG 模块档案、AI_CONTEXT 最新事实摘要、dev-log 学习复盘**。
+使用本 skill 必须阅读「强制执行门（硬门禁）」。本 skill 是模块收工整理的**后半程**，负责基于固化素材写三份文档：**AI_CONTEXT_CHANGELOG 模块档案、AI_CONTEXT 最新事实摘要、dev-log 学习复盘**。
 
-```text
-finish-module（注释查漏 + 验证 + 素材固化到 <module>-notes.md）
-        ↓
-finish-docs（本 skill：技术档案与复盘写作）
-        ↓
-用户人工审查
-        ↓
-accept-module（最终门禁检查）
-```
+## 强制执行门（硬门禁）
+
+每次调用 `finish-docs`，必须严格按以下顺序执行：
+
+1. 在采取任何操作前，完整读取本 `SKILL.md` 至 EOF，不得依赖记忆、摘要或以前执行过。
+2. 完整读取当前 `<module>-notes.md`。
+3. 在修改三份交付文档前，在 `<module>-notes.md` 新增“finish-docs 执行清单”小节：
+   - 逐字复制本文件「dev-log 交付门（必须执行）」标题下从第一个 `- [ ]` 到最后一个 `- [ ]` 的全部检查项；
+   - 逐字复制本文件「三文档交付门（必须执行）」标题下从第一个 `- [ ]` 到最后一个 `- [ ]` 的全部检查项；
+   - 禁止概括、删减、合并或改写检查项。
+4. 所有检查项初始为 `[ ]`。必须完成一项、核对一项、勾选一项；禁止预先勾选、批量勾选或仅写“全部通过”。
+5. 如果 notes 缺少模块验证快照、关键决策、范围、风险或遗留等完成收工所必需的素材，必须停止 `finish-docs`，明确声明缺项并退回 `finish-module` 补齐；不得用“过程细节未记录”代替关键素材后继续完成。
+6. 写完后，按照「阶段 5：收尾确认」完整回读三份文档的本次修改区域，并运行 `git diff --check`。
+7. 任一 checkbox 未变成 `[x]`，或者关键素材不完整、回读未完成、`git diff --check` 未通过，必须声明 `finish-docs 未完成`，禁止说“收工完成”或“可以验收”。
+8. 最终回复必须报告：素材来源、是否发生二次补齐（如发生，说明轮次和具体缺项）、两个交付门是否全部通过、完整回读是否完成、`git diff --check` 是否通过，以及 warning、未证明能力和遗留。
 
 ## 核心原则
 
-过程细节未记录就不编；档案编写信息来源：
+过程细节未记录就不编。档案编写的信息来源按以下优先级使用：
 
-- `docs/notes/<module>-notes.md`（**首选**，前半程固化的素材）
-- 会话记忆（开发和收工是同一个会话时可用）
+- `docs/notes/<module>-notes.md`（模块收工素材的单一事实源）
+- 会话记忆（开发和收工是同一个 AI 会话时可用）
 - `docs/state/AI_CONTEXT.md`
 - `docs/state/AI_CONTEXT_CHANGELOG.md`
 - git diff
-- 终端验证输出
 
-素材缺失时如实说明：AI 档案里写"过程细节未记录"；dev-log 里写"此处素材未记录，待补充"（或留空后续补记），不自行编造。
+素材缺失分为两类：
 
-验证快照必须来自 notes.md 固化的真实命令输出，或当前对话中明确可见的真实命令输出。不能写“预计通过”“应该通过”。
+- **完成关键素材缺失**：包括模块验证快照、关键决策及最终选择、实际改动范围、风险、安全或兼容边界、遗留事项。缺少任一项时必须停止 `finish-docs`，列出缺项并退回 `finish-module` 补齐。
+- **非关键过程细节缺失**：例如某次中间排查的完整过程。允许如实写“过程细节未记录”，但不得据此推测、补写或美化结论。
+
+`finish-docs` 不得新跑数据库、API、smoke、pytest、Eval 或真实 LLM 等模块验证来补造素材；本阶段只能运行文档回读、Git 范围核对和 `git diff --check` 等交付检查。
 
 ## 阶段 1：读取素材
 
@@ -38,9 +46,9 @@ accept-module（最终门禁检查）
 2. 读取 `docs/state/AI_CONTEXT.md` 当前状态 / 最近验证事实 / 当前路线判断，确认当前模块、默认配置、最新基线。
 3. 按需读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 近期变更记录，确认档案格式与最近结论。
 4. 跑 `git status --short` 和 `git diff --name-only` 核对改动范围与 notes.md 一致。
-5. 如果 notes.md 缺失关键素材（例如没有验证快照、没有决策记录），在文档里明确写“过程细节未记录”，并提示用户：可以补跑验证/补记素材后再继续；不要自行脑补。
+5. notes 中关键素材缺失时立即停止 `finish-docs`，列出具体缺项并退回 `finish-module` 补齐；只有非关键过程细节缺失时，才允许标注“过程细节未记录”后继续。
 
-## 阶段 2：更新 docs/state/AI_CONTEXT.md / docs/state/AI_CONTEXT_CHANGELOG.md
+## 阶段 2：更新 AI_CONTEXT.md / AI_CONTEXT_CHANGELOG.md
 
 模块完成时，在 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」头部新增一节（`###` 标题），保存完整模块档案和实验记录。
 
@@ -51,7 +59,7 @@ accept-module（最终门禁检查）
 ```md
 ### Mx 模块名（YYYY-MM-DD）
 
-- 改动范围：先跑 `git diff --name-only <base>..HEAD`（base 为本模块起始 commit）获取完整变更清单，再归并为 glob 模式（如 `engine/nl2sql/*`、`app/schemas/agent.py`），归并后逐条对照原始清单确认无遗漏。如果无明确起始 commit，用 `git status --short` 和 `git diff --stat --cached` 代替。
+- 改动范围：先运行 `git status --short`，覆盖暂存、未暂存和未跟踪文件。如果有明确的模块起始 commit，再运行 `git diff --name-only <base>` 获取从模块起点到当前工作区的 tracked 文件变更，并运行 `git diff --cached --name-only` 交叉检查暂存区；如果没有明确起始 commit，则使用 `git status --short`、`git diff --name-only` 和 `git diff --cached --name-only` 共同核对。最终归并为 glob 模式（如 `engine/nl2sql/*`、`app/schemas/agent.py`），归并后逐条对照原始文件清单，确认没有遗漏未提交、已暂存或未跟踪文件。
 - 关键记录：
   - 比如关键决策、决策原因、实验结果、新发现、用户做出的选择
 - 参考资料：
@@ -64,9 +72,7 @@ accept-module（最终门禁检查）
   - 比如：下一模块要接什么，当前还有什么风险，后续采用什么技术或方法
 ```
 
-同时更新 `docs/state/AI_CONTEXT.md` 顶部「当前状态」：
-
-- `当前模块`：写本次 Mx 的名称与当前阶段；收工时标 `Mx 未验收（待 accept-module）`，验收通过后由 `accept-module` 改为 `Mx 已验收（日期）`；
+同时更新 `docs/state/AI_CONTEXT.md` 顶部「当前状态」。
 
 如果只是小修复，不写完整档案，只在 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」新增一个 `###` 条目（内容 1-3 行）；仅当它影响当前路线时，再同步一句到 `docs/state/AI_CONTEXT.md`「最新事实快照」。
 
@@ -320,7 +326,9 @@ accept-module（最终门禁检查）
 
 ```
 
-## 阶段4：交付门
+## 阶段 4：交付门
+
+交付门必须逐字复制到 `<module>-notes.md` 的“finish-docs 执行清单”，并逐项实际检查、记录结果和单独勾选。完整回读统一按照「阶段 5：收尾确认」执行；禁止在最终回复前凭记忆整体判断或一次性批量勾选。
 
 ### dev-log 交付门（必须执行）
 
@@ -352,19 +360,36 @@ accept-module（最终门禁检查）
 写完后、回复用户前，必须逐项自检：
 
 - [ ] `AI_CONTEXT_CHANGELOG.md`：本次完整模块有新的 `###` 条目，包含改动范围、关键记录、参考资料、验证快照、遗留/后续。
-- [ ] `AI_CONTEXT_CHANGELOG.md`：如无明确模块起始 commit，已说明改动范围依据为 `git status --short` 与 diff 核对；用户确认过关键方案时，已记录主要选项、风险、推荐与最终选择。
-- [ ] `AI_CONTEXT.md`：只同步影响续接的当前事实，不复制完整历史；当前模块、默认配置/最新基线/活跃边界均准确。
-- [ ] 涉及评测口径、文档入口、归档迁移、默认行为或长期兼容边界时，已在 changelog 或当前事实摘要中留下可追溯记录。
-- [ ] 三份文档刚写入的章节均已回读，确认无截断、乱码、标题层级错误或事实夸大。
+- [ ] `AI_CONTEXT_CHANGELOG.md`：改动范围已经通过 `git status --short` 和对应 diff 命令核对，覆盖已提交、已暂存、未暂存和未跟踪的模块文件；文档中的归并范围与原始文件清单一致。
+- [ ] `AI_CONTEXT_CHANGELOG.md`：如果用户确认过关键方案，已经完整记录每个主要选项的做法、影响、适用条件和风险，以及 AI 的建议和用户最终选择；没有用“选择 A/B”代替决策上下文。
+- [ ] `AI_CONTEXT.md`：只同步影响续接的当前事实，不复制完整历史；当前模块、默认配置、最新基线和活跃边界均准确。
+- [ ] 涉及评测口径、文档入口、归档迁移、默认行为、安全边界或长期兼容边界时，已在 changelog 或当前事实摘要中留下可追溯记录。
+- [ ] 已检查本模块的新结论是否推翻或修正旧结论；如有，已经在旧条目原位添加 `⚠️ 注` 并指向本次新结论；如无，也已实际检查并确认不需要添加。
+- [ ] 三份文档刚写入的章节均已按照「阶段 5：收尾确认」完整回读，确认无截断、乱码、标题层级错误、事实夸大或未经 notes 支持的结论。
 
-任一项不满足时，禁止声明 finish-docs 完成；先补齐。
+任一项不满足时，禁止声明 `finish-docs` 完成；必须先补齐并重新执行受影响的检查项。
 
 ## 阶段 5：收尾确认
 
-写完 docs/state/AI_CONTEXT.md、docs/state/AI_CONTEXT_CHANGELOG.md 和 dev-log.md 后，回读各自刚写入的章节，确认格式正确、内容完整、没有截断或乱码。发现异常立即修正。
+按以下顺序执行，不得调换：
 
-最后回复用户，列出本次写作做了什么：
+1. 完整回读 `AI_CONTEXT_CHANGELOG.md` 本模块新章节。
+2. 完整回读 `AI_CONTEXT.md` 的当前状态、最新事实、路线判断和活跃坑。
+3. 完整回读 `dev-log.md` 本模块新章节。
+4. 对照 `<module>-notes.md` 逐项执行 dev-log 交付门。
+5. 对照 `<module>-notes.md` 逐项执行三文档交付门。
+6. 检查旧结论是否因本模块过时；需要时在旧条目原位添加 `⚠️ 注`。
+7. 运行 `git diff --check`。
+8. 将每项真实结果写回 notes，全部通过后才允许宣布完成。
 
-- 更新了哪些文档（AI_CONTEXT_CHANGELOG / AI_CONTEXT / dev-log）
-- 素材来源（哪个 notes.md，哪些内容来自验证快照）
-- 有哪些 warning / 遗留
+最终回复必须明确包含：
+
+- 更新了哪些文档；
+- 素材来自哪个 notes；
+- 是否发生二次补齐（如发生，说明轮次和具体缺项）；
+- dev-log 交付门是否全部通过；
+- 三文档交付门是否全部通过；
+- warning、未证明能力和遗留；
+
+不得只写“已更新三份文档”或“检查通过”而不报告上述结果。
+

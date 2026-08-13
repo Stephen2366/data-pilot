@@ -1,0 +1,49 @@
+# M30 指标知识投影配置。
+#
+# ★ 本文件只声明“哪些 metrics.yaml 指标需要形成知识条目”及其展示/访问元数据，
+# 不允许填写公式、过滤条件或口径正文；正文始终由 metrics.yaml 对应 key 确定性生成。
+metric_projections:
+  - document_key: gmv_metric_note
+    revision: "2026-08-13-r1"
+    title: GMV 指标口径说明
+    knowledge_type: metric_definition
+    metric_key: gmv
+    status: active
+    anchor: metric-gmv
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: coupon_order_count_note
+    revision: "2026-08-13-r1"
+    title: 优惠券使用订单数口径
+    knowledge_type: metric_definition
+    metric_key: coupon_order_count
+    status: active
+    anchor: metric-coupon-order-count
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: coupon_usage_rate_note
+    revision: "2026-08-13-r1"
+    title: 优惠券使用率口径
+    knowledge_type: metric_definition
+    metric_key: coupon_usage_rate
+    status: active
+    anchor: metric-coupon-usage-rate
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: behavior_funnel_rule
+    revision: "2026-08-13-r1"
+    title: 加购到支付转化率口径
+    knowledge_type: metric_definition
+    metric_key: add_to_pay_conversion_rate
+    status: active
+    anchor: metric-add-to-pay-conversion-rate
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]

@@ -64,7 +64,6 @@ def _table_aliases(table_name: str) -> list[str]:
         "orders_wide": ["订单宽表", "看板口径", "渠道 GMV 看板"],
         "users": ["用户表", "用户"],
         "tickets": ["工单表", "工单"],
-        "knowledge_docs": ["知识库文档表", "知识库文档"],
     }
     return aliases.get(table_name, [f"{table_name}表"])
 

@@ -13,5 +13,5 @@ error_cases:
     fixed_sql: SELECT id, user_name, role, status FROM users LIMIT 10
   - id: customer_service_orders
     bad_sql: SELECT order_no FROM orders LIMIT 10
-    blocked_reason: customer_service 角色只允许访问 tickets 和 knowledge_docs。
+    blocked_reason: customer_service 的 Text2SQL 只允许访问 tickets；政策正文必须走未来受控的 Knowledge Tool。
     fixed_sql: SELECT ticket_no, status FROM tickets LIMIT 10

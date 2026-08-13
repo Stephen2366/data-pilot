@@ -4,11 +4,11 @@
 >
 > **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/state/AI_CONTEXT_CHANGELOG.md`。
 
-更新时间：2026-08-09
+更新时间：2026-08-13
 
 ## 一句话结论
 
-DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 张物理表**，并通过 `20260722_0003` polish 补齐宽表字段、优惠券有效期索引和价格历史调价原因字段。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。当前 Text2SQL 与 Eval 都以这套 14 表库为业务底座，不再回到旧 7 表库。
+DataPilot 当前数据库有 **14 张物理表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs`。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。
 
 ## 关键入口
 
@@ -20,6 +20,8 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 - 表结构自然语言描述：`domain_pack/schema_desc/*.md`
 - 结构化关系事实源：`domain_pack/schema_desc/relations.yaml`
 - 指标口径事实源：`domain_pack/metrics.yaml`
+- 政策/规则事实源：`domain_pack/kb_docs/*.md`
+- Staged catalog builder：`engine/rag/catalog.py`
 - Few-shot 示例：`domain_pack/sql_examples/basic.yaml`
 - M27 当前 case catalog：`eval/cases/catalog/scenarios.yaml`
 - 当前 Eval 运行入口与 Gate：`docs/state/runbook.md`
@@ -39,7 +41,7 @@ DataPilot 当前数据库已经从阶段二的 7 表 demo 底座升级为 **14 �
 | `order_items` | 18000 | 订单明细行 | 商品维度 GMV、销量、明细退款归因 | Join 后统计订单量必须 `COUNT(DISTINCT orders.id)` |
 | `refunds` | 1000 | 退款单 | 退款量、退款原因、退款率 | `order_item_id` 有 100 条为空（10%），属于整单退款，只能通过 `order_id` 关联；商品维度退款率必须用 LEFT JOIN，INNER JOIN 会丢 10% |
 | `tickets` | 300 | 客服工单 | 高优先级待处理、客服问题分析 | `order_id` 可空，咨询类工单不一定绑定订单 |
-| `knowledge_docs` | 10 | 知识库文档 | RAG / 客服规则语料 | 后续 RAG 会继续使用 |
+| `knowledge_docs` | 11 | legacy 知识投影 | 兼容既有物理表/seed | 不属于 Text2SQL queryable universe；字段有损，不得作为 authority、正式 ACL 或 runtime catalog |
 | `coupons` | 10 | 优惠券 | 券信息、券类型、有效期 | 固定券码 `JUNE_FIXED_50` |
 | `order_coupons` | 3000 | 订单-优惠券桥接 | 优惠券使用率、券渠道分析 | 多对多桥接表，一单可多券，订单数要去重 |
 | `user_behavior_log` | 10000 | 用户行为事件 | 加购到支付转化率、设备分析 | 转化率按 `event_type` 事件计数，不是订单表 |
@@ -140,11 +142,12 @@ Phase 2.7 的 seed 有意保留少量真实业务异常，供 Text2SQL 诊断使
 
 ## RBAC / 安全边界
 
-- 底层表级 RBAC：`admin` 可访问全部 14 表；`ops` 可访问全部 14 表但不应访问敏感字段；`customer_service` / `demo_user` 只允许访问有限业务表。
+- Text2SQL 表级 RBAC 只面向 13 张 queryable tables；SQLAlchemy/Alembic 的 14 张物理表不是权限全集。
 - Text2SQL 安全口径：**敏感字段优先于角色权限**，`admin` 也不能通过自然语言 Text2SQL 直出 `users.email` / `users.phone` 明文字段；如后续确需查看，应设计脱敏 / 审计 / 专门接口。
-- `ops`：可访问全部 14 表，但不能查 `users.email` / `users.phone` 等敏感字段。
-- `customer_service`：仅可访问 `tickets`、`knowledge_docs`。
-- `demo_user`：仅可访问 `products`、`channels`、`knowledge_docs`、`product_categories`、`orders_wide`。
+- `admin` / `ops`：可访问全部 13 张 queryable tables，但不能查 `users.email` / `users.phone` 等敏感字段。
+- `customer_service`：Text2SQL 仅可访问 `tickets`。
+- `demo_user`：Text2SQL 仅可访问 `products`、`channels`、`product_categories`、`orders_wide`。
+- 所有角色都不能通过 Text2SQL 查询 `knowledge_docs`；未来文档权限必须走 trusted caller + Knowledge Tool ACL seam。
 - SQL Guard 仍要求只读 SQL；`DROP` / `DELETE` / `UPDATE` / 多语句 / 越权表字段都应拦截。
 
 权限事实源是 `engine/sql_guard/rbac.py`。新增表或新增角色时，要同步测试安全 case。
