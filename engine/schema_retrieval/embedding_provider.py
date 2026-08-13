@@ -11,6 +11,8 @@ from collections.abc import Callable
 from typing import Any
 from urllib import request
 
+from engine.governance import OutboundRequest, require_outbound
+
 DEFAULT_SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
 DEFAULT_SILICONFLOW_EMBEDDING_MODEL = "BAAI/bge-m3"
 DEFAULT_DASHSCOPE_EMBEDDING_BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
@@ -72,6 +74,17 @@ class SiliconFlowEmbeddingProvider:
         if not missing_texts:
             return [self._cache[text] for text in texts]
 
+        # ★ 网络前强制出站门：只放行已登记的 schema_text 数据类别；缺策略或字段越界在
+        # transport 前失败关闭，同 provider 的新 Knowledge payload 也无法绕过。
+        require_outbound(
+            OutboundRequest(
+                receiver="siliconflow_embedding",
+                node_purpose="schema_embedding",
+                data_class="schema_text",
+                fields=frozenset({"texts", "model", "dimensions"}),
+                fallback_available=False,
+            )
+        )
         payload: dict[str, object] = {
             "model": self.model,
             "input": missing_texts,
@@ -156,6 +169,16 @@ class DashScopeEmbeddingProvider:
         if not missing_texts:
             return [self._cache[text] for text in texts]
 
+        # ★ 同 SiliconFlow 路径：真实网络前必须经过出站裁决，失败关闭且不影响已缓存结果。
+        require_outbound(
+            OutboundRequest(
+                receiver="dashscope_embedding",
+                node_purpose="schema_embedding",
+                data_class="schema_text",
+                fields=frozenset({"texts", "model", "dimensions"}),
+                fallback_available=False,
+            )
+        )
         for batch_start in range(0, len(missing_texts), self.max_batch_size):
             batch_texts = missing_texts[batch_start : batch_start + self.max_batch_size]
             payload: dict[str, object] = {

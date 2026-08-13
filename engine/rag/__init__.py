@@ -1,7 +1,7 @@
 """Phase 4 文档知识能力。
 
-M30 只在这里建立可信原件到 ``staged catalog`` 的边界；检索、Knowledge Tool、
-Evidence/citation 和 active 发布仍属于后续模块。
+这里只保留 M30 catalog 的稳定短入口。M31 governance、Evidence 和 release 相互有明确依赖
+方向，调用方应从对应子模块导入，避免一个聚合 ``__init__`` 重新制造循环依赖和万能接口。
 """
 
 from engine.rag.catalog import (

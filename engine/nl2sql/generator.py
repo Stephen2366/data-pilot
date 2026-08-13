@@ -16,6 +16,7 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from engine.governance import GovernanceError, OutboundRequest, require_outbound
 from engine.nl2sql.fidelity_contract import SQLPlanFidelityResult, evaluate_sql_plan_fidelity
 from engine.nl2sql.llm_call import LLMCallEvidence, LLMGenerationError, execute_llm_call
 from engine.nl2sql.planner import QueryPlan, QueryPlanStep
@@ -67,7 +68,9 @@ class SQLPlanContractError(LLMGenerationError):
 class LLMClient(Protocol):
     """最小 LLM client 协议，方便测试替换真实 DeepSeek 调用。"""
 
-    def complete(self, *, prompt: str, system_prompt: str | None = None) -> str:
+    def complete(
+        self, *, prompt: str, system_prompt: str | None = None, node_purpose: str = "sql_generation"
+    ) -> str:
         """输入完整 prompt，返回模型原始文本。"""
 
 
@@ -91,6 +94,7 @@ class OpenAICompatibleChatClient:
     default_base_url = ""
     default_model = ""
     missing_key_message = "LLM API key 缺失。"
+    outbound_receiver = "unknown_chat"
 
     def __init__(
         self,
@@ -111,14 +115,32 @@ class OpenAICompatibleChatClient:
         self.max_retries = max_retries
         self.retry_backoff_seconds = retry_backoff_seconds
 
-    def complete(self, *, prompt: str, system_prompt: str | None = None) -> str:
-        """调用 OpenAI-compatible chat completions 接口。"""
+    def complete(
+        self, *, prompt: str, system_prompt: str | None = None, node_purpose: str = "sql_generation"
+    ) -> str:
+        """调用 OpenAI-compatible 接口；网络前必须通过精确用途的出站裁决。"""
 
         if not self.api_key:
             raise LLMGenerationError(self.missing_key_message)
 
         # 步骤 1：按 OpenAI-compatible chat 格式组装请求 -------------------------------
         resolved_system_prompt = system_prompt or "你只负责把中文业务问题转换为安全的单条 SELECT SQL。"
+        try:
+            require_outbound(
+                OutboundRequest(
+                    receiver=self.outbound_receiver,
+                    node_purpose=node_purpose,
+                    data_class="text2sql_prompt",
+                    fields=frozenset({"prompt", "system_prompt", "model"}),
+                    fallback_available=False,
+                )
+            )
+        except GovernanceError as exc:
+            raise LLMGenerationError(
+                f"{self.provider_label} 出站策略拒绝本次调用。",
+                stage=node_purpose,
+                error_subtype="outbound_denied",
+            ) from exc
         payload = {
             "model": self.model,
             "messages": [
@@ -191,6 +213,7 @@ class DeepSeekChatClient(OpenAICompatibleChatClient):
     # 2026-07-31 主模型从 deepseek-v4-pro 切换为 deepseek-v4-flash（更快更便宜的非推理模型）。
     default_model = "deepseek-v4-flash"
     missing_key_message = "DeepSeek API key 缺失，请配置 DEEPSEEK_API_KEY 或 LLM_API_KEY。"
+    outbound_receiver = "deepseek_chat"
 
 
 class QwenChatClient(OpenAICompatibleChatClient):
@@ -200,6 +223,7 @@ class QwenChatClient(OpenAICompatibleChatClient):
     default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     default_model = "qwen3.7-plus"
     missing_key_message = "Qwen API key 缺失，请配置 DASHSCOPE_API_KEY。"
+    outbound_receiver = "qwen_chat"
 
 
 def get_default_llm_client() -> LLMClient:

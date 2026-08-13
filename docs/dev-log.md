@@ -1940,3 +1940,124 @@ python -c "from engine.rag import build_staged_catalog; print(build_staged_catal
 
 **本地启动体验：** 本模块暂无独立 API 或页面，因为它只建立 staged catalog 和 Text2SQL 安全地基，尚未通过 G3 接入 Knowledge Tool。人工体验可先阅读 `domain_pack/kb_docs/`，再运行上面的只读 manifest 命令，重点检查 `lifecycle_status=staged`、11 个 entry、authority reference 和 identity；环境未激活时，把 `python` 换成 `AGENTS.md` 中的项目 Python 完整路径。
 
+## ★ M31 可信证据与安全发布
+
+（2026-08-13）
+
+**简述**：把 M30 的 11 条 staged 知识推进为一个经过身份、ACL、出站、Evidence/citation 和故障发布合同保护的 **active release**，但刻意不提前实现检索和问答。
+
+### 先用大白话讲
+
+M30 像把 11 份公司制度整理进了档案室，但门还没正式打开。M31 做的是档案室的**门禁、借阅单、引用凭证和版本切换**：前端自己写“我是管理员”不能开门；一份文档即使被找到，也要在选中和真正交给生成器前各检查一次权限；答案里的引用不能临时编个文件名；新版本只有完整写好、校验好、重新加载成功后，才把门牌从旧版本切到新版本。
+
+用户最终批准了 **G3 方案 A**，所以当前 11-entry release 已正式 active。这里的“active”只表示它可以被后续 P2 安全消费，不表示 DataPilot 已经会检索政策、生成 RAG 答案或在 API 中展示 citation。
+
+### 这次做了什么
+
+本模块处理的核心矛盾是：知识内容已经治理好，但系统还不能证明“谁在用、能不能用、实际给模型看了什么、引用是否真实、发布失败会不会暴露半成品”。最终结论是先把这些确定性地基做成小而深的接口，再让下一模块只组合接口，不在 Knowledge Tool、Graph、Trace 和 Eval 中各写一份安全判断。
+
+1. **先把“用户自报角色”与可信身份彻底分开**
+
+   原来的 `QueryRequest.user_role` 是客户端传来的字符串。如果未来直接拿它做文档 ACL，攻击者只要把 role 改成 `admin` 就可能读到受限政策。M31 引入 **Trusted caller（可信调用者）**：它像 Spring Security 已完成认证后的 `Authentication`，业务层只接收解析好的 caller，不读取 token、cookie 或原始角色声明。production authenticated、demo fixture 和 test fixture 可以成为授权主体；请求体声明只能变成 `unverified_request_claim`，其 `resolved_roles` 固定为空。
+
+   文档授权再按 trust、active revision、purpose、`public/allowed_roles` 的固定顺序判断，admin 也没有隐式全读权。候选构造前做 `pre_selection` 检查，真正进入生成器前做 `pre_generation` 二次检查；拒绝投影统一显示 `not_authorized`，避免标题、文档 ID、revision、正文甚至“某文档是否存在”成为侧信道。没有采用“相信前端 role”或“让模型看 prompt 自己守规矩”的宽松方案，因为安全边界必须由确定性代码控制。11 entries × 角色 × 用途矩阵、role 篡改和 admin 非全读反例都已通过；但生产 JWT/OAuth 和 RAG API 尚未实现。
+
+2. **让 Evidence 和 citation 记录真实使用过程，而不是事后拼来源**
+
+   “检索命中过”不等于“被选中”，更不等于“模型真正看过并用于回答”。M31 建立 **Typed Evidence（带类型证据）**：公共外壳保存 run、authority、revision、content identity、anchor 和用途，内部 payload 分为 Document 与 SQL；授权决策、runtime 和 outbound 仍是独立引用，不塞进万能大对象。Evidence 只能沿 `candidate → selected → generation_visible → cited` 同轮单步前进。
+
+   **Citation slot（引用槽位）**由代码按 run 和 claim 预分配，validator 再检查 slot、run、阶段、文档 safe-ref、revision/content identity、anchor、用途和入模前授权。模型自造 ID、引用只到 selected 的证据、跨轮引用、旧 revision、错误 anchor 或拿另一份文档的 allow decision 冒用，都会整体得到 `citation_invalid`；同一份真实 Evidence 可以支持多个 claim，但 ledger 只推进一次。没有采用“答案末尾拼文件名/sources”的简单方案，因为它证明不了生成器看过什么、也不能阻止越权引用。篡改和多 claim 复用测试已通过；开放语义上“这段证据是否真的支持这句话”仍要在 P2 用 gold/人工/advisory judge 验证。
+
+3. **用不可变 release 和独立 Phase 4 Gate 完成安全发布**
+
+   如果直接覆盖一个运行目录，写到一半崩溃时，服务可能看到新旧内容混合。M31 采用 **Immutable release bundle（不可变发布包）**：完整正文投影、corpus/build、policy 和 contract 一起计算 canonical hash；相同 identity 的文件不允许出现不同字节。新的 candidate 独立写入并重载成功后，才原子替换 `active.json`；pointer 记录 current/previous 和 G3 approval。即使故障注入先破坏目标 pointer 再报错，也恢复精确旧 pointer；启动发现 active 损坏会失败关闭，不自动复活可能已撤销的 previous。显式 rollback 也要重新对照当前 authority、revision、ACL 和 policy，而不是“旧文件还在就能回去”。
+
+   用户比较过方案 A“验证后激活”和方案 B“继续 staged”：A 能让 P2 开工，但派生 bundle 保存正文，未来真实敏感内容要补 retention/delete；B 更保守，却会暂停 RAG 主线。建议并最终选择 A。独立 **`phase4-v1` contract/security family** 用 8 个 Scenario、12 个 required assertion 检查 caller、ACL、outbound、Evidence、citation 和发布；每题只执行一次，artifact 对 caller/runtime/policy/corpus/release/Scenario/assertion 做 closed-world 对账。最终 Gate 为 `12/12 passed`，全仓为 `276 passed, 3 skipped`。这些证据证明确定性合同和兼容性，没有证明 retrieval、答案正确率或真实 LLM 效果。
+
+### 新概念
+
+- **Active pointer（活动指针）**：一个很小的文件，只说明当前服务应读取哪个完整 release，并保留上一版 identity。可以类比数据库里的“当前版本号”：先准备好新数据，再原子改版本号，消费者不会读到半成品。
+- **Immutable release bundle（不可变发布包）**：生成后不原地修改的完整运行投影。内容变化就产生新 identity，像带内容哈希的制品包；它不是新的正文编辑入口，authority 仍是 Markdown 和 `metrics.yaml`。
+- **AuthorizationDecision（授权决定）**：一次确定性 allow/deny 结果，记录 policy、caller/document safe-ref、阶段和用途。它不是角色字符串，也不能拿一份文档的 decision 给另一份 Evidence 冒用。
+- **Citation integrity（引用完整性）**：代码能证明引用 ID 存在、同轮、已入模、有权、版本和 anchor 正确。它与 semantic support 不同：前者是确定性真伪，后者还要判断证据内容是否足以支持自然语言 claim。
+- **Closed-world Eval（闭世界评测）**：不仅检查已有结果，还要求该有的 Scenario、replicate、assertion 和 identity 一个不少、一个不多。否则少跑一半也可能得到“现有结果 100% 通过”。
+
+### 代码阅读路线
+
+1. **从身份与两类策略开始**：`engine/governance.py`
+   先看 `TrustedCaller` 的四种 trust level，再看 `DocumentAuthorizationPolicy.authorize()` 的固定检查顺序，最后看 `OutboundPolicy.decide()` 的精确白名单。这里解决“谁可信、文档能否使用、数据能否外发”三个确定性问题；重点理解默认拒绝和 safe projection，不需要死记 hash 实现。
+
+2. **跟一份文档走完 Evidence 生命周期**：`engine/rag/evidence.py`
+   从 `make_document_evidence()` 看 `pre_selection` decision 如何绑定 document safe-ref；再看 `EvidenceLedger.transition()` 为什么在 `generation_visible` 前要求第二次授权；最后看 `allocate_citation_slot()` 与 `validate_citations()` 如何把 claim 绑定到同轮真实入模 Evidence。这一层不负责检索和写答案，只保证证据事实可靠。
+
+3. **看 candidate 怎样变成 active**：`engine/rag/release.py` → `domain_pack/kb_releases/active.json`
+   先读 `build_candidate_release()` 的 canonical serialization/独立重载，再读 `activate_release()` 的 current/previous 和失败恢复，最后读 `load_active_release()` 与 `rollback_active_release()` 的失败关闭。运行文件只是 builder 产物，不能反向编辑 authority。
+
+4. **看现有远程调用怎样被约束**：`engine/nl2sql/llm_call.py` → `engine/nl2sql/generator.py`；`engine/schema_retrieval/embedding_provider.py`
+   `llm_call` 把 `query_plan/sql_generation` 用途交给真实 chat client；client 和 embedding provider 在 fake/真实网络函数前调用 outbound gate。这样保留现有 Text2SQL 数据类别，却不会因为 provider 相同就自动放行 Document Evidence。
+
+5. **最后读新的确定性评测与反例**：`eval/phase4_contracts.py` → `tests/test_m31_*.py`
+   先看 8 个 Scenario 如何各执行一次并产出共享 `ExecutionEvidence`，再看 completed artifact 如何做 closed-world 对账；测试重点覆盖 role 篡改、ACL 侧信道、伪 citation、hash 篡改、pointer 故障、重启和 rollback。它与 M27 v3 分离，不会把 RAG 字段塞回旧 Text2SQL artifact。
+
+核心数据流是：
+
+`active release entry`
+→ `trusted caller + pre-selection AuthorizationDecision`
+→ `candidate/selected Document Evidence`
+→ `pre-generation AuthorizationDecision`
+→ `generation-visible Evidence`
+→ `code-assigned citation slot`
+→ `validated cited Evidence`
+
+### 设计要点
+
+- **安全判断集中且可删除测试**：P2 只依赖 caller/authorization/Evidence/release 小接口；删掉任一检查会直接让对应 required 反例失败。
+- **同 provider 不继承权限**：Text2SQL 已登记的 Qwen 调用不代表 answer composer、Document Evidence 或 Eval Judge 获批；LangFuse Cloud 仍关闭。
+- **发布失败不等于自动回退**：候选失败保持旧 active；但启动发现 current 损坏时失败关闭，因为自动复活 previous 可能恢复已撤销正文。
+- **第一次发布没有 rollback 神话**：`previous=null` 是真实状态；只有未来第二版且旧版重新通过当前 policy/authority 校验，才允许显式 rollback。
+- **能力边界不夸大**：`phase4-v1` 证明安全和发布合同，不是 RAG 召回率或答案质量分数。
+
+### 面试怎么讲
+
+**可直接复述**：我在 RAG 检索之前先做了一层可信 Evidence 和安全发布地基。客户端自报 role 只会生成 unverified caller，文档按 trust、revision、purpose 和显式 role allowlist 在候选与入模前双检；现有 chat/schema embedding 远程调用也在 transport 前按 receiver、node purpose、data class 和 fields 精确授权，新 Knowledge 数据默认拒绝。Evidence 使用 Document/SQL typed payload 和四阶段不可变 ledger，citation slot 由代码分配并校验同轮、入模、ACL、revision 和 anchor。发布采用内容哈希的 immutable bundle，完整重载后才原子切 active pointer，故障会保留旧 pointer，rollback 重新验 authority/policy。用户批准后 11-entry release 已 active；`phase4-v1` 12 个 required assertion 全过，全仓 276 passed。这个模块只证明确定性安全与发布，不声称检索或真实答案质量已经完成。
+
+1. **[基础追问] 为什么文档权限要检查两次，检索前检查一次不够吗？**
+
+   候选阶段检查能减少未授权内容进入后续处理，但候选还可能经过缓存、去重、版本变化或调用链 bug。真正入模前再检查一次，才能证明生成器此刻看到的 revision、purpose 和 caller 仍然有效。它类似 Controller 入口鉴权后，执行敏感 Service 操作前仍检查资源级权限；两次检查共享同一个 policy，不是复制两套规则。
+
+2. **[工程/深挖追问] 你怎么证明 citation 不是模型随便编的？**
+
+   模型拿不到自由生成可信 ID 的权力。代码先为本轮 claim 分配 slot，validator 再从同轮 ledger 查 evidence id，要求它已经处于 `generation_visible`，并对照当前 active entry 的 document/revision/content identity/anchor、用途和 `pre_generation` decision。unknown、selected-only、跨轮、旧版本、错误 anchor、冒用另一文档 decision 都用反例测试拒绝。这里证明的是 citation integrity；语义支持度仍留给 P2 的 gold/人工评估。
+
+3. **[工程/深挖追问] 原子改 `active.json` 就等于有完整事务和高可用发布了吗？**
+
+   不等于。M31 的保证范围是当前单机文件系统：bundle 先完整写入并重载，pointer 用同目录 replace 切换，故障恢复精确旧 pointer。它没有解决多实例并发、对象存储一致性、分布式锁或在线无停机协调。当前项目没有这些真实需求，所以先用可测试的本地深模块；出现多实例/运营后台需求时，再替换 release storage adapter，而不是把单机保证包装成分布式事务。
+
+4. **[压力追问] 你做了这么多安全对象，业务还不能回答 RAG，这是不是过度设计？**
+
+   这个质疑合理：M31 没提升用户可见回答能力。它的目标也不是做展示层，而是关闭几条一旦接上生成器就难以补救的边界——客户端 role 越权、未入模证据被引用、同 provider 静默扩大外发、半成品发布。证据是 12 个 required contract assertion、发布故障注入和 276 项全仓回归，不是主观说“更安全”。复杂度也受控在三个深模块和独立 Eval family，没有引入 Graph、向量库或生产认证。下一步 P2 会直接复用这些接口形成可见 RAG 闭环；如果 P2 调用者仍需要理解 release 文件或重写 ACL，就说明本模块的抽象没有做好。
+
+### 验证与下一步
+
+- **模块专项**：M31 caller/ACL/outbound、Evidence/citation、release 和 Phase 4 artifact 共 `45 passed in 1.23s`。
+- **跨模块 Gate**：M31 + M30 + Phase3A + legacy API/Trace + M27 foundation/review 为 `93 passed, 1 warning`。
+- **全仓验证**：`276 passed, 3 skipped, 1 warning in 481.28s`；skip 是既有 Milvus/远端 embedding 条件测试，warning 是既有 Starlette/httpx deprecation。
+- **发布与 Eval**：active release `4e86bdd...`、11 entries、previous `null`；`phase4-v1` artifact `197e0d62...`，required `12 passed / 0 failed / 0 not_observed`。
+- **尚未证明**：未运行真实 LLM、远程 embedding、Milvus、LangFuse Cloud 或真实 RAG Eval；没有 Knowledge Tool、retrieval、Composer、公开 API citation、Graph/Router/Hybrid。
+- **下一步**：进入 P2 确定性 RAG 垂直切片，只消费 active catalog 和 M31 治理接口，先做本地可替换 retrieval + Knowledge Tool，再形成薄 Gate/Composer/Citation 闭环。
+
+可复制验证命令：
+
+```powershell
+# M31 确定性安全/发布专项；预计 45 passed，不访问网络。
+python -m pytest tests/test_m31_governance.py tests/test_m31_evidence_citation.py tests/test_m31_release.py tests/test_m31_phase4_contracts.py -q --basetemp=.agent_work/temp/m31-review-focused
+
+# 全仓确定性回归；当前结果为 276 passed、3 skipped、1 个既有 warning。
+python -m pytest -q --basetemp=.agent_work/temp/m31-review-full
+
+# 只读查看正式 active 状态；预计 active=true、11 entries、previous=None。
+python -c "from engine.rag.release import inspect_release_state; print(inspect_release_state())"
+```
+
+**本地启动体验：** 本模块暂无独立 API 或页面，因为它提供的是 P2 将消费的安全地基，`/api/query` 仍未接 RAG。现在最直接的人工体验是运行上面的只读 `inspect_release_state()`，确认 current release、entry count 和 previous；环境未激活时，把 `python` 换成 `AGENTS.md` 中的项目 Python 完整路径。不要直接修改 `domain_pack/kb_releases/*.json`，内容变化应从 authority 重新 build/publish。
+

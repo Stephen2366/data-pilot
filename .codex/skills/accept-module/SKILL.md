@@ -123,20 +123,43 @@ ls -la
 
 ## 检查 7：真实测试
 
+默认执行**裁剪验证**（模块专项 + 受影响回归 + 关键基线）；全量 pytest 保留但默认不启用，作为最终保险。裁剪范围的选取必须写进报告，铁律仍然适用：报告里的 ✅ 只对应本次实际执行过的命令。
+
+### 默认：裁剪验证（必须执行）
+
+1. **模块专项**：本模块新增 / 修改的测试文件（如 `tests/test_mXX_*.py`）。
+2. **受影响回归**：本模块改动波及的既有测试（依据 `git diff` 波及文件与本模块 notes 的回归记录）。
+3. **关键基线**：跨模块长期契约测试（如 M30 catalog / Text2SQL isolation、M27 foundation / review、legacy API / Trace）；具体清单以模块 notes 的验证快照记录为准。
+
 Windows / PowerShell 常用：
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE='1'
-<CLAUDE.md 指定的项目 Python> -m pytest -p no:cacheprovider
+<CLAUDE.md 指定的项目 Python> -m pytest -p no:cacheprovider <模块专项与基线测试文件...> --basetemp=.agent_work/temp/<module>-accept
 ```
 
 macOS / Linux 可用：
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:cacheprovider
+PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:cacheprovider <模块专项与基线测试文件...> --basetemp=.agent_work/temp/<module>-accept
 ```
 
-把输出最后一行（如 `5 passed in 0.8s`）原样贴进报告。失败 = ❌，附失败用例名。
+把输出最后一行（如 `45 passed in 1.23s`）原样贴进报告，并写明本次实际执行的文件范围。失败 = ❌，附失败用例名。
+
+### 全量回归（保留，默认不启用）
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'
+<CLAUDE.md 指定的项目 Python> -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/<name>
+```
+
+仅在以下情况执行全量：
+
+- 用户明确要求跑全量；
+- 模块改动面大，或涉及公共 fixture / 数据库 schema / 迁移 / seed；
+- 收工流程（finish-module / finish-docs）规定或用户指定。
+
+执行时同样把最后一行结果原样贴进报告。未执行全量时，不得引用 notes 或 changelog 里的全量数字冒充本次执行结果。
 
 ## 检查 8：最新事实快照同步
 

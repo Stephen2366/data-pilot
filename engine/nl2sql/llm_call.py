@@ -40,7 +40,9 @@ class LLMGenerationError(RuntimeError):
 class SupportsComplete(Protocol):
     """真实 client 与测试 fake 共用的最小接口。"""
 
-    def complete(self, *, prompt: str, system_prompt: str | None = None) -> str: ...
+    def complete(
+        self, *, prompt: str, system_prompt: str | None = None, node_purpose: str = "sql_generation"
+    ) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -93,9 +95,17 @@ class LLMCallResult:
     evidence: LLMCallEvidence
 
 
-def _complete_compat(client: SupportsComplete, *, prompt: str, system_prompt: str) -> str:
-    """兼容历史 fake client；真实 client 始终接收 system prompt。"""
+def _complete_compat(
+    client: SupportsComplete, *, prompt: str, system_prompt: str, node_purpose: str
+) -> str:
+    """把真实调用用途传给出站门，同时兼容尚未声明新参数的历史 fake client。"""
 
+    try:
+        return client.complete(prompt=prompt, system_prompt=system_prompt, node_purpose=node_purpose)
+    except TypeError as exc:
+        # 旧 fake 可能同时不接受 system_prompt/node_purpose；Python 的错误文本只点名其中一个。
+        if "node_purpose" not in str(exc) and "system_prompt" not in str(exc):
+            raise
     try:
         return client.complete(prompt=prompt, system_prompt=system_prompt)
     except TypeError as exc:
@@ -132,7 +142,12 @@ def execute_llm_call(
     for attempt_number in range(1, resolved_retries + 2):
         started = time.perf_counter()
         try:
-            content = _complete_compat(client, prompt=prompt, system_prompt=system_prompt)
+            content = _complete_compat(
+                client,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                node_purpose=stage,
+            )
         except LLMGenerationError as exc:
             latency_ms = round((time.perf_counter() - started) * 1000, 3)
             attempts.append(

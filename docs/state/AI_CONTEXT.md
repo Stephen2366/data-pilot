@@ -8,9 +8,9 @@
 | ------------ | -------------------------- |
 | 阶段路线     | `docs/phase4-roadmap.md`   |
 | 阶段参考     | `docs/phase4-reference.md` |
-| 当前活动模块 | M30 已验收（2026-08-13）   |
-| 当前 plan    | `docs/notes/m30-plan.md`   |
-| 当前 notes   | `docs/notes/m30-notes.md`  |
+| 当前活动模块 | M31 已验收（2026-08-13）   |
+| 当前 plan    | `docs/notes/m31-plan.md`   |
+| 当前 notes   | `docs/notes/m31-notes.md`  |
 | 待决事项     | 无                         |
 | 更新时间     | 2026-08-13                 |
 
@@ -34,12 +34,17 @@
 - 默认模型：Qwen `qwen3.7-plus`（`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`）；45s、retry0、backoff1。
 - 默认检索：inmemory + deterministic + weighted；Milvus / DashScope embedding 仅显式实验开启。
 - LangFuse 默认关闭，JSONL trace 为主；SQL 安全为只读 AST + RBAC + 敏感字段策略。
+- 现有 Text2SQL chat/schema embedding 出站在 transport 前按 `phase4-outbound-v1` 精确登记；所有新增 Knowledge/RAG 数据类别与节点用途继续默认拒绝，LangFuse Cloud 未获放行。
 
 ## 最近验证事实
 
+> 只保留会影响当前决策的最新证据，不按模块流水账累积。
+
 | 日期 | 事实 |
 |---|---|
-| 2026-08-13 | M30 建立 source-backed staged catalog：7 个 Markdown 政策/规则原件 + 4 个从 `metrics.yaml` 派生的指标条目，共 11 entries；corpus identity `abdc9aed...`，build identity `c5e6cf17...`。Catalog 仍是 staged，没有接生成器、active index 或 G3 发布。 |
+| 2026-08-13 | M31 完成 Phase 4 P1 第二切片：trusted caller、文档 ACL 双检、outbound 默认拒绝、Document/SQL typed Evidence 四阶段、确定性 citation validator 和 immutable release 已落地。用户选择 G3=A；11-entry release `4e86bdd...` 已 active，corpus `abdc9aed...`，首次发布 `previous=null`。 |
+| 2026-08-13 | 独立 `phase4-v1` contract/security family 当前为 8 Scenario / 12 required，最终 artifact `197e0d62...`，`12 passed / 0 failed / 0 not_observed`、Gate passed；全仓 `276 passed, 3 skipped, 1 warning`。它不证明 retrieval、答案质量或开放语义 citation support，M27 v3 保持只读。 |
+| 2026-08-13 | M30 建立 source-backed staged catalog：7 个 Markdown 政策/规则原件 + 4 个从 `metrics.yaml` 派生的指标条目，共 11 entries；corpus identity `abdc9aed...`，build identity `c5e6cf17...`。M31 以它为 authority-derived candidate 完成 active 发布；legacy `knowledge_docs` 仍不是 runtime catalog。 |
 | 2026-08-13 | 用户在 G2 选择方案 B：运行时 catalog 读取 authority source，`knowledge_docs` 物理表暂留为有损 legacy storage；seed 从同一 builder 派生 11 行，不再维护 `_KB_CONTENTS`。Text2SQL queryable universe 为 13 表，Schema corpus 为 186 docs/hash `6b67606d...`；14 张物理表事实不变。全仓 `231 passed, 3 skipped`，未调用真实 provider。 |
 | 2026-08-12 | M29 完成 Phase 4 P0 合同冻结：后续保留 `/api/query` 并做兼容投影；内部事实拆为 route/execution/answer/safety 四轴；引入 trusted caller、typed Evidence 四阶段、citation 校验与 receiver × node purpose × data class 出站策略。M29 只产出合同/调查材料，没有修改运行代码或默认行为。 |
 | 2026-08-12 | 首批知识治理覆盖现有 10 条 seed：政策/规则经审查后保留，metric 说明由 `metrics.yaml` 派生或校验，不引入长文 parent/child；所有新增 Knowledge/RAG 远端用途默认 deny。Phase 4 Eval 使用独立 family，M27 v3 全部只读；具体文件结构/版本号留给首次实现模块。 |
@@ -56,12 +61,16 @@
 
 ## 当前路线判断
 
-- (2026-08-13) M30 已闭环可信原件、staged catalog 和 Text2SQL 隔离；下一能力切片应继续 P1 的 Evidence/citation、trusted caller、文档 ACL/outbound 与安全发布，G3 前不得把 staged catalog 交给生成器。
+> 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
+
+- (2026-08-13) M31 已闭环 P1 的 caller/ACL/outbound/Evidence/citation 与 G3 安全发布。下一能力切片进入 P2 确定性 RAG 垂直切片：只消费 active catalog 和已验证治理接口，先做本地可替换 retrieval + Knowledge Tool，再接薄 Evidence Gate/Composer/Citation 闭环；不预选 Milvus/embedding，不接 Graph/Router/Hybrid。
 - (2026-08-10) Text2SQL 的确定性收尾问题已修复，下一阶段建议进入 RAG；若未来重跑 Text2SQL，必须使用 `m27-v3` 新序列，并完整记录 collection、embedding、corpus 与 run-scoped index identity。现有 v1/v2 数字只作历史解释。
 - (2026-08-09) 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
 - (2026-08-09) M22–M26 的旧模型分数、RRF、M25/M26 合同取舍仅作历史参考，不定义当前 M27 路线。
 
 ## 已知的坑（活跃列表）
+
+> 只允许活跃问题；已经解决的内容移入 changelog。
 
 | 坑 | 影响 | 当前处理 |
 |---|---|---|
@@ -71,9 +80,10 @@
 | 旧 Milvus collection `datapilot_schema_docs` 有重复灌入污染 | 历史 A/B 不可信 | 新 eval 用唯一/clean collection；校验 row count、dimension、schema docs hash。 |
 | QueryPlan 可能过宽，或 SQL 与计划不一致 | contract pass 不等于答案正确 | 保持保守 AST 边界，用 output/result/trace 共同定位。 |
 | M27 v1 将 QueryPlan timeout 投影成业务 failed | 旧 Core 的失败数混入外部不可用 | v2 统一为 `external_unavailable / not_observed`；v1 artifact 只读追溯，不再作 v2 基线。 |
-| 请求体 `user_role` 仍是客户端自报字符串 | 不能作为文档 ACL、生产身份或 thread owner 的信任来源 | P1 通过 auth/demo/test adapter 构造 trusted caller；未验证声明默认不得获得文档 Evidence。 |
+| 请求体 `user_role` 仍是客户端自报字符串，生产认证尚未建设 | 不能作为文档 ACL、生产身份或 thread owner 的信任来源 | M31 已让该输入只形成 `unverified_request_claim` 且无 resolved roles；仅 authenticated/demo/test adapter 可授权文档。当前 `/api/query` 尚未接 RAG caller。 |
 | `knowledge_docs` 物理表仍存在且是有损 legacy 投影 | 新调用者若绕过 source-backed catalog 读取旧表，会丢失 revision/authority/identity/完整 ACL，并重新制造旁路 | Text2SQL 已从 Schema/prompt/RBAC 双重隔离；seed 只从 staged catalog 派生，旧表不得作为 authority/runtime catalog。 |
-| LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭；重新启用前先做 allowlist/redaction 策略。 |
+| Active Knowledge release 首次发布没有 previous；active 损坏时不会自动 fallback | 自动复活旧正文可能绕过撤销/ACL，当前也没有可回滚版本 | 启动失败关闭；只有未来第二版且 previous 重新通过 authority/revision/policy 校验时才允许显式 rollback。 |
+| LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭且 M31 outbound 未放行 Cloud；重新启用前先做 allowlist/redaction 策略和用户决策。 |
 | 有时会出现 Windows 宿主保留 9091 | Milvus health 检查失败 | 使用 `19091:9091` host 映射。 |
 
 ## 历史入口
