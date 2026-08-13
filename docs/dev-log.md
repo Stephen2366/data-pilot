@@ -1693,4 +1693,115 @@ M20 开始时，DataPilot 已经能把自然语言转成 SQL，也有几十道 E
 
 这意味着 Phase 3B 下半阶段留下的不只是一个 Text2SQL 模块，而是一套可以继续支撑 **RAG、Hybrid Agent 与后续 EvalOps** 的工程方法：先保证事实与证据可信，再讨论模型和策略优化。
 
+## ★ M29 Phase 4 入口盘点与合同冻结
+
+（2026-08-12）
+
+**简述**：在写 RAG 代码前，先把 DataPilot 现有入口、安全漏洞面、知识来源和评测迁移边界盘清楚，冻结一套**能独立验收的 Phase 4 语义合同**，让后续模块不会一边实现一边改口径。
+
+### 先用大白话讲
+
+M29 像盖新楼前先做测绘和立施工红线。DataPilot 已有 `/api/query`、SQL 安全、Trace 和 Eval，但这些部件是为 Text2SQL 长出来的：客户端可以自己填 role，技术超时也会显示成“安全阻断”，数据库里的知识正文还可能被 SQL 路径看见。如果直接加一个向量库和问答 prompt，系统表面上会回答文档问题，却说不清**谁有权看、用了哪份证据、为什么拒答、外发了什么、失败算能力差还是服务不可用**。
+
+所以本模块没有追求“马上能聊天”，而是先规定后续各部件共同遵守的语言：状态分开说、身份不能自报、证据要有生命周期、引用必须可校验、远程发送默认不继承旧授权。这样下一模块可以围绕一个明确问题完成闭环，而不是把 API、权限、语料、检索、生成和 Eval 一次性揉成失控的大改造。
+
+### 这次做了什么
+
+本模块处理的核心矛盾是：Phase 4 roadmap 已经描述了 RAG/Hybrid 的方向，但当前代码事实仍是 SQL-only 入口，若不先冻结接口与安全语义，后续每增加一个节点都会复制兼容分支和权限判断。最终产出不是运行能力，而是一份从现状证据推导出的**实施合同与风险地图**。
+
+1. **把“回答发生了什么”拆成四条互不冒充的状态轴**
+
+   原来的 `AgentResponse` 只有 route 和一组 safety/error 字段，Schema 没召回、模型超时、SQL 执行错误和 SQL Guard 拦截都可能被包装成 `safety_status=blocked`。这会误导用户，也会让 Eval 把“没观察到能力”判成“业务答错”。M29 将内部事实冻结为 **route / execution / answer / safety**：走哪条路、工具是否完成、答案是否完整、安全是否放行分别表达，并为澄清、不支持、无候选、证据不足、外部不可用、ACL 拒绝、引用非法等情况建立 reason registry。
+
+   没有直接修改 `/api/query` 或删除旧字段，因为 Streamlit、Trace、M27 adapter 和大量测试仍在消费它们。推荐方案是后续保留端点并做单向兼容投影：新内部合同产生旧字段，而不是旧字段反过来控制新流程。聚焦 **40 个回归测试**和消费者反向清单证明现有行为未被 M29 改动；但这还不能证明未来投影实现正确，那要由对应开发模块测试。
+
+2. **把身份、Evidence 和 citation 变成安全边界**
+
+   当前 `QueryRequest.user_role` 是客户端自己填写的字符串，能用于 demo fixture，却不能证明生产身份。M29 冻结 **trusted caller** 语义：只有认证、demo 或测试 adapter 能解析出可信 caller，未经验证的 role 声明默认拿不到文档 Evidence。Evidence 也不再是随手塞进 `docs_used` 的字典，而是带 authority、content identity、revision、allowed uses 和安全 reference 的 typed object，并区分 candidate、selected、generation-visible、cited 四个阶段。
+
+   这个阶段划分解决一个常见错觉：**“检索到过”不等于“模型看过”，更不等于“答案真的引用它”**。Citation 必须由代码检查 evidence id、revision、ACL、阶段和 anchor；模型不能自造一个看似正规的编号。没有把权限判断交给 prompt，也没有默认让 admin 看全部文档，因为这会把确定性安全规则交给概率模型。桌面反例覆盖 role 篡改、未授权高分候选、旧版本文档、文档 prompt injection 和伪造 citation；它证明合同能描述这些风险，不代表实现已经存在。
+
+3. **治理首批知识与 Eval 交接，但不提前替后续模块选技术参数**
+
+   反向盘点发现，10 条 `knowledge_docs` seed 不只是未来 RAG 语料：它还进入 ORM/Alembic、SQL RBAC、Domain Schema、Schema Retrieval、prompt 和旧 Eval。尤其 `sensitive_data_policy` 草稿容易暗示 admin 可看敏感明文，与现行“所有角色都禁止敏感字段”代码事实冲突。M29 为每条 seed 登记保留、改写、由 `metrics.yaml` 派生或淘汰的 disposition，并规定知识原件只讲政策规则，实时订单事实仍由 SQL Evidence 提供。
+
+   没有在本模块直接删表、改 seed 或发布 corpus，因为那会跨入 P1 实现并改变当前运行边界；也没有提前选择 chunk size、top-k、rerank、embedding 或 LangGraph。Phase 4 Eval 将使用独立 family，复用 M27 的“一题一次执行、多 assertion 共享 evidence”、required/advisory Gate 和 artifact 身份纪律，但不往只读的 `m27-v3` 塞大量 RAG optional 字段。全仓 **29 个测试文件、223 个 collected test 已分段执行覆盖且无失败**；这只能证明 M29 未破坏当前代码，不能说明 RAG 召回或答案质量已经提升。
+
+### 新概念
+
+- **Orthogonal status axes（正交状态轴）**：把几个不同问题分开记，像 HTTP status、业务状态和审计状态不会共用一个布尔值。工具超时可以是 execution unavailable，同时 safety 仍 passed；证据不足可以是 answer insufficient，也不等于系统异常。
+- **Trusted caller（可信调用者）**：不是“请求里写自己是谁”，而是由可信入口解析出的身份上下文。可类比 Spring Security 的 `Authentication`：Controller 不应相信前端直接传来的 `ROLE_ADMIN`，业务层只消费认证链给出的 authorities。
+- **Evidence lifecycle（证据生命周期）**：一份材料从候选到被选择、真正送给生成器、最后被答案引用的阶段记录。它让系统能回答“这句话究竟依据了什么”，也让 ACL、Trace 和 Eval 在同一个事实基础上工作。
+- **Closed-world artifact（闭世界产物）**：评测产物不只要求“已有结果都合法”，还要求应有的 Scenario、replicate、assertion 和身份一个不少、一个不多；否则缺一半结果也可能投影出漂亮分数。
+- **Outbound policy（出站策略）**：授权粒度是 receiver × node purpose × data class。即使 QueryPlan 已允许发给 Qwen，也不自动代表可以把受限政策正文、SQL rows 或完整答案发给同一家 provider。
+
+### 代码阅读路线
+
+1. **先读模块边界与最终合同**：`docs/notes/m29-phase4-entry-contract-plan.md` → `docs/notes/m29-phase4-entry-contract-notes.md`
+   Plan 解释为什么 M29 只做 P0；notes 依次给出 inventory、决策、四轴真值表、reason registry、Evidence/citation handoff、10 条知识 disposition 和 Scenario matrix。阅读时先抓“不改运行代码”的边界，再看每项风险如何交给 P1/P2。
+
+2. **再对照公开入口事实**：`app/schemas/agent.py` → `app/api/query.py` → `demo/streamlit_app.py`
+   先看请求体 role 和当前 `AgentResponse`，再看 route 如何构造成功/失败响应，最后看 demo 消费了哪些兼容字段。这样能理解为什么 G0 选择保留 `/api/query`，以及为什么新状态必须先在内部稳定再向外投影。
+
+3. **沿身份和知识旁路检查安全面**：`engine/sql_guard/rbac.py` → `domain_pack/schema_desc/knowledge_docs.md` → `engine/schema_retrieval/document_builder.py` → `scripts/seed_data.py`
+   这条路线会看到 `knowledge_docs` 如何被 SQL 角色允许、如何成为 Schema 文档、正文从哪里生成。重点不是死记表结构，而是理解**只在 RAG 层加 ACL 不够**，还必须封住 Schema/prompt/SQL 的旁路。
+
+4. **最后看 Trace、远端和 Eval 的消费者**：`engine/trace/` → `engine/nl2sql/generator.py` → `eval/contracts.py` / `eval/projector.py` / `eval/review.py`
+   Trace 当前会保存较完整的请求/响应，模型与 judge 各有自己的 payload；M27 合同则以 SQL 证据为中心。对照 notes 的 outbound matrix 和 Eval migration matrix，可以看懂为什么授权不能按 provider 粗放继承，也为什么 Phase 4 需要独立合同 family。
+
+核心阅读链路是：
+
+`客户端声明`
+→ `trusted caller adapter`
+→ `route / execution / answer / safety`
+→ `candidate → selected → generation-visible → cited Evidence`
+→ `公开兼容投影 / 安全 Trace / Phase 4 Eval`
+
+### 设计要点
+
+- **保留一个稳定入口，内部合同先行**：避免同时迁移 API、demo、Trace 和旧 Eval；兼容字段只能是投影，不能继续做事实源。
+- **安全 fail closed，但能力失败不冒充安全阻断**：身份、ACL、citation 和 outbound 缺失时拒绝；provider timeout、无候选和证据不足则用各自状态诚实表达。
+- **知识 authority 只有一个**：政策来自经审查原件，metric 文档从 `metrics.yaml` 派生或校验，数据库表只是可重建投影，不能三处独立编辑。
+- **滚动规划技术参数**：M29 冻结后续必须满足的语义和验收，不替尚未建立的 corpus 选择 chunk、top-k、rerank、图编排或向量后端。
+- **边界**：trusted caller、Evidence、ACL、citation 和新 Eval family 目前都是冻结合同，不是已上线代码；当前 `user_role` 和 `knowledge_docs` SQL 暴露仍是 P1 风险。
+
+### 面试怎么讲
+
+我在 DataPilot 从 Text2SQL 进入 RAG 前做了一个入口合同模块。通过反向盘点 API、Streamlit、RBAC、Schema Retrieval、知识 seed、Trace、模型出站和 M27 Eval，我发现直接接向量检索会把客户端自报 role、技术失败与安全阻断混写、知识 SQL 旁路和远程 payload 授权等问题带进新链路。我没有马上堆 RAG 节点，而是冻结 route/execution/answer/safety 四轴状态、trusted caller、typed Evidence 生命周期、可验证 citation 和细粒度 outbound policy；同时治理 10 条首批知识的 authority/ACL/disposition，并决定 Phase 4 使用独立 Eval family、保持 M27 v3 只读。模块没有改运行行为，29 个测试文件、223 个测试项分段回归无失败；下一步会先完成可信知识原件和 Text2SQL 隔离，再安全发布给 RAG。
+
+1. **[基础追问] 为什么技术超时和安全阻断必须分开？**
+
+   两者的用户动作、监控归因和评测结论完全不同。安全阻断说明请求或证据违反确定性政策，重试不应该绕过；provider timeout 说明本轮没有观察到答案，可能重试或降级。若都写成 blocked，用户会以为自己越权，Eval 也会把外部不可用算成业务错误。四轴状态允许 execution unavailable 与 safety passed 同时成立。
+
+2. **[工程/深挖追问] 既然已有 SQL RBAC，为什么 RAG 还要 trusted caller 和两次 ACL 检查？**
+
+   SQL RBAC 只保护表和字段，而且当前 role 来自请求体；文档还涉及 revision、allowed roles、tenant、存在性侧信道和生成阶段。检索前过滤避免把未授权正文交给 retriever，生成前再检一次防止缓存、索引漂移或实现错误。两次检查消费同一个 trusted caller 与 policy decision，并在 Trace 中只保留安全引用。
+
+3. **[工程/深挖追问] 为什么不直接扩展 M27 Eval contract？**
+
+   M27 的核心对象是 SQL-only execution 和 `user_role`，RAG/Hybrid 需要 caller identity、两类 Evidence、citation、文档 ACL、分支状态和用途分集。把它们全做 optional 会让 loader、projector、review 到处出现兼容判断，还可能重写历史解释。独立 family 复用评测纪律而不复用不合适的数据结构，M27 artifact 因此保持只读可追溯。
+
+4. **[压力追问] 这个模块没有一行功能代码，是不是设计过度、工程自嗨？**
+
+   这个质疑对“已经交付 RAG 能力”成立，M29 确实没有交付它，也没有这样宣传。它的目标是关闭会让后续实现返工或越权的入口歧义，而且证据来自现有代码：role 可自报、知识正文处于 SQL Schema/RBAC、技术失败统一 blocked、Trace/远端 payload 没有 RAG 数据分类。模块把这些风险转成可测试合同和两个可独立验收的 P1 切片。若直接实现一个 demo 会更快看到答案，但无法可靠说明谁能看、答案依据和失败含义；对于企业数据 Agent，这些不是装饰性设计。
+
+### 验证与下一步
+
+- **验证**：API/Trace/M27/数据库聚焦回归为 **`40 passed, 1 warning`**；全量 223 项因工具 300 秒上限分段完成，后半段 **`72 passed, 3 skipped, 1 warning`**，中断位置 M4 单独 **`7 passed, 1 warning`**，其余前段在中断前均通过；没有测试失败。`git diff --check` 通过。
+- **Warning/skip**：warning 是既有 Starlette/httpx deprecation；3 个 skip 是未启用 Milvus/远端 embedding 的既有条件跳过，均不影响 M29。
+- **尚未证明**：没有运行真实 LLM Eval，也没有 RAG recall、citation correctness 或 answer quality 数字；本模块证明的是合同完整和现有行为未被破坏。
+- **下一步**：先规划并实现“可信知识原件、catalog prototype 与 Text2SQL 隔离闭环”，再规划 Evidence/citation/ACL/outbound 的安全发布；不直接跳到 Router/Hybrid。
+
+可复制的确定性验证命令：
+
+```powershell
+# 聚焦检查现有公开响应、Trace、M27 合同和数据库边界；预计 40 passed。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q tests/test_m5_agent_response.py tests/test_m16_trace_router.py tests/test_m27_foundation.py tests/test_database_upgrade.py --basetemp=.agent_work/temp/pytest-m29-contract
+
+# 全仓回归；项目当前共收集 223 项，Milvus/远端 embedding 未启用时会有 3 个条件 skip。
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/pytest-m29-full
+```
+
+**本地启动体验：** M29 暂无独立可交互入口，因为它交付的是后续 RAG 的合同和安全边界，没有修改 `/api/query` 的当前运行行为。要人工复盘，建议并排阅读 M29 plan/notes 与上述代码阅读路线；真正的知识问答体验要等 P1 安全发布和 P2 RAG 垂直切片完成后再开放。
+
 

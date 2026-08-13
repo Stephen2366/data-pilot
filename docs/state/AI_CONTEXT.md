@@ -4,10 +4,10 @@
 
 ## 当前状态（唯一权威出处）
 
-- 当前阶段计划：`docs/notes/m28-text2sql-review-notes.md`（M28 已完成；Phase 4 RAG 规划见 `docs/phase4-roadmap.md`）
-- 当前模块：M28 已验收（2026-08-12）；待进入 Phase 4 RAG（规划中）
+- 当前阶段计划：`docs/phase4-roadmap.md`；当前模块合同见 `docs/notes/m29-phase4-entry-contract-plan.md`
+- 当前模块：M29 Phase 4 入口盘点与合同冻结已验收（2026-08-13）
 - 阻塞项：无
-- 更新时间：2026-08-12
+- 更新时间：2026-08-13
 
 ## 必读规则
 
@@ -34,6 +34,8 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-12 | M29 完成 Phase 4 P0 合同冻结：后续保留 `/api/query` 并做兼容投影；内部事实拆为 route/execution/answer/safety 四轴；引入 trusted caller、typed Evidence 四阶段、citation 校验与 receiver × node purpose × data class 出站策略。M29 只产出合同/调查材料，没有修改运行代码或默认行为。 |
+| 2026-08-12 | 首批知识治理覆盖现有 10 条 seed：政策/规则经审查后保留，metric 说明由 `metrics.yaml` 派生或校验，不引入长文 parent/child；所有新增 Knowledge/RAG 远端用途默认 deny。Phase 4 Eval 使用独立 family，M27 v3 全部只读；具体文件结构/版本号留给首次实现模块。 |
 | 2026-08-10 | 当前 canonical contract 升为 `m27-v3`：Schema Context 的物理字段、metric key、输出 alias 分开，并在 catalog 加载时做 domain schema 可满足性校验；`orders_wide` 业务月份统一按 `paid_at`，`snapshot_at/batch_id` 只选快照版本。旧 v1/v2 artifact 继续只读，不与 v3 直接比较；本次未运行真实 LLM Eval。 |
 | 2026-08-10 | M27 EvalRun 已恢复 run-scoped Schema vector index：一轮只构建/注入一次，结束时关闭，runtime identity 记录 reuse 与 Milvus row count；pytest 默认禁止未 mock 的真实 Text2SQL provider。 |
 | 2026-08-10 | Qwen plus + Milvus 的 M27 Stress（9 题）与 Database Exception（7 题）各完成一次，runtime identity 完整记录 DashScope Qwen embedding / 1024 dim、clean collection、195-doc hash。Stress 为全部 assertion **7 passed / 14 failed / 4 not_observed**（7 completed / 2 external unavailable）；Database Exception 为 **4 / 4 / 11**（3 completed / 4 external unavailable）。两套 policy 的 required 均为 0、Gate 都是 `inconclusive`，不等于业务硬门失败；均为单轮 advisory 证据，未登记长期 baseline。 |
@@ -47,6 +49,7 @@
 
 ## 当前路线判断
 
+- (2026-08-12) M29 收工后，Phase 4 下一模块应优先闭环“可信知识原件、catalog prototype 与 Text2SQL 隔离”，再单独闭环 Evidence/citation/ACL/outbound 与安全发布；暂不进入 RAG 生成、Router、Hybrid、长文切分或检索调参。
 - (2026-08-10) Text2SQL 的确定性收尾问题已修复，下一阶段建议进入 RAG；若未来重跑 Text2SQL，必须使用 `m27-v3` 新序列，并完整记录 collection、embedding、corpus 与 run-scoped index identity。现有 v1/v2 数字只作历史解释。
 - (2026-08-09) 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
 - (2026-08-09) M22–M26 的旧模型分数、RRF、M25/M26 合同取舍仅作历史参考，不定义当前 M27 路线。
@@ -61,6 +64,8 @@
 | 旧 Milvus collection `datapilot_schema_docs` 有重复灌入污染 | 历史 A/B 不可信 | 新 eval 用唯一/clean collection；校验 row count、dimension、schema docs hash。 |
 | QueryPlan 可能过宽，或 SQL 与计划不一致 | contract pass 不等于答案正确 | 保持保守 AST 边界，用 output/result/trace 共同定位。 |
 | M27 v1 将 QueryPlan timeout 投影成业务 failed | 旧 Core 的失败数混入外部不可用 | v2 统一为 `external_unavailable / not_observed`；v1 artifact 只读追溯，不再作 v2 基线。 |
+| 请求体 `user_role` 仍是客户端自报字符串 | 不能作为文档 ACL、生产身份或 thread owner 的信任来源 | P1 通过 auth/demo/test adapter 构造 trusted caller；未验证声明默认不得获得文档 Evidence。 |
+| `knowledge_docs` 仍在 Text2SQL Schema/RBAC 路径且 10 条 seed 只是草稿 | SQL 可能旁路 Knowledge Tool，安全政策草稿还与现行敏感字段策略冲突 | 下一模块先建立权威原件/目录，再做 Schema、RBAC、prompt 双重隔离；M29 不改运行时。 |
 | LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭；重新启用前先做 allowlist/redaction 策略。 |
 | Windows 宿主保留 9091 | Milvus health 检查失败 | 使用 `19091:9091` host 映射。 |
 

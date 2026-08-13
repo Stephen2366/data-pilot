@@ -15,6 +15,16 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M29 Phase 4 入口盘点与合同冻结（2026-08-12）
+
+- **改动范围**：模块起始点为 `29e12f2 M28accept`；开工时 `git status --short` 只有未跟踪的 M29 plan，收工按 status/diff 与 notes 逐项核对。本模块归并范围为 `docs/notes/m29-phase4-entry-contract-{plan,notes}.md`、`docs/state/{AI_CONTEXT,AI_CONTEXT_CHANGELOG}.md`、`docs/dev-log.md`；没有修改应用代码、测试、Eval runner、数据库、默认配置或 README。
+- **关键记录**：用户以“按已确认的当前模块 plan 执行开发”确认计划推荐项：G0=A，保留 `/api/query`、内部先稳定四轴状态与 typed Evidence、对外增量兼容；G1=A，治理现有 10 条 seed，政策/规则经审查后保留，metric 说明从 `metrics.yaml` 派生/校验，暂不做长文 parent/child；G1-O=A，本地/deterministic 先行，新增远端用途按 receiver × node purpose × data class 显式授权，LangFuse Cloud 继续关闭。主要风险是兼容投影可能暂时保留旧歧义、首批语料较短、远端默认 deny 会降低能力上限；推荐仍优先换取可验收的安全闭环。
+- **关键记录**：冻结 route/execution/answer/safety 四轴真值表与 reason registry；trusted caller 不信任请求体 `user_role`，只允许 production auth/demo/test adapter 形成可用身份；Evidence 区分 candidate、selected、generation-visible、cited，citation 必须由代码校验 identity/revision/ACL/stage/anchor。M27 v3 全部只读，Phase 4 采用独立 Eval family 和 closed-world artifact 完整性；具体版本、文件与参数滚动规划。
+- **关键记录**：反向盘点确认 `knowledge_docs` 同时存在于 seed、ORM/Alembic、Schema 描述与检索、RBAC、prompt、Eval/文档链路；10 条 seed 均登记 authority/ACL/outbound disposition。安全代码优先于冲突的 `sensitive_data_policy` 草稿；技术/外部失败后续不得继续等同 `safety_status=blocked`。这些只形成 P1 handoff，本模块没有静默修复或发布 corpus。
+- **参考资料**：项目 Phase 4 roadmap/reference、M28 plan/notes/验收与 M27/M28 档案、四份 state 事实源；定点复核 API/Streamlit、RBAC/SQL Guard、Schema builder、Trace/LangFuse、模型/embedding/judge adapter、M27 contracts/projector/review/tests、seed/metrics。源码定点复核 `ARAG-STATE`、`ARAG-EVAL`、`DBGPT-EVAL`：借鉴实际 Tool context 固化、dataset identity 对账和 retrieval/answer 分层 evaluator；不照搬强制搜索/开放 rewrite、notebook 简单均值、空结果统一记零或平台 DAG，也不提前冻结 chunk/top-k/rerank/vector backend。
+- **验证快照**：聚焦 API/Trace/M27/数据库回归 `40 passed, 1 warning in 124.62s`；全量 223 项因外层 300 秒上限分段补齐，后半 8 文件 `72 passed, 3 skipped, 1 warning in 225.04s`，中断处的 M4 单独 `7 passed, 1 warning in 12.03s`，其余前段在中断前全部通过，无测试失败；`git diff --check` 通过。3 个 skip 为既有 Milvus/远端 embedding 条件跳过，warning 为既有 Starlette/httpx deprecation。未运行真实 LLM Eval、Milvus、embedding 或 LangFuse Cloud。
+- **遗留/后续**：M29 未验收，等待用户人工审查后运行 `accept-module`。下一 module plan 建议先做“可信知识原件、catalog prototype 与 Text2SQL 隔离闭环”，再做“Evidence/citation/ACL/outbound 与安全发布闭环”；当前请求体 role 不可信、`knowledge_docs` 仍可被 Text2SQL 看见、seed 仍是草稿，均是已知 P1 风险。新增 Knowledge/RAG 远端用途继续默认 deny，M27 v3 和旧 artifact 保持只读。
+
 ### [模块任务] M28 Text2SQL 收尾确定性修复（2026-08-10）
 
 - **改动范围**：因本模块没有单独起始 commit，范围依据为 `git status --short` 与 `git diff --name-only`；逐项对照 M28 notes 后归并为 `engine/nl2sql/prompt.py`、`eval/{contracts,catalog,environment,run_eval}.py`、`eval/cases/catalog/*`、相关 `tests/*`，以及 `docs/{notes,state,dev-log}.md`。工作树中另有用户/其他工具修改的 `docs/ref-discussion/RAG 的讨论.md` 与 `.codex/skills/finish-docs/SKILL.md`，均不属于 M28，未触碰。
