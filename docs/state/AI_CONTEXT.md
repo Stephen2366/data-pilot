@@ -8,9 +8,9 @@
 | ------------ | -------------------------- |
 | 阶段路线     | `docs/phase4-roadmap.md`   |
 | 阶段参考     | `docs/phase4-reference.md` |
-| 当前活动模块 | M31 已验收（2026-08-13）   |
-| 当前 plan    | `docs/notes/m31-plan.md`   |
-| 当前 notes   | `docs/notes/m31-notes.md`  |
+| 当前活动模块 | M32 已开发并收工，待人工检查与验收（2026-08-13） |
+| 当前 plan    | `docs/notes/m32-plan.md`   |
+| 当前 notes   | `docs/notes/m32-notes.md`  |
 | 待决事项     | 无                         |
 | 更新时间     | 2026-08-13                 |
 
@@ -32,7 +32,7 @@
 - 数据库：MySQL `datapilot_dev` + SQLAlchemy/Alembic；SQLite 仅用于测试、smoke 与 M27 deterministic oracle。
 - NL2SQL：普通 API 默认走 `new_text2sql`（Schema Retrieval → QueryPlan → SQL Guard）；只有显式传 `force_new_pipeline=false` 才走 legacy 模板优先 baseline。
 - 默认模型：Qwen `qwen3.7-plus`（`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`）；45s、retry0、backoff1。
-- 默认检索：inmemory + deterministic + weighted；Milvus / DashScope embedding 仅显式实验开启。
+- Schema Retrieval 默认：inmemory + deterministic + weighted；Milvus / DashScope embedding 仅显式实验开启。M32 Knowledge deterministic adapter 只是 P2 本地 baseline，G4 尚未选择 P3 默认 adapter。
 - LangFuse 默认关闭，JSONL trace 为主；SQL 安全为只读 AST + RBAC + 敏感字段策略。
 - 现有 Text2SQL chat/schema embedding 出站在 transport 前按 `phase4-outbound-v1` 精确登记；所有新增 Knowledge/RAG 数据类别与节点用途继续默认拒绝，LangFuse Cloud 未获放行。
 
@@ -42,6 +42,8 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-13 | M32 按用户确认的方案 A 完成 P2 第一切片：`load_active_release()` → pre-selection ACL → deterministic adapter → Document Evidence candidate/selected → pre-generation 复核。内部 ledger 保留审计事实，安全投影只显示最终 selected Evidence；不生成答案、citation、公开 API 或四轴状态。 |
+| 2026-08-13 | 独立 `phase4-rag-retrieval-v1` 当前为 6 Scenario / 20 required，Gate `passed`；3 条 retrieval advisory 为 2 passed / 1 technical-unavailable `not_observed`。最终 M32 聚焦 `28 passed`，全仓 `304 passed, 3 skipped, 1 warning`；均为离线确定性证据，不证明真实 LLM、语义检索或 citation 支持质量。 |
 | 2026-08-13 | M31 完成 Phase 4 P1 第二切片：trusted caller、文档 ACL 双检、outbound 默认拒绝、Document/SQL typed Evidence 四阶段、确定性 citation validator 和 immutable release 已落地。用户选择 G3=A；11-entry release `4e86bdd...` 已 active，corpus `abdc9aed...`，首次发布 `previous=null`。 |
 | 2026-08-13 | 独立 `phase4-v1` contract/security family 当前为 8 Scenario / 12 required，最终 artifact `197e0d62...`，`12 passed / 0 failed / 0 not_observed`、Gate passed；全仓 `276 passed, 3 skipped, 1 warning`。它不证明 retrieval、答案质量或开放语义 citation support，M27 v3 保持只读。 |
 | 2026-08-13 | M30 建立 source-backed staged catalog：7 个 Markdown 政策/规则原件 + 4 个从 `metrics.yaml` 派生的指标条目，共 11 entries；corpus identity `abdc9aed...`，build identity `c5e6cf17...`。M31 以它为 authority-derived candidate 完成 active 发布；legacy `knowledge_docs` 仍不是 runtime catalog。 |
@@ -63,7 +65,7 @@
 
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
 
-- (2026-08-13) M31 已闭环 P1 的 caller/ACL/outbound/Evidence/citation 与 G3 安全发布。下一能力切片进入 P2 确定性 RAG 垂直切片：只消费 active catalog 和已验证治理接口，先做本地可替换 retrieval + Knowledge Tool，再接薄 Evidence Gate/Composer/Citation 闭环；不预选 Milvus/embedding，不接 Graph/Router/Hybrid。
+- (2026-08-13) M32 已完成 P2 的安全取证子闭环。下一轮应从 selected Document Evidence 接薄 Shared Evidence Gate/Composer/Citation 回答闭环，只在真实入模时推进 `generation_visible`，通过 validator 后才推进 `cited`；不重做 retrieval，不预选 Milvus/embedding，不接 Graph/Router/Hybrid。
 - (2026-08-10) Text2SQL 的确定性收尾问题已修复，下一阶段建议进入 RAG；若未来重跑 Text2SQL，必须使用 `m27-v3` 新序列，并完整记录 collection、embedding、corpus 与 run-scoped index identity。现有 v1/v2 数字只作历史解释。
 - (2026-08-09) 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
 - (2026-08-09) M22–M26 的旧模型分数、RRF、M25/M26 合同取舍仅作历史参考，不定义当前 M27 路线。
@@ -83,6 +85,7 @@
 | 请求体 `user_role` 仍是客户端自报字符串，生产认证尚未建设 | 不能作为文档 ACL、生产身份或 thread owner 的信任来源 | M31 已让该输入只形成 `unverified_request_claim` 且无 resolved roles；仅 authenticated/demo/test adapter 可授权文档。当前 `/api/query` 尚未接 RAG caller。 |
 | `knowledge_docs` 物理表仍存在且是有损 legacy 投影 | 新调用者若绕过 source-backed catalog 读取旧表，会丢失 revision/authority/identity/完整 ACL，并重新制造旁路 | Text2SQL 已从 Schema/prompt/RBAC 双重隔离；seed 只从 staged catalog 派生，旧表不得作为 authority/runtime catalog。 |
 | Active Knowledge release 首次发布没有 previous；active 损坏时不会自动 fallback | 自动复活旧正文可能绕过撤销/ACL，当前也没有可回滚版本 | 启动失败关闭；只有未来第二版且 previous 重新通过 authority/revision/policy 校验时才允许显式 rollback。 |
+| M32 词法 adapter 只在 11 条短知识和冻结 Scenario 上验证 | 不能外推长文、同义改写或真实语义检索效果，也不能据此触发 G4 | 保持它为本地可替换 baseline；先完成回答/citation 闭环，再用失败簇和单变量证据决定是否实验 embedding/hybrid/rerank。 |
 | LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭且 M31 outbound 未放行 Cloud；重新启用前先做 allowlist/redaction 策略和用户决策。 |
 | 有时会出现 Windows 宿主保留 9091 | Milvus health 检查失败 | 使用 `19091:9091` host 映射。 |
 

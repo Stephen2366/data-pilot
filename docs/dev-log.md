@@ -2061,3 +2061,128 @@ python -c "from engine.rag.release import inspect_release_state; print(inspect_r
 
 **本地启动体验：** 本模块暂无独立 API 或页面，因为它提供的是 P2 将消费的安全地基，`/api/query` 仍未接 RAG。现在最直接的人工体验是运行上面的只读 `inspect_release_state()`，确认 current release、entry count 和 previous；环境未激活时，把 `python` 换成 `AGENTS.md` 中的项目 Python 完整路径。不要直接修改 `domain_pack/kb_releases/*.json`，内容变化应从 authority 重新 build/publish。
 
+## ★ M32 确定性知识取证与 Knowledge Tool
+
+（2026-08-13）
+
+**简述**：把 M31 已发布的 11 条 active 知识安全、稳定地检索成 **selected Document Evidence**，并用独立 retrieval Eval 证明召回、ACL、失败归因和 artifact 完整性；本模块仍不生成最终答案。
+
+### 先用大白话讲
+
+M31 建好了带门禁的档案室，M32 开始真正办理“查档”。用户问“质量问题退款要什么材料”，系统先确认这个人能看哪些文件，再把允许看的文件交给检索器；检索器只负责排候选，不能自己越权开柜。选出文件后，系统还会在交给下一层之前再检查一次权限和版本，最后发出一组带身份的证据。
+
+这像公司 Service 层调用搜索组件：搜索组件只接收已经过滤的数据，返回的是候选坐标，不是最终业务结论。M32 还专门建立了一份离线答卷，能区分“确实没有候选”“存在内容但调用者无权”“版本中途失效”和“检索后端坏了”。这样下一模块接生成器时，答错了可以先判断是**没找到证据**，还是**找到后没有正确作答**。
+
+### 这次做了什么
+
+本模块的**核心矛盾**是：active release 已经可信，但缺少一个安全、可替换、可评测的消费入口。如果直接把全部文档交给模型，既可能泄露未授权内容，也会把检索失败、生成失败和引用失败混成一个“回答不好”。最终采用用户确认的方案 A，先闭环取证层，再把回答层留给下一切片。
+
+1. **把检索器做成可替换、可复现的 adapter**
+
+   原来系统没有 Knowledge retrieval seam，后续若直接在 Tool 里写死向量库或 Milvus，安全过滤、检索算法和运行配置会绑在一起。这里的 **Retrieval Adapter（检索适配器）**，可以理解成 Java 里的 repository interface：上层只认输入输出合同，不依赖词法、向量或混合检索的内部实现。
+
+   `engine/rag/retrieval.py` 冻结了 `RetrievalAdapter`、`RetrievalBatch`、`RetrievalMatch` 和有界 `RetrievalBudget`。首个本地 recipe 用 NFKC 规范化、英文词和中文 2–4 gram，按 title/key/content 加权，再用 `0.05` 门槛过滤只共享“平台”一类公共词的极低相关候选；固定输入按明确 identity 打破并列，保证结果可复现。没有先上 embedding/hybrid/rerank，因为当前只有 11 条短知识，尚无失败簇证明这些复杂度必要，而且 G4 默认 adapter 决策还没触发。
+
+   **验证证据**包括相同输入重复结果一致、gold 命中、零候选、并列排序、重复输入、未知 entry、越预算、错误 query/runtime identity 和非法 rank/score。它证明本地 recipe 与 seam 的确定性，**尚未证明**长文、同义改写或真实语义召回质量。
+
+2. **把 ACL、检索与 Evidence 组织成一个安全 Tool**
+
+   最大风险不是“搜得不准”，而是未授权正文先进入检索器。即使最后不返回，未来远端 adapter、日志、score 或命中数量也可能泄露“某份文档存在”。`engine/rag/knowledge_tool.py` 因此固定执行：active load → **pre-selection ACL（候选前授权）** → 一次 adapter → candidate Evidence → 选择 → **pre-generation recheck（入模前复核）**。
+
+   adapter 只看到已授权 entries；match 必须映射回同次 active bundle，才能构造 Document Evidence。通过第二次检查的证据只推进到 `selected`，因为 M32 还没有真的把正文交给 Composer，不能提前记成 `generation_visible`。内部 ledger 保留候选供审计，但 `safe_projection()` 只显示最终 selected Evidence；这条规则是在收工审查中补强的，避免 revision/content identity 形成存在性侧信道。
+
+   没有用“把所有失败都返回空列表”的宽松方案：`no_candidate`、`no_authorized_evidence`、`stale_revision`、active release 不可用和 adapter 不可用在内部保持不同原因，技术故障也不会伪装成“政策不存在”。同时，公开安全投影会让无候选与无权限收敛，防止反向探测知识库。投毒正文、角色篡改、两次 ACL 间 revision 失效和故障注入均有测试；**尚未完成**真实入模、答案、claim、citation 和公开四轴状态。
+
+3. **建立一次执行、闭世界的 retrieval Eval**
+
+   如果每个 scorer 都重跑一次 Tool，六个指标可能来自六次不同检索，最终平均数看似精确却无法解释。`eval/rag_retrieval_contracts.py` 建立 **ExecutionEvidence（执行证据）**：每个 Scenario 只调用一次 Tool，再由 reason、coverage、rank、ACL、调用次数和 runtime 等 assertion 共同读取这份答卷。
+
+   artifact 采用 **Closed-world validation（闭世界校验）**：不仅检查已有结果，还核对 Scenario、replicate、assertion、effect、caller/runtime/release/corpus/adapter/recipe identity 和 canonical hash 是否一个不少、一个不多。required Gate 与 retrieval-only advisory 分开；检索器技术不可用时，coverage 是 `not_observed`，不会记成业务错误，也不会靠 advisory 通过掩盖 required 失败。
+
+   最终 `phase4-rag-retrieval-v1` 有 **6 个 Scenario、20 条 required 全通过**，3 条 advisory 为 2 passed、1 technical-unavailable `not_observed`；M32 聚焦 28 passed，全仓 304 passed、3 skipped。开发中两轮失败也被保留并修正：先处理公共词低分与 stale fixture，再修正 Eval safe-ref 和 returned-evidence 口径。以上证明合同、ACL 和离线 baseline 可复现，**不能说明**真实 LLM 答案正确、citation 语义支持或 Milvus 更好。
+
+### 新概念
+
+- **Retrieval Adapter（检索适配器）**：把“怎样找到候选”藏在统一接口后面。Knowledge Tool 只依赖 match 合同，将来替换向量或混合检索时，不必把 ACL、Evidence 和回答逻辑一起改掉。
+- **Query fingerprint（查询指纹）**：规范化问题和已确认条件后生成的 hash。它能比较“是不是同一份检索输入”，又不用在长期诊断里保存原始问题。
+- **Pre-selection ACL / pre-generation recheck**：第一次保证未授权内容不进入检索器，第二次保证选中后权限或 revision 没有在真正使用前失效。可类比 Spring Security 的入口认证与资源级二次授权。
+- **Retrieval recipe identity（检索配方身份）**：把分词、权重、低分门槛等实现配方标成稳定版本。调整算法就应该换 identity，避免两种不同检索行为混在同一 Eval 名下。
+- **`not_observed`（不可观察）**：不是“答案错了”，而是外部技术故障导致本轮根本没有可评分答卷。它与 `failed` 分开，能避免把可用性问题误算成业务质量。
+
+### 代码阅读路线
+
+1. **先读最小检索合同**：`engine/rag/retrieval.py`
+   从 `RetrievalBudget`、`RetrievalMatch`、`RetrievalBatch` 看清上层与后端交换什么，再读 `DeterministicLexicalRetrievalAdapter.retrieve()`。重点理解 adapter 只消费传入 entries、稳定排序和 recipe identity 为什么存在；中文 n-gram 的每个权重不需要死记。
+
+2. **沿主流程读 Knowledge Tool**：`engine/rag/knowledge_tool.py`
+   从 `KnowledgeRequest` 和 `RetrievalOutcome` 入手，然后顺着 `KnowledgeTool.retrieve()` 的四个步骤读。重点看 ACL 为什么在 adapter 前、match 怎样回到 active entry、为何第二次授权后只推进 selected，以及内部 ledger 与安全投影为什么不同。
+
+3. **跟一次 Scenario 看共享答卷**：`eval/rag_retrieval_contracts.py`
+   先看 `SCENARIOS` 冻结了哪些正常与失败路径，再看 `_execute_scenario()` 如何只调用一次 Tool，最后看 `validate_completed_artifact()`、`project_required_gate()` 和 retrieval effect summary。这里解决的是评测可信度，不是训练或调参平台。
+
+4. **用测试反向理解边界**：`tests/test_m32_retrieval.py` → `tests/test_m32_knowledge_tool.py` → `tests/test_m32_rag_retrieval_contracts.py`
+   先看算法确定性，再看 ACL、投毒、stale 与 adapter 故障，最后看 artifact 缺失、重复、identity 篡改和 required/advisory 分离。测试名称本身就是一份失败模式目录。
+
+核心调用链是：
+
+`active ReleaseBundle`
+→ `pre-selection ACL 过滤`
+→ `RetrievalAdapter 一次调用`
+→ `candidate Document Evidence`
+→ `pre-generation recheck`
+→ `selected Evidence + 内部 ledger + safe diagnostics`
+→ `一次 ExecutionEvidence`
+→ `required Gate / advisory retrieval view`
+
+### 设计要点
+
+- **方案 A 的边界**：先把安全取证单独做深，避免 retrieval、generation、API 和 citation 同时变化；代价是本模块没有用户可见回答。
+- **授权在 adapter 外集中控制**：未来即使换远程检索器，也不能自己决定能看什么；安全规则不会散落到每个后端。
+- **审计事实不等于公开事实**：内部可以保留 candidate 方便归因，安全投影只暴露最终 selected，避免“可观测性”反过来成为数据泄露。
+- **业务零结果不等于技术失败**：结构化 reason 与 `not_observed` 让系统能分别处理知识缺失、权限收敛和后端不可用。
+- **G4 继续延后**：词法 adapter 是候选 baseline，不是 P3 默认；要等回答/citation 闭环和可比较证据成立后再决定。
+
+### 面试怎么讲
+
+**可直接复述**：我在可信知识发布之后实现了一个确定性 Knowledge retrieval 垂直切片。检索层用可替换 adapter seam，本地基线通过中文 2–4 gram 和稳定 tie-break 保证固定输入可复现；Knowledge Tool 只从 active release 取数据，在未授权正文进入 adapter 前做 pre-selection ACL，选中后再做 pre-generation 复核，并把证据严格停在 selected 阶段。内部区分 no candidate、无授权证据、revision 失效、release 与 adapter 不可用，公开投影则避免泄露文档存在性。Eval 每题只执行一次 Tool，多条 typed assertion 共享同一 ExecutionEvidence，completed artifact 做 closed-world 对账。最终 20 条 required 全过、全仓 304 passed。这个模块证明的是离线取证合同与安全边界，不声称真实 LLM 回答或语义 citation 已完成。
+
+1. **[基础追问] 为什么不让检索器自己做 ACL，反而先过滤再调用？**
+
+   因为 adapter 是可替换的基础设施，未来可能变成远程 embedding、向量库或第三方服务。如果把 ACL 交给每个 adapter，不同后端很容易规则漂移，而且未授权正文已经在“检索之前”被发送或记录。现在 Tool 集中做授权，adapter 的输入集合本身就是安全边界；测试还用 counting fake 证明未授权 entry 从未进入 adapter。
+
+2. **[工程/深挖追问] 检索后已经做了 pre-generation 检查，为什么 ledger 不直接推进 generation-visible？**
+
+   检查通过只表示“此刻允许使用”，不表示正文已经真的进入 Composer。把 selected 提前写成 generation-visible，会让未来 citation validator 相信一份模型根本没看过的证据。M32 返回 decision 给下一层，只有下一层实际构造生成上下文时才执行阶段迁移，这样 ledger 记录事实而不是意图。
+
+3. **[工程/深挖追问] 技术不可用时为什么 coverage 是 not_observed，而不是 failed 或 0 分？**
+
+   后端故障时没有候选答卷，无法判断检索算法本来能不能覆盖 gold。记 failed 会把可靠性故障混进业务质量，记 0 更会错误惩罚算法；但也不能忽略这次运行，所以 execution/root-cause required assertion 仍然可观察，coverage advisory 单独记 `not_observed`。Gate 与效果视图分开后，两类问题都不会被藏掉。
+
+4. **[压力追问] 你在 11 条文档上写词法检索和 20 条断言，这不是自己出题自己满分吗？**
+
+   这个质疑合理：这组结果确实不能外推真实语义检索，更不能证明业务答案质量。M32 的目标是先验证接口、安全顺序、失败归因和评测分母，而不是宣称模型效果。证据中也保留了开发失败、技术不可用 `not_observed` 和全仓回归，没有只报一个满分。下一阶段先接 Evidence Gate/Composer/citation；只有出现稳定召回失败簇并冻结未污染对照后，才值得比较 embedding、hybrid 或 rerank，并触发 G4 默认 adapter 决策。
+
+### 验证与下一步
+
+- **M32 聚焦验证**：adapter、Knowledge Tool、ACL/Evidence 与 retrieval Eval 为 `28 passed in 0.71s`。
+- **P1 回归**：M30 catalog 和 M31 release/governance/Evidence/Phase 4 contract 为 `56 passed in 2.26s`。
+- **受影响回归**：API/Text2SQL/Eval 完整重跑为 `188 passed, 1 warning in 446.43s`；第一次 180.3 秒外层超时未计作成功。
+- **全仓验证**：`304 passed, 3 skipped, 1 warning in 537.27s`；skip 是本机 Milvus 不可用的既有条件跳过，warning 是既有 Starlette/httpx 弃用提示。
+- **尚未证明**：未运行真实 LLM、remote embedding/rerank、Milvus 或 LangFuse Cloud；没有回答、citation、公开 RAG API 或长文能力结论。
+- **下一步**：从 selected Evidence 接 Shared Evidence Gate 和 Composer；实际入模后推进 `generation_visible`，citation validator 通过后推进 `cited`，再讨论用户可见投影。
+
+可复制验证命令：
+
+```powershell
+# M32 取证与 retrieval Eval 聚焦门；预计 28 passed，不访问网络。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m32-review tests/test_m32_retrieval.py tests/test_m32_knowledge_tool.py tests/test_m32_rag_retrieval_contracts.py -q
+
+# 全仓确定性回归；当前结果为 304 passed、3 skipped、1 个既有 warning。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m32-review-full -q
+
+# 只读打印 M32 retrieval Gate 和 advisory 汇总，不写 report、不调用外部服务。
+python -c "from eval.rag_retrieval_contracts import run_rag_retrieval_contract_suite,project_required_gate,project_retrieval_effect_summary; a=run_rag_retrieval_contract_suite(); print(project_required_gate(a)); print(project_retrieval_effect_summary(a))"
+```
+
+**本地启动体验：** 本模块暂无独立 API 或页面，因为方案 A 只做到内部安全取证，`/api/query` 还没有接 Knowledge Tool。当前最直接的体验方式是运行上面的只读 Gate 命令，观察 required 全通过和技术不可用 coverage 的 `not_observed`；环境未激活时，把 `python` 换成 `AGENTS.md` 中的项目 Python 完整路径。
+
