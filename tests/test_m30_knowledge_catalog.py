@@ -53,9 +53,9 @@ def test_default_catalog_is_complete_immutable_staged_and_auditable() -> None:
     catalog = build_staged_catalog()
 
     assert catalog.lifecycle_status == "staged"
-    assert len(catalog.entries) == 11
-    assert len(catalog.usable_entries) == 11
-    assert catalog.summary()["counts_by_source"] == {"metric_projection": 4, "policy_markdown": 7}
+    assert len(catalog.entries) == 22
+    assert len(catalog.usable_entries) == 22
+    assert catalog.summary()["counts_by_source"] == {"metric_projection": 12, "policy_markdown": 10}
     assert [entry.document_key for entry in catalog.entries] == sorted(entry.document_key for entry in catalog.entries)
     assert all(entry.authority_ref and entry.content_identity and entry.anchor for entry in catalog.entries)
     assert all(entry.public or entry.allowed_roles for entry in catalog.entries)
@@ -83,7 +83,7 @@ def test_legacy_seed_projection_is_derived_from_the_same_catalog() -> None:
     catalog = build_staged_catalog()
     rows = _build_knowledge_docs()
 
-    assert EXPECTED_SEED_COUNTS["knowledge_docs"] == len(rows) == len(catalog.entries) == 11
+    assert EXPECTED_SEED_COUNTS["knowledge_docs"] == len(rows) == len(catalog.entries) == 22
     assert [(row.doc_key, row.content) for row in rows] == [
         (entry.document_key, entry.content) for entry in catalog.entries
     ]

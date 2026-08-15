@@ -259,4 +259,4 @@ notes.md 必须包含以下小节：
 - 素材固化到哪个 notes.md（阶段 3）
 - Handoff 是否已完整写入 notes，以及下一模块建议从什么问题开始
 
-如果用户说了还需要调用 `finish-docs`，重新读取 `finish-docs` 全文，然后继续执行 skill。
+如果本次模块任务还未写 `dev-log.md / AI_CONTEXT.md / AI_CONTEXT_CHANGELOG.md`，重新读取 `finish-docs` skill 全文，然后继续执行。

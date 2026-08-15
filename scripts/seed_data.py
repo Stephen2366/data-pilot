@@ -45,7 +45,7 @@ EXPECTED_SEED_COUNTS = {
     "order_items": 18_000,
     "refunds": 1_000,
     "tickets": 300,
-    "knowledge_docs": 11,
+    "knowledge_docs": 22,
     "coupons": 10,
     "order_coupons": 3_000,
     "user_behavior_log": 10_000,

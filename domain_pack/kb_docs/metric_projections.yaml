@@ -47,3 +47,91 @@ metric_projections:
     purposes: [answer_evidence, generation_context]
     public: false
     allowed_roles: [ops]
+  - document_key: refund_rate_note
+    revision: "2026-08-15-r1"
+    title: 退款率指标口径
+    knowledge_type: metric_definition
+    metric_key: refund_rate
+    status: active
+    anchor: metric-refund-rate
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: item_gmv_note
+    revision: "2026-08-15-r1"
+    title: 商品维度 GMV 口径
+    knowledge_type: metric_definition
+    metric_key: item_gmv
+    status: active
+    anchor: metric-item-gmv
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: net_revenue_note
+    revision: "2026-08-15-r1"
+    title: 净收入指标口径
+    knowledge_type: metric_definition
+    metric_key: net_revenue
+    status: active
+    anchor: metric-net-revenue
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: order_count_note
+    revision: "2026-08-15-r1"
+    title: 订单量指标口径
+    knowledge_type: metric_definition
+    metric_key: order_count
+    status: active
+    anchor: metric-order-count
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: refund_count_note
+    revision: "2026-08-15-r1"
+    title: 退款量指标口径
+    knowledge_type: metric_definition
+    metric_key: refund_count
+    status: active
+    anchor: metric-refund-count
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: net_refund_amount_note
+    revision: "2026-08-15-r1"
+    title: 实际净退款金额口径
+    knowledge_type: metric_definition
+    metric_key: net_refund_amount
+    status: active
+    anchor: metric-net-refund-amount
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: avg_selling_price_note
+    revision: "2026-08-15-r1"
+    title: 历史平均售价口径
+    knowledge_type: metric_definition
+    metric_key: avg_selling_price
+    status: active
+    anchor: metric-avg-selling-price
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]
+  - document_key: pending_high_priority_ticket_count_note
+    revision: "2026-08-15-r1"
+    title: 待处理高优先级工单数口径
+    knowledge_type: metric_definition
+    metric_key: pending_high_priority_ticket_count
+    status: active
+    anchor: metric-pending-high-priority-ticket-count
+    data_class: metric_definition
+    purposes: [answer_evidence, generation_context]
+    public: false
+    allowed_roles: [ops]

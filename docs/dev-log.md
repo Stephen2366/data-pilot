@@ -2186,3 +2186,142 @@ python -c "from eval.rag_retrieval_contracts import run_rag_retrieval_contract_s
 
 **本地启动体验：** 本模块暂无独立 API 或页面，因为方案 A 只做到内部安全取证，`/api/query` 还没有接 Knowledge Tool。当前最直接的体验方式是运行上面的只读 Gate 命令，观察 required 全通过和技术不可用 coverage 的 `not_observed`；环境未激活时，把 `python` 换成 `AGENTS.md` 中的项目 Python 完整路径。
 
+## ★ M33 可信 RAG 回答与 Citation 闭环
+
+（2026-08-15）
+
+**简述**：把 M32 的 selected Document Evidence 真正送入受控回答流程，形成经过 Shared Gate、确定性 Composer 和 Citation Validator 验证的 **RAG answer/citation 闭环**；当前仍是内部深模块，尚未接公开 API。
+
+### 先用大白话讲
+
+M32 已经能从档案室里安全找出资料，但“找到资料”不等于“系统真的根据资料回答了问题”。M33 像给查档流程增加一张严格的**答复审批单**：资料必须仍是当前版本、调用者仍有权、内容确实足以回答、文档里没有伪装成系统命令的危险指令，才能交给写答复的人；每一句答复的引用位置由程序先编号，最后再由验真员核对引用是否来自本轮真正看过的资料。
+
+因此，系统现在能区分“没找到”“找到了但不够”“没有权限”“后端坏了”“引用被篡改”等不同情况。通过验证的回答才会公开；失败时内部保留审计轨迹，但不会借日志或响应泄露某份受限文档是否存在。用户还在 **G4** 选择当前确定性词法检索器作为 P3 的首个工程 baseline，让下一阶段可以直接做 Router/Harness；这并不表示词法检索已经是最终最佳方案。
+
+### 这次做了什么
+
+本模块解决的**核心矛盾**是：M32 已经产生可信 selected Evidence，但项目仍不能证明生成器到底看了什么、回答里的 claim 是否受这些 Evidence 支持、citation 是否真实，也没有统一的四轴失败结果。最终方案是把这些责任收进一个 `RAGAnswerFlow` 深模块，并用独立、一次执行的 Answer Eval 验证，而不是提前把半成品接进 HTTP。
+
+1. **建立 Shared Gate，让“允许使用”变成“真实入模”**
+
+   原来的 Evidence 最远只到 `selected`。如果下一层仅凭“检索选中了”就标记 `generation_visible`，citation validator 可能相信一份 Composer 根本没看过的文档。这里的 **Generation context（生成上下文）**，就是本轮 Composer 实际收到的 typed Evidence 集合，不是事后重新检索或从答案猜来源。
+
+   `engine/rag/answer_flow.py` 的 Gate 会检查 run/stage/purpose、当前 active revision、content/anchor identity、pre-generation authorization、结构化 Evidence requirement 和文档指令安全。只有检查通过且马上要交给 Composer 的那几份 Evidence 才推进 `generation_visible`；Gate deny 时 Composer 调用数固定为 0。没有采用“先全部推进、生成失败再回滚”的宽松方案，因为 ledger 应记录已经发生的事实，而不是未来意图。
+
+   测试覆盖 zero-hit、已有候选但缺少指定事实、ACL 拒绝、revision 中途失效、缺失 authorization 和 prompt injection。**验证证据**显示正常 context 与最终 cited Evidence 精确对应，拒绝路径不越过 selected；但这些是冻结短知识上的确定性规则，**尚未证明**开放语义充分性判断。
+
+2. **让 claim 与 citation 从同一份 Evidence 身份链产生**
+
+   过去常见的简单做法是生成完答案后，在末尾拼一个文件名或 `sources` 数组；它只能说明“可能检索过”，不能证明该来源真的支持某句话。M33 的 **Evidence-bound Composer（证据绑定生成器）** 首版采用离线 extractive 方式：从真实 generation context 中抽取有界正文，每条 `ClaimDraft` 都携带支持它的 Evidence ID 和 anchor，但无权自己创建最终 citation。
+
+   AnswerFlow 再按 run、claim 顺序和文本 hash 分配稳定 claim/citation slot，复用 M31 Citation Validator 校验同轮、阶段、revision、anchor、ACL 和 slot 完整性。只有全部引用通过，才构造 `ValidatedClaim`、用户 citation 和 answer，并把 ledger 推进 `cited`；`docs_used` 也只能从 validated citation 单向派生。空 claim、未知 Evidence、杜撰文本、越预算、错误 anchor 或缺一条 citation 都会整体失败，不返回“半份看起来可信”的答案。
+
+   没有直接接远程 LLM，因为当前 Knowledge generation/outbound 仍默认拒绝；伪造一个“以后可替换”的远程 adapter 反而会掩盖尚未授权的边界。**验证证据**包括 GMV 公式和质量退款正常回答、Composer 故障、杜撰 claim、partial citation 与篡改反例。它证明 citation integrity 和 extractive support，**不等于**自然语言回答质量已达到产品水平。
+
+3. **集中四轴结果，并把内部审计与公开投影分开**
+
+   如果所有失败都返回空字符串，上层无法区分业务证据不足、权限阻断和技术不可用。`RAGAnswerResult` 统一返回 **route / execution / answer / safety 四轴**：例如 retriever 故障是 `rag / external_unavailable / no_answer / passed`，citation 篡改是 `rag / completed / no_answer / blocked`，正常闭环才是 `rag / completed / complete / passed`。
+
+   一个容易忽略的安全点是：Composer 或 citation 失败后，内部 ledger 必须保留真实的 `generation_visible`，否则审计会撒谎；但公开 `safe_projection()` 不能把这些 Evidence identity 带出去，否则受限或投毒文档的存在性可能泄露。因此 M33 同时保留**内部真相**和**最小公开真相**，失败公开投影会清空 Evidence/context、answer、claims 和 citations。
+
+   没有在本模块修改 `AgentResponse` 或 `/api/query`。直接接线虽然更容易演示，却会迫使 M33 提前决定 Router、可信 caller 和 HTTP 兼容合同，甚至可能误用请求体 `user_role`。用户确认 **G-M33 方案 A** 后，这些职责留给 P3 唯一顶层 Harness。全仓验证证明旧 API/Text2SQL 没被改坏；**尚未完成**的是公开 RAG、生产认证和全局 Trace。
+
+4. **建立独立、一次执行的 Answer/Citation Eval**
+
+   如果状态 scorer、citation scorer 和答案 scorer 各自重跑一次流程，它们看到的可能不是同一轮 Evidence。`eval/rag_answer_contracts.py` 因此为每个 Scenario 只运行一次 AnswerFlow，生成一份 **ExecutionEvidence（执行证据）**，再让所有 typed assertions 共享它。
+
+   `phase4-rag-answer-v1` 有 9 个 Scenario，覆盖质量退款、GMV、no candidate、语义不足、ACL、prompt injection、stale revision、retriever unavailable 和 citation invalid。completed artifact 对 Scenario、replicate、assertion/effect、execution evidence ref，以及 release/corpus/adapter/recipe/composer/flow/policy identity 做 **Closed-world validation（闭世界校验）**；缺失、多余、重复或篡改都整体验证失败。required Gate 与开放措辞 advisory 分开，技术不可用时答案质量记 `not_observed`，不会冒充 0 分或被忽略。
+
+   最终 **60/60 required 全通过**；3 条 advisory 为 2 passed、1 retriever-unavailable `not_observed`。用户据此在 **G4 选择方案 A**，让 `knowledge-deterministic-lexical-v1` 成为 P3 首个默认 baseline。这个结论只说明当前链路足以做工程起点，**不能说明** embedding/hybrid 没价值；未来仍要用 held-out 失败簇和单变量 A/B 决定是否替换。
+
+### M33 的知识内容追加
+
+用户随后选择方案 A，把知识库从 11 条补到 22 条：增加 8 条直接由 `metrics.yaml` 派生的指标说明，以及 3 份只讲处理边界的文档。它们不会另造退款金额、处理时限、优惠门槛或用户资格；遇到实时订单事实、证据不足和优惠券实际适用性，仍要求查业务系统、专项规则或转人工。
+
+这次只扩内容，没有新开模块，也没有改 ACL、出站策略、词法检索默认值或 AnswerFlow 合同。新 release 保留旧 11 条版本作为 previous；三套 required Gate 仍为 12/12、20/20、60/60，全仓更新为 `342 passed, 3 skipped, 1 warning`。知识面更实用了，但仍只是短知识 baseline。
+
+### 新概念
+
+- **Generation context（生成上下文）**：Composer 本轮实际看见的 Evidence 集合。可以类比调用 Java Service 时真正传入的方法参数；数据库里查到但没有传进去的数据，不能事后声称被 Service 使用过。
+- **Shared Answer Evidence Gate（共享回答证据门）**：在生成前集中检查 Evidence 当前是否有效、有权、用途匹配、足够支持问题并且内容安全。它不是 LLM 自评，而是确定性代码控制的硬边界。
+- **Evidence-bound claim（证据绑定声明）**：每条用户可见结论都先声明支持它的 Evidence identity，再由代码分配 citation slot 和验证；不是答案生成完以后猜一个来源。
+- **Extractive Composer（抽取式生成器）**：直接从允许的文档正文中抽取内容，不做开放改写。优点是支持关系容易证明，缺点是措辞可能生硬；它是当前可信 baseline，不是最终产品文案方案。
+- **四轴结果**：把路由、技术执行、答案状态和安全状态分开，避免“没答案”同时代表没证据、系统坏了或被安全策略阻断。
+
+### 代码阅读路线
+
+1. **先从唯一入口看完整控制流**：`engine/rag/answer_flow.py`
+   从 `RAGAnswerRequest` 和 `AnswerEvidenceRequirement` 开始，再顺着 **`RAGAnswerFlow.run()`** 的五个步骤读：Knowledge Tool、Gate、Composer、slot/validator、结果投影。重点理解每个子模块只负责一个决定，以及失败为何集中映射四轴；不需要先死记 hash 细节。
+
+2. **停在 Gate 看真实入模边界**：`engine/rag/answer_flow.py::_gate`
+   对照 `GenerationContext`、`GateDecision` 和 `EvidenceLedger.transition()`，看 selected Evidence 经过 revision/ACL/requirement/指令检查后，怎样只把实际 context 推进到 `generation_visible`。这里解决“检索过”和“模型看过”不能混为一谈的问题。
+
+3. **继续跟 claim 走到 citation**：`DeterministicEvidenceComposer.compose()` → `_build_citation_drafts()` → `engine/rag/evidence.py::validate_citations`
+   先看 Composer 只产 text + Evidence/anchor，再看流程代码分配 claim/slot，最后由 M31 validator 推进 cited。关键设计是 **identity 先于展示**：用户 citation 是验证结果的投影，不能反向构造内部 Evidence。
+
+4. **最后看安全失败和一次执行评测**：`tests/test_m33_answer_flow.py` → `eval/rag_answer_contracts.py` → `tests/test_m33_rag_answer_contracts.py`
+   AnswerFlow 测试是一份失败模式目录；Eval catalog 展示 9 个 Scenario 怎样共享同一次执行；artifact 测试则证明缺 Scenario、重复 replicate、改 policy/composer/hash 或断开 evidence ref 都会被拒绝。
+
+核心调用链是：
+
+`TrustedCaller + question + requirement`
+→ `KnowledgeTool selected Evidence`
+→ `Shared Gate`
+→ `generation-visible context`
+→ `deterministic ClaimDraft`
+→ `code-assigned claim/citation slot`
+→ `Citation Validator`
+→ `cited ledger + validated answer/citations + 四轴安全投影`
+
+### 设计要点
+
+- **深模块而非步骤拼装**：P3 只调用 `RAGAnswerFlow.run()`，不需要知道 Gate、ledger、Composer 和 validator 的正确顺序，避免多个 controller 产生状态分叉。
+- **内部审计不等于公开响应**：失败 ledger 保留真实阶段便于排障，公开投影清空未验证 Evidence，兼顾可审计和非泄露。
+- **确定性 Composer 是刻意的 baseline**：当前先证明支持关系和 citation integrity；自然改写、远程模型和语义 Judge 需要新的 outbound 决策和效果证据。
+- **G4=A 不是永久技术押注**：词法 adapter 只是 P3 首个可工作的默认值；长文、同义改写或跨文档失败出现后，才能用受控 A/B 讨论 embedding/hybrid/rerank。
+- **公开能力仍未完成**：`/api/query`、生产 caller、Router/LangGraph、Hybrid、全局 Trace 和真实 RAG 效果都属于后续边界。
+
+### 面试怎么讲
+
+**可直接复述**：我在安全 Knowledge Tool 之后实现了一个可信 RAG AnswerFlow。它先用 Shared Gate 检查 selected Evidence 的 run、阶段、用途、active revision、pre-generation ACL、结构化充分性和文档指令安全，只有实际交给 Composer 的证据才推进 generation-visible。首版 Composer 是离线 extractive baseline，每条 claim 绑定 Evidence/anchor，但 citation slot 由代码分配，再复用既有 validator 校验同轮、版本、ACL 和完整性；只有全量通过才公开答案并推进 cited。失败结果统一投影为 route/execution/answer/safety 四轴，内部 ledger 保留审计事实，公开投影避免文档存在性泄露。独立 Eval 每个 Scenario 只执行一次，9 个场景的 60 条 required 全过；同属 M33 的内容追加把短知识从 11 条补到 22 条，全仓 342 passed。用户据此选择确定性词法 adapter 作为 P3 首个 baseline，但我明确没有把这些结果包装成真实 LLM、长文或语义检索能力。
+
+1. **[基础追问] 你怎么证明 citation 指向的是生成器真正看过的资料，而不是检索命中过的资料？**
+
+   我把 Evidence 阶段拆成 candidate、selected、generation-visible 和 cited。检索只能推进 selected；AnswerFlow 在实际构造 Composer context 的同一个边界才推进 generation-visible。citation slot 又由代码按 run/claim 分配，validator 只接受本轮 generation-visible Evidence，并复核 revision、anchor、ACL 和 current active entry。测试会捕获真实 Composer context，并与最终 cited Evidence identity 对账，所以不是靠答案末尾的文件名猜来源。
+
+2. **[工程/深挖追问] citation 校验失败后为什么内部 ledger 还保留 generation-visible，不回滚到 selected？**
+
+   因为正文已经实际进入 Composer，回滚会篡改审计事实。正确做法是内部保留 generation-visible，表明“看过但引用验证失败”；最终 answer/claims/citations 全部丢弃，公开 safe projection 清空 Evidence/context，避免泄露。这样阶段账本记录事实，响应层负责可见性，两者职责不会混在一起。
+
+3. **[工程/深挖追问] 远程检索或 Composer 不可用时，为什么不是统一返回 insufficient evidence？**
+
+   `insufficient_evidence` 是业务判断，表示系统正常执行但当前证据不够；后端不可用是 execution failure，本轮根本没有形成可评分答卷。如果混在一起，用户会误以为政策不存在，Eval 也会把可靠性故障算成答案质量差。M33 用四轴和稳定 reason 分开处理，技术不可用场景的 root cause assertion 仍可通过，开放答案质量则记 `not_observed`。
+
+4. **[压力追问] 你的 Composer 只是复制文档，60/60 required 是不是又一次“自己出题自己满分”？**
+
+   这个质疑有合理部分：60/60 不能证明自然语言回答好，也不能外推 11 条短知识之外的语义检索。我这轮的目标是先证明更底层、可确定性验证的合同——真实入模、ACL、阶段、claim/citation identity、失败非泄露和 Eval 分母没有造假。证据除了两条成功题，还包含七类失败和 artifact 篡改反例。选择 extractive Composer 是为了让支持关系可验证，而不是把它包装成最终产品能力。进入 P3 后先打通可信端到端；出现 held-out 语义失败后，再授权远程 Composer 或比较 embedding/hybrid，并用独立 A/B 证明收益。
+
+### 验证与下一步
+
+- **M33 聚焦验证**：AnswerFlow、Gate、Composer、citation、四轴结果和 Answer Eval 共 `33 passed in 0.84s`。
+- **M31/M32 回归**：治理、Evidence/release、retrieval、Knowledge Tool 与历史 Phase 4 contracts 为 `73 passed in 1.44s`。
+- **全仓验证**：知识内容追加后的结果为 `342 passed, 3 skipped, 1 warning in 466.33s`；skip 是既有条件跳过，warning 是既有 Starlette/httpx deprecation。
+- **Answer Eval**：9 Scenario、60 required 全通过；3 advisory 为 2 passed、1 retriever-unavailable `not_observed`；最新 artifact `0dde3216...`。
+- **尚未证明**：未调用真实 LLM、remote sufficiency/judge、embedding/rerank、Milvus 或 LangFuse Cloud；没有公开 API、生产认证、长文、同义改写、跨文档复杂问题或自然措辞结论。
+- **下一步**：进入 P3 唯一顶层 Router/Harness，复用 Text2SQL pipeline 与 `RAGAnswerFlow.run()`，再解决可信 caller、同一 `/api/query` 兼容投影和全局 Trace。
+
+可复制验证命令：
+
+```powershell
+# M33 回答与 Answer Eval 聚焦门；预计 33 passed，不访问网络。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m33-review tests/test_m33_answer_flow.py tests/test_m33_rag_answer_contracts.py -q
+
+# 全仓确定性回归；当前结果为 342 passed、3 skipped、1 个既有 warning。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m33-review-full -q
+
+# 只读复算 M33 required Gate 与 advisory summary，不调用外部服务。
+python -c "from eval.rag_answer_contracts import run_rag_answer_contract_suite,project_required_gate,project_answer_effect_summary; a=run_rag_answer_contract_suite(); print(project_required_gate(a)); print(project_answer_effect_summary(a))"
+```
+
+**本地启动体验：** 本模块暂无独立 API 或页面，因为用户确认的 G-M33 方案 A 只交付内部可信 AnswerFlow，`/api/query` 的 Router、生产 caller 和兼容响应要由 P3 唯一顶层 Harness 一次性接入。当前可运行上面的只读 Gate 命令观察 60 条 required 与 advisory 分层；也可阅读 `tests/test_m33_answer_flow.py` 的成功/失败用例理解四轴结果。环境未激活时，把 `python` 换成 `AGENTS.md` 中的项目 Python 完整路径。
+
