@@ -355,10 +355,14 @@ def decide_outbound(
     return policy.decide(request)
 
 
-def require_outbound(request: OutboundRequest) -> OutboundDecision:
-    """远程 transport 的强制门；deny 时不允许进入网络函数。"""
+def require_outbound(
+    request: OutboundRequest,
+    *,
+    policy: OutboundPolicy | None = DEFAULT_OUTBOUND_POLICY,
+) -> OutboundDecision:
+    """远程 transport 的强制门；调用方可显式注入独立用途策略，默认合同不变。"""
 
-    decision = decide_outbound(request)
+    decision = decide_outbound(request, policy=policy)
     if not decision.allowed:
         raise GovernanceError("outbound_denied", decision.reason_code)
     return decision

@@ -1,0 +1,83 @@
+{
+  "recipe_version": "enterprise-rag-case-split-v1",
+  "question_set_identity": "9a21ca95995c9d2c9e962351e9e7485630233a89c280a5c928b6bc40b9cd271c",
+  "stratification": [
+    "question_type",
+    "source_signature",
+    "document_cardinality"
+  ],
+  "diagnostic_dev_question_ids": [
+    "qst_0016", "qst_0019", "qst_0022", "qst_0023", "qst_0029", "qst_0031",
+    "qst_0045", "qst_0047", "qst_0050", "qst_0059", "qst_0062", "qst_0079",
+    "qst_0086", "qst_0091", "qst_0116", "qst_0117", "qst_0118", "qst_0122",
+    "qst_0151", "qst_0155", "qst_0157", "qst_0181", "qst_0186", "qst_0198",
+    "qst_0199", "qst_0200", "qst_0211", "qst_0215", "qst_0216", "qst_0233",
+    "qst_0236", "qst_0248", "qst_0252", "qst_0268", "qst_0272", "qst_0279",
+    "qst_0282", "qst_0283", "qst_0289", "qst_0318", "qst_0338", "qst_0341",
+    "qst_0353", "qst_0384", "qst_0386", "qst_0387", "qst_0388", "qst_0389",
+    "qst_0393", "qst_0400", "qst_0408", "qst_0420", "qst_0428", "qst_0431",
+    "qst_0433", "qst_0442", "qst_0447", "qst_0457", "qst_0461", "qst_0462"
+  ],
+  "held_out_question_ids": [
+    "qst_0006", "qst_0007", "qst_0008", "qst_0011", "qst_0012", "qst_0013",
+    "qst_0021", "qst_0024", "qst_0025", "qst_0035", "qst_0037", "qst_0039",
+    "qst_0040", "qst_0054", "qst_0057", "qst_0065", "qst_0069", "qst_0076",
+    "qst_0080", "qst_0083", "qst_0085", "qst_0094", "qst_0096", "qst_0102",
+    "qst_0104", "qst_0105", "qst_0110", "qst_0112", "qst_0115", "qst_0128",
+    "qst_0129", "qst_0132", "qst_0133", "qst_0134", "qst_0135", "qst_0136",
+    "qst_0141", "qst_0142", "qst_0150", "qst_0164", "qst_0169", "qst_0171",
+    "qst_0174", "qst_0179", "qst_0183", "qst_0190", "qst_0191", "qst_0194",
+    "qst_0195", "qst_0196", "qst_0197", "qst_0203", "qst_0210", "qst_0212",
+    "qst_0217", "qst_0221", "qst_0222", "qst_0223", "qst_0225", "qst_0228",
+    "qst_0234", "qst_0238", "qst_0241", "qst_0244", "qst_0256", "qst_0258",
+    "qst_0259", "qst_0262", "qst_0265", "qst_0270", "qst_0271", "qst_0280",
+    "qst_0291", "qst_0293", "qst_0294", "qst_0297", "qst_0300", "qst_0327",
+    "qst_0331", "qst_0358", "qst_0361", "qst_0364", "qst_0376", "qst_0381",
+    "qst_0382", "qst_0383", "qst_0390", "qst_0391", "qst_0392", "qst_0394",
+    "qst_0395", "qst_0396", "qst_0397", "qst_0398", "qst_0401", "qst_0402",
+    "qst_0404", "qst_0405", "qst_0406", "qst_0407", "qst_0411", "qst_0412",
+    "qst_0413", "qst_0419", "qst_0421", "qst_0425", "qst_0434", "qst_0435",
+    "qst_0437", "qst_0439", "qst_0440", "qst_0441", "qst_0444", "qst_0445",
+    "qst_0449", "qst_0452", "qst_0453", "qst_0454", "qst_0458", "qst_0469"
+  ],
+  "distribution": {
+    "diagnostic_dev": {
+      "diagnostic_dev:cardinality:multi_document": 12,
+      "diagnostic_dev:cardinality:single_document": 48,
+      "diagnostic_dev:source:confluence": 22,
+      "diagnostic_dev:source:confluence+google_drive": 2,
+      "diagnostic_dev:source:confluence+jira": 2,
+      "diagnostic_dev:source:google_drive": 14,
+      "diagnostic_dev:source:jira": 20,
+      "diagnostic_dev:total": 60,
+      "diagnostic_dev:type:basic": 21,
+      "diagnostic_dev:type:completeness": 4,
+      "diagnostic_dev:type:conflicting_info": 2,
+      "diagnostic_dev:type:constrained": 8,
+      "diagnostic_dev:type:intra_document_reasoning": 2,
+      "diagnostic_dev:type:miscellaneous": 3,
+      "diagnostic_dev:type:project_related": 2,
+      "diagnostic_dev:type:semantic": 18
+    },
+    "held_out": {
+      "held_out:cardinality:multi_document": 26,
+      "held_out:cardinality:single_document": 94,
+      "held_out:source:confluence": 42,
+      "held_out:source:confluence+google_drive": 4,
+      "held_out:source:confluence+jira": 4,
+      "held_out:source:google_drive": 28,
+      "held_out:source:google_drive+jira": 2,
+      "held_out:source:jira": 40,
+      "held_out:total": 120,
+      "held_out:type:basic": 43,
+      "held_out:type:completeness": 9,
+      "held_out:type:conflicting_info": 6,
+      "held_out:type:constrained": 17,
+      "held_out:type:intra_document_reasoning": 2,
+      "held_out:type:miscellaneous": 5,
+      "held_out:type:project_related": 4,
+      "held_out:type:semantic": 34
+    }
+  },
+  "split_identity": "f8164d3f57fe4c262f3a8f7ecd293196748d2abcbd4f387f3fbb8f50208138dd"
+}

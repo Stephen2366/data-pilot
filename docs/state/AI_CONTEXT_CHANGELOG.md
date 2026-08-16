@@ -15,6 +15,16 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M34 EnterpriseRAG-Bench 外部语料接入（2026-08-16）
+
+- **专项状态补齐**：M34 收工复核发现 `docs/state/rag-current-state.md` 仍停留在“只下载、未接入”的开工状态，已改写为当前两套知识基线、external identities/profile/pointer、parser/unit recipe、lexical/semantic retrieval 对照、180 题 Answer Eval、方案 B 支持合同、成本、回滚与活跃风险；WixQA 继续明确为未纳入候选。此次只更新事实源，未重跑构建、Eval 或 provider。
+- **改动范围**：新增 `engine/rag/enterprise_{dataset,cases,parser,units,profile,lexical_experiment,runtime,retrieval_eval,semantic,generation,answer_eval}.py`、`scripts/*m34*.py`、`tests/test_m34_*.py`、`eval/cases/enterprise-rag-bench-v1.0.0-{dataset,split}.json`；修改 `engine/rag/{answer_flow,catalog,evidence,knowledge_tool}.py`、`engine/nl2sql/generator.py`、`engine/schema_retrieval/embedding_provider.py`、`engine/governance.py` 及既有 M33/M4 测试；新增 `docs/notes/m34-{plan,notes}.md`、`docs/state/rag-current-state.md`。范围由 `git status --short`、`git diff --name-only` 与未跟踪清单逐项核对，项目外 raw/extracted/profile/index 未提交。
+- **关键记录**：扫描 EnterpriseRAG-Bench v1.0.0 得 36,417 docs、180 questions、274 unique gold；冻结 `enterprise-unit-paragraph-2400-v1`、60 dev + 120 held-out 和独立 external profile，业务 22 条 active release 不变。lexical 成为 external 默认，semantic candidate 在 dev/held-out 均落后，未激活。真实链路为 KnowledgeTool → Evidence → AnswerFlow → citation，保留 M31–M33 ACL、release、ledger 与 validator 合同。
+- **用户决策与方案 B**：用户确认独立 benchmark profile（不合并业务 release），并选择自然语言回答 + 同 Evidence 逐字 `support_text` 的方案 B。AI 建议该方案，因为它提升可读性但仍能严格证明支持关系；风险是 support contract rejection，故没有改成 fuzzy/semantic 支持，也没有放宽 ACL/citation。用户随后明确取消 M34 Composer 的应用层 800-token 上限并继续已确认的 full Eval；provider 服务端限制与 token telemetry 保留，最终只完成这一轮 180 题运行，没有自动 retry 或收工阶段追加重跑。
+- **验证快照**：retrieval lexical @20 dev `0.810417/0.766667/0.645303`，held-out `0.823125/0.775000/0.723134`（coverage/all-gold/MRR）；semantic 均较低。full Answer Eval `.agent_work/temp/m34-answer-eval-full-v4.json` completed，artifact `d9fa2b20863c568cbc7091dea4724c5d69d74979b5b4ba3d3eb14ff101eeb41f`，180 flow/provider calls、405,305 tokens、complete `146/180`、all-gold cited `80/180`、multi all-gold `2/38`、semantic all-gold `15/52`、10 unavailable、24 contract rejected。聚焦回归 `158 passed`，compileall 通过；全仓 pytest 长时间无可靠终态后停止，结论 `inconclusive`。
+- **参考资料**：`docs/notes/m34-plan.md`、`docs/notes/m34-notes.md`、`docs/state/rag-current-state.md`、EnterpriseRAG-Bench 官方仓库 metadata，以及阿里云百炼官方价格/Qwen OpenAI-compatible 文档；后者仅用于出站模式和成本口径。
+- **遗留/后续**：full Eval 只证明真实构建、检索、回答和证据链可复现，不证明自然答案正确率、生产 ACL、长期性能或成本；complete 不等于 correctness。下一模块先分析 lexical 漏召回和 multi-document context packing，再以新 identity/A-B 决定是否改 recipe；Judge、Router、Hybrid、UI、通用评测平台仍不在范围。10 unavailable、24 support rejection 和全仓 pytest inconclusive 必须保留为风险。
+
 ### [模块任务] M33 可信 RAG 回答与 Citation 闭环（2026-08-15）
 
 - **同日内容追加（仍属 M33）**：按用户确认的方案 A，补充 8 条由 `metrics.yaml` 派生的指标 projection 和 3 份不新增金额、时限、资格承诺的边界文档，catalog 从 11 条增至 22 条；新增验证归入 `tests/test_m33_knowledge_expansion.py`，没有新建模块。active release 为 `7d0d0937...`，previous `4e86bdd...`，corpus `1927eb53...`，pointer `7e41ef20...`，policy identity 不变。新 corpus 上三套 required Gate 仍全绿（12/12、20/20、60/60），全仓 `342 passed, 3 skipped, 1 warning`；仍不外推真实 LLM、长文或开放语义质量。

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 from time import perf_counter
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Protocol
 
 from engine.governance import (
     AuthorizationDecision,
@@ -19,7 +19,12 @@ from engine.governance import (
     authorize_document,
 )
 from engine.rag.catalog import CatalogEntry, KNOWN_PURPOSES
-from engine.rag.evidence import Evidence, EvidenceLedger, make_document_evidence
+from engine.rag.evidence import (
+    DocumentContextCoordinates,
+    Evidence,
+    EvidenceLedger,
+    make_document_evidence,
+)
 from engine.rag.release import ActivePointer, ReleaseBundle, ReleaseError, load_active_release
 from engine.rag.retrieval import (
     DeterministicLexicalRetrievalAdapter,
@@ -41,7 +46,28 @@ RetrievalReason = Literal[
     "retrieval_unavailable",
 ]
 AuthorizationFn = Callable[..., AuthorizationDecision]
-ActiveLoader = Callable[[], tuple[ActivePointer, ReleaseBundle]]
+
+
+class KnowledgeBundleView(Protocol):
+    """业务 release 与 external profile 共同满足的只读运行视图。"""
+
+    release_identity: str
+    corpus_identity: str
+    authorization_policy_identity: str
+    outbound_policy_identity: str
+    entries: tuple[CatalogEntry, ...]
+
+
+@dataclass(frozen=True)
+class MaterializedDocumentContext:
+    """命中 metadata entry 后，受控加载的真实 Evidence context。"""
+
+    entry: CatalogEntry
+    coordinates: DocumentContextCoordinates | None = None
+
+
+ActiveLoader = Callable[[], tuple[object, KnowledgeBundleView]]
+ContextLoader = Callable[[CatalogEntry], MaterializedDocumentContext]
 
 
 class KnowledgeToolContractError(ValueError):
@@ -158,6 +184,12 @@ def _default_active_loader() -> tuple[ActivePointer, ReleaseBundle]:
     return load_active_release()
 
 
+def _default_context_loader(entry: CatalogEntry) -> MaterializedDocumentContext:
+    """22 条业务知识已经内嵌全文，默认 loader 保持 M32 行为。"""
+
+    return MaterializedDocumentContext(entry=entry)
+
+
 def _run_ref(run_id: str) -> str:
     """避免 diagnostics 保存调用方提供的可读 run_id。"""
 
@@ -180,6 +212,7 @@ class KnowledgeTool:
         active_loader: ActiveLoader = _default_active_loader,
         authorization_policy: DocumentAuthorizationPolicy | None = DocumentAuthorizationPolicy(),
         authorization_fn: AuthorizationFn = authorize_document,
+        context_loader: ContextLoader = _default_context_loader,
     ) -> None:
         """注入 adapter、active loader 与授权 seam，默认只使用本地实现。"""
 
@@ -187,6 +220,7 @@ class KnowledgeTool:
         self._active_loader = active_loader
         self._authorization_policy = authorization_policy
         self._authorization_fn = authorization_fn
+        self._context_loader = context_loader
 
     def retrieve(self, request: KnowledgeRequest) -> RetrievalOutcome:
         """执行一次确定性、安全取证；adapter 恰好调用一次或在 release 失败前不调用。
@@ -272,19 +306,45 @@ class KnowledgeTool:
         }
         candidate_evidence: list[Evidence] = []
         entry_by_evidence: dict[str, CatalogEntry] = {}
-        for match in validated:
-            identity = (match.document_key, match.revision, match.content_identity, match.anchor)
-            entry = entry_index[identity]
-            evidence = make_document_evidence(
-                run_id=request.run_id,
-                release_identity=bundle.release_identity,
-                entry=entry,
-                purpose=request.purpose,
-                authorization=pre_selection[identity],
-                runtime_ref=f"retrieval:{batch.adapter_identity}:{batch.recipe_identity}",
+        try:
+            for match in validated:
+                identity = (match.document_key, match.revision, match.content_identity, match.anchor)
+                metadata_entry = entry_index[identity]
+                materialized = self._context_loader(metadata_entry)
+                entry = materialized.entry
+                hydrated_identity = (
+                    entry.document_key,
+                    entry.revision,
+                    entry.content_identity,
+                    entry.anchor,
+                )
+                # ★ loader 只能补正文/坐标，不能把已授权 metadata 偷换成另一份 unit。
+                if hydrated_identity != identity or not entry.content.strip():
+                    raise RetrievalAdapterError(
+                        "retrieval_context_invalid", "context loader 返回未知或空 unit"
+                    )
+                evidence = make_document_evidence(
+                    run_id=request.run_id,
+                    release_identity=bundle.release_identity,
+                    entry=entry,
+                    purpose=request.purpose,
+                    authorization=pre_selection[identity],
+                    runtime_ref=f"retrieval:{batch.adapter_identity}:{batch.recipe_identity}",
+                    context_coordinates=materialized.coordinates,
+                )
+                candidate_evidence.append(evidence)
+                entry_by_evidence[evidence.ref.evidence_id] = entry
+        except (OSError, RetrievalAdapterError):
+            return self._failure_outcome(
+                request=request,
+                started_at=started_at,
+                reason_code="retrieval_unavailable",
+                execution_outcome="external_unavailable",
+                query_fingerprint_value=batch.query_fingerprint,
+                bundle=bundle,
+                adapter_calls=1,
+                authorized_entry_count=len(authorized_entries),
             )
-            candidate_evidence.append(evidence)
-            entry_by_evidence[evidence.ref.evidence_id] = entry
 
         ledger = EvidenceLedger.from_candidates(run_id=request.run_id, evidence=tuple(candidate_evidence))
         provisional_ids = tuple(
@@ -389,7 +449,7 @@ class KnowledgeTool:
         reason_code: RetrievalReason,
         execution_outcome: ExecutionOutcome,
         query_fingerprint_value: str,
-        bundle: ReleaseBundle | None = None,
+        bundle: KnowledgeBundleView | None = None,
         adapter_calls: int = 0,
         authorized_entry_count: int = 0,
         candidate_count: int = 0,
@@ -422,7 +482,7 @@ class KnowledgeTool:
         request: KnowledgeRequest,
         started_at: float,
         query_fingerprint_value: str,
-        bundle: ReleaseBundle | None,
+        bundle: KnowledgeBundleView | None,
         adapter_calls: int,
         authorized_entry_count: int,
         candidate_count: int,

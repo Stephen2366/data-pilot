@@ -26,7 +26,16 @@ DEFAULT_METRIC_PROJECTIONS_PATH = DEFAULT_POLICY_SOURCE_DIR / "metric_projection
 
 KNOWN_ROLES = frozenset({"admin", "ops", "customer_service", "demo_user"})
 KNOWN_STATUSES = frozenset({"active", "inactive", "revoked"})
-KNOWN_DATA_CLASSES = frozenset({"role_restricted_policy_text", "security_policy", "metric_definition"})
+KNOWN_DATA_CLASSES = frozenset(
+    {
+        "role_restricted_policy_text",
+        "security_policy",
+        "metric_definition",
+        # EnterpriseRAG 是公开合成 benchmark，不等同业务 authority。该枚举只允许它
+        # 经过独立 external profile 使用，不会让 domain_pack 自动纳入外部语料。
+        "public_benchmark_document",
+    }
+)
 KNOWN_PURPOSES = frozenset({"answer_evidence", "analysis_constraint", "generation_context"})
 POLICY_REQUIRED_FIELDS = frozenset(
     {

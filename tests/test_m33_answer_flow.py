@@ -239,7 +239,7 @@ def test_citation_tamper_blocks_draft_and_does_not_claim_cited_stage() -> None:
 
 
 def test_composer_cannot_invent_unknown_support_or_unsupported_text() -> None:
-    """Composer 声称的内容必须能在绑定 Evidence 中逐字找到。"""
+    """Composer 声称的 support 必须能在绑定 Evidence 中逐字找到。"""
 
     class InventingComposer(DeterministicEvidenceComposer):
         """返回 Evidence 未支持结论的恶意 Composer。"""
@@ -251,7 +251,7 @@ def test_composer_cannot_invent_unknown_support_or_unsupported_text() -> None:
                 confirmed_conditions=confirmed_conditions,
                 max_claims=max_claims,
             )[0]
-            return (replace(draft, text="这是 Evidence 中不存在的结论"),)
+            return (replace(draft, support_text="这是 Evidence 中不存在的原文"),)
 
     with pytest.raises(AnswerFlowContractError, match="composer_output_invalid"):
         RAGAnswerFlow(composer=InventingComposer()).run(_request(run_id="invented"))

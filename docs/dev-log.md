@@ -2325,3 +2325,182 @@ python -c "from eval.rag_answer_contracts import run_rag_answer_contract_suite,p
 
 **本地启动体验：** 本模块暂无独立 API 或页面，因为用户确认的 G-M33 方案 A 只交付内部可信 AnswerFlow，`/api/query` 的 Router、生产 caller 和兼容响应要由 P3 唯一顶层 Harness 一次性接入。当前可运行上面的只读 Gate 命令观察 60 条 required 与 advisory 分层；也可阅读 `tests/test_m33_answer_flow.py` 的成功/失败用例理解四轴结果。环境未激活时，把 `python` 换成 `AGENTS.md` 中的项目 Python 完整路径。
 
+## ★ ★ M34 EnterpriseRAG-Bench 真实语料接入
+
+（2026-08-16）
+
+**简述**：把项目外的 **36,417 篇企业文档、139,214 个检索单元和 180 道问题**真正接入 DataPilot 的 Knowledge Tool、Evidence、回答和引用链路，用真实构建与 Eval 取代“22 条短知识全部通过”的玩具化证据；最终确认链路已经成立，但答案质量的主要瓶颈仍是**漏召回、多文档上下文组织和严格支持合同失败**。
+
+### 先用大白话讲
+
+M31–M33 像是在一个只有 **22 张知识卡片**的小书架上，把门禁、权限、回答和引用流程练得很规范。它能证明“流程没乱”，却回答不了更现实的问题：如果书架突然变成几万篇 Confluence 页面、Google Drive 文档和 Jira 记录，系统还能不能建库、找到资料、把资料交给模型，并且让每句话都能追溯到原文？
+
+M34 就是把这个“小书架实验”升级成一次真正的仓库压力测试。我们先审计数据，再按文档结构切片，建立项目外索引，然后让问题实际经过：
+
+`真实大语料 → 检索 → 权限检查 → Evidence → 模型回答 → support_text → citation → Eval`
+
+最终有两个很重要的结论。第一，**工程链路确实跑通了**，不再只是下载数据或写离线脚本。第二，跑通不等于答对：有些回答状态是 complete，也有合法引用，但引用的文档并不是标准答案需要的文档。这次 Eval 最大的价值，正是把这种过去看不见的问题暴露出来。
+
+### 这次做了什么
+
+这次工作的核心矛盾是：既要把大规模、长文档和多文档问题接进现有 RAG，又不能为了省事推翻 M31–M33 已经建立的权限、Evidence、发布和 citation 合同。最终采用了“**外部语料独立存放和建库，运行时复用现有可信链路**”的方式，并分别用 retrieval Eval 和 Answer Eval 判断“找没找对”与“回答链是否成立”。
+
+1. **先把数据变成可核对的语料，而不是把一堆文件当作知识库**
+
+   **原来的问题**是，外部数据即使已经下载，也不能直接等同于“可用知识库”。同一个 logical document ID 可能对应多份物理文件；题目里还存在重复 gold ID；如果读取时用 ID 覆盖写入，某些冲突信息题会在建库阶段就被悄悄改错。路径、文件数量或官方资产发生漂移，也会让两次评测看似使用同一数据，实际分母已经不同。
+
+   M34 建立了 **closed-world dataset scanner**。所谓 closed-world，可以理解为仓库入库前先封一张完整清单：只接受 Confluence、Google Drive、Jira 三种来源，逐个核对官方资产的大小和 hash，并区分 **logical document identity**（基准题怎样称呼一篇文档）与 **physical source-instance identity**（磁盘上这一份具体文件是谁）。发现冲突时保留，而不是覆盖；发现缺文件、未知来源、空题目或资产漂移时直接失败关闭。
+
+   全量审计得到 **Confluence 5,189、Google Drive 25,108、Jira 6,120，共 36,417 篇文档**；180 道题涉及 274 个唯一 gold document ID，0 个缺失，同时发现 3 个冲突 logical ID。`qst_0413` 的重复 gold 还被保留为 **multiset（多重集合）**，因为它要求找回同一 logical ID 对应的两份不同物理文档，不能偷懒去重。
+
+   没有采用“能读就行”的宽松方案，因为那样最危险的不是程序报错，而是程序正常运行、分数也正常输出，却已经换了语料或丢了冲突文档。这里的验证证明了**数据分母、身份和来源可复现**；但 EnterpriseRAG-Bench 是模拟企业环境的合成数据，它仍不能证明真实公司的连接器噪声、权限继承和历史脏数据已经被覆盖。
+
+2. **把长文档切成可定位、可回查、可替换的检索单元**
+
+   **原来的问题**是，整篇文档直接入库虽然简单，但有些正文超过两万字符：检索词容易被大段无关内容稀释，命中后也会给模型塞入过多上下文。反过来，如果切得太碎或大量 overlap，又会放大索引、延迟和费用，还可能让 citation 只能指向一段脱离上下文的碎片。
+
+   parser 先按三种来源的实际格式恢复正文中的结构性 `\\n`，但只处理明确的换行 token，不使用通用 `unicode_escape`，避免误改代码、JSON 或 Windows path。随后比较了 whole-document、paragraph-1200、paragraph-2400、paragraph-2400-overlap1 四种 **unit recipe**。这里的 unit recipe 就像切菜规格：它规定从哪里下刀、每块多大、是否重复搭边；一旦冻结，参数和 identity 必须一起版本化。
+
+   在相同 corpus、parser 和 60 道 dev 题下，最终选择 **`enterprise-unit-paragraph-2400-v1`、无 overlap**：共 139,214 units。它的 lexical coverage@20 为 `0.810417`，高于 whole-document 的 `0.724306`、paragraph-1200 的 `0.793056` 和 overlap1 的 `0.793750`；overlap1 反而多出 21,301 个 units 和约 19% 索引字符，却没有带来稳定收益。
+
+   每个 unit 都绑定 normalized document revision、字符起止位置和正文 hash，citation 可以从 `normalized-char:<start>-<end>` 回切原文。没有用“先随便切，效果不好以后再换”的临时方案，因为切分会影响索引 identity、Evidence anchor 和 Eval 可比性。当前证据说明 2400/no-overlap 是这套 dev lexical 协议下较好的工程折中，**并不证明它对所有 embedding 模型、所有语言或生产文档都是全局最优**。
+
+3. **建立独立 external profile，同时复用原来的权限和 Evidence 链路**
+
+   **原来的问题**是，M31 的业务 `ReleaseBundle` 为 22 条短知识设计，正文直接内嵌；若把 139,214 个 units 强塞进去，会形成约 2.62 亿字符的 JSON/内存放大，而且同一长文的多个切片会争用原来的 `(document_key, revision)` citation key。更严重的是，把 benchmark 与业务 release 合并，会让测试数据参与业务默认检索、权限发布和回滚。
+
+   因此 M34 建立了独立的 **external profile**：项目外的 immutable SQLite 保存 36,417 条 document metadata、139,214 条 unit metadata/context 和 FTS5 索引；构建完成前使用 `.building-*` 临时身份，经过 SQLite integrity、meta、数量、FTS、database hash 校验后，再原子 rename。benchmark 有自己的 active/previous pointer，业务 22 条 release 和 pointer 完全不动。
+
+   运行时也没有重写第二套 RAG。`enterprise_runtime.py` 提供 metadata-only bundle、SQLite 检索 adapter 和命中后正文 loader；Knowledge Tool 仍先做 pre-selection ACL，只有选中的 units 才加载正文，再做 pre-generation authorization，随后进入 M33 的 AnswerFlow、Evidence ledger 和 citation validator。每个 unit 使用独立 `enterprise-unit:<identity>` document key，同时保留 logical/physical document 和 normalized offsets。
+
+   这相当于给原来的安全流水线换了一个“大仓库进料口”，但仓库里的门禁、验货和出库单没有被绕过。聚焦回归最终为 **158 passed**，说明 M30–M34 的 catalog、release、ACL、Evidence、AnswerFlow 和新 external runtime 合同能共同工作。它尚未证明公开 `/api/query`、生产认证、真实 Confluence/Drive/Jira connector ACL 或 Router 已经接好，因为这些明确不属于 M34。
+
+4. **让 lexical 与 semantic 用同一把尺子竞争，而不是凭技术名词决定默认值**
+
+   **原来的问题**是，“企业 RAG 就应该上向量检索”听起来合理，但如果 lexical 与 semantic 使用不同切分、不同题集或不同 top-k，分数没有可比性；更不能因为 embedding 更先进，就静默替换已经工作的默认 adapter。
+
+   M34 先把 180 题按 `question_type × source signature × single/multi-document` 确定性分成 **60 dev + 120 held-out**。dev 用来调查和选择，held-out 只有候选冻结后才打开；gold document 不进入 runtime，只在检索返回后评分。两种 adapter 都固定 @20，并按 physical source identity 去重，评分同时计算 coverage、all-gold 和 MRR。
+
+   lexical 在 dev 的 `coverage/all-gold/MRR` 为 **`0.810417 / 0.766667 / 0.645303`**，held-out 为 **`0.823125 / 0.775000 / 0.723134`**。semantic candidate 在 dev 为 `0.737500 / 0.700000 / 0.621421`，held-out 为 `0.773958 / 0.741667 / 0.630477`；两个 split 都没有胜出，所以 semantic collection 保留为 candidate，external 默认仍是 lexical。
+
+   这个结果不是“向量检索没用”，而是说明**当前 embedding + unit recipe + 检索协议没有证明收益**。没有继续加入 Hybrid、rerank 或 query rewrite，因为那会一次改变多个变量，也超出 M34 范围。下一轮如果改进召回，应生成新 identity，并继续用同一 split 做单变量 A/B。
+
+5. **把真实回答、原文支持和最终引用绑在一起，再诚实记录答案质量**
+
+   **原来的问题**有两层。第一，M33 的 extractive Composer 只能基本照抄原文，回答不自然；直接放开 LLM 改写后，又无法仅靠字符串证明改写内容真的受到 Evidence 支持。第二，早期 smoke 已经暴露：AnswerFlow 可以返回 complete 和 validated citation，但检索到的文档可能不是 gold，导致“流程完整、答案却错”。
+
+   用户最终选择了 **方案 B**：每条 `ClaimDraft` 同时包含自然语言 `text`、同一 Evidence 中逐字存在的 `support_text`、`evidence_id` 和 `anchor`。可以把它理解为“对外说人话，对内必须附原文凭据”。代码只做严格且可证明的事情：support_text 必须能在同一 Evidence 找到，Evidence/anchor/ACL/stage/citation slot 必须全部合法；它不假装字符串规则可以证明 paraphrase 与 support 之间的语义蕴含。为了减少 JSON 换行造成的假拒绝，只做 whitespace canonicalization，不做 fuzzy 或语义近似放行。
+
+   180 题 full Answer Eval 最终完成 **180 次 AnswerFlow、180 次 provider request、0 次自动 retry**，共使用 **405,305 tokens**。146/180 的 `answer_status=complete` 只表示回答合同完整走完；真正的 gold 对账显示，只有 **80/180（44.44%）**题引用齐全部 gold 文档，平均 gold-document coverage 为 **49.3981%**。其中 multi-document all-gold 只有 **2/38（5.26%）**，semantic 题只有 **15/52（28.85%）**；另有 10 次 Composer unavailable 和 24 次 support contract rejected。
+
+   因此 M34 最重要的结论不是“RAG 已经答得很好”，而是：**build → retrieve → authorize → answer → support → cite → score 已经成为可复现的真实链路，并且它可靠地暴露了系统还答不好的地方**。exact-fact 的逐字检查只有 1/180 全量命中，但这是保守字符串下限，也不能反向解释为开放语义正确率只有 0.69%；本模块没有引入 LLM Judge，不能给出尚未测量的语义正确率。
+
+### 新概念
+
+- **Closed-world validation（闭世界校验）**：先声明“合法输入和合法输出的全集是什么”，再拒绝缺失、多余、重复或身份漂移。它类似数据库迁移里的 schema checksum：不是只看程序能不能启动，而是确认程序处理的确实是那一版数据。
+- **Logical ID / physical source instance**：logical ID 是 benchmark 对文档的业务编号，physical instance 是磁盘上的具体副本。可类比 MySQL 中的“业务单号”和“带版本的行记录”：业务单号相同，不代表两行正文可以互相覆盖。
+- **Retrieval unit recipe**：从 normalized document 生成检索片段的一组版本化规则，包括长度、分段与 overlap。它不只是调参，因为会改变索引规模、Evidence identity、citation anchor 和 Eval 可比性。
+- **External profile**：与业务知识 release 分开的不可变大语料构建物。它复用 Knowledge Tool 接口，但有独立 corpus/index identity 和 active pointer，避免 benchmark 污染业务知识。
+- **Gold coverage / all-gold / MRR**：coverage 看标准文档找回了多少；all-gold 要求一题需要的文档全部找齐；MRR 关注第一个正确结果排得是否靠前。多文档题只命中一半时，MRR 可能好看，但 all-gold 会如实失败。
+- **`support_text`**：模型为自然语言 claim 提供的原文支持片段。它解决“citation 指向哪份 Evidence”，但不能单独证明复杂改写在逻辑上一定成立，所以后续语义 Judge 仍是独立能力。
+- **Checkpoint + identity**：长任务每完成一小段就原子记录进度，并绑定同一份配置身份。发生欠费、TLS EOF 或进程退出时，只能从已确认前缀续跑，不能拿数据库物理 row count 猜进度。
+
+### 代码阅读路线
+
+1. **从数据边界开始**：`engine/rag/enterprise_dataset.py`、`eval/cases/enterprise-rag-bench-v1.0.0-dataset.json`
+
+   先看 dataset recipe 如何冻结 release、三种来源、官方资产 hash 和预期分母，再看 scanner 如何建立 logical/physical/corpus/question identities。重点理解 **为什么冲突 ID 不覆盖、重复 gold 不去重**；具体 SHA-256 拼接格式无需先死记。
+
+2. **跟随一篇文档完成“清洗和切片”**：`engine/rag/enterprise_parser.py` → `engine/rag/enterprise_units.py`
+
+   parser 负责保守恢复结构性换行并生成 normalized revision；unit builder 再按 paragraph-2400 recipe 输出稳定字符 offset、unit identity 和正文 hash。阅读时抓住 `raw → normalized document → retrieval unit → source anchor` 这条线，它解决的是**检索片段如何回到未经篡改的来源**。
+
+3. **看大语料如何安全落盘和激活**：`engine/rag/enterprise_profile.py`
+
+   先看 immutable profile 的 metadata/units/FTS 结构，再看 building、verify、atomic rename 和 active/previous pointer。这里最关键的不是 SQLite API，而是 **candidate 只有完整校验后才能成为可加载 profile**，损坏构建不能替换当前 active。
+
+4. **看真实查询如何进入旧 Knowledge Tool**：`engine/rag/enterprise_runtime.py` → `engine/rag/knowledge_tool.py`
+
+   `enterprise_runtime.py` 负责把 profile 适配成 metadata-only bundle、retriever 和 context loader；Knowledge Tool 先在 metadata 上做 pre-selection ACL，命中后才加载正文并复核 pre-generation authorization。这样既避免 14 万段正文常驻内存，也不让外部 adapter 绕过 M31/M32 的门禁。
+
+5. **沿着 Evidence 走到自然回答和引用**：`engine/rag/evidence.py` → `engine/rag/answer_flow.py` → `engine/rag/enterprise_generation.py`
+
+   先看 Evidence 新增的 logical/physical/unit/offset 坐标，再看 AnswerFlow 如何把 selected 推进 generation-visible，最后看 Qwen Composer 输出 `text + support_text + evidence_id + anchor`。重点理解 **support_text 先通过同 Evidence 逐字校验，citation 再由代码分配和验证**；模型不能自己宣布引用有效。
+
+6. **最后读两层 Eval，理解数字从哪里来**：`engine/rag/enterprise_retrieval_eval.py` → `engine/rag/enterprise_answer_eval.py` → `scripts/run_m34_answer_eval.py`
+
+   Retrieval Eval 只评价 Tool 找回了哪些文档；Answer Eval 每题只执行一次真实 AnswerFlow，再在返回后加入 gold 做 coverage、failure、latency 和 token 投影。脚本负责 checkpoint/resume，不负责放宽评分。这里解决的是**运行输入不泄露答案、失败不丢分母、长任务中断后不重复付费**。
+
+核心数据流是：
+
+`项目外 raw/extracted`
+→ `strict scanner + identities`
+→ `source-aware parser`
+→ `paragraph-2400 units`
+→ `immutable external profile / FTS or Milvus candidate`
+→ `Knowledge Tool + ACL`
+→ `Document Evidence + context loader`
+→ `AnswerFlow + Qwen Composer`
+→ `support_text + Citation Validator`
+→ `retrieval/answer artifact + gold 后置评分`
+
+### 设计要点
+
+- **不合并业务 release**：benchmark profile 与 22 条业务知识分别发布和回滚，避免测试语料污染业务检索或改变既有 ACL。
+- **身份先于分数**：dataset、corpus、parser、unit recipe、profile、split、adapter 和 artifact 都有 identity；没有这些身份，相同分数也不能证明两次实验可比较。
+- **held-out 只用于裁决**：unit recipe 先在 60 道 dev 上确定，再打开 120 道 held-out，避免一边看最终答案一边调参。
+- **semantic 用证据竞争默认值**：embedding 构建完成不等于方案更好；两个 split 都落后，所以保留 candidate，不切默认。
+- **自然回答不放弃硬引用**：方案 B 允许 paraphrase，但 `support_text` 必须来自同一 Evidence；只修复空白差异，不用 fuzzy matching 偷渡不确定支持。
+- **技术失败与业务质量分开**：provider unavailable、contract rejected、answer complete、gold coverage 是不同事实，不能全部压成一个“成功率”。
+- **成本成为 artifact 的一部分**：full Eval 记录 prompt/completion/total tokens 和每题 attempt，取消 800-token 应用上限后不再宣称固定费用上界。
+- **明确没有做的事**：没有接 Router、Hybrid、UI、通用评测平台或 LLM Judge；没有提交 raw/extracted/SQLite/Milvus 大文件，也没有证明生产 connector ACL。
+
+### 面试怎么讲
+
+**可直接复述**：我负责把 DataPilot 的 RAG 从 22 条短知识回归，扩展到 EnterpriseRAG-Bench 的 36,417 篇 Confluence、Google Drive 和 Jira 合成企业文档。为了不破坏既有权限和发布合同，我没有把外部语料塞进业务 release，而是建立独立 immutable external profile，把文档按 paragraph-2400 切成 139,214 个带稳定 offset 的 units，运行时通过 adapter 和 context loader 复用原来的 Knowledge Tool、ACL、Evidence ledger、AnswerFlow 和 Citation Validator。评测上固定了 60 dev + 120 held-out，gold 只在运行后用于评分。lexical 在 held-out 的 coverage@20/all-gold@20/MRR 为 0.823125/0.775/0.723134，semantic candidate 没有胜出，因此没有切默认。回答侧采用自然 text 加同 Evidence 逐字 support_text 的合同，180 题 full Eval 完成 180 次真实 provider 调用并记录 405,305 tokens。虽然 146 题走完整回答链，但只有 80 题引用齐全部 gold 文档，多文档 all-gold 只有 2/38。这说明我不仅打通了真实 build、retrieve、answer、cite、score 链路，也用可复现证据定位出下一步应优先解决召回与多文档 context packing，而没有把 complete 状态包装成正确率。
+
+1. **[基础追问] 你怎么证明这不是“下载了数据，再写几个离线搜索脚本”？**
+
+   M34 的验收证据跨过了四层：第一，36,417 篇文档经过 closed-world scanner、parser 和 unit builder，形成可校验 profile；第二，检索通过真实 Knowledge Tool adapter，而不是实验函数直接查 gold；第三，命中结果经过 ACL、Evidence 阶段和 AnswerFlow，真正进入 Composer；第四，citation validator 与 Answer Eval 对同一轮 Evidence 做后置评分。真实 artifact 有 180 个 flow/provider calls、token、延迟和失败结构，所以它证明的是在线运行链，而不只是数据准备。
+
+2. **[基础追问] 为什么一题要同时看 coverage、all-gold 和 MRR？**
+
+   三个指标回答的问题不同。MRR 看第一个正确文档排得靠不靠前，适合单文档快速命中；coverage 看需要的文档找回了几成；all-gold 要求全部找齐。比如一道题需要两份文档，只把第一份排在第 1 名，MRR 会很好，但 coverage 只有 0.5、all-gold 为失败。M34 的 multi-document all-gold 只有 2/38，正说明不能只看 MRR。
+
+3. **[工程/深挖追问] 为什么要新建 external profile，而不是扩展原来的 ReleaseBundle？这是不是重复建设？**
+
+   两者复用的是运行接口，不应强行复用存储形态。原 ReleaseBundle 面向 22 条短知识，内嵌正文且一个文档对应单 anchor；external corpus 有 139,214 个 units、约 2.62 亿正文字符，多切片还需要独立 unit identity。强塞会放大内存并破坏 citation key，同时把 benchmark 与业务发布、ACL 和回滚绑在一起。external profile 只解决大语料存储、索引和命中后加载，Knowledge Tool、Evidence、AnswerFlow、validator 都仍是原模块，因此不是复制第二套 RAG。
+
+4. **[工程/深挖追问] embedding 构建花了不少时间，为什么最后仍用 lexical？**
+
+   因为技术选择看 held-out 结果，不看投入沉没成本。semantic 在 dev 的 coverage@20 是 0.7375，低于 lexical 的 0.810417；held-out 是 0.773958，仍低于 lexical 的 0.823125，MRR 也更低。它可能需要更好的 embedding、query 表达、hybrid 或 rerank，但这些是新变量。正确做法是保留 collection 和 identity 作为 candidate，下一轮围绕明确失败簇做单变量 A/B，而不是为了证明前面的成本值得就切默认。
+
+5. **[工程/深挖追问] 为什么 support_text 逐字存在，仍不能说回答一定正确？**
+
+   它只能证明“模型给出的原文凭据确实来自这份 Evidence”，不能证明自然语言改写没有扩大、曲解或遗漏原意。M34 故意只让代码判断可确定的字符串与身份合同，没有把语义蕴含伪装成确定性规则。未来若要评价改写正确性，需要独立的人工标注或 Judge 合同；但在那之前，support_text 至少阻止了完全没有原文依据的 citation。
+
+6. **[压力追问] 你跑了 180 题、花了真实调用费用，最后 all-gold 只有 44.44%，这是不是说明模块失败了？**
+
+   这个质疑对“答案质量已经提升”是成立的：M34 没有证明这一点，而且多文档 5.26% all-gold 很差。但模块目标不只是刷一个总分，而是把原来玩具化的知识链换成可复现的真实压力证据。现在我们能区分是检索漏了 gold、Composer 不可用、support 合同被拒绝，还是回答链完整但引用错文档；此前 22 条短知识的全绿测试看不到这些问题。工程链已经打通，质量短板也被量化，下一步可以针对 retrieval 和 context packing 做受控实验，而不是盲目改 prompt。
+
+### 验证与下一步
+
+- **数据与构建证据**：36,417 documents、139,214 units；profile 独立 reload 后 identity、count 和 database SHA 一致，原始/派生大文件未提交仓库。
+- **Retrieval Eval**：60 dev + 120 held-out 全部 completed；lexical 两个 split 都胜过当前 semantic candidate，因此 external 默认保持 lexical。
+- **Answer Eval**：180/180 flow calls、180/180 provider requests、0 retry、405,305 total tokens；artifact identity 为 `d9fa2b20863c568cbc7091dea4724c5d69d74979b5b4ba3d3eb14ff101eeb41f`。
+- **确定性回归**：M30–M34 相关聚焦套件 **158 passed in 4.47s**；生成/安全聚焦套件 **40 passed**；`compileall` 通过。
+- **全仓边界**：full pytest 在非 M34 测试阶段长时间没有可靠终态，进程已停止，所以只能记录为 **inconclusive**，不能写成全仓通过。
+- **下一步建议**：先离线分析 lexical top-k 漏召回、multi-document gold 分布和 selected context budget，再规划新的 retrieval/context-packing 模块；未经新计划和费用确认，不重跑大规模 provider、不切 semantic 默认、不放宽 support/citation 合同。
+
+可复制验证命令：
+
+```powershell
+# M30–M34 相关合同回归；预计看到 158 passed，不访问真实 provider。
+python -m pytest --basetemp=.agent_work/temp/pytest-run-m34 tests/test_m30_knowledge_catalog.py tests/test_m31_governance.py tests/test_m31_evidence_citation.py tests/test_m31_phase4_contracts.py tests/test_m31_release.py tests/test_m32_knowledge_tool.py tests/test_m32_rag_retrieval_contracts.py tests/test_m32_retrieval.py tests/test_m33_answer_flow.py tests/test_m33_knowledge_expansion.py tests/test_m33_rag_answer_contracts.py tests/test_m34_enterprise_answer_eval.py tests/test_m34_enterprise_case_split.py tests/test_m34_enterprise_dataset.py tests/test_m34_enterprise_generation.py tests/test_m34_enterprise_lexical_experiment.py tests/test_m34_enterprise_parser.py tests/test_m34_enterprise_profile.py tests/test_m34_enterprise_retrieval_eval.py tests/test_m34_enterprise_runtime.py tests/test_m34_enterprise_semantic.py tests/test_m34_enterprise_units.py -q
+
+# 只做 Python 语法/导入编译检查；预计无输出并以 exit 0 结束。
+python -m compileall -q engine app eval scripts tests
+```
+
+**本地启动体验：** M34 **暂无独立 API 或页面**，因为本模块只把 external corpus 接入内部 Knowledge Tool/AnswerFlow，并明确不扩展 Router、Hybrid 或 UI。最安全的体验方式是运行上面的离线聚焦回归，再只读查看 `.agent_work/temp/m34-answer-eval-full-v4.json` 的 summary、group summaries 和 failure counts。若要重建 profile 或重新调用真实 Qwen，必须显式提供项目外 dataset root，并重新确认数据路径、Milvus、provider 费用和运行范围；不要为了“体验一下”直接重跑 180 题。
+

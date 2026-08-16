@@ -15,7 +15,7 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from time import perf_counter
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Mapping
 
 from engine.governance import (
     DOCUMENT_AUTHORIZATION_POLICY_IDENTITY,
@@ -36,7 +36,12 @@ from engine.rag.evidence import (
     allocate_citation_slot,
     validate_citations,
 )
-from engine.rag.knowledge_tool import KnowledgeRequest, KnowledgeTool, RetrievalOutcome
+from engine.rag.knowledge_tool import (
+    KnowledgeBundleView,
+    KnowledgeRequest,
+    KnowledgeTool,
+    RetrievalOutcome,
+)
 from engine.rag.release import ActivePointer, ReleaseBundle, ReleaseError, load_active_release
 from engine.rag.retrieval import RetrievalBudget
 
@@ -63,7 +68,7 @@ AnswerReason = Literal[
     "composer_unavailable",
     "citation_invalid",
 ]
-ActiveLoader = Callable[[], tuple[ActivePointer, ReleaseBundle]]
+ActiveLoader = Callable[[], tuple[object, KnowledgeBundleView]]
 
 DETERMINISTIC_COMPOSER_IDENTITY = "rag-deterministic-evidence-composer-v1"
 ANSWER_FLOW_RUNTIME_IDENTITY = "rag-answer-flow-local-v1"
@@ -227,9 +232,15 @@ class GateDecision:
 
 @dataclass(frozen=True)
 class ClaimDraft:
-    """Composer 的结构化草稿；尚无代码分配的 claim/citation slot。"""
+    """Composer 的结构化草稿；自然语言结论和逐字证据片段必须分开。
+
+    ``text`` 是最终给用户看的表述，可以是对原文的忠实改写；``support_text`` 则是
+    Composer 声称支持该结论的原文片段。后者必须能被代码在绑定 Evidence 中逐字找到。
+    ★ 字符串校验只能证明“证据真的存在”，不能自动证明改写与证据在语义上等价。
+    """
 
     text: str
+    support_text: str
     evidence_id: str
     anchor: str
 
@@ -370,6 +381,17 @@ def _default_active_loader() -> tuple[ActivePointer, ReleaseBundle]:
     return load_active_release()
 
 
+def _bundle_entry_index(
+    bundle: KnowledgeBundleView,
+) -> Mapping[tuple[str, str], CatalogEntry]:
+    """优先复用大 profile 的只读索引；旧 22 条 release 仍可现场建立小字典。"""
+
+    supplied = getattr(bundle, "entry_index", None)
+    if supplied is not None:
+        return supplied
+    return {(entry.document_key, entry.revision): entry for entry in bundle.entries}
+
+
 def _strip_markdown_heading(content: str) -> str:
     """删除首个 Markdown 标题，保留原件正文作为确定性 extractive claim。"""
 
@@ -409,7 +431,15 @@ class DeterministicEvidenceComposer:
             text = _strip_markdown_heading(evidence.payload.content)
             if not text:
                 raise AnswerFlowContractError("composer_output_invalid", "Document Evidence 没有可展示正文")
-            drafts.append(ClaimDraft(text=text, evidence_id=evidence.ref.evidence_id, anchor=evidence.ref.anchor))
+            drafts.append(
+                ClaimDraft(
+                    text=text,
+                    # 本地 baseline 不做改写，直接把整份实际入模正文作为可回查 support。
+                    support_text=evidence.payload.content,
+                    evidence_id=evidence.ref.evidence_id,
+                    anchor=evidence.ref.anchor,
+                )
+            )
         if not drafts:
             raise AnswerFlowContractError("composer_output_invalid", "Composer 不允许返回空 claim 集")
         return tuple(drafts)
@@ -476,10 +506,16 @@ class RAGAnswerFlow:
                 started_at=started_at,
                 counts=(tool_calls, gate_calls, composer_calls, validator_calls),
             )
+        current_entries = _bundle_entry_index(bundle)
 
         # 步骤 3：Shared Gate 形成真实 generation context 并推进 ledger ================
         gate_calls += 1
-        gate = self._gate(request=request, outcome=outcome, bundle=bundle)
+        gate = self._gate(
+            request=request,
+            outcome=outcome,
+            bundle=bundle,
+            current_entries=current_entries,
+        )
         if not gate.allowed:
             return self._from_gate_denial(
                 outcome=outcome,
@@ -525,7 +561,7 @@ class RAGAnswerFlow:
                 ledger=gate.ledger,
                 slots=slots,
                 drafts=citation_drafts,
-                current_entries={(entry.document_key, entry.revision): entry for entry in bundle.entries},
+                current_entries=current_entries,
                 generation_authorizations=dict(outcome.pre_generation_authorizations),
             )
             self._validate_complete_citation_set(slots=slots, citations=validated)
@@ -547,7 +583,7 @@ class RAGAnswerFlow:
             claim_refs=claim_refs,
             validated=validated,
             ledger=cited_ledger,
-            bundle=bundle,
+            current_entries=current_entries,
         )
         answer = "\n\n".join(item.text for item in claims)
         return RAGAnswerResult(
@@ -576,14 +612,15 @@ class RAGAnswerFlow:
         *,
         request: RAGAnswerRequest,
         outcome: RetrievalOutcome,
-        bundle: ReleaseBundle,
+        bundle: KnowledgeBundleView,
+        current_entries: Mapping[tuple[str, str], CatalogEntry],
     ) -> GateDecision:
         """验证 selected/current/auth/requirement，构造最小 context 并真实推进阶段。"""
 
         selected = outcome.selected_evidence
         selected_ids = tuple(item.ref.evidence_id for item in selected)
         auth_map = dict(outcome.pre_generation_authorizations)
-        entry_map = {(entry.document_key, entry.revision): entry for entry in bundle.entries}
+        entry_map = current_entries
 
         if not selected or set(auth_map) != set(selected_ids):
             return GateDecision(False, "document_acl_denied", outcome.ledger, None, ("authorization_complete",))
@@ -708,7 +745,12 @@ class RAGAnswerFlow:
         context: GenerationContext,
         max_claims: int,
     ) -> None:
-        """拒绝 Composer 空答、越预算、未知 support、错误 anchor 或重复 claim。"""
+        """拒绝空答、越预算、未知 Evidence、错误 anchor、伪造 support 或重复 claim。
+
+        这里刻意不要求 ``text`` 逐字出现在正文中：远程 Composer 可以生成更自然的
+        paraphrase。安全锚点是 ``support_text``，它必须逐字属于同一个 Evidence；之后
+        既有 citation validator 仍负责 Evidence 身份、授权、revision 和 slot 完整性。
+        """
 
         if not drafts or len(drafts) > max_claims:
             raise AnswerFlowContractError("composer_output_invalid", "claim 数量为空或越预算")
@@ -719,17 +761,16 @@ class RAGAnswerFlow:
             identity = (draft.text.strip(), draft.evidence_id)
             if (
                 not draft.text.strip()
+                or not draft.support_text.strip()
                 or item is None
                 or draft.anchor != item.ref.anchor
                 or identity in seen
             ):
                 raise AnswerFlowContractError("composer_output_invalid", "claim support/anchor/identity 非法")
-            # deterministic baseline 是 extractive Composer：claim 必须逐字来自支持 Evidence。
+            # ★ support 必须逐字来自绑定 Evidence；不能用另一份文档的正确原文冒充。
             payload = item.payload
-            if not isinstance(payload, DocumentEvidencePayload) or draft.text not in payload.content:
-                # 删除 Markdown 标题后会把段落用双换行重新连接，允许与同样规范化的正文相等。
-                if not isinstance(payload, DocumentEvidencePayload) or _normalize(draft.text) not in _normalize(payload.content):
-                    raise AnswerFlowContractError("composer_output_invalid", "claim 不是 Evidence 支持的 extractive 内容")
+            if not isinstance(payload, DocumentEvidencePayload) or draft.support_text not in payload.content:
+                raise AnswerFlowContractError("composer_output_invalid", "claim support 不是绑定 Evidence 的逐字内容")
             seen.add(identity)
 
     def _build_citation_drafts(
@@ -775,11 +816,11 @@ class RAGAnswerFlow:
         claim_refs: tuple[str, ...],
         validated: tuple[ValidatedCitation, ...],
         ledger: EvidenceLedger,
-        bundle: ReleaseBundle,
+        current_entries: Mapping[tuple[str, str], CatalogEntry],
     ) -> tuple[tuple[ValidatedClaim, ...], tuple[UserCitation, ...]]:
         """只从 validator 输出构造 claims/citations，禁止读取未验证 draft 作为事实源。"""
 
-        entry_map = {(entry.document_key, entry.revision): entry for entry in bundle.entries}
+        entry_map = current_entries
         citations_by_claim: dict[str, list[str]] = {}
         user_citations: list[UserCitation] = []
         for item in validated:
@@ -848,7 +889,7 @@ class RAGAnswerFlow:
         *,
         outcome: RetrievalOutcome,
         gate: GateDecision,
-        bundle: ReleaseBundle,
+        bundle: KnowledgeBundleView,
         started_at: float,
         counts: tuple[int, int, int, int],
     ) -> RAGAnswerResult:
@@ -884,7 +925,7 @@ class RAGAnswerFlow:
         gate_decision: GateDecision | None,
         started_at: float,
         counts: tuple[int, int, int, int],
-        bundle: ReleaseBundle | None = None,
+        bundle: KnowledgeBundleView | None = None,
     ) -> RAGAnswerResult:
         """集中构造无答卷结果，防止某条错误分支意外保留 claim/citation。"""
 
@@ -915,7 +956,7 @@ class RAGAnswerFlow:
         outcome: RetrievalOutcome,
         started_at: float,
         counts: tuple[int, int, int, int],
-        bundle: ReleaseBundle | None,
+        bundle: KnowledgeBundleView | None,
         context: GenerationContext | None,
     ) -> AnswerFlowDiagnostics:
         """所有成功/失败路径共享一份字段齐全的 runtime diagnostics。"""

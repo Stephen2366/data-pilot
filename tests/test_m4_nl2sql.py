@@ -128,7 +128,10 @@ def test_qwen_chat_client_uses_dashscope_openai_compatible_contract() -> None:
 
     def fake_post_json(url: str, headers: dict[str, str], payload: dict[str, object], timeout: float) -> dict[str, object]:
         calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
-        return {"choices": [{"message": {"content": '{"sql":"SELECT 1","tables_used":[]}'}}]}
+        return {
+            "choices": [{"message": {"content": '{"sql":"SELECT 1","tables_used":[]}'}}],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+        }
 
     client = QwenChatClient(
         api_key="dashscope-key",
@@ -143,6 +146,35 @@ def test_qwen_chat_client_uses_dashscope_openai_compatible_contract() -> None:
     assert calls[0]["payload"]["model"] == "qwen3.7-plus"
     assert calls[0]["payload"]["messages"][0] == {"role": "system", "content": "系统约束"}
     assert calls[0]["payload"]["response_format"] == {"type": "json_object"}
+    assert (client.request_count, client.successful_response_count) == (1, 1)
+    assert (client.prompt_tokens, client.completion_tokens, client.total_tokens) == (11, 7, 18)
+    assert "enable_thinking" not in calls[0]["payload"]
+    assert "max_tokens" not in calls[0]["payload"]
+
+
+def test_qwen_chat_client_can_bound_a_specialized_non_thinking_call() -> None:
+    """专用 Composer 可显式限费，但通用 client 缺省行为不能被静默改变。"""
+
+    from engine.nl2sql.generator import QwenChatClient
+
+    payloads: list[dict[str, object]] = []
+
+    def fake_post_json(_url, _headers, payload, _timeout):
+        payloads.append(payload)
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    client = QwenChatClient(
+        api_key="key",
+        base_url="https://example.test/v1",
+        model="qwen3.7-plus",
+        post_json=fake_post_json,
+        enable_thinking=False,
+        max_tokens=800,
+    )
+    client.complete(prompt="Return JSON", system_prompt="JSON only")
+
+    assert payloads[0]["enable_thinking"] is False
+    assert payloads[0]["max_tokens"] == 800
 
 
 def test_get_default_llm_client_can_select_qwen_provider(monkeypatch: Any) -> None:

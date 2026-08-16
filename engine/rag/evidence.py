@@ -61,6 +61,18 @@ class EvidenceRef:
 
 
 @dataclass(frozen=True)
+class DocumentContextCoordinates:
+    """大 corpus Evidence 的 document → unit → normalized anchor 坐标。"""
+
+    source_type: str
+    logical_document_id: str
+    physical_source_identity: str
+    unit_identity: str
+    normalized_start: int
+    normalized_end: int
+
+
+@dataclass(frozen=True)
 class DocumentEvidencePayload:
     """内部文档 Evidence；包含当前消费者真正可用的受控正文。"""
 
@@ -71,6 +83,7 @@ class DocumentEvidencePayload:
     knowledge_type: str
     anchor: str
     content: str
+    context_coordinates: DocumentContextCoordinates | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +129,7 @@ def make_document_evidence(
     purpose: str,
     authorization: AuthorizationDecision,
     runtime_ref: str,
+    context_coordinates: DocumentContextCoordinates | None = None,
 ) -> Evidence:
     """仅由 active release entry 和成功的 pre-selection decision 构造候选 Evidence。"""
 
@@ -160,6 +174,7 @@ def make_document_evidence(
             knowledge_type=entry.knowledge_type,
             anchor=entry.anchor,
             content=entry.content,
+            context_coordinates=context_coordinates,
         ),
     )
 

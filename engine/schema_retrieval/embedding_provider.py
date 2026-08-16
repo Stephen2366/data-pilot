@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib import request
 
-from engine.governance import OutboundRequest, require_outbound
+from engine.governance import DEFAULT_OUTBOUND_POLICY, OutboundPolicy, OutboundRequest, require_outbound
 
 DEFAULT_SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
 DEFAULT_SILICONFLOW_EMBEDDING_MODEL = "BAAI/bge-m3"
@@ -138,6 +138,9 @@ class DashScopeEmbeddingProvider:
         max_batch_size: int = 20,
         timeout: float = 30.0,
         post_json: PostJson = _post_json,
+        outbound_policy: OutboundPolicy | None = DEFAULT_OUTBOUND_POLICY,
+        outbound_node_purpose: str = "schema_embedding",
+        outbound_data_class: str = "schema_text",
     ) -> None:
         """保存 DashScope embedding 配置；初始化不发请求，便于单测和配置检查。"""
 
@@ -150,7 +153,17 @@ class DashScopeEmbeddingProvider:
         self.max_batch_size = max_batch_size
         self.timeout = timeout
         self._post_json = post_json
+        self._outbound_policy = outbound_policy
+        self._outbound_node_purpose = outbound_node_purpose
+        self._outbound_data_class = outbound_data_class
         self._cache: dict[str, list[float]] = {}
+        self.request_count = 0
+        self.total_tokens = 0
+
+    def clear_cache(self) -> None:
+        """释放批量构建产生的向量缓存；不会改变 provider/runtime identity。"""
+
+        self._cache.clear()
 
     def embed(self, text: str) -> list[float]:
         """生成单条文本向量。"""
@@ -173,11 +186,12 @@ class DashScopeEmbeddingProvider:
         require_outbound(
             OutboundRequest(
                 receiver="dashscope_embedding",
-                node_purpose="schema_embedding",
-                data_class="schema_text",
+                node_purpose=self._outbound_node_purpose,
+                data_class=self._outbound_data_class,
                 fields=frozenset({"texts", "model", "dimensions"}),
                 fallback_available=False,
-            )
+            ),
+            policy=self._outbound_policy,
         )
         for batch_start in range(0, len(missing_texts), self.max_batch_size):
             batch_texts = missing_texts[batch_start : batch_start + self.max_batch_size]
@@ -199,6 +213,10 @@ class DashScopeEmbeddingProvider:
                 payload,
                 self.timeout,
             )
+            self.request_count += 1
+            usage = response.get("usage")
+            if isinstance(usage, dict) and isinstance(usage.get("total_tokens"), (int, float)):
+                self.total_tokens += int(usage["total_tokens"])
 
             output = response.get("output")
             if not isinstance(output, dict):

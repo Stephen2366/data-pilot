@@ -16,7 +16,13 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
-from engine.governance import GovernanceError, OutboundRequest, require_outbound
+from engine.governance import (
+    DEFAULT_OUTBOUND_POLICY,
+    GovernanceError,
+    OutboundPolicy,
+    OutboundRequest,
+    require_outbound,
+)
 from engine.nl2sql.fidelity_contract import SQLPlanFidelityResult, evaluate_sql_plan_fidelity
 from engine.nl2sql.llm_call import LLMCallEvidence, LLMGenerationError, execute_llm_call
 from engine.nl2sql.planner import QueryPlan, QueryPlanStep
@@ -106,6 +112,10 @@ class OpenAICompatibleChatClient:
         timeout: float = 45.0,
         max_retries: int = 0,
         retry_backoff_seconds: float = 1.0,
+        outbound_policy: OutboundPolicy | None = DEFAULT_OUTBOUND_POLICY,
+        outbound_data_class: str = "text2sql_prompt",
+        enable_thinking: bool | None = None,
+        max_tokens: int | None = None,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/") or self.default_base_url
@@ -114,6 +124,19 @@ class OpenAICompatibleChatClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_backoff_seconds = retry_backoff_seconds
+        self._outbound_policy = outbound_policy
+        self._outbound_data_class = outbound_data_class
+        if max_tokens is not None and max_tokens < 1:
+            raise ValueError("max_tokens 必须为正数")
+        # ``None`` 表示完全沿用 provider 默认，避免 M34 改到既有 Text2SQL/Qwen 行为。
+        self.enable_thinking = enable_thinking
+        self.max_tokens = max_tokens
+        # 只记录计费/可靠性所需的数字，不保存 prompt、response 或 API key。
+        self.request_count = 0
+        self.successful_response_count = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
 
     def complete(
         self, *, prompt: str, system_prompt: str | None = None, node_purpose: str = "sql_generation"
@@ -130,10 +153,11 @@ class OpenAICompatibleChatClient:
                 OutboundRequest(
                     receiver=self.outbound_receiver,
                     node_purpose=node_purpose,
-                    data_class="text2sql_prompt",
+                    data_class=self._outbound_data_class,
                     fields=frozenset({"prompt", "system_prompt", "model"}),
                     fallback_available=False,
-                )
+                ),
+                policy=self._outbound_policy,
             )
         except GovernanceError as exc:
             raise LLMGenerationError(
@@ -150,8 +174,14 @@ class OpenAICompatibleChatClient:
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
+        # 直接 HTTP 调用时，百炼要求非标准参数与 model/messages 同级放在 body 顶层。
+        if self.enable_thinking is not None:
+            payload["enable_thinking"] = self.enable_thinking
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
 
         # 步骤 2：真实网络调用只在这里发生；失败统一转成 LLMGenerationError。
+        self.request_count += 1
         try:
             response_payload = self._post_json(
                 f"{self.base_url}/chat/completions",
@@ -196,12 +226,19 @@ class OpenAICompatibleChatClient:
 
         # 步骤 3：只把模型正文交给上层 parser；attempt 证据由 llm_call 统一产出。
         try:
-            return str(response_payload["choices"][0]["message"]["content"])
+            content = str(response_payload["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMGenerationError(
                 f"{self.provider_label} 返回结构缺少 choices/message/content：{response_payload}",
                 error_subtype="transport_response_contract",
             ) from exc
+        usage = response_payload.get("usage", {})
+        if isinstance(usage, dict):
+            self.prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
+            self.completion_tokens += int(usage.get("completion_tokens", 0) or 0)
+            self.total_tokens += int(usage.get("total_tokens", 0) or 0)
+        self.successful_response_count += 1
+        return content
 
 
 class DeepSeekChatClient(OpenAICompatibleChatClient):

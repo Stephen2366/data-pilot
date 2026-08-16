@@ -4,7 +4,7 @@
 
 > **总路线**：[LEARNING_ROADMAP.md](D:/.Work/Practice/Python-Practice/LEARNING_ROADMAP_v3.md) — 总体规划。日常模块开发优先读 `CLAUDE.md / AGENTS.md`、`docs/state/AI_CONTEXT.md`、当前阶段路线与约束文件，以及 `AI_CONTEXT.md` 指向的当前活动模块 plan；阶段切换、范围调整或重大技术取舍时再读完整总 ROADMAP。
 >
-> **技术档案**：[AI_CONTEXT.md](docs/state/AI_CONTEXT.md) — AI 续接 / 查 bug 优先阅读，只保留当前状态、默认配置、最新基线、关键结论和活跃坑；运行入口 / 模型链路 / LangFuse / eval 命令矩阵见 [runbook.md](docs/state/runbook.md)，完整改动历史见 [AI_CONTEXT_CHANGELOG.md](docs/state/AI_CONTEXT_CHANGELOG.md)，长期评测账本见 [eval-baselines.md](docs/state/eval-baselines.md)，数据库状态速查见 [database-current-state.md](docs/state/database-current-state.md)。
+> **技术档案**：[AI_CONTEXT.md](docs/state/AI_CONTEXT.md) — AI 续接 / 查 bug 优先阅读，只保留当前状态、默认配置、最新基线、关键结论和活跃坑；运行入口 / 模型链路 / LangFuse / eval 命令矩阵见 [runbook.md](docs/state/runbook.md)，完整改动历史见 [AI_CONTEXT_CHANGELOG.md](docs/state/AI_CONTEXT_CHANGELOG.md)，长期评测账本见 [eval-baselines.md](docs/state/eval-baselines.md)，数据库状态速查见 [database-current-state.md](docs/state/database-current-state.md)，RAG / 知识库状态速查见 [rag-current-state.md](docs/state/rag-current-state.md)。
 >
 > **状态文档阅读规则**：`docs/state/AI_CONTEXT.md` 只是续接仪表盘。凡涉及运行命令、模型 / embedding / LangFuse 开关、eval 数字或失败归因、数据库事实、历史取舍，必须按 `AI_CONTEXT.md`「必读规则」继续读取对应 state 文档；其中运行入口必须读 `docs/state/runbook.md`，不能只读 AI_CONTEXT 摘要后执行。
 >
@@ -64,6 +64,7 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
     runbook.md          # AI / 本地运行入口，模型、检索、LangFuse、eval 命令矩阵
     eval-baselines.md   # 长期评测基线、A/B 结果、失败结构和错因账本
     database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
+    rag-current-state.md # RAG 知识原件、运行基线、外部语料与评测证据边界速查
   notes/                # 模块计划与过程素材库（mX-plan.md / mX-notes.md）
   ref-discussion/       # 网上技术讨论原文收集（未筛选素材）
   dev-log(M0-M19).md    # 用户学习复盘（M0~M19）
