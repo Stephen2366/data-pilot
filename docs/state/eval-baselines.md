@@ -1,6 +1,6 @@
 # DataPilot Eval Baselines
 
-> 本文记录当前 EvalRun 基线与可比性规则。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
+> 本文是评测数字、分母、artifact、实验状态与可比性规则的唯一详细账本。`rag-current-state.md` 只保留 RAG 当前运行口径和结论摘要；两处出现同一 profile identity 时，以本文判断“能否比较”，以 `rag-current-state.md` 判断“当前运行使用什么”。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
 更新时间：2026-08-16
 

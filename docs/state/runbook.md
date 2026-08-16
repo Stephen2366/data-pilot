@@ -2,17 +2,25 @@
 
 > 本文是 DataPilot 的运行入口：只说明“怎么开启哪条链路、怎么跑命令、哪些默认不能随手改”。Trigger：只要要运行命令、切模型、开 LangFuse、跑 eval、改环境变量，必须先读本文。当前状态先读 `docs/state/AI_CONTEXT.md`，评测数字和错因追溯读 `docs/state/eval-baselines.md`，Milvus / embedding 细节读 `docs/state/schema-retrieval-milvus-embedding.md`。
 
-更新时间：2026-08-12
+更新时间：2026-08-16
 
 ## 模型链路
 
 | 目标 | 环境变量 | 说明 |
 |---|---|---|
 | 默认 Qwen 主链路 | `LLM_PROVIDER=qwen`；`QWEN_MODEL=qwen3.7-plus` | 当前默认。Qwen provider 读取 `QWEN_MODEL`，不是 `LLM_MODEL`。`.env` 中的 `LLM_MODEL=deepseek-v4-flash` 仅作为显式切回 DeepSeek 时的备用入口。 |
-| API Text2SQL 路径 | 默认 `force_new_pipeline=true`；显式 `false` | 普通 `/api/query` 默认走 Schema Retrieval → QueryPlan → SQL Guard 的新链路；`false` 只保留给 legacy baseline 兼容排障。 |
+| API Text2SQL 路径 | 默认 `force_new_pipeline=true`；显式 `false` | 普通 `/api/query` 先进入 M35 顶层 Harness；路由为 SQL 后，Text2SQL Tool 默认走 Schema Retrieval → QueryPlan → SQL Guard 新链路。显式 `false` 只让该 Tool 走 legacy baseline，不绕过 Harness。 |
 | DeepSeek 主模型对照 | `LLM_PROVIDER=deepseek`；`LLM_MODEL=deepseek-v4-flash` | 显式切换时使用；`LLM_MODEL` 在现有代码语义里主要服务 DeepSeek provider。 |
 | LLM 可靠性配置 | `LLM_TIMEOUT_SECONDS=45`；`LLM_MAX_RETRIES=0`；`LLM_RETRY_BACKOFF_SECONDS=1` | M25 默认不自动重试。只对明确标记为 transient 的 timeout / 网络 / 429 / 5xx 生效；聚焦实验在当前 shell 临时覆盖，不直接改 `.env` 默认。 |
 | Legacy L3 judge | `EVAL_JUDGE_MODEL=<模型名>` | 仅服务冻结旧 runner 语义；当前 M27 CLI 不提供 `--judge-model`，也不把 LLM-as-Judge 作为默认裁决器。 |
+
+## Caller / Harness 链路
+
+| 目标 | 配置 / 入口 | 说明 |
+|---|---|---|
+| 顶层单轮 Harness | `POST /api/query` | 先解析可信 Caller，再进行单次路由；每次请求至多调用一个 Text2SQL 或 RAG Tool。 |
+| Fixture Caller resolver | `APP_ENV=local`、`demo` 或 `test` | 只有这三个环境会由应用启动过程注入 fixture resolver，供本地演示和测试使用；请求中的 `user_role` 只选择 fixture 身份，不能自行授权。 |
+| 无 Caller resolver | 其他 `APP_ENV`，或应用未注入 resolver | Harness 将 Caller 视为不可信并以 `caller_untrusted` 失败关闭：不进入 Router、不调用 Tool，返回 blocked / no-answer。生产接线必须显式提供真实认证 resolver。 |
 
 ## Schema Retrieval / Embedding 链路
 
@@ -32,6 +40,22 @@
 | 本地 M27 eval | `LANGFUSE_ENABLED=false`；按下方 selector 命令运行 | completed EvalRun JSON + Markdown report 是新事实源；M27 不生成旧 triage JSON。 |
 | LangFuse Cloud trace/score | `LANGFUSE_ENABLED=true`，必要时 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` | Cloud 仍是旁路增强；M27 当前只构造严格 allowlist assertion payload，实际上传需显式授权，不能影响本地 EvalRun。 |
 | LangFuse smoke | `python scripts\smoke_phase3b_langfuse.py`；Cloud 硬门禁加 `--require-langfuse` | M18 的主验证入口，用于 API / JSONL / trace mapping / score / visibility。 |
+
+## M34 EnterpriseRAG-Bench external benchmark
+
+> 以下是 external benchmark 主流程的 9 个脚本入口骨架。`<dataset-root>`、`<profile-root>`、`<profile-identity>` 和输出文件名必须替换成当前事实；长期身份与默认 adapter 先查 `docs/state/rag-current-state.md`。真实 embedding / LLM 命令会产生外部调用和费用，不得因超时自动重跑。
+
+| 目标 | 命令骨架 |
+|---|---|
+| 只读检查数据集 | `python scripts\inspect_m34_enterprise_dataset.py --dataset-root <dataset-root> --output .agent_work\temp\m34-dataset-audit.json` |
+| 构建 60/120 split | `python scripts\build_m34_case_split.py --dataset-root <dataset-root> --output .agent_work\temp\m34-case-split.json` |
+| dev lexical recipe 对照 | `python scripts\run_m34_lexical_dev_experiment.py --dataset-root <dataset-root> --work-dir .agent_work\temp\m34-lexical-work --output .agent_work\temp\m34-lexical-dev.json` |
+| 构建 external lexical profile | `python scripts\build_m34_external_profile.py --dataset-root <dataset-root> --profile-root <profile-root> --output .agent_work\temp\m34-profile-build.json`；只有明确要切 benchmark pointer 时才加 `--activate` |
+| Retrieval Eval | `python scripts\run_m34_retrieval_eval.py --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity <profile-identity> --scope diagnostic_dev --output .agent_work\temp\m34-retrieval-eval.json` |
+| 本地 Tool → AnswerFlow smoke | `python scripts\smoke_m34_external_runtime.py --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity <profile-identity> --output .agent_work\temp\m34-external-runtime-smoke.json` |
+| 构建 / 恢复 semantic candidate | `python scripts\build_m34_semantic_candidate.py --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity <profile-identity> --output .agent_work\temp\m34-semantic-build.json` |
+| 真实 Qwen 三题 AnswerFlow smoke | `python scripts\smoke_m34_remote_answer.py --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity <profile-identity> --output .agent_work\temp\m34-remote-answer-smoke.json` |
+| 真实 Qwen 180 题 Answer Eval | `python scripts\run_m34_answer_eval.py --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity <profile-identity> --output .agent_work\temp\m34-answer-eval.json` |
 
 ## Eval 命令入口
 

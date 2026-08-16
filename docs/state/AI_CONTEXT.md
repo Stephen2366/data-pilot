@@ -8,7 +8,7 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4-roadmap.md`                                     |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M35 顶层 LangGraph Harness 与 SQL/RAG Router 已开发并完成收工文档，待人工检查与验收（2026-08-16） |
+| 当前活动模块 | M35 顶层 LangGraph Harness 与 SQL/RAG Router 已开发并完成收工文档，已验收（2026-08-16） |
 | 当前 plan    | `docs/notes/m35-plan.md`                                     |
 | 当前 notes   | `docs/notes/m35-notes.md`                                    |
 | 待决事项     | 下一模块规划时按 P4/G5 选择首个有界恢复切片；尚未触发远程 Router 或生产认证决策门 |

@@ -1,6 +1,6 @@
 # DataPilot RAG / 知识库当前事实速查
 
-> 本文是知识库的当前状态入口，作用类似 `database-current-state.md`：只记录续接开发需要立刻知道的事实、证据边界和活跃风险，不代替模块 plan、notes、Eval artifact 或历史档案。涉及知识原件、active release、外部 corpus、Knowledge Tool、RAG Eval 或 M34 状态时必须先读本文。
+> 本文是知识库的当前运行状态入口，作用类似 `database-current-state.md`：只记录续接开发需要立刻知道的语料、active identity、运行接线、当前结论和活跃风险。评测数字、分母、artifact 与可比性规则统一以 `eval-baselines.md` 为准；本文不建立第二份评测账本。涉及知识原件、active release、外部 corpus、Knowledge Tool 或 M34 运行状态时必须先读本文。
 
 **更新时间：2026-08-16**
 
@@ -8,7 +8,7 @@
 
 DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知识 release** 继续作为原有回归与业务默认；EnterpriseRAG-Bench 的 **36,417 篇 Confluence / Google Drive / Jira 文档**已经通过独立 external profile 接入 KnowledgeTool → Evidence → AnswerFlow → citation 链路，并形成 60 dev + 120 held-out retrieval 和 180 题 Answer Eval 证据。external 默认保持 lexical；semantic 已完成候选构建，但两个 split 都未胜出。
 
-## 当前两套知识基线
+## 当前两套知识运行口径
 
 | 项目 | 业务知识基线 | EnterpriseRAG-Bench external benchmark |
 |---|---|---|
@@ -56,7 +56,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - lexical profile database 为 662,818,816 bytes，SHA-256 `5b88e88abaaa6ee570f10a9dc9eb57b0b4b83b28d7e62d7569c5653d728141d3`；manifest identity `546b0aeec8264c0e9d55e3093ce5a72577a2a63a594544f82cae5ad4cfb48eaf`。
 - benchmark pointer identity `9908e59aa43d9fac360fbd896ec98f4e8cc935adf90c0ff126e4e2adebf2446b`；active 为上述 lexical profile，previous 为 `null`。构建物损坏时失败关闭，不自动回退未校验版本。
 
-recipe 的依据是同 corpus/parser/dev lexical 对照：paragraph-2400 的 coverage@20 为 `0.810417`，高于 whole-document `0.724306`、paragraph-1200 `0.793056` 和 paragraph-2400-overlap1 `0.793750`；overlap1 增加约 19% 索引字符却没有稳定收益。这只证明当前协议下的工程折中，不代表所有 embedding、语言或生产文档的全局最优切分。
+当前 paragraph-2400 无 overlap recipe 来自同 corpus/parser/dev 条件下的 lexical 候选对照；它在该协议下胜出，且 overlap 没有形成稳定收益。完整实验数字和历史取舍见 `docs/notes/m34-notes.md`；这仍只是当前协议下的工程折中，不代表所有 embedding、语言或生产文档的全局最优切分。
 
 ## 运行时接线与安全合同
 
@@ -67,60 +67,30 @@ recipe 的依据是同 corpus/parser/dev lexical 对照：paragraph-2400 的 cov
 - 方案 B 的 `ClaimDraft` 为自然语言 `text` + 同一 Evidence 中逐字存在的 `support_text` + `evidence_id` + `anchor`。只允许 whitespace canonicalization，不做 fuzzy/semantic support 放行。
 - M34 Composer identity 为 `rag-qwen-evidence-support-nonthinking-unbounded-v4`：`enable_thinking=false`，应用层不发送 `max_tokens`；provider 服务端限制仍在。该配置只属于 M34 external Answer Eval，不是业务默认 Composer。
 
-## Retrieval Eval 当前证据
+## 当前评测结论
 
-> 本节保留 RAG 续接所需的快速读数；正式长期基线、共同 identity 与后续可比性规则以 `docs/state/eval-baselines.md` 为准。
+> 完整数值、共同 identity、artifact 和可比性规则只在 `docs/state/eval-baselines.md` 维护。这里仅保留会影响运行和下一步开发的结论。
 
-固定 @20、相同 corpus/parser/unit/split；gold 不进入 runtime，只在 Tool 返回后评分。
+- 固定 @20、相同 corpus/parser/unit/split 的正式对照中，lexical 在 dev 和 held-out 都胜过当前 semantic candidate，因此 external 默认保持 lexical。
+- gold 不进入 runtime，只在 Tool 返回后评分；retrieval gold coverage 不能冒充答案正确率。
+- completed Answer/Citation Eval 证明真实 Tool → Evidence → AnswerFlow → citation 链路与账本可复现，但暴露出 lexical 漏召回、多文档 context packing 不足和 Composer support 合同拒绝三类主要缺口。
+- `answer_status=complete` 只表示回答、support 和 citation 合同闭合，不等于答案正确；M34 没有启用 LLM Judge。
 
-| Adapter / split | Coverage@20 | All-gold@20 | MRR |
-|---|---:|---:|---:|
-| lexical dev（60） | 0.810417 | 0.766667 | 0.645303 |
-| semantic dev（60） | 0.737500 | 0.700000 | 0.621421 |
-| lexical held-out（120） | 0.823125 | 0.775000 | 0.723134 |
-| semantic held-out（120） | 0.773958 | 0.741667 | 0.630477 |
-
-semantic candidate 已完成 139,214/139,214 unique unit 闭合：
+semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活候选：
 
 - semantic identity `9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20`
 - Milvus collection `datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89`
 - unit-set identity `17d5af0b197ab3e4a069703d2095813f4727f1315a1e12bc06e631a9b793905f`
 - manifest identity `22c573755257c47c6264218ba1bbe2e1182ccc7ad91a15bc889e3e8da56be97b`
 
-semantic 在 dev 和 held-out 都未胜 lexical，因此保持 candidate，不切 external 默认。该结果只约束当前 embedding、recipe 和检索协议，不证明 semantic、Hybrid 或 rerank 永久无价值。
+该候选结论只约束当前 embedding、recipe 和检索协议，不证明 semantic、Hybrid 或 rerank 永久无价值。
 
-## Answer / Citation Eval 当前证据
-
-> 本节保留当前结果与失败结构速查；正式基线登记和严格对照边界见 `docs/state/eval-baselines.md`。
-
-full artifact：`.agent_work/temp/m34-answer-eval-full-v4.json`
-
-artifact identity：`d9fa2b20863c568cbc7091dea4724c5d69d74979b5b4ba3d3eb14ff101eeb41f`
-
-| 项目 | 结果 |
-|---|---:|
-| AnswerFlow / provider requests | 180 / 180 |
-| 自动 retry | 0 |
-| provider tokens | 405,305（342,656 input + 62,649 completion） |
-| `answer_status=complete` | 146/180（81.11%） |
-| Composer unavailable | 10/180，其中 1 次 network error |
-| Composer output contract rejected | 24/180 |
-| gold document all-cited | 80/180（44.44%） |
-| mean gold-document coverage | 49.3981% |
-| multi-document all-gold | 2/38（5.2632%） |
-| semantic questions all-gold | 15/52（28.8462%） |
-| exact-fact 全量命中 | 1/180（0.6944%） |
-| flow latency p50 / p95 / max | 8.428s / 13.823s / 16.931s |
-
-`answer_status=complete` 只证明回答、support 和 citation 合同完整走完，**不等于答案正确**。exact-fact 是保守逐字检查下限，也不能反向解释为开放语义正确率只有 0.69%；M34 没有启用 LLM Judge。当前主要失败结构是 lexical top-k 漏掉 gold 文档、多文档 context packing 不足，以及 Composer 输出未满足严格 support 合同。
-
-## 旧业务合同与回归证据
+## 当前相关合同
 
 - M31 `phase4-v1`：8 Scenario / 12 required，证明既有合同与安全边界。
 - M32 `phase4-rag-retrieval-v1`：6 Scenario / 20 required，证明 22 条业务语料上的确定性检索合同。
 - M33 `phase4-rag-answer-v1`：9 Scenario / 60 required，证明确定性抽取式回答与 citation 闭环。
-- M34 聚焦回归：M30–M34 相关套件 `158 passed`；`compileall` 通过。
-- 全仓 pytest 未形成可靠终态，在非 M34 测试阶段长时间等待后停止；当前结论是 `inconclusive`，不能写成全仓通过。
+- M35 `phase4-harness-v1`：5 Scenario / 全 required，证明顶层单轮 Harness 的唯一路由、至多一个 Tool、保守终止与 Caller 失败关闭合同。
 
 ## 暂不纳入 M34 的候选语料
 
@@ -135,9 +105,9 @@ WixQA 位于：
 - **召回和多文档质量**：主要缺口仍是 lexical 漏召回、selected budget 和 context packing；下一步按上方 Answer Eval 失败结构分层定位。
 - **support 合同**：Composer 仍有输出被严格合同拒绝。不得通过 fuzzy/semantic 字符串放行换取表面 complete rate；若引入语义支持判断，需要独立合同和证据。
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
-- **能力范围**：未接 `/api/query`、Router、Hybrid、UI 或通用评测平台；LangFuse Cloud 仍关闭。
+- **能力范围**：M35 已接入 `/api/query` 顶层单轮 Harness 与 SQL/RAG Router；Hybrid、生产认证、UI 专项接线和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **默认切换**：semantic candidate、Hybrid、rerank 或新 recipe 必须产生新 identity，并以同 split 的单变量 A/B 和 held-out 证据经用户确认后才能切换。
 
-历史决策、实验过程、欠费/TLS EOF/checkpoint 修正和完整 artifact 路径见 `docs/notes/m34-notes.md`，并从 `docs/state/CHANGELOG_INDEX.md` 进入对应 Phase 历史。
+完整评测数字与 artifact 见 `docs/state/eval-baselines.md`；历史决策、实验过程、欠费/TLS EOF/checkpoint 修正见 `docs/notes/m34-notes.md`，并从 `docs/state/CHANGELOG_INDEX.md` 进入对应 Phase 历史。
