@@ -1,11 +1,11 @@
-"""M5 `/api/query`：自然语言问题 → SQL Tool → Trace + Chart + AgentResponse。
+"""M35 `/api/query`：把 HTTP 请求投影到唯一的单轮 Harness。
 
-★ M4 仍然模板优先：M3 已验证过的高价值问题继续走稳定模板；模板未命中时才调用 LLM
-生成 SQL。M5 在这条链路外层收口响应契约：SQL 执行进入 tool，结果进入 chart tool，
-全过程写入 JSONL trace。
+★ API 不再自行选择 Text2SQL、拼安全状态或绕过 Graph。它只做三件事：解析 caller、注入本轮
+依赖、把 `AgentRunResult` 单向投影成兼容响应与 JSONL Trace。
 """
 
 from __future__ import annotations
+
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -14,72 +14,96 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, ToolCallTrace
-from engine.nl2sql.generator import LLMGenerationError, generate_sql
-from engine.nl2sql.pipeline import run_text2sql_pipeline
-from engine.nl2sql.schema_loader import load_domain_schema
-from engine.nl2sql.templates import match_template
-from engine.sql_guard.guard import validate_readonly_sql
-from engine.sql_guard.precheck import looks_like_dangerous_sql
-from engine.tools.chart_tool import build_chart_spec
-from engine.tools.sql_tool import SQLToolResult, run_sql_tool
-from engine.trace.recorder import TraceRecord, TraceStep, append_trace
+from app.schemas.agent import AgentResponse, CostInfo, QueryRequest
+from engine.harness.adapters import RAGToolAdapter, Text2SQLToolAdapter
+from engine.harness.contracts import AgentRunResult, HarnessRequest, ToolObservation
+from engine.harness.graph import HarnessRuntime, run_harness
+from engine.trace.recorder import TraceRecord, append_trace
 
 
 router = APIRouter(prefix="/api", tags=["query"])
 
 
 def _trace_id(request: Request) -> str:
-    """从日志中间件读取 trace_id，保证响应体和响应头能对上同一次请求。"""
+    """从日志中间件读取 trace_id，保证响应体、响应头和 Harness run identity 一致。"""
 
     return getattr(request.state, "trace_id", "unknown")
 
 
 def _trace_path(request: Request) -> Path | None:
-    """读取测试或运行时指定的 trace 路径。
-
-    默认返回 None，让 recorder 使用 `eval/traces/traces.jsonl`；测试可以通过 `app.state`
-    指到临时文件，避免污染真实评测 trace。
-    """
+    """读取测试或运行时指定的 JSONL 目标，默认仍由 recorder 使用正式路径。"""
 
     path = getattr(request.app.state, "trace_path", None)
     return Path(path) if path is not None else None
 
 
-def _build_answer(answer_hint: str, rows: list[dict[str, Any]]) -> str:
-    """用最小模板把表格结果转成自然语言答案。
+def _observation_projection(observation: ToolObservation | None) -> dict[str, Any] | None:
+    """为 Trace/Eval 形成白名单 Observation，不携带 RAG 文档正文或内部异常文本。"""
 
-    M5 仍不追求复杂报告，只把“首行重点 + 总行数”讲清楚，保证演示页不用直接让用户读
-    原始表格。
-    """
+    if observation is None:
+        return None
+    return {
+        "tool_name": observation.tool_name,
+        "route": observation.route,
+        "execution_status": observation.execution_status,
+        "answer_status": observation.answer_status,
+        "safety_status": observation.safety_status,
+        "reason_code": observation.reason_code,
+        "error_type": observation.error_type,
+        "sql_time_ms": observation.sql_time_ms,
+        "diagnostics": observation.diagnostics,
+        "ledger": observation.ledger_projection,
+    }
 
-    if not rows:
-        return f"{answer_hint}：暂无数据。"
 
-    first_row = rows[0]
-    summary = "，".join(f"{key}={value}" for key, value in first_row.items())
-    return f"{answer_hint}：{summary}（共 {len(rows)} 行结果）"
+def _project_response(*, result: AgentRunResult, trace_id: str, started_at: float) -> AgentResponse:
+    """★ 唯一 AgentResponse projector：旧字段只从同一份 Harness 事实派生。"""
 
+    observation = result.observation
+    # 步骤 1：从 Observation 取得兼容字段；none 路径不会伪造 SQL、rows 或 docs。----------
+    sql = observation.sql if observation else None
+    columns = list(observation.columns) if observation else []
+    rows = list(observation.rows) if observation else []
+    tables_used = list(observation.tables_used) if observation else []
+    docs_used = list(observation.docs_used) if observation else []
+    chart_spec = observation.chart_spec if observation else None
+    tool_calls = list(observation.tool_calls) if observation else []
+    citations = list(observation.citations) if observation else []
 
-def _elapsed_ms(started_at: float) -> float:
-    """返回保留 3 位小数的毫秒耗时。"""
-
-    return round((perf_counter() - started_at) * 1000, 3)
+    # 步骤 2：blocked_reason 只表达安全裁决；技术故障只能在 reason/error_type 中诊断。----
+    blocked_reason = observation.blocked_reason if observation and result.safety_status == "blocked" else None
+    return AgentResponse(
+        route=result.route,
+        answer=result.answer,
+        sql=sql,
+        columns=columns,
+        rows=rows,
+        tables_used=tables_used,
+        docs_used=docs_used,
+        chart_spec=chart_spec,
+        safety_status=result.safety_status,
+        blocked_reason=blocked_reason,
+        cost=CostInfo(
+            latency_ms=round((perf_counter() - started_at) * 1000, 3),
+            sql_time_ms=observation.sql_time_ms if observation else 0.0,
+        ),
+        tool_calls=tool_calls,
+        error_type=observation.error_type if observation else (result.reason_code if result.execution_status == "failed" else None),
+        trace_id=trace_id,
+        execution_status=result.execution_status,
+        answer_status=result.answer_status,
+        citations=citations,
+        reason_code=result.reason_code,
+    )
 
 
 def _record_trace(
-    *,
-    request: Request,
-    request_body: QueryRequest,
-    response: AgentResponse,
-    trace_steps: list[TraceStep] | None = None,
-    langfuse_trace_id: str | None = None,
-    langfuse_trace_url: str | None = None,
-    langfuse_write_status: str = "skipped",
-    langfuse_span_mode: str = "post_hoc",
+    *, request: Request, request_body: QueryRequest, response: AgentResponse, result: AgentRunResult
 ) -> None:
-    """把 AgentResponse 的关键信息同步追加到 JSONL trace。"""
+    """把同一份 Harness result 写成 JSONL 安全投影，Trace 不重新判断 route 或四轴。"""
 
+    observation = result.observation
+    decision = result.route_decision
     trace_record = TraceRecord(
         trace_id=response.trace_id,
         question=request_body.question,
@@ -96,12 +120,28 @@ def _record_trace(
         blocked_reason=response.blocked_reason,
         cost=response.cost,
         tool_calls=response.tool_calls,
-        trace_steps=trace_steps or [],
+        trace_steps=list(observation.trace_steps) if observation else [],
         error_type=response.error_type,
-        langfuse_trace_id=langfuse_trace_id,
-        langfuse_trace_url=langfuse_trace_url,
-        langfuse_write_status=langfuse_write_status,
-        langfuse_span_mode=langfuse_span_mode,
+        langfuse_trace_id=observation.langfuse_trace_id if observation else None,
+        langfuse_trace_url=observation.langfuse_trace_url if observation else None,
+        langfuse_write_status=observation.langfuse_write_status if observation else "skipped",
+        langfuse_span_mode=observation.langfuse_span_mode if observation else "post_hoc",
+        execution_status=result.execution_status,
+        answer_status=result.answer_status,
+        reason_code=result.reason_code,
+        route_decision={
+            "route": decision.route,
+            "reason_code": decision.reason_code,
+            "needs_evidence": decision.needs_evidence,
+            "termination_action": decision.termination_action,
+            "decision_source": decision.decision_source,
+            "requirement_identity": decision.requirement.identity if decision.requirement else None,
+        },
+        graph_steps=list(result.graph_steps),
+        caller_safe_ref=result.caller_safe_ref,
+        tool_observation=_observation_projection(observation),
+        evidence_refs=list(observation.evidence_refs) if observation else [],
+        termination_action=result.termination_action,
     )
     path = _trace_path(request)
     if path is None:
@@ -110,259 +150,32 @@ def _record_trace(
         append_trace(trace_record, path=path)
 
 
-def _blocked_response(
-    *,
-    request: Request,
-    request_body: QueryRequest,
-    trace_id: str,
-    sql: str | None,
-    blocked_reason: str,
-    started_at: float,
-    tool_call: ToolCallTrace | None = None,
-    error_type: str = "sql_guard_blocked",
-    trace_steps: list[TraceStep] | None = None,
-    langfuse_trace_id: str | None = None,
-    langfuse_trace_url: str | None = None,
-    langfuse_write_status: str = "skipped",
-    langfuse_span_mode: str = "post_hoc",
-) -> AgentResponse:
-    """构造统一的拦截响应，并同步写 trace。"""
-
-    tool_calls = [
-        tool_call
-        or ToolCallTrace(
-            tool_name="sql_guard",
-            status="blocked",
-            latency_ms=0.0,
-            sql=sql,
-            error_type=error_type,
-            message=blocked_reason,
-        )
-    ]
-
-    response = AgentResponse(
-        route="sql",
-        answer="SQL Guard 已拦截该请求。",
-        sql=sql,
-        columns=[],
-        rows=[],
-        tables_used=[],
-        docs_used=[],
-        chart_spec=None,
-        safety_status="blocked",
-        blocked_reason=blocked_reason,
-        cost=CostInfo(latency_ms=_elapsed_ms(started_at), sql_time_ms=0.0),
-        tool_calls=tool_calls,
-        error_type=error_type,
-        trace_id=trace_id,
-    )
-    _record_trace(
-        request=request,
-        request_body=request_body,
-        response=response,
-        trace_steps=trace_steps,
-        langfuse_trace_id=langfuse_trace_id,
-        langfuse_trace_url=langfuse_trace_url,
-        langfuse_write_status=langfuse_write_status,
-        langfuse_span_mode=langfuse_span_mode,
-    )
-    return response
-
-
-def _resolve_sql(request_body: QueryRequest) -> tuple[str, dict[str, str], str]:
-    """解析自然语言请求对应的 SQL。
-
-    返回值按 `(sql, parameters, answer_hint)` 组织。模板命中时沿用 M3 参数化 SQL；模板未
-    命中时走 M4 LLM 生成路径，生成 SQL 目前不带绑定参数。
-    """
-
-    matched = match_template(request_body.question)
-    if matched is not None:
-        return matched.sql, matched.parameters, matched.answer_hint
-
-    domain_schema = load_domain_schema()
-    generated = generate_sql(
-        question=request_body.question,
-        user_role=request_body.user_role,
-        domain_schema=domain_schema,
-    )
-    return generated.sql, {}, "LLM SQL 查询结果"
-
-
-def _success_response(
-    *,
-    request: Request,
-    request_body: QueryRequest,
-    trace_id: str,
-    sql: str,
-    answer_hint: str,
-    tool_result: SQLToolResult,
-    started_at: float,
-    trace_steps: list[TraceStep] | None = None,
-    chart_spec: dict[str, Any] | None = None,
-    langfuse_trace_id: str | None = None,
-    langfuse_trace_url: str | None = None,
-    langfuse_write_status: str = "skipped",
-    langfuse_span_mode: str = "post_hoc",
-) -> AgentResponse:
-    """把 SQL Tool 结果整理成 M5 AgentResponse，并追加 trace。"""
-
-    resolved_chart_spec = chart_spec
-    if resolved_chart_spec is None:
-        resolved_chart_spec = build_chart_spec(columns=tool_result.columns, rows=tool_result.rows, question=request_body.question)
-    response = AgentResponse(
-        route="sql",
-        answer=_build_answer(answer_hint, tool_result.rows),
-        sql=sql,
-        columns=tool_result.columns,
-        rows=tool_result.rows,
-        tables_used=tool_result.tables_used,
-        docs_used=[],
-        chart_spec=resolved_chart_spec,
-        safety_status="passed",
-        blocked_reason=None,
-        cost=CostInfo(
-            latency_ms=_elapsed_ms(started_at),
-            sql_time_ms=tool_result.sql_time_ms,
-            model=None,
-            prompt_tokens=0,
-            completion_tokens=0,
-        ),
-        tool_calls=[tool_result.tool_call] if tool_result.tool_call else [],
-        error_type=None,
-        trace_id=trace_id,
-    )
-    _record_trace(
-        request=request,
-        request_body=request_body,
-        response=response,
-        trace_steps=trace_steps,
-        langfuse_trace_id=langfuse_trace_id,
-        langfuse_trace_url=langfuse_trace_url,
-        langfuse_write_status=langfuse_write_status,
-        langfuse_span_mode=langfuse_span_mode,
-    )
-    return response
-
-
 @router.post("/query", response_model=AgentResponse)
 def query(request_body: QueryRequest, request: Request, db: Session = Depends(get_db)) -> AgentResponse:
-    """执行 M5 查询闭环。
-
-    处理顺序：
-    1. 先匹配模板；
-    2. 模板未命中时，如果用户输入本身像危险 SQL，旧链路先用 M3 只读 Guard 直接拦截；
-    3. 其他未命中问题调用 LLM 生成 SQL；
-    4. SQL 统一交给 M5 SQL Tool，返回表格、工具调用和耗时；
-    5. 聚合结果尝试生成 chart_spec，并把完整过程写入 JSONL trace。
-    """
+    """执行 M35 统一查询入口，所有 SQL/RAG/terminal 路径都必须穿过同一次 Harness。"""
 
     started_at = perf_counter()
     trace_id = _trace_id(request)
-    matched = match_template(request_body.question)
 
-    # 步骤 0：M11 评测开关显式绕过模板优先，只走新 Text2SQL pipeline。-----------------------
-    if request_body.force_new_pipeline:
-        pipeline_result = run_text2sql_pipeline(
-            question=request_body.question,
-            user_role=request_body.user_role,
-            db=db,
-            trace_id=trace_id,
-            schema_retrieval_profile=request_body.schema_retrieval_profile,
-            schema_fusion_strategy=request_body.schema_fusion_strategy,
-            schema_vector_index=getattr(request.app.state, "schema_vector_index", None),
-        )
-        if pipeline_result.tool_result is None or pipeline_result.safety_status != "passed":
-            return _blocked_response(
-                request=request,
-                request_body=request_body,
-                trace_id=trace_id,
-                sql=pipeline_result.sql,
-                blocked_reason=pipeline_result.blocked_reason or "新 Text2SQL pipeline 已拦截该请求。",
-                started_at=started_at,
-                tool_call=pipeline_result.tool_call,
-                error_type=pipeline_result.error_type or "text2sql_pipeline_blocked",
-                trace_steps=pipeline_result.trace_steps,
-                langfuse_trace_id=pipeline_result.langfuse_trace_id,
-                langfuse_trace_url=pipeline_result.langfuse_trace_url,
-                langfuse_write_status=pipeline_result.langfuse_write_status,
-                langfuse_span_mode=pipeline_result.langfuse_span_mode,
-            )
-        return _success_response(
-            request=request,
-            request_body=request_body,
-            trace_id=trace_id,
-            sql=pipeline_result.sql or "",
-            answer_hint=pipeline_result.answer_hint,
-            tool_result=pipeline_result.tool_result,
-            started_at=started_at,
-            trace_steps=pipeline_result.trace_steps,
-            chart_spec=pipeline_result.chart_spec,
-            langfuse_trace_id=pipeline_result.langfuse_trace_id,
-            langfuse_trace_url=pipeline_result.langfuse_trace_url,
-            langfuse_write_status=pipeline_result.langfuse_write_status,
-            langfuse_span_mode=pipeline_result.langfuse_span_mode,
-        )
-
-    if matched is None and looks_like_dangerous_sql(request_body.question):
-        guard_result = validate_readonly_sql(request_body.question)
-        if not guard_result.is_allowed:
-            return _blocked_response(
-                request=request,
-                request_body=request_body,
-                trace_id=trace_id,
-                sql=request_body.question,
-                blocked_reason=guard_result.blocked_reason or "SQL Guard 已拦截。",
-                started_at=started_at,
-            )
-
-    try:
-        sql, parameters, answer_hint = _resolve_sql(request_body)
-    except LLMGenerationError as exc:
-        return _blocked_response(
-            request=request,
-            request_body=request_body,
-            trace_id=trace_id,
-            sql=None,
-            blocked_reason=f"LLM SQL 生成失败：{exc}",
-            started_at=started_at,
-            tool_call=ToolCallTrace(
-                tool_name="llm_sql_generator",
-                status="error",
-                latency_ms=_elapsed_ms(started_at),
-                error_type="llm_generation_error",
-                message=str(exc),
-            ),
-            error_type="llm_generation_error",
-        )
-
-    domain_schema = load_domain_schema()
-    tool_result = run_sql_tool(
-        db=db,
-        sql=sql,
-        parameters=parameters,
-        user_role=request_body.user_role,
-        trace_id=trace_id,
-        domain_schema=domain_schema,
+    # 步骤 1：应用组装层的 resolver 解析 role；没有 resolver 或 role 不匹配时不调用任何 Tool。
+    resolver = getattr(request.app.state, "caller_resolver", None)
+    resolution = resolver.resolve(request_body.user_role) if resolver is not None else None
+    harness_request = HarnessRequest(
+        question=request_body.question,
+        run_id=trace_id,
+        caller=resolution.caller if resolution else None,
+        active_sql_role=resolution.active_sql_role if resolution else None,
+        force_new_pipeline=request_body.force_new_pipeline,
+        schema_retrieval_profile=request_body.schema_retrieval_profile,
+        schema_fusion_strategy=request_body.schema_fusion_strategy,
     )
-    if tool_result.safety_status != "passed":
-        return _blocked_response(
-            request=request,
-            request_body=request_body,
-            trace_id=trace_id,
-            sql=sql,
-            blocked_reason=tool_result.blocked_reason or "SQL Guard 已拦截。",
-            started_at=started_at,
-            tool_call=tool_result.tool_call,
-            error_type=tool_result.error_type or "sql_guard_blocked",
-        )
 
-    return _success_response(
-        request=request,
-        request_body=request_body,
-        trace_id=trace_id,
-        sql=sql,
-        answer_hint=answer_hint,
-        tool_result=tool_result,
-        started_at=started_at,
+    # 步骤 2：DB Session、深 Tool 与可选 Schema index 仅属于本次 invoke 的 runtime context。
+    runtime = HarnessRuntime(
+        sql_tool=Text2SQLToolAdapter(db=db, schema_vector_index=getattr(request.app.state, "schema_vector_index", None)),
+        rag_tool=RAGToolAdapter(),
     )
+    result = run_harness(request=harness_request, runtime=runtime)
+    response = _project_response(result=result, trace_id=trace_id, started_at=started_at)
+    _record_trace(request=request, request_body=request_body, response=response, result=result)
+    return response

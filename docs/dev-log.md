@@ -2504,3 +2504,160 @@ python -m compileall -q engine app eval scripts tests
 
 **本地启动体验：** M34 **暂无独立 API 或页面**，因为本模块只把 external corpus 接入内部 Knowledge Tool/AnswerFlow，并明确不扩展 Router、Hybrid 或 UI。最安全的体验方式是运行上面的离线聚焦回归，再只读查看 `.agent_work/temp/m34-answer-eval-full-v4.json` 的 summary、group summaries 和 failure counts。若要重建 profile 或重新调用真实 Qwen，必须显式提供项目外 dataset root，并重新确认数据路径、Milvus、provider 费用和运行范围；不要为了“体验一下”直接重跑 180 题。
 
+## ★ M35 顶层 LangGraph Harness 与 SQL/RAG Router
+
+（2026-08-16）
+
+**简述**：用一个**单轮顶层 LangGraph Harness** 统一接管 SQL、RAG 和保守终止，让 `/api/query`、Trace 与 Eval 对同一次执行说同一种“四轴语言”。
+
+### 先用大白话讲
+
+M35 解决的是“系统已经有两支专业队伍，却没有统一调度台”的问题。Text2SQL 会查数据库，RAG AnswerFlow 会查文档、做权限检查和引用校验；但此前它们各自成立，普通 `/api/query` 还没有一个可信的总入口决定：**这题该交给谁、能不能执行、最后到底是答完了、需要澄清、技术不可用，还是被安全规则拦住**。
+
+这次加的 Harness 可以类比 SpringBoot 里的一个很薄的业务编排层：它不把 SQL 生成、知识检索重新实现一遍，只负责一次请求的路由、调用一个深 Tool、汇总最终状态并停止。请求进来后，先解析可信 caller，再由 Router 在 SQL、RAG 或不调用 Tool 之间做保守决定；Tool 返回结构化 Observation，最后由唯一 controller 生成结果。**API、JSONL Trace 和 Eval 都从同一个 `AgentRunResult` 投影**，因此不会再出现 API 说成功、Trace 说 blocked、Eval 又按另一套规则判卷的情况。
+
+这个版本刻意只做**单轮、最多一个 Tool**。它不是完整自主 Agent：没有恢复循环、thread、Hybrid 双路汇合、远程 Router 或生产登录系统。M35 的价值是先把“调度一次并诚实结束”做成可靠地基，下一阶段才有资格讨论失败后要不要重试或补问。
+
+### 这次做了什么
+
+这次工作的核心矛盾是：既要让 SQL 和 RAG 真正进入同一个用户入口，又不能因为引入 LangGraph 就拆坏已经验证过的 Text2SQL、ACL、Evidence、AnswerFlow 和 Citation Validator。最终采用了**浅编排、深 Tool、单一事实投影**的方案，并用 caller 篡改、Hybrid、SQL Guard、技术不可用和 Trace 一致性反例证明边界没有被接线工作冲掉。
+
+1. **建立唯一的单轮 Harness，而不是再写一套业务流水线**
+
+   **原来的问题**是 `/api/query` 主要围绕 SQL 组织，M33 的 `RAGAnswerFlow.run()` 虽然内部可信，却没有接到统一 Router、HTTP 响应和全局 Trace。若直接在 API 里继续堆 `if SQL / elif RAG`，路由、状态和失败话术会散落在不同层；若把 Text2SQL 和 AnswerFlow 的每个内部步骤都画成 Graph 节点，又会让顶层 Graph 与深模块争夺控制权。
+
+   M35 引入 **Harness**——它不是“更聪明的模型”，而是一张受控执行地图。拓扑固定为 `START → route → (sql_tool | rag_tool | terminal) → controller → END`。Router 只选路径，Tool 只报告 Observation，controller 是唯一能写最终四轴和终止动作的地方。DB Session、Router 和 Tool adapter 通过 LangGraph runtime context 注入，不塞进可持久 state；`graph_steps` 使用显式 reducer，审计顺序不会被未来分支静默覆盖。
+
+   没有引入 checkpoint、Store、interrupt 或循环，因为 M35 只证明一次执行；这些能力会带来 thread ownership、预算和恢复策略，属于 P4。**验证证据**包括拓扑、每轮最多一个 Tool、terminal 可终止、非法 caller fail closed，以及最终全仓 397 条测试通过。它仍**不能证明**系统已经能多轮恢复或长期记忆。
+
+2. **把 Text2SQL 与 RAG 保持为两个深 Tool，并让失败各归各位**
+
+   **原来的问题**是旧 SQL 链路常把 `blocked_reason` 当作万能错误字段：SQL Guard 拒绝、QueryPlan 语义不支持、LLM 解析失败、数据库 driver 错误可能都被压成 `safety_status=blocked`。这会误导用户和 Eval——“服务暂时不可用”并不等于“你触碰了安全规则”。RAG 侧若被 Graph 重新拼答案，也会绕过 M33 已验证的 Gate、Composer 和 Citation Validator。
+
+   两个 adapter 因此只做**合同翻译**。Text2SQL 成功后才生成可复算 fingerprint、SQL Evidence 和 ledger；SQL Guard、确定性语义拒绝、output-projection 合同拒绝、provider unavailable 与 driver failure 分开映射。RAG adapter 每轮只调用一次 `RAGAnswerFlow.run()`，把已经闭合的四轴、validated citations、`docs_used` 和 EvidenceRef 安全投影交给 Graph，文档正文不进入顶层 Trace。
+
+   用户确认的**方案 A**进一步规定：QueryPlan 多投影字段属于执行前确定性合同拒绝，保持 `completed / no_answer / blocked`；LLM 无法解析 JSON/SQL 属于 `external_unavailable / no_answer / passed`，且不写 `blocked_reason`。没有选择“两类都 blocked”的旧兼容方案，因为那会继续混淆安全与技术故障；也没有把 projection 拒绝降为普通技术错误，因为那会弱化 SQL fidelity。聚焦 7 条合同测试和全仓回归证明了这组映射；但它**没有运行真实 Text2SQL LLM Eval**，所以不代表远程模型稳定性已经提升。
+
+3. **让 caller 先可信，再允许 Router 调 Tool**
+
+   **原来的问题**是请求体里的 `user_role` 本质上只是客户端自报字符串。如果把它直接传给 SQL RBAC 或文档 ACL，用户写个 `admin` 就可能获得更高权限。M31 虽然已经定义了 `TrustedCaller`，但普通 API 还缺少组装 seam。
+
+   用户在 G-M35-1 选择**方案 A**：只有明确的 `local/demo/test` 环境由应用组装层注入 fixture resolver；resolver 先给出固定 caller 和完整 resolved roles，请求的 role 只能从中选择 active role，不能凭请求现场创建新身份。其他环境没有 authenticated resolver 时，在任何 SQL/RAG Tool 调用前以 `caller_untrusted` 停止。Trace 记录 caller safe ref 和 fixture 来源，但不把 demo 身份包装成 production auth。
+
+   没有采用“所有环境都必须手工注入 resolver”的方案 B，因为当前学习/demo 默认入口会全部失效，并可能诱使后续开发者为了跑起来又在 API 内直信 role；方案 A 的风险则是环境配置错误会让人误解信任等级，所以边界和测试必须一直保留。unknown role Tool 前失败的 API/Trace 反例已经通过；这只证明**本地 fixture 不越过其角色集合**，不证明 JWT/OAuth、企业目录或 tenant/thread owner 已实现。
+
+4. **让 API、Trace 和 Eval 只读同一份执行事实**
+
+   **原来的问题**是一个系统最难排查的情况不是直接报错，而是三个出口各自“合理地”解释同一请求：API 根据异常拼话术，Trace 根据旧字段记录状态，Eval 再重跑或重新猜 route。这样即使测试全绿，也可能测的是不同执行。
+
+   M35 把 `AgentRunResult` 设为**单一事实源**。API projector 只负责保留旧 SQL/rows/chart/docs_used 兼容字段并增加 execution/answer/reason/citations；Trace 同时记录 route decision、graph steps、caller safe ref、Tool Observation、EvidenceRef 和 termination action；独立 `phase4-harness-v1` Eval 对 Scenario、execution 和 assertion identity 做 closed-world 校验，并断言一题只 invoke 一次 Graph。
+
+   没有让 Eval 为了评分重新调用 Tool，也没有把 M27、M31–M34 的历史 artifact 改写成新格式，因为那会破坏“一次执行、多处只读”的证据身份。**最终证据**是 `397 passed`、compileall 和 diff check 全部通过，且 RAG Trace 不含文档正文。尚未证明的边界是：真实远程 Router、Milvus、external Composer/Judge 和 LangFuse Cloud 都未在 M35 运行。
+
+### 新概念
+
+- **Harness（执行框架）**：包住多个专业 Tool 的薄编排层。可以类比 Spring MVC 的 DispatcherServlet：它决定请求交给哪个 handler、怎样统一收口，但不自己实现每个业务。
+- **LangGraph runtime context**：每次执行临时注入的依赖容器，里面放 DB Session、Tool 和 Router。它类似 FastAPI `Depends` 或 Spring 注入的 service；与 Graph state 不同，它不是要跨节点审计或持久化的业务事实。
+- **Reducer（归并器）**：多个节点写同一个 state 字段时采用的合并规则。M35 的 `graph_steps` 用 append reducer，类似给执行日志只追加、不覆盖，防止未来增加分支后丢失路径。
+- **Tool Observation**：Tool 对本轮执行结果开的“结构化回执”，包含四轴、reason、EvidenceRef 和安全诊断；它不是最终回答，controller 才决定产品层怎样结束。
+- **Fail closed（失败关闭）**：身份、路由或合同无法确认时宁可停止，也不猜一个默认 Tool 或默认权限。它类似 SQL Guard 遇到无法证明只读的语句时拒绝执行。
+- **单向投影**：内部完整事实只能向 API/Trace/Eval 的安全视图转换，出口不能反过来修改 controller 判断。这样 `error_type` 只是兼容诊断，不会偷偷变成第二套状态机。
+
+### 代码阅读路线
+
+1. **先看系统在传递哪些事实**：`engine/harness/contracts.py`
+
+   从 `HarnessRequest`、`RouteDecision`、`ToolObservation` 读到 `AgentRunResult`。重点看四轴、caller、EvidenceRef 和 termination 的不变量：这些 dataclass 就像 Java service 层的 DTO + invariant，不是一个什么都能塞的 `Map<String, Object>`。
+
+2. **再看 Router 为什么会保守停下**：`engine/harness/router.py`、`engine/harness/caller.py`
+
+   Router 只返回封闭的结构化决定，不直接调用 DB/RAG；caller resolver 则先把请求 role 限制在可信角色集合内。阅读重点是 **unknown/Hybrid 不 fallback、未解析 caller 不进 Tool**，具体关键词规则只是首版 deterministic fixture，不必背。
+
+3. **沿 SQL/RAG 两条深 Tool 接口读失败翻译**：`engine/harness/adapters.py`
+
+   先看 `Text2SQLToolAdapter.run()` 怎样在新/legacy pipeline 之间选择，再看 `_sql_observation()` 如何区分 Guard、语义拒绝、projection、provider 与 driver；最后看 `RAGToolAdapter.run()` 为什么只消费 `RAGAnswerFlow` 安全结果。这里解决的是**接线而不重写专业模块**。
+
+4. **看 Graph 怎样保证一轮只走一条路**：`engine/harness/graph.py`
+
+   从 `_route_node()` 开始，沿 conditional edge 到 SQL、RAG 或 terminal，再到 `_controller_node()`。主角是 `run_harness()` 和唯一 controller；理解节点职责与终止即可，不需要先研究 LangGraph 所有高级功能。
+
+5. **从 HTTP 入口检查“没有旁路”**：`app/main.py` → `app/api/query.py` → `app/schemas/agent.py`
+
+   `app/main.py` 组装环境级 resolver；query route 依次解析 caller、构造 runtime、调用一次 Harness、投影 response 和 Trace；schema 保留旧字段并增加四轴/citations。关键设计是 `force_new_pipeline=false` 仍在 Tool 里面，API 不再分叉成第二条顶层链。
+
+6. **最后读 Trace 与 Eval 如何复用同一结果**：`engine/trace/recorder.py` → `eval/harness_contracts.py` → `tests/test_m35_*.py`
+
+   Trace 看安全白名单字段，Eval 看 execution/assertion identity 和 one-invoke 闭合，测试则覆盖 topology、caller tamper、SQL failure mapping、RAG citation 非泄露和 API/Trace 一致性。这里证明的是**同一执行事实被多个消费者读取，而不是多个消费者各跑一次**。
+
+核心调用链是：
+
+`POST /api/query`
+→ `CallerResolver`
+→ `HarnessRequest + HarnessRuntime`
+→ `route`
+→ `Text2SQLToolAdapter | RAGToolAdapter | terminal`
+→ `controller / AgentRunResult`
+→ `AgentResponse + JSONL Trace + Harness Eval`
+
+**模块闭环**：M30–M33 已建立知识原件、ACL/Evidence、Knowledge Tool 与可信 AnswerFlow；M35 把它和既有 Text2SQL 一起接入公开查询入口。至此 Phase 4 P3 的“**一次请求、一个可信 caller、至多一个 Tool、一个最终状态**”已经可演示。
+
+### 设计要点
+
+- **深 Tool、薄 Graph**：Graph 只负责编排与最终状态，Text2SQL/RAG 内部验证继续由原深模块负责，避免双控制权。
+- **四轴不混用**：execution 描述技术执行，answer 描述能否回答，safety 描述确定性安全裁决；`blocked_reason` 不再装技术异常。
+- **caller 不是请求字段**：role 只能选择可信 resolver 已解析的权限，不能凭 JSON 自我授权；demo fixture 与生产认证必须明确区分。
+- **保守 Router**：未知或 Hybrid 停止，不默认落到 SQL、RAG 或双后端；开放能力不足要如实暴露。
+- **一个 result，多种投影**：API、Trace、Eval 不重新判断 route/四轴，减少口径漂移和重复执行。
+- **当前边界**：没有 P4 loop/thread/context、P5 Hybrid、生产认证、远程 Router，也没有把 M34 external profile 接入默认 RAG。
+
+### 面试怎么讲
+
+**可直接复述**：我在 DataPilot 的 Phase 4 P3 中实现了一个单轮 LangGraph Harness，把已有 Text2SQL pipeline 和可信 RAG AnswerFlow 接到同一个 `/api/query`。我没有把两个成熟流水线拆成大量 Graph 节点，而是把它们作为深 Tool，顶层只负责 caller 解析、保守路由、至多一次 Tool 调用和唯一 controller 收口。内部用 route、execution、answer、safety 四轴表达结果，例如 QueryPlan projection mismatch 是确定性 blocked，而 LLM 解析失败是 external unavailable、safety passed。local/demo/test 通过显式 fixture resolver 提供可信 caller，请求体 role 只能选择 resolved role，其他环境缺认证 resolver 时 Tool 前失败关闭。API、JSONL Trace 和独立 Harness Eval 都只从同一个 AgentRunResult 投影，一题只 invoke 一次 Graph。最终全仓 397 条确定性测试通过；同时我明确没有把它包装成完整自主 Agent，因为 P4 恢复循环、Hybrid、生产认证和远程 Router 仍未实现。
+
+1. **[基础追问] 为什么你把 Text2SQL 和 RAG 当成两个 Tool，而不是把内部每一步都做成 LangGraph 节点？**
+
+   因为节点边界应该跟控制权一致，而不是跟函数数量一致。Text2SQL 已经拥有 Schema Retrieval、QueryPlan、SQL Guard 和执行合同；RAG 已经拥有 Knowledge Tool、Gate、Composer 和 Citation Validator。全部拆开会让顶层 Graph 也能跳过或重排这些安全步骤，形成双控制权。M35 只需要跨 Tool 路由和最终四轴，所以深 Tool 能让 Graph 更小、接口更稳定，也更容易注入 fake 做拓扑测试。
+
+2. **[工程/深挖追问] LLM 生成失败为什么是 safety passed？用户明明没有拿到答案。**
+
+   四轴回答的是不同问题。没有答案由 `answer_status=no_answer` 表达，provider/解析故障由 `execution_status=external_unavailable` 表达；safety 只回答有没有触发确定性安全裁决。若把技术故障也写成 blocked，监控会误以为用户违规，Eval 也无法区分模型不稳定和 Guard 拒绝。M35 仍把 QueryPlan projection mismatch 标成 blocked，因为它是执行前确定性 SQL 输出合同，而不是远程服务波动。
+
+3. **[工程/深挖追问] 你怎么保证 API、Trace 和 Eval 不会各说各话？**
+
+   三者都只消费同一次 `run_harness()` 产生的 `AgentRunResult`。API projector 不能重新路由，Trace recorder 不能重新计算四轴，Eval 也不重跑 Tool；closed-world artifact 还校验 Scenario、execution、assertion identity 和一题一次 invoke。测试会对照 response/JSONL 中的 route、steps、reason、caller 和 EvidenceRef，并检查 RAG Trace 没有正文泄露。
+
+4. **[压力追问] 你的 Router 只是关键词规则，这也能叫 Agent 吗？是不是为了用 LangGraph 而用 LangGraph？**
+
+   这个质疑对“通用智能路由”是成立的，M35 没有证明那项能力。模块目标是先建立可信的执行和停止合同：caller 必须可信、未知问题不能乱调用 Tool、每题最多一次执行、失败能按四轴归因。LangGraph 在这里提供显式状态迁移、conditional edge、runtime context 和后续 P4 的稳定 seam，而不是用来包装关键词。当前 Router 是可替换 baseline；只有 Trace/Eval 出现真实失败簇、远程出站得到授权后，才值得增加模型 fallback。
+
+5. **[压力追问] 你加了一层 Graph，却没有让答案质量变高，这是不是工程自嗨？**
+
+   如果目标是当场提高召回或生成质量，这个模块确实没有做到，也没有这样宣称。它解决的是原系统无法安全组合 SQL/RAG、状态口径会漂移、请求 role 不可信以及评测可能重复执行的问题。397 条回归、caller tamper、one-invoke、Trace 非泄露和错误分类证明这些工程合同成立。下一阶段的恢复或 Hybrid 如果没有这层预算、终止和证据 seam，很容易变成无界重试或双 Tool 乱跑；但是否进入 P4、先恢复哪类失败，仍要用真实失败数据决定。
+
+### 验证与下一步
+
+- **方案 A 聚焦合同**：`7 passed, 1 warning in 23.00s`，覆盖 output-projection blocked 与 LLM `external_unavailable` 的最终映射。
+- **全仓确定性回归**：`397 passed, 1 warning in 555.68s (9:15)`；warning 是既有 FastAPI TestClient/Starlette `httpx` deprecation，不影响 M35 合同。
+- **静态交付**：`compileall -q app engine eval demo tests` 与 `git diff --check` 通过；注释审计 `113/113` 覆盖。
+- **尚未证明**：未运行真实 LLM Router/Text2SQL Eval、Milvus/embedding、M34 external Answer Eval、远程 Composer/Judge 或 LangFuse Cloud。
+- **下一步建议**：先读 Harness Trace/Eval 的 reason、execution 和 termination 失败簇，再规划 P4/G5 首个有界恢复切片；M34 召回/context packing 继续作为独立候选，不自动并入。
+
+可复制验证命令：
+
+```powershell
+# 最终全仓确定性回归；预计看到 397 passed 和 1 个既有 TestClient deprecation warning。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m35-full-recheck
+
+# 只检查 Python 语法/导入编译；预计无输出并以 exit 0 结束。
+python -m compileall -q app engine eval demo tests
+```
+
+**本地启动体验：** M35 已有可交互后端入口。先确认 MySQL/seed 和项目环境符合 `docs/state/runbook.md`，然后启动 API：
+
+```powershell
+# 启动 FastAPI；环境未激活时使用 AGENTS.md 中的完整 Python 路径。
+python -m uvicorn app.main:app --reload
+```
+
+打开 **Swagger UI**：`http://127.0.0.1:8000/docs`，选择 `POST /api/query`。可以先提交 SQL 示例 `{"question":"各渠道订单量是多少？","user_role":"ops"}`，观察 `route=sql`、四轴、SQL/rows/chart 和 trace id；再提交明确的政策/指标口径问题，观察 `route=rag`、validated citations 与 `docs_used`。如果提交未知 role，应该在 Tool 前得到 `caller_untrusted`；如果题目同时要求 SQL 与文档汇合，M35 会保守返回 unsupported，而不是偷偷运行两个 Tool。这里使用的是 **local/demo fixture caller**，只能用于学习和演示，不能当作生产认证。
+

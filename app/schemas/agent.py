@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 class QueryRequest(BaseModel):
     """自然语言查询请求。
 
-    `user_role` 会进入 SQL Guard 的 RBAC 权限矩阵，决定这个问题能访问哪些表和字段。
+    `user_role` 在 M35 起只表示请求者选择的 active role：应用组装层必须先通过 caller
+    resolver 把它解析为可信 fixture / authenticated caller，才能进入 SQL Guard 或知识 ACL。
     `force_new_pipeline` 是新旧 Text2SQL 的兼容开关：默认 True，让普通 API 与 M27 Eval 都走
     Schema Retrieval → QueryPlan → SQL Guard 的新 pipeline；显式传 False 才暂时回到 legacy
     baseline，供兼容排障使用。
@@ -67,7 +68,7 @@ class AgentResponse(BaseModel):
     EvalOps 读取。旧字段只增不改，避免 M3/M4 测试和后续调用方失效。
     """
 
-    route: Literal["sql", "rag", "hybrid"]
+    route: Literal["sql", "rag", "hybrid", "none"]
     answer: str
     sql: str | None = None
     columns: list[str] = Field(default_factory=list)
@@ -81,3 +82,10 @@ class AgentResponse(BaseModel):
     tool_calls: list[ToolCallTrace] = Field(default_factory=list)
     error_type: str | None = None
     trace_id: str
+    # M35 四轴新增字段。旧字段继续保留为兼容投影，不能反向驱动 Harness controller。
+    execution_status: Literal["not_started", "completed", "external_unavailable", "failed"] = "not_started"
+    answer_status: Literal[
+        "complete", "partial", "clarification_required", "unsupported", "insufficient_evidence", "no_answer"
+    ] = "no_answer"
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+    reason_code: str | None = None

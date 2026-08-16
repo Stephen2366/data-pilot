@@ -74,6 +74,16 @@ class TraceRecord(BaseModel):
     langfuse_trace_url: str | None = None
     langfuse_write_status: Literal["ok", "skipped", "failed"] = "skipped"
     langfuse_span_mode: Literal["post_hoc", "live"] = "post_hoc"
+    # M35：JSONL 记录 Harness 的安全投影，避免 API/Trace/Eval 各自猜同一轮状态。
+    execution_status: str = "not_started"
+    answer_status: str = "no_answer"
+    reason_code: str | None = None
+    route_decision: dict[str, Any] | None = None
+    graph_steps: list[str] = Field(default_factory=list)
+    caller_safe_ref: str | None = None
+    tool_observation: dict[str, Any] | None = None
+    evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    termination_action: str | None = None
 
 
 class TraceBackend(Protocol):

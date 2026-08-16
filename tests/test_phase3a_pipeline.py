@@ -398,8 +398,10 @@ def test_sql_generation_failure_trace_keeps_raw_preview_and_parse_context(tmp_pa
     sql_generation_step = next(step for step in trace["trace_steps"] if step["name"] == "sql_generation")
 
     assert response.status_code == 200
-    assert body["safety_status"] == "blocked"
+    assert body["safety_status"] == "passed"
     assert body["error_type"] == "llm_generation_error"
+    assert body["execution_status"] == "external_unavailable"
+    assert body["blocked_reason"] is None
     assert sql_generation_step["status"] == "error"
     assert sql_generation_step["metadata"]["stage"] == "sql_generation"
     assert sql_generation_step["metadata"]["raw_response_preview"] == "我无法稳定返回 JSON，也没有 SELECT。"

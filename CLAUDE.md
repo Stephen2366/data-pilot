@@ -13,7 +13,7 @@
 > **参考资料速查**：[REFERENCE_GUIDE.md](D:/.Work/Practice/Python-Practice/references/REFERENCE_GUIDE.md) — 参考项目的定位、可借鉴点、不要照搬的坑。写代码时按场景查对应项目，不用通读。
 
 ## 用户背景
-- 2028 届硕士研究生，目标 10 月找到 AI 应用开发 / Agent 开发 / 后端开发的日常实习。项目服务简历和面试
+- 2028 届硕士研究生，目标 10 月找到 AI 应用开发 / Agent 开发 / 后端开发的日常实习，DataPilot 项目服务简历和面试
 - **已学习技术栈**：Java / SpringBoot / MySQL / Redis / Python / FastAPI / LangChain-LangGraph（讲解和注释时可适当用这些技术作类比）
 - 用户使用 Claude Code 和 Codex 协作开发，项目 AGENTS.md 通过符号链接到 CLAUDE.md，从而实现文档同步
 
@@ -93,10 +93,7 @@ tests/                  # pytest 测试
 
 - 开始较完整的模块开发时，先在 `docs/notes/<module>-notes.md` 写几条 implementation checklist。
 - 开发中遇到关键决策/踩坑/验证素材/临时取舍/判断与修正/实验结论/新发现等，先把素材写入 `docs/notes/<module>-notes.md`。提前记录素材是为了供收工流程复用，防止后面记录日志时只能根据代码来。
-- 模块开发完成后按两步收工：
-  1. `finish-module`：注释查漏 + 运行验证 + 把决策取舍/验证快照/注释小结固化到 `docs/notes/<module>-notes.md`（开发刚结束时调用，上下文最新鲜）。
-  2. `finish-docs`：基于固化的素材/对话记忆/代码，更新 `docs/state/AI_CONTEXT_CHANGELOG.md` / `docs/state/AI_CONTEXT.md` / `docs/dev-log.md`（可稍后或跨会话执行）。
-- 收工完成后用户人工查看验收；最终由 `accept-module` 做验收门禁。
+- 模块开发完成后调用`finish-module` 收工。
 
 ## 代码风格
 
@@ -114,13 +111,18 @@ tests/                  # pytest 测试
 ## 开发记录要求
 
 - `docs/state/AI_CONTEXT.md` 是 AI 续接技术档案，记录 git 和代码查不到的信息：当前状态、默认配置、评测基线、关键结论和活跃坑；保持短小，优先服务快速续接。
-
 - `docs/state/AI_CONTEXT_CHANGELOG.md` 保存完整变更记录、模块档案、真实 LLM eval、A/B 实验、smoke 结论和历史取舍。
   - 普通小修改如果会影响后续理解，就在 `docs/state/AI_CONTEXT_CHANGELOG.md` 加一段简短记录；不记录文档整理、表达润色、无技术含义等修改。
   - 较完整模块开发、影响默认行为/安全口径/评测口径/架构边界的修改，才需要写结构化记录，建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
+- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须同步到 `docs/state/AI_CONTEXT_CHANGELOG.md`，并把会影响当前路线的最新结论摘要同步到 `docs/state/AI_CONTEXT.md`。若新结论推翻或修正旧条目的判断，在旧条目处加一行 `⚠️ 注` 指向新结论，防止过时判断被误读。
 
-- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须同步到 `docs/state/AI_CONTEXT_CHANGELOG.md`，并把会影响当前路线的最新结论摘要同步到 `docs/state/AI_CONTEXT.md`「最新事实快照」。若新结论推翻或修正旧条目的判断，在旧条目处加一行 `⚠️ 注` 指向新结论，防止过时判断被误读。
+## 长时间命令与余额控制
 
-- `dev-log.md` 面向用户学习复盘。
-
-  
+- 开发过程中优先运行与当前改动直接相关的测试；允许在当前轮等待，但应设置合理等待时间并稀疏检查，禁止高频心跳轮询。
+- 测试失败后优先修复并重跑相关失败用例，不立即重复运行完整测试。
+- 完成全部代码修改后，完整测试、完整 Eval、构建或数据处理任务如果预计超过 2 分钟，使用后台进程运行，不进行 AI 心跳轮询。
+- 后台任务必须将日志、退出码和完成标记写入 `.agent_work/temp/`。
+- 后台任务启动后，向用户报告命令、PID、日志路径、完成标记路径和检查方法，然后结束当前回复。
+- 用户稍后要求检查时，再读取一次退出码、结果摘要和必要的失败信息。
+- 后台验证尚未完成或结果尚未检查时，不宣称模块完成。
+- 相关代码和验证条件未变化且已有可信结果时，不重复验证。

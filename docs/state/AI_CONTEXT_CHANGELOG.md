@@ -15,6 +15,17 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 
 ## 变更记录（新的在上）
 
+### [模块任务] M35 顶层 LangGraph Harness 与 SQL/RAG Router（2026-08-16）
+
+- **改动范围**：未提供模块起始 commit，收工以 `git status --short`、`git diff --name-only`、`git diff --cached --name-only` 和未跟踪清单交叉核对。归并范围为新增 `engine/harness/{__init__,contracts,router,caller,adapters,graph}.py`、`eval/harness_contracts.py`、四个 `tests/test_m35_*.py`、`docs/notes/m35-{plan,notes}.md`；修改 `app/{main,api/query,schemas/agent}.py`、`engine/trace/recorder.py`、`demo/streamlit_app.py`、`pyproject.toml`、`tests/test_phase3a_pipeline.py`，以及本轮 `docs/state/{AI_CONTEXT,AI_CONTEXT_CHANGELOG}.md`、`docs/dev-log.md`。归并后逐项对照原始清单无遗漏；开始前已有的 `.codex/skills/finish-module/SKILL.md` 用户改动不属于 M35，未触碰。
+- **单轮 Harness 与深 Tool 边界**：新增唯一 `run_harness()` seam，LangGraph `>=1.1.2,<2` 固定拓扑为 `START → route → (sql_tool | rag_tool | terminal) → controller → END`，一题最多调用一个 Tool。`RouteDecision`、`ToolObservation`、`AgentRunResult` 保存 route/execution/answer/safety 四轴、caller safe ref、EvidenceRef 与终止事实；API、JSONL Trace 和独立 `phase4-harness-v1` Eval 都只从同次 result 单向投影。Text2SQL pipeline 与 `RAGAnswerFlow.run()` 保持完整深 Tool，Graph 不复制其 Schema/Gate/Composer/Validator 内部步骤；`force_new_pipeline=false` 只保留为 SQL adapter 内部诊断选项，不再绕过 Harness。
+- **G-M35-1 caller 决策**：方案 A 在 `local/demo/test` 由应用组装层注入明确标记的 fixture resolver，请求 `user_role` 只能选择 resolver 已解析角色；其他环境没有 authenticated resolver 时 Tool 前 fail closed。它适合当前学习/demo，未来生产认证只替换 resolver；风险是环境标识不清会被误认成生产身份，因此 Trace 保留 fixture 标记且不声称 production auth。方案 B 要求所有环境手工注入 resolver，失败关闭最彻底，适合近期即接真实认证，但会中断 `uvicorn app.main:app`/Streamlit 默认体验，并可能诱发 API 内重新直信请求 role 的旁路。AI 建议 A，用户最终确认 **A**。
+- **SQL 四轴决策**：首次全仓回归暴露旧 Phase 3 测试把 QueryPlan output-projection mismatch 与 LLM JSON/SQL 解析失败都写成 safety blocked。方案 A 区分两者：确定性 projection 合同拒绝保持 `completed / no_answer / blocked`，provider 解析失败为 `external_unavailable / no_answer / passed` 且无 `blocked_reason`；适用于既要保留 SQL fidelity 又要落实 Phase 4 四轴的当前合同，风险是只读旧 `safety_status` 的客户端需要适配新 execution/reason。方案 B 把两者都视为技术失败，适用于把 safety 极窄地限定为 SQL Guard 的系统，影响与风险是 projection 执行前保护语义被弱化。方案 C 全部沿用 blocked，适用于无法迁移旧消费者的短期兼容场景，影响是测试改动最少，风险是继续违反 M35 C6 并混淆安全与技术故障。AI 建议 A，用户确认 **A**，并新增 adapter 反例、只更新 LLM 失败的过时 API 断言。开发中还修复了 SQL EvidenceRef 方法名、M27 语义拒绝分类和 legacy raw SQL Guard 缺结构化 tool call 三处兼容回归。
+- **Router、Trace 与 Eval**：首版 Router 为可注入 deterministic/conservative adapter，覆盖代表性 SQL、RAG、澄清、unsupported 和 Hybrid 保守停止；未指定路径不采用 GustoBot 式 postgres+milvus fallback。Trace 记录 route decision、graph steps、caller safe ref、Tool Observation、EvidenceRef、四轴和终止动作，RAG 正文不进入安全投影。Harness Eval 使用 closed-world identity，一题只执行一次 Graph；未改写或混算 M27/M31–M34 artifact。
+- **参考资料**：按 `docs/phase4-reference.md` 定点复核 ARAG `graph.py`/`graph_state.py`、DataAgent `DataAgentConfiguration.java` 和 GustoBot router。借鉴显式 conditional edge、state reducer、深执行模块与控制边分离；不复制 loop、fan-out、checkpoint、多轮状态、强制检索或多后端默认 fallback。另以项目本地 LangGraph 1.1.2 验证 `StateGraph`、`Runtime` 和无 checkpoint compile。
+- **验证快照**：方案 A 聚焦合同 `7 passed, 1 warning in 23.00s`；最终全仓 deterministic pytest `397 passed, 1 warning in 555.68s`；`compileall -q app engine eval demo tests` 与 `git diff --check` 通过。warning 为既有 FastAPI TestClient/Starlette `httpx` deprecation，不影响 M35 合同。注释审计 113/113 覆盖。未运行真实 LLM Router/Text2SQL Eval、Milvus/embedding、M34 external Answer Eval、远程 Composer/Judge 或 LangFuse Cloud。
+- **遗留/后续**：M35 待用户人工检查与 `accept-module`。下一轮自然入口是根据 Harness reason/execution/termination 与 Eval/Trace 失败簇规划 P4/G5 首个有界恢复切片；不提前冻结模块号、loop/thread/context builder、P5 Hybrid 或远程 Router。生产认证仍未建设，demo fixture 不得外推生产安全；deterministic Router 对开放问法较窄；旧客户端需读取新增四轴而不能只看 `safety_status`。M34 external profile/召回优化仍是独立后续，不自动接入默认 RAG。
+
 ### [模块任务] M34 EnterpriseRAG-Bench 外部语料接入（2026-08-16）
 
 - **专项状态补齐**：M34 收工复核发现 `docs/state/rag-current-state.md` 仍停留在“只下载、未接入”的开工状态，已改写为当前两套知识基线、external identities/profile/pointer、parser/unit recipe、lexical/semantic retrieval 对照、180 题 Answer Eval、方案 B 支持合同、成本、回滚与活跃风险；WixQA 继续明确为未纳入候选。此次只更新事实源，未重跑构建、Eval 或 provider。
@@ -24,6 +35,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - **验证快照**：retrieval lexical @20 dev `0.810417/0.766667/0.645303`，held-out `0.823125/0.775000/0.723134`（coverage/all-gold/MRR）；semantic 均较低。full Answer Eval `.agent_work/temp/m34-answer-eval-full-v4.json` completed，artifact `d9fa2b20863c568cbc7091dea4724c5d69d74979b5b4ba3d3eb14ff101eeb41f`，180 flow/provider calls、405,305 tokens、complete `146/180`、all-gold cited `80/180`、multi all-gold `2/38`、semantic all-gold `15/52`、10 unavailable、24 contract rejected。聚焦回归 `158 passed`，compileall 通过；全仓 pytest 长时间无可靠终态后停止，结论 `inconclusive`。
 - **参考资料**：`docs/notes/m34-plan.md`、`docs/notes/m34-notes.md`、`docs/state/rag-current-state.md`、EnterpriseRAG-Bench 官方仓库 metadata，以及阿里云百炼官方价格/Qwen OpenAI-compatible 文档；后者仅用于出站模式和成本口径。
 - **遗留/后续**：full Eval 只证明真实构建、检索、回答和证据链可复现，不证明自然答案正确率、生产 ACL、长期性能或成本；complete 不等于 correctness。下一模块先分析 lexical 漏召回和 multi-document context packing，再以新 identity/A-B 决定是否改 recipe；Judge、Router、Hybrid、UI、通用评测平台仍不在范围。10 unavailable、24 support rejection 和全仓 pytest inconclusive 必须保留为风险。
+- ⚠️ 注（2026-08-16）：用户随后选择先回归 Phase 4 主线，M35 已完成 P3 顶层 Router/Harness；M34 的 lexical/multi-document 失败簇仍保留为独立后续，不代表已被 M35 修复或接入默认 RAG。M35 的全仓 `397 passed` 也只更新当前代码回归终态，不改写 M34 当时 full pytest inconclusive 的历史事实。
 
 ### [模块任务] M33 可信 RAG 回答与 Citation 闭环（2026-08-15）
 
@@ -39,6 +51,7 @@ M13 之后的新增记录使用标题标签，帮助 AI 快速筛选阅读优先
 - **参考资料**：按 `docs/phase4-reference.md` 定点复核 DB-GPT Resource/Tool、agentic-rag-for-dummies state/context、Gusto workflow source/finalize，并使用 `codebase-design` 深 module 词汇。借鉴正文与 structured reference 同过生成 seam、真实 Tool context 留存和 source 身份不能后置猜测；不照搬纯文本 Observation、首 resource、Graph/message reducer/loop、metadata 末尾拼 sources、模型自造 citation、远程重写/rerank 或 PostgreSQL→Milvus 级联。
 - **验证快照**：最终 M33 聚焦 `33 passed in 0.84s`；M31/M32 回归 `73 passed in 1.44s`；G4 后全仓 `337 passed, 3 skipped, 1 warning in 498.86s`；finish-module 使用 `-p no:cacheprovider` 再跑全仓为 `337 passed, 3 skipped, 1 warning in 462.10s`。M33 Eval 复算 identity/分母不变；`compileall -q app engine eval tests scripts` 与 `git diff --check` 通过。3 skip 为既有条件跳过，warning 为既有 Starlette/httpx deprecation。全程未调用真实 LLM、remote sufficiency/judge、embedding/rerank、Milvus 或 LangFuse Cloud。
 - **遗留/后续**：M33 待用户人工检查与 `accept-module`。下一轮自然入口是 P3 唯一顶层 Router/Harness，复用 Text2SQL pipeline 与 `RAGAnswerFlow.run()`，再解决可信 caller、同一 `/api/query` 的兼容四轴/citation 投影和全局 Trace。当前没有公开 RAG API、生产认证、Hybrid、真实 LLM Composer、长文/同义改写/跨文档能力或自然措辞结论；Knowledge 远端用途继续默认拒绝。
+- ⚠️ 注（2026-08-16）：上述 P3 Router/Harness、`/api/query` 四轴/citation 投影和全局 JSONL Trace 已由 M35 完成；生产认证、Hybrid、远程 Router/Composer 和开放语义质量仍未完成。
 
 ### [模块任务] M32 确定性知识取证与 Knowledge Tool（2026-08-13）
 

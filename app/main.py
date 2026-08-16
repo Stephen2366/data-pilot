@@ -9,6 +9,7 @@ from app.api import query_router, resources_router
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, register_request_logging_middleware
+from engine.harness.caller import build_default_caller_resolver
 
 
 def redact_database_url(database_url: str) -> str:
@@ -49,6 +50,9 @@ def create_app() -> FastAPI:
         description="Enterprise data analysis agent API.",
         version="0.1.0",
     )
+    # ★ G-M35-1：只有明确 local/demo/test 环境才拥有 fixture resolver；其他环境保持 None，
+    # 由 Harness 在 Tool 前失败关闭，绝不把请求体 user_role 当成生产身份。
+    application.state.caller_resolver = build_default_caller_resolver(settings.app_env)
     register_request_logging_middleware(application)
     register_exception_handlers(application)
     application.include_router(resources_router)

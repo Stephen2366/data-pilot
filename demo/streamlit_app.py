@@ -71,6 +71,8 @@ def _render_response(body: dict[str, Any]) -> None:
 
     # 步骤 1：顶部状态条 =====================================================================
     status = body.get("safety_status", "unknown")
+    execution_status = body.get("execution_status", "unknown")
+    answer_status = body.get("answer_status", "unknown")
     error_type = body.get("error_type") or "none"
     trace_id = body.get("trace_id") or "unknown"
     latency = (body.get("cost") or {}).get("latency_ms", 0)
@@ -78,6 +80,8 @@ def _render_response(body: dict[str, Any]) -> None:
         f"""
         <div class="status-strip">
           <span class="status-pill status-{status}">{status}</span>
+          <span>execution: <code>{execution_status}</code></span>
+          <span>answer: <code>{answer_status}</code></span>
           <span>trace_id: <code>{trace_id}</code></span>
           <span>latency: <code>{latency} ms</code></span>
           <span>error_type: <code>{error_type}</code></span>
@@ -92,6 +96,11 @@ def _render_response(body: dict[str, Any]) -> None:
 
     if body.get("blocked_reason"):
         st.error(body["blocked_reason"])
+
+    citations = body.get("citations") or []
+    if citations:
+        st.subheader("Citations")
+        st.json(citations)
 
     st.subheader("SQL")
     st.code(body.get("sql") or "", language="sql")
@@ -113,6 +122,7 @@ def _render_response(body: dict[str, Any]) -> None:
             "tables_used": body.get("tables_used", []),
             "docs_used": body.get("docs_used", []),
             "tool_calls": body.get("tool_calls", []),
+            "reason_code": body.get("reason_code"),
             "cost": body.get("cost", {}),
         }
     )
