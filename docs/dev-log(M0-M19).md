@@ -1,6 +1,6 @@
 # DataPilot 开发日志（学习复盘）
 
-> 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `docs/state/AI_CONTEXT.md`「当前状态」；完整技术档案和历史实验看 `docs/state/AI_CONTEXT_CHANGELOG.md`，查 bug 时按需追溯。
+> 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `docs/state/AI_CONTEXT.md`「当前状态」；完整技术档案和历史实验统一从 `docs/state/CHANGELOG_INDEX.md` 进入，查 bug 时按需追溯。
 >
 > 本文件只包含 M0 → M19；M20 以后的记录见 `dev-log`。
 
@@ -2076,7 +2076,7 @@ M14-lite 没有新增 API 端点，体验入口仍是批量评测和 trace。想
 - **Embedding Provider A/B**：比较的是“检索时用什么向量表示文本”。它影响 Schema / 文档召回，不等于主模型能力。Qwen 主模型不一定默认更好，但 Qwen embedding 仍可能更适合后续 RAG。
 - **diagnostic 体检**：formal / challenge 更像考试分数，diagnostic 更像体检报告。它不只看答对多少，还暴露失败发生在漏表、漏列、plan validation、LLM 生成失败、安全拦截还是 trace 证据不足。
 - **错误严重性对比**：不只比较谁错得少，还要比较错在哪里。DeepSeek 独有错误更多在非阻塞生成失败；`qwen3.7-max` 独有错误包含 blocking 的核心生成失败、多表缺列、plan validation 和 trace 证据缺失，所以即使分数只差 2 分，也更不适合当默认。
-- **Context / Changelog 拆分**：`AI_CONTEXT.md` 只保留当前快照，`AI_CONTEXT_CHANGELOG.md` 保存完整历史。这样 AI 续接时先读短上下文，需要查原因时再追溯历史，减少“每次都把几百行旧记录塞进上下文”的负担。
+- **Context / Changelog 拆分**：`AI_CONTEXT.md` 只保留当前快照，完整历史最初集中在 `AI_CONTEXT_CHANGELOG.md`；现在统一从 `CHANGELOG_INDEX.md` 路由到按 Phase 拆分的历史文件。这样 AI 续接时先读短上下文，需要查原因时再定点追溯，减少无关历史占用上下文。
 
 ### 设计要点
 

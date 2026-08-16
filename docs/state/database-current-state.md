@@ -2,7 +2,7 @@
 
 > 给后续 AI / Agent 接手用：先用这份文档快速理解当前数据库底座、指标口径、固定 seed 事实和 SQL 业务边界。Trigger：只要涉及 SQL、字段、表、指标、seed、expected SQL、`result_match` 或数据库事实，必须先读本文。
 >
-> **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍见 `docs/state/AI_CONTEXT_CHANGELOG.md`。
+> **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍统一从 `docs/state/CHANGELOG_INDEX.md` 进入。
 
 更新时间：2026-08-13
 
@@ -154,7 +154,7 @@ Phase 2.7 的 seed 有意保留少量真实业务异常，供 Text2SQL 诊断使
 
 ## 历史 Eval 材料（只读）
 
-旧 formal / challenge / diagnostic YAML、Phase 3A 运行策略和历史分数不再定义当前评测；需要追溯时看 `docs/archive-versions/eval-baselines-old.md` 与 `docs/state/AI_CONTEXT_CHANGELOG.md`，不要把旧合同混入 M27 结论。
+旧 formal / challenge / diagnostic YAML、Phase 3A 运行策略和历史分数不再定义当前评测；需要追溯时看 `docs/archive-versions/eval-baselines-old.md`，并从 `docs/state/CHANGELOG_INDEX.md` 进入对应 Phase 历史，不要把旧合同混入 M27 结论。
 
 ## 后续 RAG-Hybrid 使用注意
 

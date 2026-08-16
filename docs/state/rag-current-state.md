@@ -140,4 +140,4 @@ WixQA 位于：
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **默认切换**：semantic candidate、Hybrid、rerank 或新 recipe 必须产生新 identity，并以同 split 的单变量 A/B 和 held-out 证据经用户确认后才能切换。
 
-历史决策、实验过程、欠费/TLS EOF/checkpoint 修正和完整 artifact 路径见 `docs/notes/m34-notes.md` 与 `docs/state/AI_CONTEXT_CHANGELOG.md`。
+历史决策、实验过程、欠费/TLS EOF/checkpoint 修正和完整 artifact 路径见 `docs/notes/m34-notes.md`，并从 `docs/state/CHANGELOG_INDEX.md` 进入对应 Phase 历史。

@@ -1,11 +1,11 @@
 ---
 name: finish-module
-description: 模块开发完成后的技术收工：注释查漏补缺、运行验证、素材固化到模块 notes，并更新 AI_CONTEXT 与 AI_CONTEXT_CHANGELOG。Use when the user says 收工、模块完成、补注释、跑验证、技术档案、finish module.
+description: 模块开发完成后的技术收工：注释查漏补缺、运行验证、素材固化到模块 notes，并通过 CHANGELOG_INDEX 更新当前 Phase 技术历史与 AI_CONTEXT。Use when the user says 收工、模块完成、补注释、跑验证、技术档案、记录 changelog、finish module.
 ---
 
 # Module Finish（模块技术收工）
 
-本 skill 负责模块完成后的整套**技术收工**：**补注释 + 跑验证 + 固化 notes + 更新 AI_CONTEXT_CHANGELOG / AI_CONTEXT**。它不写面向用户学习复盘的 `dev-log.md`（由 `finish-docs` 负责），也不是最终验收门禁（由 `accept-module` 负责）。
+本 skill 负责模块完成后的整套**技术收工**：**补注释 + 跑验证 + 固化 notes + 通过 CHANGELOG_INDEX 更新当前 Phase 技术历史与 AI_CONTEXT**。它不写面向用户学习复盘的 `dev-log.md`（由 `finish-docs` 负责），也不是最终验收门禁（由 `accept-module` 负责）。
 
 ```text
 finish-module（本 skill：注释 + 验证 + notes + 技术档案）
@@ -27,7 +27,7 @@ accept-module（最终门禁检查）
 
 - 当前对话
 - `docs/state/AI_CONTEXT.md`
-- `docs/state/AI_CONTEXT_CHANGELOG.md`
+- `docs/state/CHANGELOG_INDEX.md` 及其路由到的相关 Phase 文件
 - `docs/notes/<module>-notes.md`
 - git diff
 - 终端验证输出
@@ -51,7 +51,7 @@ accept-module（最终门禁检查）
    - 只处理本模块相关文件，不回滚用户改动
 4. 收集过程素材：
    - 读取 `docs/state/AI_CONTEXT.md` 当前状态 / 最新事实快照
-   - 按需读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 近期变更记录
+   - 先读 `docs/state/CHANGELOG_INDEX.md`，再按需读取其路由到的当前或历史 Phase 条目
    - 读取 `docs/notes/<module>-notes.md`，如果存在
    - 查找当前对话中的新鲜上下文（决策、踩坑、验证命令输出）
    - 如果模块中曾向用户确认关键取舍，必须记录当时给出的选项、主要风险、推荐方案和用户最终选择；不要只写最终结论
@@ -227,12 +227,12 @@ notes.md 必须包含以下小节：
 
 ## 阶段 4：更新技术档案（硬门禁）
 
-阶段 4 负责 `docs/state/AI_CONTEXT_CHANGELOG.md` 和 `docs/state/AI_CONTEXT.md`。必须在阶段 1–3 完成、验证快照和 Handoff 已写入 notes 后执行；不得先写档案再倒推素材。
+阶段 4 负责索引指定的当前 Phase changelog 和 `docs/state/AI_CONTEXT.md`。必须在阶段 1–3 完成、验证快照和 Handoff 已写入 notes 后执行；不得先写档案再倒推素材。
 
 ### 强制顺序
 
 1. 完整读取 `docs/state/AI_CONTEXT.md` 至 EOF，逐项检查当前状态、默认值、最近验证事实、路线判断和活跃坑。
-2. 按需读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 近期条目，确认格式、旧结论和是否需要原位添加 `⚠️ 注`。
+2. 完整读取 `docs/state/CHANGELOG_INDEX.md`，确定当前写入目标；再按需读取当前 Phase 近期条目或相关历史 Phase，确认格式、旧结论和是否需要原位添加 `⚠️ 注`。禁止绕过索引猜测文件。
 3. 运行 `git status --short`、`git diff --name-only` 和 `git diff --cached --name-only`；有明确模块起始 commit 时再运行 `git diff --name-only <base>`，与 notes 的改动清单逐项核对。
 4. 在 `docs/notes/<module>-notes.md` 新增“finish-module 技术档案交付清单”，逐字复制下方全部 checkbox，初始均为 `[ ]`。
 5. 更新 CHANGELOG 和 AI_CONTEXT；完成一项、核对一项、勾选一项，禁止预先或批量勾选。
@@ -240,7 +240,7 @@ notes.md 必须包含以下小节：
 7. 运行 `git diff --check`，把回读、检查与 warning 的真实结果写回 notes。
 8. 任一 checkbox 未完成、关键素材缺失、回读未完成或 `git diff --check` 出现实际 whitespace error 时，必须声明 `finish-module 未完成`，禁止说“技术收工完成”或“可以进入 finish-docs”。
 
-### 更新 AI_CONTEXT_CHANGELOG
+### 更新当前 Phase changelog
 
 完整模块在「变更记录」头部新增 `### Mx 模块名（YYYY-MM-DD）`，至少包含：
 
@@ -265,9 +265,10 @@ notes.md 必须包含以下小节：
 
 ### 技术档案交付门（必须执行）
 
-- [ ] `AI_CONTEXT_CHANGELOG.md`：完整模块已有新的 `###` 条目，包含改动范围、关键记录、参考资料、验证快照、遗留/后续；小修复已有对应简短条目。
-- [ ] `AI_CONTEXT_CHANGELOG.md`：改动范围已经通过 Git 状态、未暂存、暂存及适用时的起始 commit 清单共同核对，归并后没有遗漏模块文件。
-- [ ] `AI_CONTEXT_CHANGELOG.md`：关键用户决策已记录选项、影响、风险、建议与最终选择，没有只写方案代号。
+- [ ] 已先读 `CHANGELOG_INDEX.md`，并把记录写入索引指定的当前 Phase 文件。
+- [ ] 当前 Phase changelog：完整模块已有新的 `###` 条目，包含改动范围、关键记录、参考资料、验证快照、遗留/后续；小修复已有对应简短条目。
+- [ ] 当前 Phase changelog：改动范围已通过 Git 状态、未暂存、暂存及适用时的起始 commit 清单共同核对，归并后没有遗漏模块文件。
+- [ ] 当前 Phase changelog：关键用户决策已记录选项、影响、风险、建议与最终选择，没有只写方案代号。
 - [ ] `AI_CONTEXT.md`：只同步影响续接的当前事实，当前模块、默认配置、最新基线和活跃边界准确。
 - [ ] `AI_CONTEXT.md` 已完整审查，不是只检查本次新增位置。
 - [ ] 已替换、退役或删除过时、已完成、已解决、重复或仅具历史价值的当前内容，并确认有价值历史仍可追溯。

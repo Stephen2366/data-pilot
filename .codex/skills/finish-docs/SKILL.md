@@ -26,7 +26,7 @@ description: 模块技术收工完成后的学习复盘写作：严格基于模�
 - `docs/notes/<module>-notes.md`（模块收工素材的单一事实源）
 - 会话记忆（开发和收工是同一个 AI 会话时可用）
 - `docs/state/AI_CONTEXT.md`
-- `docs/state/AI_CONTEXT_CHANGELOG.md`
+- `docs/state/CHANGELOG_INDEX.md` 及其路由到的本模块 Phase 文件
 - git diff
 
 素材缺失分为两类：
@@ -39,7 +39,7 @@ description: 模块技术收工完成后的学习复盘写作：严格基于模�
 ## 阶段 1：读取素材
 
 1. 读取 `docs/notes/<module>-notes.md`——**必读**。
-2. 读取 `docs/state/AI_CONTEXT.md` 的当前模块与最新事实，并读取 `docs/state/AI_CONTEXT_CHANGELOG.md` 本模块技术档案，用于核对 notes 与正式技术结论一致；只读，不修改。
+2. 读取 `docs/state/AI_CONTEXT.md` 的当前模块与最新事实；再先读 `docs/state/CHANGELOG_INDEX.md`，按索引读取本模块技术档案，用于核对 notes 与正式技术结论一致；只读，不修改。
 3. 确认 `finish-module` 的技术档案交付门已经完成。若未完成、缺少本模块 CHANGELOG 条目，或 AI_CONTEXT 仍保留明显过时状态，停止并退回 `finish-module`。
 4. 跑 `git status --short` 和 `git diff --name-only` 核对改动范围与 notes.md 一致。
 5. notes 中关键素材缺失时立即停止 `finish-docs`，列出具体缺项并退回 `finish-module` 补齐；只有非关键过程细节缺失时，才允许标注“过程细节未记录”后继续。
@@ -327,7 +327,7 @@ description: 模块技术收工完成后的学习复盘写作：严格基于模�
 
 1. 完整回读 `dev-log.md` 本模块新章节。
 2. 对照 `<module>-notes.md` 逐项执行 dev-log 交付门。
-3. 再次确认本轮没有修改 `AI_CONTEXT.md` 或 `AI_CONTEXT_CHANGELOG.md`；若发现技术事实需要修正，停止并退回 `finish-module`。
+3. 再次确认本轮没有修改 `AI_CONTEXT.md`、`CHANGELOG_INDEX.md` 或任何 `change-history/` 文件；若发现技术事实需要修正，停止并退回 `finish-module`。
 4. 运行 `git diff --check`。
 5. 将每项真实结果写回 notes，全部通过后才允许宣布完成。
 

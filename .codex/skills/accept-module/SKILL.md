@@ -24,7 +24,7 @@ description: 项目模块验收门禁，在收工整理和用户人工检查之�
 ```bash
 rg -n -f .codex/skills/accept-module/deprecated-terms.txt --hidden \
    -g '!.git' -g '!dev-log.md' -g '!docs/dev-log(M0-M19).md' -g '!docs/notes/**' \
-   -g '!docs/state/AI_CONTEXT.md' -g '!docs/state/AI_CONTEXT_CHANGELOG.md' -g '!CLAUDE.md' \
+   -g '!docs/state/AI_CONTEXT.md' -g '!docs/state/CHANGELOG_INDEX.md' -g '!docs/state/change-history/**' -g '!CLAUDE.md' \
    -g '!.gitignore' \
    -g '!.agent_work/**' -g '!docs/archive-dormant/**' -g '!docs/archive-versions/**' \
    -g '!.claude/skills/accept-module/**' -g '!.codex/skills/accept-module/**' .
@@ -67,11 +67,11 @@ ls -la
 
 ## 检查 4：最新日志完整性
 
-读 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」最新一条 `###` 条目和 `dev-log.md` 最新一条模块日志：
+先读 `docs/state/CHANGELOG_INDEX.md`，再读取其当前写入目标中最新一条 `###` 条目，以及 `dev-log.md` 最新一条模块日志：
 
-- `docs/state/AI_CONTEXT_CHANGELOG.md` 模块档案须含 5 个部分：改动范围、关键记录、参考资料、验证快照、遗留/后续。缺项 = ❌。
+- 当前 Phase changelog 的模块档案须含 5 个部分：改动范围、关键记录、参考资料、验证快照、遗留/后续。缺项 = ❌。
 - `dev-log.md` 模块日志须含 8 个部分：简述、先用大白话讲、这次做了什么、新概念、代码阅读路线、设计要点、面试怎么讲、验证与下一步。缺项 = ❌。
-- 小修复走 `docs/state/AI_CONTEXT_CHANGELOG.md`「变更记录」，放宽为：改了什么 / 为什么 / 验证了什么，或等价信息。
+- 小修复走索引指定的当前 Phase changelog，放宽为：改了什么 / 为什么 / 验证了什么，或等价信息。
 - 「验证快照」出现"期待 / 预计 / 预期 / 应该会"这类措辞时，判断是否属于"没跑命令就下结论"，是则 ❌——验证快照必须来自真实执行过的命令 + 真实输出（铁律的日志版）。
 - 如果日志中出现“过程细节未记录”，不自动判 ❌。这是 `finish-module` 的防幻觉诚实标记；但如果大量关键决策都未记录，应给 ⚠️，建议后续开发中维护 `docs/notes/<module>-notes.md`。
 - 若本模块推翻或修正了旧条目的判断（归因修正、实验结论反转、口径变化），原条目处应有 ⚠️ 注 指向新结论；缺失 = ❌。
@@ -181,7 +181,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 
 检查 8 只确认素材有没有写回仪表盘；本项检查模块完成后 `docs/state/` 的**当前口径是否彼此一致、是否仍给出过期行动指令**。先读本模块 `docs/notes/<module>-notes.md`，再按改动范围选择以下事实源；不得只用关键词搜索代替全文核对相关段落：
 
-- 必读：`AI_CONTEXT.md`、`AI_CONTEXT_CHANGELOG.md`。
+- 必读：`AI_CONTEXT.md`、`CHANGELOG_INDEX.md`，以及索引路由到的本模块 Phase 文件。
 - 跑过真实 LLM eval、A/B、smoke，或改过 case/scorer：读 `eval-baselines.md`。
 - 改过运行命令、模型、LangFuse、trace/eval 开关：读 `runbook.md`。
 - 改过数据库、指标、SQL/reference、字段或关系口径：读 `database-current-state.md`。
@@ -192,7 +192,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 1. `AI_CONTEXT.md` 的「当前状态」「当前路线判断」「已知的坑」只含当前可执行的指令；已完成模块的过程性“下一步”应留在 changelog / eval-baselines，不得与当前模块路线冲突。
 2. 同一事实（默认配置、corpus 数量/hash、指标默认口径、最新 eval 数字、manual/review 含义、活跃坑）在相关 state 文档中一致。历史数字可以保留，但必须有模块/日期/旧 corpus 等历史边界，不能伪装成当前基线。
 3. 兼容字段、历史关系或诊断题必须明确“不是默认口径 / 自动硬门”；避免后续 case、reference SQL 或 prompt 把兼容路径误当默认事实。
-4. `AI_CONTEXT_CHANGELOG.md` 是完整历史，不因本项发现旧结论就删除；若新模块推翻旧判断，检查原条目是否有 `⚠️ 注` 指向新结论。
+4. `CHANGELOG_INDEX.md` 路由到的 Phase 文件共同组成完整历史，不因本项发现旧结论就删除；若新模块推翻旧判断，按索引定位原条目并检查是否有 `⚠️ 注` 指向新结论。
 
 判定：实际矛盾、过期行动指令或当前口径缺同步 = ❌；仅有不冲突的冗余、术语不够通用或容易误读的措辞 = ⚠️；无问题 = ✅。本检查**只报告，不在验收过程中自动修复 state 文档**，避免验收门禁擅自改变长期口径；有 ❌ / ⚠️ 时给出精确修复建议，待用户或单独文档小修处理后复检本项。
 

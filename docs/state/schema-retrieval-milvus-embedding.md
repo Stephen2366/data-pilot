@@ -1,6 +1,6 @@
 # DataPilot Schema Retrieval / Milvus / Embedding 速查
 
-> 本文只保留当前 Schema Retrieval、Milvus 和 embedding 的运行事实。真实 Eval 命令见 [runbook.md](runbook.md)，M27 分母、Gate 与快照见 [eval-baselines.md](eval-baselines.md)，完整历史实验见 [AI_CONTEXT_CHANGELOG.md](AI_CONTEXT_CHANGELOG.md)。
+> 本文只保留当前 Schema Retrieval、Milvus 和 embedding 的运行事实。真实 Eval 命令见 [runbook.md](runbook.md)，M27 分母、Gate 与快照见 [eval-baselines.md](eval-baselines.md)，完整历史实验统一从 [CHANGELOG_INDEX.md](CHANGELOG_INDEX.md) 进入。
 
 更新时间：2026-08-13
 
@@ -63,4 +63,4 @@
 - M23 的 Qwen embedding 在 vector-only recall 上有提升，但当时端到端没有足够证据证明收益。
 - M26 及以前的 formal/challenge/diagnostic 数字是冻结历史；不与 M27 v2 直接比较。
 
-需要追溯具体模型、collection、旧命令或实验数字时，阅读 [AI_CONTEXT_CHANGELOG.md](AI_CONTEXT_CHANGELOG.md) 与 `eval/reports/` 的对应历史报告，不在本速查文档继续扩充旧口径。
+需要追溯具体模型、collection、旧命令或实验数字时，先读 [CHANGELOG_INDEX.md](CHANGELOG_INDEX.md)，再定点读取对应 Phase 文件与 `eval/reports/` 历史报告，不在本速查文档继续扩充旧口径。

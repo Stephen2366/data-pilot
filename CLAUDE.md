@@ -4,7 +4,7 @@
 
 > **总路线**：[LEARNING_ROADMAP.md](D:/.Work/Practice/Python-Practice/LEARNING_ROADMAP_v3.md) — 总体规划。日常模块开发优先读 `CLAUDE.md / AGENTS.md`、`docs/state/AI_CONTEXT.md`、当前阶段路线与约束文件，以及 `AI_CONTEXT.md` 指向的当前活动模块 plan；阶段切换、范围调整或重大技术取舍时再读完整总 ROADMAP。
 >
-> **技术档案**：[AI_CONTEXT.md](docs/state/AI_CONTEXT.md) — AI 续接 / 查 bug 优先阅读，只保留当前状态、默认配置、最新基线、关键结论和活跃坑；运行入口 / 模型链路 / LangFuse / eval 命令矩阵见 [runbook.md](docs/state/runbook.md)，完整改动历史见 [AI_CONTEXT_CHANGELOG.md](docs/state/AI_CONTEXT_CHANGELOG.md)，长期评测账本见 [eval-baselines.md](docs/state/eval-baselines.md)，数据库状态速查见 [database-current-state.md](docs/state/database-current-state.md)，RAG / 知识库状态速查见 [rag-current-state.md](docs/state/rag-current-state.md)。
+> **技术档案**：[AI_CONTEXT.md](docs/state/AI_CONTEXT.md) — AI 续接 / 查 bug 优先阅读，只保留当前状态、默认配置、最新基线、关键结论和活跃坑；运行入口 / 模型链路 / LangFuse / eval 命令矩阵见 [runbook.md](docs/state/runbook.md)，完整改动历史统一从 [CHANGELOG_INDEX.md](docs/state/CHANGELOG_INDEX.md) 进入，长期评测账本见 [eval-baselines.md](docs/state/eval-baselines.md)，数据库状态速查见 [database-current-state.md](docs/state/database-current-state.md)，RAG / 知识库状态速查见 [rag-current-state.md](docs/state/rag-current-state.md)。
 >
 > **状态文档阅读规则**：`docs/state/AI_CONTEXT.md` 只是续接仪表盘。凡涉及运行命令、模型 / embedding / LangFuse 开关、eval 数字或失败归因、数据库事实、历史取舍，必须按 `AI_CONTEXT.md`「必读规则」继续读取对应 state 文档；其中运行入口必须读 `docs/state/runbook.md`，不能只读 AI_CONTEXT 摘要后执行。
 >
@@ -60,7 +60,8 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
   archive-versions/     # 存档2（同文档的迭代链和不用的文档）
   state/                # AI 续接 / 排障状态事实源
     AI_CONTEXT.md       # 技术档案（AI 续接 / 查 bug 入口）
-    AI_CONTEXT_CHANGELOG.md # 技术档案完整变更记录 / 实验历史
+    CHANGELOG_INDEX.md # 技术历史唯一入口与跨阶段路由
+    change-history/    # 按 Phase 拆分的模块档案、实验和取舍
     runbook.md          # AI / 本地运行入口，模型、检索、LangFuse、eval 命令矩阵
     eval-baselines.md   # 长期评测基线、A/B 结果、失败结构和错因账本
     database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
@@ -111,10 +112,10 @@ tests/                  # pytest 测试
 ## 开发记录要求
 
 - `docs/state/AI_CONTEXT.md` 是 AI 续接技术档案，记录 git 和代码查不到的信息：当前状态、默认配置、评测基线、关键结论和活跃坑；保持短小，优先服务快速续接。
-- `docs/state/AI_CONTEXT_CHANGELOG.md` 保存完整变更记录、模块档案、真实 LLM eval、A/B 实验、smoke 结论和历史取舍。
-  - 普通小修改如果会影响后续理解，就在 `docs/state/AI_CONTEXT_CHANGELOG.md` 加一段简短记录；不记录文档整理、表达润色、无技术含义等修改。
+- `docs/state/CHANGELOG_INDEX.md` 是 changelog / 技术历史的唯一入口。无论写入小修、模块档案、实验，还是查询以前的设计和结论，都必须先读索引，再进入其指定的 Phase 文件；禁止绕过索引直接猜测目标文件。
+  - 普通小修改如果会影响后续理解，就在索引指定的当前 Phase 文件增加简短记录；不记录文档整理、表达润色、无技术含义等修改。
   - 较完整模块开发、影响默认行为/安全口径/评测口径/架构边界的修改，才需要写结构化记录，建议包含：改动范围、关键记录（比如关键决策、实验结果、新发现）、参考资料、验证快照、遗留/后续。
-- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须同步到 `docs/state/AI_CONTEXT_CHANGELOG.md`，并把会影响当前路线的最新结论摘要同步到 `docs/state/AI_CONTEXT.md`。若新结论推翻或修正旧条目的判断，在旧条目处加一行 `⚠️ 注` 指向新结论，防止过时判断被误读。
+- 跑过真实 LLM eval、A/B 实验、smoke，或者决定“不采用某方案 / 不切默认 / 不追某指标”时，必须先读 `docs/state/CHANGELOG_INDEX.md`，再同步到索引指定的当前 Phase 文件，并把会影响当前路线的最新结论摘要同步到 `docs/state/AI_CONTEXT.md`。若新结论推翻或修正旧判断，按索引定位旧条目并在原位加一行 `⚠️ 注`。
 
 ## 长时间命令与余额控制
 

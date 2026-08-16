@@ -283,7 +283,7 @@ P0 先以 DataPilot 当前代码和 `docs/state/` 为事实依据，再读取 `d
 - Domain Schema 与 Schema Retrieval 文档构建；
 - schema descriptions、relations、few-shot、旧 case 与测试假设；
 - prompt、Trace、错误消息与 demo 展示；
-- 当前事实文档与公开说明，包括 `docs/state/database-current-state.md` 的 RBAC 事实、`docs/state/AI_CONTEXT.md` 的最新安全快照、`docs/state/AI_CONTEXT_CHANGELOG.md` 的迁移记录，以及受影响的 runbook、canonical Eval catalog、当前测试和 demo 能力描述；
+- 当前事实文档与公开说明，包括 `docs/state/database-current-state.md` 的 RBAC 事实、`docs/state/AI_CONTEXT.md` 的最新安全快照、从 `docs/state/CHANGELOG_INDEX.md` 路由到的迁移记录，以及受影响的 runbook、canonical Eval catalog、当前测试和 demo 能力描述；
 - 历史 artifact 只读兼容，不因迁移被改写。
 
 首版默认不提供知识目录 SQL 查询。若以后确有目录统计需求，必须另设不含正文的安全 metadata 投影，并执行与 Knowledge Tool 等价的逐文档授权；不能因为“只查标题/数量”就绕过文档安全。
