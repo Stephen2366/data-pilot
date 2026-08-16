@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, register_request_logging_middleware
 from engine.harness.caller import build_default_caller_resolver
+from engine.harness.thread import ThreadCheckpointManager
 
 
 def redact_database_url(database_url: str) -> str:
@@ -53,6 +54,11 @@ def create_app() -> FastAPI:
     # ★ G-M35-1：只有明确 local/demo/test 环境才拥有 fixture resolver；其他环境保持 None，
     # 由 Harness 在 Tool 前失败关闭，绝不把请求体 user_role 当成生产身份。
     application.state.caller_resolver = build_default_caller_resolver(settings.app_env)
+    # ★ M36 方案 A：应用生命周期持有唯一进程内 manager；endpoint 只能调用其深 interface，
+    # 不能自己维护字典。服务重启会明确丢失 pending thread，不伪装成持久会话。
+    application.state.thread_checkpoint_manager = ThreadCheckpointManager(
+        ttl_seconds=settings.thread_checkpoint_ttl_seconds
+    )
     register_request_logging_middleware(application)
     register_exception_handlers(application)
     application.include_router(resources_router)

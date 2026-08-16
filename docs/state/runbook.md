@@ -2,25 +2,30 @@
 
 > 本文是 DataPilot 的运行入口：只说明“怎么开启哪条链路、怎么跑命令、哪些默认不能随手改”。Trigger：只要要运行命令、切模型、开 LangFuse、跑 eval、改环境变量，必须先读本文。当前状态先读 `docs/state/AI_CONTEXT.md`，评测数字和错因追溯读 `docs/state/eval-baselines.md`，Milvus / embedding 细节读 `docs/state/schema-retrieval-milvus-embedding.md`。
 
-更新时间：2026-08-16
+更新时间：2026-08-17
 
 ## 模型链路
 
 | 目标 | 环境变量 | 说明 |
 |---|---|---|
 | 默认 Qwen 主链路 | `LLM_PROVIDER=qwen`；`QWEN_MODEL=qwen3.7-plus` | 当前默认。Qwen provider 读取 `QWEN_MODEL`，不是 `LLM_MODEL`。`.env` 中的 `LLM_MODEL=deepseek-v4-flash` 仅作为显式切回 DeepSeek 时的备用入口。 |
-| API Text2SQL 路径 | 默认 `force_new_pipeline=true`；显式 `false` | 普通 `/api/query` 先进入 M35 顶层 Harness；路由为 SQL 后，Text2SQL Tool 默认走 Schema Retrieval → QueryPlan → SQL Guard 新链路。显式 `false` 只让该 Tool 走 legacy baseline，不绕过 Harness。 |
+| API Text2SQL 路径 | 默认 `force_new_pipeline=true`；显式 `false` | `/api/query` 先进入 M36 turn seam；accepted turn 再恰好调用一次 M35 Graph。路由为 SQL 后，Text2SQL Tool 默认走 Schema Retrieval → QueryPlan → SQL Guard 新链路。显式 `false` 只让该 Tool 走 legacy baseline，不绕过 turn/Harness。 |
 | DeepSeek 主模型对照 | `LLM_PROVIDER=deepseek`；`LLM_MODEL=deepseek-v4-flash` | 显式切换时使用；`LLM_MODEL` 在现有代码语义里主要服务 DeepSeek provider。 |
 | LLM 可靠性配置 | `LLM_TIMEOUT_SECONDS=45`；`LLM_MAX_RETRIES=0`；`LLM_RETRY_BACKOFF_SECONDS=1` | M25 默认不自动重试。只对明确标记为 transient 的 timeout / 网络 / 429 / 5xx 生效；聚焦实验在当前 shell 临时覆盖，不直接改 `.env` 默认。 |
 | Legacy L3 judge | `EVAL_JUDGE_MODEL=<模型名>` | 仅服务冻结旧 runner 语义；当前 M27 CLI 不提供 `--judge-model`，也不把 LLM-as-Judge 作为默认裁决器。 |
 
-## Caller / Harness 链路
+## Caller / Turn / Harness 链路
 
 | 目标 | 配置 / 入口 | 说明 |
 |---|---|---|
-| 顶层单轮 Harness | `POST /api/query` | 先解析可信 Caller，再进行单次路由；每次请求至多调用一个 Text2SQL 或 RAG Tool。 |
+| M36 turn seam | `POST /api/query` | initial、pending 和一次 resume 共用同一入口。普通/accepted turn 恰好调用一次 M35 Graph；thread lifecycle 前置拒绝调用零次 Graph，每个 accepted turn 至多一个 Text2SQL 或 RAG Tool。 |
+| 结构化 resume | 请求同时提供 `thread_id`、`expected_version`、`clarification_answers` | 三项必须成组出现；只接受 checkpoint 声明的闭集字段。一次恢复后仍不明确时以 budget stop 结束，不创建嵌套 pending。 |
+| 显式 clear | `DELETE /api/query/threads/{thread_id}?user_role=<role>&expected_version=<version>` | clear 不调用 Graph/Tool，但会记录 lifecycle Trace；thread id 本身不能授权操作。 |
+| 进程内 checkpoint | `THREAD_CHECKPOINT_TTL_SECONDS=900` | `inprocess-clarification-checkpoint-v1` 只保存 pre-Tool pending clarification；owner 绑定可信 caller + tenant/active role。重启或多 worker 不恢复/共享。 |
 | Fixture Caller resolver | `APP_ENV=local`、`demo` 或 `test` | 只有这三个环境会由应用启动过程注入 fixture resolver，供本地演示和测试使用；请求中的 `user_role` 只选择 fixture 身份，不能自行授权。 |
-| 无 Caller resolver | 其他 `APP_ENV`，或应用未注入 resolver | Harness 将 Caller 视为不可信并以 `caller_untrusted` 失败关闭：不进入 Router、不调用 Tool，返回 blocked / no-answer。生产接线必须显式提供真实认证 resolver。 |
+| 无 Caller resolver | 其他 `APP_ENV`，或应用未注入 resolver | Graph 的 route 节点直接生成 `caller_untrusted`，不调用业务 Router adapter 或 Tool，返回 blocked / no-answer。生产接线必须显式提供真实认证 resolver。 |
+
+最小 initial 请求仍兼容旧形状：`{"question":"这个怎么处理？","user_role":"ops"}`。若响应返回 pending thread，resume 形状为 `{"question":"补充条件","user_role":"ops","thread_id":"<id>","expected_version":1,"clarification_answers":{"subject":"退款政策"}}`；字段名和值域以响应中的 clarification spec 为准。
 
 ## Schema Retrieval / Embedding 链路
 
@@ -37,6 +42,7 @@
 | 目标 | 环境变量 / 命令 | 说明 |
 |---|---|---|
 | 本地 JSONL trace | M27 默认写入 `eval/traces/`，可用 `--trace-dir eval/traces` 指定目录 | 默认不依赖 LangFuse；JSONL 默认不提交。 |
+| `/api/query` M36 Trace | 默认 `eval/traces/traces.jsonl` | 记录 `turn_action`、不可逆 thread/context ref、checkpoint 版本迁移、Graph 次数和公开结果；不记录 raw thread id、clarification answer value 或 checkpoint dump。clear/rejected 也各写一条 lifecycle Trace。 |
 | 本地 M27 eval | `LANGFUSE_ENABLED=false`；按下方 selector 命令运行 | completed EvalRun JSON + Markdown report 是新事实源；M27 不生成旧 triage JSON。 |
 | LangFuse Cloud trace/score | `LANGFUSE_ENABLED=true`，必要时 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` | Cloud 仍是旁路增强；M27 当前只构造严格 allowlist assertion payload，实际上传需显式授权，不能影响本地 EvalRun。 |
 | LangFuse smoke | `python scripts\smoke_phase3b_langfuse.py`；Cloud 硬门禁加 `--require-langfuse` | M18 的主验证入口，用于 API / JSONL / trace mapping / score / visibility。 |
@@ -59,7 +65,7 @@
 
 ## Eval 命令入口
 
-> 当前正式入口为 **M27 v3 canonical eval**：一个 Scenario 只执行一次，Result / Context / Plan / Trace / Safety 等 typed assertion 共享同一份证据。v3 增加 Schema Context 物理字段/metric 静态校验，并修正宽表业务时间合同。旧 formal / challenge / diagnostic YAML、报告与分数，以及 M27 v1/v2 artifact，都是只读历史证据；它们不再由当前 `eval.run_eval` CLI 生成新结果。历史口径与数字见 `docs/archive-versions/eval-baselines-old.md` 和 `docs/state/eval-baselines.md`。
+> 当前 **Text2SQL** 正式入口为 M27 v3 canonical eval：一个 Scenario 只执行一次，Result / Context / Plan / Trace / Safety 等 typed assertion 共享同一份证据。v3 增加 Schema Context 物理字段/metric 静态校验，并修正宽表业务时间合同。Phase 4 安全/RAG/Harness 使用各自独立的 contract runner，M34 external retrieval/answer 使用上节脚本；三类结果不得混算。旧 formal / challenge / diagnostic YAML、报告与分数，以及 M27 v1/v2 artifact，都是只读历史证据；它们不再由当前 `eval.run_eval` CLI 生成新结果。历史口径与数字见 `docs/archive-versions/eval-baselines-old.md` 和 `docs/state/eval-baselines.md`。
 
 > 真实 LLM eval 默认不自动运行。用户明确说“执行 / 跑 <selector 或 suite>”时，即授权**恰好一次**运行该命令；直接按当前默认配置执行，不重复询问授权。该授权覆盖既定临时环境变量、唯一 run ID、artifact/report/checkpoint 写入和状态轮询，但不覆盖扩大范围、额外重复运行或切换默认配置。
 
@@ -98,9 +104,9 @@ M27 artifact 默认写入 `eval/reports/m27-artifacts/`，短期 checkpoint 写�
 
 新 Text2SQL Eval 会在一个 EvalRun 开始时构建一次 Schema vector index，注入该 run 的全部 Scenario，并在环境关闭时释放；artifact 的 resolved runtime identity 记录 `schema_vector_index_reuse=run_scoped` 及可用的 Milvus row count。若观察到逐题重建/重复整批 embedding，应视为生命周期回归，而不是正常耗时。
 
-### 前台等待超时：到哪里检查
+### 真实 Eval 生命周期：等待、终态与重跑
 
-前台工具等待超时不等于 Eval 已停止。使用同一个 `run_id` 检查下列位置；在 manifest 仍为 `running` 或 checkpoint 还在增加时，只继续等待，不得换 ID 重跑。
+一次用户授权只创建一个 `run_id`。前台工具等待超时不等于 Eval 已停止；使用同一个 `run_id` 检查下列位置，在 manifest 仍为 `running` 或 checkpoint 还在增加时只继续等待，不得换 ID 重跑。
 
 | 材料 | 精确路径 | 说明 |
 |---|---|---|
@@ -108,6 +114,8 @@ M27 artifact 默认写入 `eval/reports/m27-artifacts/`，短期 checkpoint 写�
 | 单题 checkpoint | `.agent_work/temp/m27-checkpoints/<run-id>/checkpoints/` | 每完成一题写入一份证据；文件继续增加说明 run 仍在推进。 |
 | 长期 artifact | `eval/reports/m27-artifacts/<run-id>.json` | 只有 completed run 才生成；它是自动评测长期事实源。 |
 | Markdown report | 命令的 `--report` 路径 | 由 completed artifact 投影而来，供阅读 Gate 和统计。 |
+
+只有原进程已经退出、manifest 明确为 `interrupted` / `failed` 且不存在 completed artifact 时，才能在用户授权范围内决定是否新建 run；原因必须先记入模块 notes。真实 LLM Eval 不临时拼装 `.ps1`、隐藏 PowerShell、计划任务或其他后台执行器。
 
 ### 真实 Eval 跑完后：怎样处理 Gate
 
@@ -124,13 +132,19 @@ M27 artifact 默认写入 `eval/reports/m27-artifacts/`，短期 checkpoint 写�
 - verdict 还必须填写结构化分类：`confirmed_correct`、两类正确拒绝，或业务 SQL / 输出合同 / Schema Context / 其他合同错误，以及 `execution_evidence_unavailable`。分类只为汇总定位，**不参与自动 Gate 或 CI**。
 - 新生成的 bundle 为 `m27-review-bundle-v2`。早期 v1 review 仅作历史证据，缺少来源哈希和上述限制，不能用新校验命令验证；需要时按原 run 重新生成 v2，而不是改写旧自动 EvalRun。
 
-### 长时间真实 Eval 的执行纪律
+## 数据库维护与验证
 
-- 默认直接在当前终端执行一次 `python -m eval.run_eval`；一次用户授权只创建一个 `run_id`。`run_id` 就是本次评测的唯一准考证号，用来绑定 checkpoint、artifact 和报告，不能拿它反复重跑。
-- 前台工具等待超时**不等于** Eval 已停止。按上方“前台等待超时”表检查同一 `run_id` 的 manifest、checkpoint 和 artifact；checkpoint 仍增长或 manifest 为 `running` 时，只继续等待和轮询，禁止换 `run_id` 重跑。
-- 普通 Smoke / Core 不要临时使用 `.ps1`、隐藏 PowerShell、计划任务或额外终端。它们不是项目的正式入口，容易让一次授权意外变成多次真实调用。
-- 只有确认原 run 进程已经退出、manifest 明确为 `interrupted` / `failed`、且没有 completed artifact 时，才可新建 `run_id` 重跑；必须先在模块 notes 记录原因。
-- 若未来确实需要后台执行能力，应单独设计、测试并取得用户确认一个固定入口；不能在真实 LLM 基线期间临时拼装执行器。
+涉及数据库结构、seed 或固定业务事实时，按需运行，不要把历史验收数字当成当前结果：
+
+```powershell
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
+D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest tests\test_database_upgrade.py tests\test_m30_knowledge_catalog.py -q --basetemp=.agent_work\temp\pytest-db-current
+git diff --check
+```
+
+`seed_data --reset` 会重建本地目标库，只在任务明确需要重置 seed 时运行。完整仓库 pytest 属于模块收工验证，按 AGENTS 的长时间命令规则执行，不作为每次数据库检查的默认动作。
 
 ## 运行纪律
 

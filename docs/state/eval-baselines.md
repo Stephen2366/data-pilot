@@ -2,14 +2,14 @@
 
 > 本文是评测数字、分母、artifact、实验状态与可比性规则的唯一详细账本。`rag-current-state.md` 只保留 RAG 当前运行口径和结论摘要；两处出现同一 profile identity 时，以本文判断“能否比较”，以 `rag-current-state.md` 判断“当前运行使用什么”。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
-更新时间：2026-08-16
+更新时间：2026-08-17
 
 ## 当前状态
 
 - **RAG 正式长期基线**：已登记 M34 EnterpriseRAG-Bench v1.0.0 external benchmark：36,417 documents / 139,214 units、60 diagnostic/dev + 120 held-out retrieval，以及同一 180 题集合的一次 completed Answer/Citation Eval。它与 22 条业务知识回归、M27 Text2SQL Eval 分账，不能混算。
-- **当前合同**：`m27-v3`；延续 v2 的 `external_unavailable / not_observed` 语义，并把 Schema Context 的物理字段、metric key、输出 alias 分开静态校验；`orders_wide` 的业务月份统一按 `paid_at`，`snapshot_at/batch_id` 只表示快照版本。
-- **当前 catalog**：28 个 Scenario；分类为 Core / Stress / Manual Lab。Smoke、Reliability、Database Exception 是 selector，不是复制题面的独立题集。
-- **当前真实 LLM 基线**：尚未登记正式长期基线；现有真实运行均为 v2，只能作为修复前过渡证据，不能与 v3 直接比较。
+- **当前 Text2SQL 合同**：`m27-v3`；延续 v2 的 `external_unavailable / not_observed` 语义，并把 Schema Context 的物理字段、metric key、输出 alias 分开静态校验；`orders_wide` 的业务月份统一按 `paid_at`，`snapshot_at/batch_id` 只表示快照版本。
+- **当前 Text2SQL catalog**：28 个 Scenario；分类为 Core / Stress / Manual Lab。Smoke、Reliability、Database Exception 是 selector，不是复制题面的独立题集。
+- **当前 Text2SQL 真实 LLM 基线**：尚未登记正式长期基线；现有真实运行均为 v2，只能作为修复前过渡证据，不能与 v3 直接比较。该结论不适用于上方已经登记的 M34 RAG 真实 Qwen Answer Eval。
 - **默认运行配置**：仍以 [runbook.md](runbook.md) 为准；M27 没有切换模型、检索、embedding、数据库、oracle、timeout 或 retry。
 - **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
@@ -67,11 +67,11 @@ M27 review bundle 是解释自动结果的旁路证据，不是第二套分数�
 
 | 类型 | 日期 | 协议 / runtime | 结果 | Artifact | 解释边界 |
 |---|---|---|---|---|---|
-| Retrieval lexical | 2026-08-16 | `enterprise-rag-retrieval-eval-v1`；SQLite FTS5 lexical；`enterprise-unit-paragraph-2400-v1`；@20 | dev coverage/all-gold/MRR `0.810417 / 0.766667 / 0.645303`；held-out `0.823125 / 0.775000 / 0.723134` | dev `7b444240...d182`；held-out `4d77b740...75c7` | 当前 external 默认与后续候选的正式锚点；只证明 gold 文档召回，不证明回答正确。 |
-| Retrieval semantic candidate | 2026-08-16 | 同 corpus/split/@20；Milvus semantic `9aec12c8...e20` | dev `0.737500 / 0.700000 / 0.621421`；held-out `0.773958 / 0.741667 / 0.630477` | dev `f2073693...ac26`；held-out `32ab5f30...8c6` | 两个 split 均未胜 lexical，故不激活；不代表 semantic、Hybrid 或 rerank 永久无价值。 |
-| Answer / Citation full | 2026-08-16 | `enterprise-rag-answer-eval-v1`；lexical external 默认；Qwen Composer `rag-qwen-evidence-support-nonthinking-unbounded-v4`；180 题 | complete `146/180`；all-gold cited `80/180`；mean gold coverage `49.3981%`；multi-document all-gold `2/38`；semantic all-gold `15/52`；10 unavailable；24 support contract rejected；405,305 tokens | `.agent_work/temp/m34-answer-eval-full-v4.json`；identity `d9fa2b20...e41f` | completed 证明真实链路和账本可复现，不证明自然答案正确率或生产质量；本地大 artifact 不提交 Git。 |
+| Retrieval lexical | 2026-08-16 | `enterprise-rag-retrieval-eval-v1`；SQLite FTS5 lexical；`enterprise-unit-paragraph-2400-v1`；@20 | dev coverage/all-gold/MRR `0.810417 / 0.766667 / 0.645303`；held-out `0.823125 / 0.775000 / 0.723134` | [完整 identity / SHA-256](../../eval/reports/m34-enterprise-rag-baseline-manifest.md) | 当前 external 默认与后续候选的正式锚点；只证明 gold 文档召回，不证明回答正确。 |
+| Retrieval semantic candidate | 2026-08-16 | 同 corpus/split/@20；Milvus semantic `9aec12c8...e20` | dev `0.737500 / 0.700000 / 0.621421`；held-out `0.773958 / 0.741667 / 0.630477` | [完整 identity / SHA-256](../../eval/reports/m34-enterprise-rag-baseline-manifest.md) | 两个 split 均未胜 lexical，故不激活；不代表 semantic、Hybrid 或 rerank 永久无价值。 |
+| Answer / Citation full | 2026-08-16 | `enterprise-rag-answer-eval-v1`；lexical external 默认；Qwen Composer `rag-qwen-evidence-support-nonthinking-unbounded-v4`；180 题 | complete `146/180`；all-gold cited `80/180`；mean gold coverage `49.3981%`；multi-document all-gold `2/38`；semantic all-gold `15/52`；10 unavailable；24 support contract rejected；405,305 tokens | [完整 identity / SHA-256](../../eval/reports/m34-enterprise-rag-baseline-manifest.md) | completed 证明真实链路和账本可复现，不证明自然答案正确率或生产质量；本地大 artifact 不提交 Git。 |
 
-四个 retrieval artifact 的本地文件分别为 `.agent_work/temp/m34-{lexical,semantic}-tool-{dev,heldout}-retrieval.json`。详细身份、失败结构与运行边界见 `rag-current-state.md`；后续严格对照必须保留原 artifact identity 和共同身份。
+可提交的轻量证据清单为 [`eval/reports/m34-enterprise-rag-baseline-manifest.md`](../../eval/reports/m34-enterprise-rag-baseline-manifest.md)，保存五个 completed artifact 的完整 identity、文件 SHA-256、共同运行身份和关键结果。原始大 JSON 仍只保存在 `.agent_work/temp/`，不是唯一长期事实源；详细失败结构与运行边界见 `rag-current-state.md`。
 
 ### Text2SQL：M27
 

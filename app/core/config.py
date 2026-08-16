@@ -26,6 +26,8 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    # M36 只保存 pre-Tool pending clarification；15 分钟后失效，避免内存态变成长期会话仓库。
+    thread_checkpoint_ttl_seconds: int = Field(default=900, gt=0, alias="THREAD_CHECKPOINT_TTL_SECONDS")
 
     # LLM 通用配置 =============================================================================
     # LLM 是大语言模型。这里先保留一个通用入口，后续 generator 可以按 provider 选择模型。

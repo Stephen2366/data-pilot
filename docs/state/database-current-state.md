@@ -4,7 +4,7 @@
 >
 > **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍统一从 `docs/state/CHANGELOG_INDEX.md` 进入。
 
-更新时间：2026-08-13
+更新时间：2026-08-17
 
 ## 一句话结论
 
@@ -41,12 +41,14 @@ DataPilot 当前数据库有 **14 张物理表**；Text2SQL 只暴露其中 **13
 | `order_items` | 18000 | 订单明细行 | 商品维度 GMV、销量、明细退款归因 | Join 后统计订单量必须 `COUNT(DISTINCT orders.id)` |
 | `refunds` | 1000 | 退款单 | 退款量、退款原因、退款率 | `order_item_id` 有 100 条为空（10%），属于整单退款，只能通过 `order_id` 关联；商品维度退款率必须用 LEFT JOIN，INNER JOIN 会丢 10% |
 | `tickets` | 300 | 客服工单 | 高优先级待处理、客服问题分析 | `order_id` 可空，咨询类工单不一定绑定订单 |
-| `knowledge_docs` | 11 | legacy 知识投影 | 兼容既有物理表/seed | 不属于 Text2SQL queryable universe；字段有损，不得作为 authority、正式 ACL 或 runtime catalog |
+| `knowledge_docs` | 11（本机现有库）/ 22（当前 reset 目标） | legacy 知识投影 | 兼容既有物理表/seed | 当前 `scripts/seed_data.py --reset` 会由 22-entry staged catalog 派生 22 行；不属于 Text2SQL queryable universe，字段有损，不得作为 authority、正式 ACL 或 runtime catalog |
 | `coupons` | 10 | 优惠券 | 券信息、券类型、有效期 | 固定券码 `JUNE_FIXED_50` |
 | `order_coupons` | 3000 | 订单-优惠券桥接 | 优惠券使用率、券渠道分析 | 多对多桥接表，一单可多券，订单数要去重 |
 | `user_behavior_log` | 10000 | 用户行为事件 | 加购到支付转化率、设备分析 | 转化率按 `event_type` 事件计数，不是订单表 |
 | `product_price_history` | 150 | 商品价格版本 | 历史售价、指定时间价格 | 查询历史价格必须匹配 `valid_from` / `valid_to` |
 | `orders_wide` | 10000 | 订单宽表快照 | 看板类渠道 / 商品 / 用户 / 退款汇总 | 业务月份按 `paid_at`；`snapshot_at/batch_id` 只选快照版本；精确明细、退款链路回星型表 |
+
+`knowledge_docs` 是当前唯一需要区分“本机既有物理数据”和“当前 seed 合同”的表：2026-08-17 只读查询本机 `datapilot_dev` 仍为 11 行，而代码与测试已冻结下一次 reset 为 22 行。该差异不影响当前 Knowledge runtime，因为权威输入和 active release 都不读取此表；只有明确执行 seed reset 后，本机物理行数才会变为 22。
 
 ## 兼容字段和新旧口径
 
@@ -81,7 +83,7 @@ DataPilot 当前数据库有 **14 张物理表**；Text2SQL 只暴露其中 **13
 - `product_price_history.product_id -> products.id`：SCD Type 2 风格价格历史，查询历史价要带时间窗口。
 - `user_behavior_log` 当前采用显式 `product_id` / `channel_id` 外键，而不是 plan 草案里的 `target_type` / `target_id` 多态列；这是为了参照完整性和 SQL 可生成性保留的有意偏离。
 
-更完整的机器可读关系在 `domain_pack/schema_desc/relations.yaml`，后续 M9 relation_doc / JoinPath 应优先从这里生成，不要靠 prompt 临场猜。
+更完整的机器可读关系在 `domain_pack/schema_desc/relations.yaml`；任何 relation document / JoinPath 都应优先从这里生成，不要靠 prompt 临场猜。
 
 ## 指标默认口径
 
@@ -147,24 +149,10 @@ Phase 2.7 的 seed 有意保留少量真实业务异常，供 Text2SQL 诊断使
 - `admin` / `ops`：可访问全部 13 张 queryable tables，但不能查 `users.email` / `users.phone` 等敏感字段。
 - `customer_service`：Text2SQL 仅可访问 `tickets`。
 - `demo_user`：Text2SQL 仅可访问 `products`、`channels`、`product_categories`、`orders_wide`。
-- 所有角色都不能通过 Text2SQL 查询 `knowledge_docs`；未来文档权限必须走 trusted caller + Knowledge Tool ACL seam。
+- 所有角色都不能通过 Text2SQL 查询 `knowledge_docs`；当前文档访问已经走 trusted caller + Knowledge Tool ACL seam。生产认证 resolver 尚未建设，不能把本地 fixture 身份外推为生产权限。
 - SQL Guard 仍要求只读 SQL；`DROP` / `DELETE` / `UPDATE` / 多语句 / 越权表字段都应拦截。
 
 权限事实源是 `engine/sql_guard/rbac.py`。新增表或新增角色时，要同步测试安全 case。
-
-## 历史 Eval 材料（只读）
-
-旧 formal / challenge / diagnostic YAML、Phase 3A 运行策略和历史分数不再定义当前评测；需要追溯时看 `docs/archive-versions/eval-baselines-old.md`，并从 `docs/state/CHANGELOG_INDEX.md` 进入对应 Phase 历史，不要把旧合同混入 M27 结论。
-
-## 后续 RAG-Hybrid 使用注意
-
-- 新 SQL 链路需要能区分订单头指标和订单明细指标。
-- Schema Retrieval 不应只召回表名，还要召回字段、指标、关系和聚合风险。
-- JoinPath 要显式处理桥接表、多对多、类目递归、SCD 时间窗口、宽表 vs 星型模型选择。
-- QueryPlanStep 应能声明 `grain`、`metrics`、`filters`、`joins`、`aggregation_risks` 和安全期望。
-- Prompt 中要强调 `COUNT(DISTINCT)` 的场景：订单 join 明细、订单 join 优惠券、退款 join 订单。
-- 对安全题，正确行为是拦截，不是生成“安全版本 SQL”。
-- 对困难诊断题，允许先输出可诊断 trace / issue tag；不要把困难题全部压成 M8 baseline 的通过门槛。
 
 ## 改库时的注意事项
 
@@ -177,33 +165,6 @@ Phase 2.7 的 seed 有意保留少量真实业务异常，供 Text2SQL 诊断使
 - `coupons` 已有 `ix_valid_range(valid_from, valid_to)`，优惠券有效期查询优先使用这组字段。
 - `app.db.base` 目前兼具 Base 定义和模型注册，导入顺序不当可能触发循环导入；脚本入口优先导入 `app.db.base` 再用模型。
 
-## 数据库验证命令
+## 数据库验证入口
 
-```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic current
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic check
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -q --basetemp=.agent_work/temp/pytest-db-current
-git diff --check
-```
-
-真实 Eval 的 selector、`run_id`、Gate 和执行授权规则统一看 `docs/state/runbook.md`；不要从本文件复制命令。
-
-Phase 2.7 历史验收快照：
-
-- Alembic head：`20260722_0003`
-- `alembic check`：无新增 migration 操作
-- Seed：14 表行数与本文件一致，固定事实与本文件一致
-- Pytest：Phase 2.7 验收时为 `31 passed, 1 warning`
-- M6 smoke：Phase 2.7 验收时为 `6/6 passed`
-
-当前 pytest / eval / 模型 A/B 基线不要看这里，统一查 `docs/state/eval-baselines.md`；运行命令入口查 `docs/state/runbook.md`。
-
-## 后续 AI 开工前检查清单
-
-- 先读 `docs/state/AI_CONTEXT.md` 当前状态，确认当前阶段 / 当前模块。
-- 如果要追溯 Phase 3A 历史设计，读 `docs/phase3a-plan.md` 顶部数据库升级前置说明。
-- 如果要写 SQL / Text2SQL plan，读本文件、`domain_pack/metrics.yaml`、`domain_pack/schema_desc/relations.yaml`。
-- 如果要改数据库，先读本文档和当前 Alembic head；如需理解历史设计取舍，再读 `docs/archive-versions/database-upgrade-plan-v5.md`。
-- 如果看到测试中自增 ID 不从 1 开始，不要修成依赖 ID；改用稳定业务键。
-- 如果 M27 数据库相关 Scenario 失败，先判断是数据库固定事实、指标 / 关系定义，还是 Text2SQL 链路问题；不要把旧 Phase 3A 口径混进当前结论。
+数据库维护、seed 重建、Alembic 检查和回归命令统一维护在 `docs/state/runbook.md`；本文只定义应当被验证的当前数据库事实。当前 pytest / Eval / 模型 A/B 数字统一查 `docs/state/eval-baselines.md`，历史设计与验收从 `docs/state/CHANGELOG_INDEX.md` 进入。

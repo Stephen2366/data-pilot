@@ -2,7 +2,7 @@
 
 > 本文是知识库的当前运行状态入口，作用类似 `database-current-state.md`：只记录续接开发需要立刻知道的语料、active identity、运行接线、当前结论和活跃风险。评测数字、分母、artifact 与可比性规则统一以 `eval-baselines.md` 为准；本文不建立第二份评测账本。涉及知识原件、active release、外部 corpus、Knowledge Tool 或 M34 运行状态时必须先读本文。
 
-**更新时间：2026-08-16**
+**更新时间：2026-08-17**
 
 ## 一句话结论
 
@@ -33,7 +33,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 
 `D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\source`
 
-源码固定为 tag `v1.0.0`、commit `56ba6a62cb66bf0a68ff995b1c423680980bf70a`，保留 `.git`。为避免与 Release 语料重复占用空间，当前采用 blobless sparse checkout，只取 `src/`、`answer_evaluation/` 和仓库根目录的方法说明；已核验数据导出、向量索引、向量检索及回答评测等关键源码齐全，足够用于追溯官方字段、导出逻辑和评测方法，无需再下载完整仓库 ZIP。该源码目录仅作外部方法参考，不是 DataPilot 的运行依赖；未 checkout `generated_data/`，正式语料仍以相邻 `v1.0.0/raw|extracted` 为准。
+源码固定为 tag `v1.0.0`、commit `56ba6a62cb66bf0a68ff995b1c423680980bf70a`；它只用于方法追溯，不是 DataPilot 运行依赖。正式语料以相邻 `v1.0.0/raw|extracted` 为准；checkout 方式、字段核验和构建过程见 `docs/notes/m34-notes.md`。
 
 | 项目 | 当前事实 |
 |---|---|
@@ -91,23 +91,17 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 - M32 `phase4-rag-retrieval-v1`：6 Scenario / 20 required，证明 22 条业务语料上的确定性检索合同。
 - M33 `phase4-rag-answer-v1`：9 Scenario / 60 required，证明确定性抽取式回答与 citation 闭环。
 - M35 `phase4-harness-v1`：5 Scenario / 全 required，证明顶层单轮 Harness 的唯一路由、至多一个 Tool、保守终止与 Caller 失败关闭合同。
-
-## 暂不纳入 M34 的候选语料
-
-WixQA 位于：
-
-`D:\.Work\Practice\AI-Project\data-pilot-datasets\wixqa\2024-12-02`
-
-当前保留 6,221 篇 Wix Help Center 文档，以及 ExpertWritten 200 题、Simulated 200 题、Synthetic 6,221 题，共约 57.5 MiB。它可用于后续客服场景或交叉基准，但不属于 M34 active corpus，尚未接入、索引或评测。
+- M36 `phase4-harness-turn-v1`：8 组 sequence，证明 initial pending → 一次 resume/clear、owner/version/TTL/concurrency/budget stop 和安全 Trace；Graph 本身仍无 checkpoint。
 
 ## 活跃风险与后续边界
 
 - **召回和多文档质量**：主要缺口仍是 lexical 漏召回、selected budget 和 context packing；下一步按上方 Answer Eval 失败结构分层定位。
 - **support 合同**：Composer 仍有输出被严格合同拒绝。不得通过 fuzzy/semantic 字符串放行换取表面 complete rate；若引入语义支持判断，需要独立合同和证据。
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
-- **能力范围**：M35 已接入 `/api/query` 顶层单轮 Harness 与 SQL/RAG Router；Hybrid、生产认证、UI 专项接线和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
+- **能力范围**：M36 已在 `/api/query` 的 M35 单轮 Graph 外接入一次有界结构化 clarification 恢复；Hybrid、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **默认切换**：semantic candidate、Hybrid、rerank 或新 recipe 必须产生新 identity，并以同 split 的单变量 A/B 和 held-out 证据经用户确认后才能切换。
+- **未接入候选**：WixQA 仍只是项目外候选，未索引、未评测、也不属于 active corpus；后续若重新考虑，需另开 corpus 调查和接入计划。
 
 完整评测数字与 artifact 见 `docs/state/eval-baselines.md`；历史决策、实验过程、欠费/TLS EOF/checkpoint 修正见 `docs/notes/m34-notes.md`，并从 `docs/state/CHANGELOG_INDEX.md` 进入对应 Phase 历史。

@@ -1,4 +1,4 @@
-"""Agent 查询接口 Schema：M5 扩展版 AgentResponse 的单一实现。
+"""Agent 查询接口 Schema：从 M5 单轮响应增量演进到 M36 thread/turn 投影。
 
 ★ 从 `/api/query` 第一次落地开始就用 Pydantic Schema 固定响应形状，后续 M5 只能增量
 扩展字段，不能推倒重来。这里保留 M3/M4 已有字段含义，再补 EvalOps 和演示页需要的
@@ -7,7 +7,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class QueryRequest(BaseModel):
@@ -29,6 +29,60 @@ class QueryRequest(BaseModel):
     force_new_pipeline: bool = Field(default=True)
     schema_retrieval_profile: Literal["default", "milvus_qwen37"] = Field(default="default")
     schema_fusion_strategy: Literal["weighted", "rrf"] = Field(default="weighted")
+    # M36：三个 resume 字段必须成组出现；普通旧请求完全不需要知道 thread。
+    thread_id: str | None = Field(default=None, min_length=1, max_length=128)
+    expected_version: int | None = Field(default=None, ge=1)
+    clarification_answers: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_resume_shape(self) -> "QueryRequest":
+        """拒绝半截 resume，避免 API 猜测这是新问题还是旧任务补充。"""
+
+        is_resume = self.thread_id is not None
+        if is_resume != (self.expected_version is not None):
+            raise ValueError("thread_id 与 expected_version 必须同时提供")
+        if is_resume != bool(self.clarification_answers):
+            raise ValueError("resume 必须提供 clarification_answers；initial request 不得提供")
+        return self
+
+
+class ClarificationFieldView(BaseModel):
+    """客户端可填写的单个 closed-world clarification 字段。"""
+
+    key: str
+    label: str
+    value_type: Literal["text", "time_range", "enum"]
+    allowed_values: list[str] = Field(default_factory=list)
+    max_length: int = Field(gt=0)
+
+
+class ClarificationView(BaseModel):
+    """首次 pending 响应中的待补说明，不含任何已填写 value。"""
+
+    identity: str
+    prompt: str
+    fields: list[ClarificationFieldView]
+
+
+class ThreadView(BaseModel):
+    """合法 owner 可见的 thread/checkpoint 安全投影。"""
+
+    thread_id: str
+    checkpoint_version: int = Field(ge=1)
+    state_version: str
+    status: Literal["pending", "claimed", "resolved", "cleared"]
+    expires_at: str
+    clarification: ClarificationView | None = None
+
+
+class ThreadControlResponse(BaseModel):
+    """显式清理 thread 的结果；失败时不返回 raw thread 投影。"""
+
+    ok: bool
+    reason_code: str
+    safety_status: Literal["passed", "blocked"]
+    message: str
+    thread: ThreadView | None = None
 
 
 class CostInfo(BaseModel):
@@ -62,7 +116,7 @@ class ToolCallTrace(BaseModel):
 
 
 class AgentResponse(BaseModel):
-    """M5 扩展版 AgentResponse。
+    """查询结果的兼容响应；M36 只增量加入 turn/thread 字段。
 
     字段顺序按“路由 → 答案 → 证据 → 图表 → 安全 → 成本 / 追踪”组织，方便前端和
     EvalOps 读取。旧字段只增不改，避免 M3/M4 测试和后续调用方失效。
@@ -89,3 +143,7 @@ class AgentResponse(BaseModel):
     ] = "no_answer"
     citations: list[dict[str, Any]] = Field(default_factory=list)
     reason_code: str | None = None
+    # M36：无 thread 的旧请求保持 None/initial；pending/resume 才返回增量字段。
+    turn_action: Literal["initial", "resume", "rejected"] = "initial"
+    graph_invocation_count: int = Field(default=1, ge=0, le=1)
+    thread: ThreadView | None = None

@@ -104,9 +104,12 @@ def _controller_node(state: HarnessState) -> dict[str, Any]:
                 caller_safe_ref=None,
             )
         elif decision.termination_action == "clarify":
+            clarification = decision.clarification_spec
+            if clarification is None:
+                raise HarnessContractError("clarify 决定缺少 clarification spec")
             result = AgentRunResult(
                 route="none", execution_status="not_started", answer_status="clarification_required", safety_status="passed",
-                reason_code=decision.reason_code, answer="请补充要查询的对象、时间范围或具体政策名称。",
+                reason_code=decision.reason_code, answer=clarification.prompt,
                 route_decision=decision, observation=None, termination_action="clarify", graph_steps=steps,
                 caller_safe_ref=request.caller.audit_ref if request.caller else None,
             )

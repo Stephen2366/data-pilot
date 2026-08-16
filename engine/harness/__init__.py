@@ -1,9 +1,10 @@
-"""M35 顶层单轮 Harness。
+"""M35/M36 顶层 Harness。
 
-这个 package 的 public interface 只有 ``run_harness`` 与几份跨节点合同。SQL 和 RAG 的复杂
-流程仍留在各自深 module；Harness 只负责一次路由、一次受控调用与统一终止。
+``run_harness`` 保留 M35 单轮兼容；M36 的 ``run_turn`` 在外侧增加一次 clarification
+checkpoint lifecycle。SQL 和 RAG 的复杂流程仍留在各自深 module。
 """
 
 from engine.harness.graph import HarnessRuntime, build_harness, run_harness
+from engine.harness.turn import run_turn
 
-__all__ = ["HarnessRuntime", "build_harness", "run_harness"]
+__all__ = ["HarnessRuntime", "build_harness", "run_harness", "run_turn"]

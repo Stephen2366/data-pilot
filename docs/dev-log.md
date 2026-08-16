@@ -2661,3 +2661,182 @@ python -m uvicorn app.main:app --reload
 
 打开 **Swagger UI**：`http://127.0.0.1:8000/docs`，选择 `POST /api/query`。可以先提交 SQL 示例 `{"question":"各渠道订单量是多少？","user_role":"ops"}`，观察 `route=sql`、四轴、SQL/rows/chart 和 trace id；再提交明确的政策/指标口径问题，观察 `route=rag`、validated citations 与 `docs_used`。如果提交未知 role，应该在 Tool 前得到 `caller_untrusted`；如果题目同时要求 SQL 与文档汇合，M35 会保守返回 unsupported，而不是偷偷运行两个 Tool。这里使用的是 **local/demo fixture caller**，只能用于学习和演示，不能当作生产认证。
 
+## ★ M36 结构化澄清恢复与轻量 Thread Checkpoint
+
+（2026-08-16）
+
+**简述**：在 M35 单轮 Harness 外增加一次**安全、可审计、只能消费一次的结构化澄清恢复**，让问题缺条件时可以先暂停，补齐后再继续调用 SQL 或 RAG。
+
+### 先用大白话讲
+
+M35 已经像一个靠谱的调度台：每个问题只交给一个 SQL 或 RAG 专家，也知道什么时候应该停下。但它碰到“这个怎么处理？”或“退款情况怎么样？”时，只能告诉用户“信息不够”，下一次用户补充“退款政策”或“2026 年 6 月、按渠道统计”时，系统并不知道这句话是在补哪一个任务，只能把它当成全新问题。
+
+M36 给调度台加了一张有安全规则的**待办卡**。第一次发现条件不足时，系统把原任务、缺哪些结构化字段、任务属于谁、版本号和过期时间写进进程内 checkpoint；第二次补充时，只有原 owner、同 tenant、同 active role 且版本正确，才能原子地领取这张卡。领取成功后，系统把原问题和补充值合成一个最小当前任务，再走原来的 M35 Graph，最多调用一个深 Tool。错误身份、过期、重复、并发抢占或版本冲突都会在 Tool 前停止。
+
+这不是通用聊天记忆，也不是完整的 LangGraph interrupt/resume。它只完成 **pre-Tool clarification（调用工具前澄清）**的一次恢复闭环：先把“暂停、补问、继续”最容易出安全问题的生命周期做扎实，再决定以后是否需要 Evidence 重取证、更多 Context 模板或持久化。
+
+### 这次做了什么
+
+本模块处理的**核心矛盾**是：系统需要跨两个 HTTP turn 延续一个未完成任务，但又不能把 thread id 当权限、让重复请求多次调用 Tool、把任意聊天历史塞回 Prompt，或者为了一个小闭环提前建设整套会话平台。最终方案是把生命周期集中在一个轻量深模块中，让 Graph、API、Trace 和 Eval 只消费受控结果。
+
+1. **把“不清楚”变成可填写、可校验的结构化任务**
+
+   **原来的问题**是 clarification 只有一句通用提示，没有说明具体缺什么，也没有机器可校验的恢复合同。用户下一次随便发一段文字，上层既无法确定字段是否补齐，也可能把额外内容误当系统控制信息。
+
+   M36 新增 **`ClarificationSpec`（结构化澄清说明）**：它像一张 Pydantic 表单定义，明确字段 key、中文标签、值类型、允许枚举和最大长度。首版只冻结两个真实场景：`subject` 负责补“具体政策、规则、指标或业务对象”；`analytics_scope` 负责补时间范围和分组维度。`ClarificationContextBuilder` 先做 closed-world 校验——字段必须不多不少——再用固定模板生成最小 current task，而不是让 LLM 自由改写整段历史。
+
+   没有做通用槽位抽取、长对话 summary 或远程 query rewrite，因为这些能力会引入新的准确率、Prompt Injection、token 和出站评测问题。**验证证据**覆盖缺字段、额外字段、非法枚举、主体恢复到 RAG、分析范围恢复到 SQL；非法补充值发生在 claim 前，不会消耗 checkpoint version。它证明两个冻结模板能保真恢复，**尚未证明**开放问法都能识别缺失条件。
+
+2. **用 versioned checkpoint 保证只有正确的人能恢复一次**
+
+   **原来的问题**是如果只用一个 `dict[thread_id] = question`，任何拿到 id 的人都可能继续任务；两个并发请求也可能同时读到 pending，然后各自调用一次 SQL/RAG。服务端还无法区分状态已经变化、任务过期、被清理或服务重启后丢失。
+
+   **`ThreadCheckpointManager`（线程检查点管理器）**把待办卡建模为 `pending → claimed → resolved/cleared` 的单调状态机，并为每次迁移递增 version。它在一个 `RLock` 内完成 owner、tenant、active role、TTL、state version、expected version 和补充值校验，再原子 claim；慢 Graph/Tool 在锁外执行，不会堵住其他 thread。这里可以类比 MySQL 的乐观锁：请求必须带自己看到的版本，只有一个竞争者能成功更新，其他人拿到稳定冲突结果。
+
+   安全审查还发现 `TrustedCaller.audit_ref` 不包含 tenant，因此不能单独当 owner。最终默认 owner 使用 `audit_ref + tenant_id` 的内部哈希，认证适配器若提供专门的 `thread_owner_ref` 则使用其作用域。错误 owner 与不存在 thread 对外统一为 `conversation_unavailable`，避免攻击者通过返回差异探测某个 thread 是否存在。
+
+   没有采用“Tool 失败后把状态退回 pending 再试一次”的宽松方案：claim 之后执行权已经被消费，自动回滚可能导致副作用重复。并发测试证明同一 expected version **恰好一个 claim 成功**，另一个在 Graph 前拒绝；跨 tenant、过期、clear、restart loss、状态版本不兼容和重复恢复也都有确定性反例。当前 checkpoint 仍是单进程内存，**不能证明**重启恢复、多 worker 共享或长期容量已经解决。
+
+3. **在 M35 Graph 外增加 turn seam，不拆坏原来的深 Tool**
+
+   **原来的问题**是直接把暂停/恢复塞进 Router 或 SQL/RAG Tool，会让每个专业模块都开始认识 thread、version 和 HTTP 生命周期；直接把 M35 Graph 改成可中断 Graph，又会改变“一次 invoke → 一份结果”的稳定合同。
+
+   M36 新增 **`run_turn()`（回合级入口）**：initial turn 先执行一次 M35 Graph，若结果是 clarification 才创建 pending checkpoint；resume turn 先 claim，再把 Context Builder 生成的当前任务交给同一个 M35 Graph，结束后推进 resolved。生命周期前置拒绝不调用 Graph；accepted turn 恰好调用一次 Graph，Graph 内仍至多一个 SQL/RAG 深 Tool。补充后如果仍然不清楚，则返回 `budget_exhausted` 并结束，不创建第二层 pending。
+
+   用户确认采用**方案 A：应用持有轻量进程内 checkpoint**。另一个方案是直接使用 LangGraph checkpointer + interrupt/resume，优点是未来可以恢复任意节点，代价是当前模块就要重写 Graph 生命周期、API、Trace 和异常关闭。选择 A 不是“先写一个假接口以后替换”，而是明确承认本模块只做 pre-Tool clarification；实现中没有预建 storage port 或伪装持久化。
+
+   M36/M35/config 聚焦回归为 **31 passed**，M31–M33 caller/ACL/outbound/Evidence/citation 安全回归为 **111 passed**。这些证据说明旧的单轮 SQL/RAG、可信 caller 和 Evidence 安全边界没有被恢复层绕过；它们**不代表**Tool retry、Evidence 跨轮复用或 Hybrid 已经完成。
+
+4. **让 API、Trace 和 sequence Eval 能共同还原两轮过程**
+
+   **原来的问题**是 M35 的单题 Eval 只能证明系统正确停在 clarification，不能证明第二个 turn 的 owner、version、并发、过期和预算是否正确。若 API、Trace 和 Eval 各自拼 thread 状态，多轮事实还会再次出现口径漂移。
+
+   `/api/query` 现在增量接受 `thread_id + expected_version + clarification_answers`，三者必须成组出现；首次 pending 响应返回可填写字段和合法 owner 可见的 thread 投影。JSONL Trace 只记录不可逆 `thread_safe_ref`、前后 version、action、`context_ref`、Graph 次数和 checkpoint runtime，不保存 raw thread id、补充值字典或完整 checkpoint。Streamlit 也能按服务端 spec 画最小补充表单，但本轮没有做浏览器人工体验检查。
+
+   没有为了排障方便把完整 checkpoint 或补充值直接写入 Trace，因为日志中的 raw thread id 可能被拿去尝试恢复任务，用户条件也会扩大长期数据暴露面；也没有给 M35 的单轮 artifact 强行补 turn 字段，而是建立独立版本的 sequence family，避免历史分母和证据身份被改写。
+
+   新的 **Sequence Eval（序列评测）**不再把每个请求当孤立题目，而是把 initial、resume、clear 和 rejected attempt 组织成同一 sequence。`phase4-harness-turn-v1` 覆盖 8 组场景：主体到 RAG、分析范围到 SQL、错误 owner、过期版本、TTL、clear、并发单 claim 和恢复预算。每个 accepted turn 一份 ExecutionEvidence，多条 assertion 只读同一证据；artifact 会拒绝漏 turn、重复 execution、缺 assertion 或多次成功 resume。
+
+   最终全仓 deterministic pytest 为 **416 passed，1 个既有 warning**，compileall 和 diff check 通过。该结果证明确定性生命周期、API/Trace 投影和回归兼容；**尚未运行**真实 LLM Router/Text2SQL Eval、M34 external Answer Eval、Milvus/embedding、remote Composer/Judge 或 LangFuse Cloud，不能把它解释成真实开放对话能力提升。
+
+### 新概念
+
+- **Thread Checkpoint（线程检查点）**：跨请求保存“一个未完成任务最少需要什么”的状态卡。M36 保存的是原问题、受控字段合同、owner、role、version 和 TTL，不是完整聊天记录。
+- **Compare-and-set / 原子 claim（比较并交换式领取）**：只有“当前 version 仍等于我看到的 version”时才能把 pending 改成 claimed。可以类比 MySQL `UPDATE ... WHERE version = ?` 或 Redis `SET NX`；成功者获得执行权，失败者不能继续调用 Tool。
+- **TTL（Time To Live，生存时间）**：checkpoint 的有效期。默认 900 秒，过期后即使 owner 和 version 正确也不能恢复，防止进程内状态无限期变成长期会话承诺。
+- **Closed-world clarification（闭世界澄清）**：系统只接受事先登记的字段和值域，不把未知 key 当作“也许有用”的上下文。它类似 Pydantic `extra=forbid` 的思路，重点是让恢复合同可验证。
+- **Turn-level seam（回合级接缝）**：位于 HTTP API 和单轮 Graph 之间的统一入口，负责 initial/resume/rejected 生命周期；Graph 继续只关心本轮 route、Tool 和 controller。
+- **Tombstone（墓碑状态）**：resolved/cleared 后仍短期保留的不可重放记录。它能告诉合法 owner“已经消费或清理”，但当前会保留到进程结束，也形成容量技术债。
+
+### 代码阅读路线
+
+1. **先看客户端能提交和看到什么**：`app/schemas/agent.py`
+
+   从 `QueryRequest.validate_resume_shape()` 看 resume 三字段为何必须成组，再看 `ClarificationView`、`ThreadView` 和 `AgentResponse` 的增量字段。这里定义的是**公开合同**：客户端能看到待填字段和自己的 raw thread id，但看不到 checkpoint 内部任务。
+
+2. **看 Router 怎样形成结构化待补单**：`engine/harness/contracts.py` → `engine/harness/router.py`
+
+   先读 `ClarificationFieldSpec` / `ClarificationSpec` 的 closed-world 约束，再看 `DeterministicRouter.decide()` 何时选择 subject 或 analytics scope。重点理解 Router 只报告“缺什么”，不保存 thread、不调用 Tool；具体关键词只是确定性 baseline，不需要背。
+
+3. **深入待办卡的安全生命周期**：`engine/harness/thread.py`
+
+   先读 `PendingThreadCheckpoint` 的字段，然后沿 `ThreadCheckpointManager.create_pending()`、`claim_resume()`、`resolve()`、`clear()` 阅读。主角是锁内的校验顺序和 version 迁移：先隐藏 wrong-owner/missing 差异，再检查 owner 自己的状态，最后在慢 Tool 前 claim。接着读 `ClarificationContextBuilder.build()`，理解为什么只允许两个模板。
+
+4. **看两次 HTTP 请求怎样复用同一个单轮 Graph**：`engine/harness/turn.py` → `engine/harness/graph.py`
+
+   从 `run_turn()` 分流 initial/resume，再重点读 `_run_resume()`：claim、锁外 Graph、budget stop、resolve。这里解决的是**跨 turn 生命周期与单轮业务执行分层**；M35 Graph 仍保持 route → 一个 Tool/terminal → controller，不需要重新学习 SQL/RAG 内部实现。
+
+5. **回到 API 检查响应和 Trace 没有旁路**：`app/main.py` → `app/api/query.py` → `engine/trace/recorder.py`
+
+   `app/main.py` 持有唯一进程内 manager；query endpoint 解析 caller、组装 runtime、只调用 `run_turn()`，再从 turn result 投影响应和 Trace。显式 clear 不调用 Graph，但会写 lifecycle Trace。阅读时重点核对 raw thread id 只出现在 owner 响应，不进入 JSONL。
+
+6. **最后用测试和 Eval 复核失败边界**：`tests/test_m36_thread.py` → `tests/test_m36_turn.py` → `tests/test_m36_api_trace.py` → `eval/harness_turn_contracts.py`
+
+   thread 测试覆盖 owner/tenant/TTL/version/并发，turn 测试覆盖一次 Graph/Tool 和 budget，API 测试对照两轮 JSONL，sequence Eval 再检查 8 组完整序列及 artifact 反例。这样可以从底层状态机一路看到公开证据，而不是只看一个 happy path。
+
+核心调用链是：
+
+`POST /api/query（问题缺条件）`
+→ `M35 Graph 返回 clarification`
+→ `ThreadCheckpointManager.create_pending()`
+→ `AgentResponse 返回 spec + thread/version`
+→ `POST /api/query（结构化补充）`
+→ `owner/tenant/role/TTL/version 校验 + 原子 claim`
+→ `ClarificationContextBuilder`
+→ `M35 Graph → 至多一个 SQL/RAG Tool`
+→ `resolved + AgentResponse + JSONL Trace + sequence evidence`
+
+**模块闭环**：M35 解决“一次请求如何可信地选择并调用一个 Tool”，M36 解决“条件不足时如何安全暂停一次、补齐后继续一次”。两者合起来形成了 Phase 4 第一个可演示的**有界多 turn Agent 闭环**。
+
+### 设计要点
+
+- **应用内 checkpoint 是明确方案，不是假持久化**：当前目标是 pre-Tool clarification，重启丢失会如实返回 unavailable；只有恢复任意 Graph 节点成为 required Scenario，才重开 LangGraph/persistent checkpoint 决策。
+- **claim 后不回滚、不自动 retry**：执行权已经消费，恢复 pending 可能重复 Tool 副作用；技术失败沿用 M35 原 reason，交给上层决定是否重新发起新任务。
+- **thread id 不是权限**：owner、tenant、active role 和 version 都在 Tool 前检查；wrong owner 与 missing 对外同形，避免存在性侧信道。
+- **最小 Context，而非聊天历史**：只保留恢复当前任务所需事实，Router/Tool 不读取 checkpoint 容器，Trace 不记录补充值或 raw id。
+- **确定性 Eval 不冒充开放智能**：416 条全仓测试和 8 组 sequence 证明生命周期合同与兼容性，不证明真实 LLM 能理解任意省略、指代或长对话。
+- **当前技术债**：checkpoint 不跨进程，resolved/cleared tombstone 暂不清扫，Streamlit 表单未做浏览器人工检查；下一轮需按真实失败和容量证据决定方向喵。
+
+### 面试怎么讲
+
+**可直接复述**：我在 DataPilot 的单轮 LangGraph Harness 外实现了一次有界的结构化澄清恢复。首次问题缺主体或分析范围时，Router 返回 typed ClarificationSpec，应用创建带 owner、tenant、active role、TTL、state/version 的进程内 checkpoint；客户端补齐字段后，ThreadCheckpointManager 在锁内校验并原子 claim，再在锁外把最小 current task 交给原 M35 Graph，所以 accepted turn 恰好一次 Graph、至多一个深 Tool，错误 owner、过期、冲突和重复提交都在 Tool 前停止。claim 后失败不回 pending，避免重复执行。API、JSONL Trace 和 `phase4-harness-turn-v1` Eval 都从同一 turn/lifecycle fact 投影，Trace 不记录 raw thread id 或补充值。最终全仓 416 条确定性测试通过；我也明确限定它是单进程、一次恢复、两个 Context 模板，不代表持久会话、Tool retry 或开放多轮理解已经完成。
+
+1. **[基础追问] 用户补充条件后，系统怎么保证继续的是原任务，而不是把补充文字当成新问题？**
+
+   首次 clarification 会把原问题和 `ClarificationSpec` 放进 owner-bound checkpoint。第二次请求不能只发一句自由文本，必须同时携带 thread id、expected version 和闭合的字段字典。Context Builder 从 checkpoint 读取原问题，用固定 subject 或 analytics 模板合成 current task；Router/Tool 只看到这个最小任务，不直接读取聊天历史。因此“退款政策”会与“这个怎么处理”合成 RAG 问题，“2026 年 6 月 + 渠道”会与“退款情况”合成 SQL 分析问题。
+
+2. **[工程/深挖追问] 两个完全相同的 resume 请求同时到达，为什么不会执行两次 SQL 或 RAG？**
+
+   manager 把状态检查和 `pending → claimed` 写入放在同一个 `RLock` 临界区，等价于 compare-and-set。两个请求都带 version 1，但只有先取得锁的请求能把状态改成 claimed/version 2；第二个进入锁后看到状态不再 pending，在调用 Graph 前返回 `thread_already_resumed`。慢 Tool 放在锁外，所以不会阻塞其他 thread。单元测试使用两个线程和 barrier 同时竞争，断言恰好一个 claim 成功、Tool 总调用不超过一次。
+
+3. **[工程/深挖追问] 为什么非法补充值不消耗 version，但 Tool 失败后却不允许继续用原 version？**
+
+   两者的执行事实不同。字段缺失、额外或枚举非法发生在 claim 之前，系统还没有给请求执行权，也没有调用 Graph，所以允许用户修正后继续使用同一 pending version。claim 之后即使 Tool 返回 unavailable，执行权已经真实消费；若把状态退回 pending，客户端重试可能再次调用具有副作用或成本的 Tool。M36 因此推进 resolved 并保留原技术 reason，不自动重试。
+
+4. **[压力追问] 你叫它 Thread Checkpoint，但服务一重启状态就没了，这不是一个残缺实现吗？**
+
+   这个质疑对“持久会话系统”成立，但 M36 的目标不是承诺持久会话，而是验证 pre-Tool clarification 的安全生命周期。方案 A 明确把 adapter identity、state version、TTL 和 restart loss 写进 Trace/测试，重启后返回 `conversation_unavailable`，没有伪装可靠性；它换来的是不改写 M35 Graph 生命周期，也不为尚未出现的中间节点恢复需求预建 storage port。现有证据证明 owner/tenant/version/并发和一次恢复成立；如果后续 required Scenario 要求跨进程或恢复 Tool/Evidence 中间态，我会重新评估 LangGraph checkpointer 或持久存储，而不是把当前内存实现偷偷包装成生产能力喵。
+
+### 验证与下一步
+
+- **M36/M35/config 聚焦**：`31 passed in 35.46s`，覆盖 thread、turn、API/Trace、sequence Eval 与 M35 兼容。
+- **安全回归**：M31–M33 caller/ACL/outbound/Evidence/citation suites 为 `111 passed in 2.65s`。
+- **全仓确定性回归**：后台运行退出码 `0`，`416 passed, 1 warning in 594.12s`；warning 是既有 Starlette TestClient/httpx deprecation，不影响 M36。
+- **静态交付**：`compileall -q app engine eval tests demo` 与 `git diff --check` 通过。
+- **尚未证明**：未运行真实 LLM Router/Text2SQL Eval、M34 external Answer Eval、Milvus/embedding、remote Composer/Judge 或 LangFuse Cloud；Streamlit 表单也未做浏览器人工体验检查。
+- **下一步建议**：规划下一模块时先在 Evidence 失效/重取证与更一般的受控 Context Builder 之间选择；若需要恢复 Tool/Evidence/任意 Graph 节点或跨重启恢复，先重开 checkpoint 方案决策门。
+
+可复制验证命令：
+
+```powershell
+# M36 + M35 聚焦回归；预计相关 thread/turn/API/Trace/Eval 合同全部通过。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m36-review tests/test_config.py tests/test_m36_thread.py tests/test_m36_turn.py tests/test_m36_api_trace.py tests/test_m36_harness_turn_eval.py tests/test_m35_harness.py tests/test_m35_harness_eval.py tests/test_m35_api_trace.py
+
+# 全仓确定性回归；收工快照为 416 passed 和 1 个既有 TestClient deprecation warning。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m36-full-recheck
+
+# Python 语法/导入编译；预计无输出并以 exit 0 结束。
+python -m compileall -q app engine eval tests demo
+```
+
+**本地启动体验：** M36 可以通过 FastAPI Swagger 做两轮体验。先按 `docs/state/runbook.md` 准备数据库/seed 和本地环境，再启动服务：
+
+```powershell
+# 启动 FastAPI；环境未激活时使用 AGENTS.md 中的完整 Python 路径。
+python -m uvicorn app.main:app --reload
+```
+
+打开 **Swagger UI**：`http://127.0.0.1:8000/docs`，先调用 `POST /api/query`，提交 `{"question":"这个怎么处理？","user_role":"ops"}`。预计得到 `answer_status=clarification_required`、`thread.status=pending`、`checkpoint_version=1`，以及只含 `subject` 的待补字段。复制返回的 `thread_id`，再次调用同一接口，提交：
+
+```json
+{
+  "question": "补充结构化条件",
+  "user_role": "ops",
+  "thread_id": "替换为首次响应中的值",
+  "expected_version": 1,
+  "clarification_answers": {"subject": "退款政策"}
+}
+```
+
+预计第二次走 `route=rag`、`turn_action=resume`，thread 变为 `resolved`。再次原样提交会在 Graph 前得到 `thread_already_resumed`，不会重复调用 Tool。也可以用“退款情况怎么样？”触发 `time_range + group_by` 表单。这里的 caller 是 **local/demo fixture**，checkpoint 只在当前 API 进程内有效；不要把这个体验解释成生产认证或持久会话。
+

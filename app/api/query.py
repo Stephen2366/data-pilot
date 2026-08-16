@@ -1,7 +1,7 @@
-"""M35 `/api/query`：把 HTTP 请求投影到唯一的单轮 Harness。
+"""M35/M36 `/api/query`：把 HTTP 请求投影到唯一的 turn-level Harness。
 
-★ API 不再自行选择 Text2SQL、拼安全状态或绕过 Graph。它只做三件事：解析 caller、注入本轮
-依赖、把 `AgentRunResult` 单向投影成兼容响应与 JSONL Trace。
+★ API 不自行选择 Text2SQL、管理 checkpoint 或拼安全状态。它只解析 caller、注入依赖，
+再把 `AgentTurnResult` 单向投影成兼容响应与 JSONL Trace。
 """
 
 from __future__ import annotations
@@ -10,14 +10,16 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.agent import AgentResponse, CostInfo, QueryRequest
+from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, ThreadControlResponse, ThreadView
 from engine.harness.adapters import RAGToolAdapter, Text2SQLToolAdapter
-from engine.harness.contracts import AgentRunResult, HarnessRequest, ToolObservation
-from engine.harness.graph import HarnessRuntime, run_harness
+from engine.harness.contracts import HarnessRequest, ToolObservation
+from engine.harness.graph import HarnessRuntime
+from engine.harness.thread import ThreadCheckpointManager
+from engine.harness.turn import AgentTurnResult, TurnRequest, clear_thread, run_turn
 from engine.trace.recorder import TraceRecord, append_trace
 
 
@@ -56,9 +58,10 @@ def _observation_projection(observation: ToolObservation | None) -> dict[str, An
     }
 
 
-def _project_response(*, result: AgentRunResult, trace_id: str, started_at: float) -> AgentResponse:
+def _project_response(*, turn: AgentTurnResult, trace_id: str, started_at: float) -> AgentResponse:
     """★ 唯一 AgentResponse projector：旧字段只从同一份 Harness 事实派生。"""
 
+    result = turn.result
     observation = result.observation
     # 步骤 1：从 Observation 取得兼容字段；none 路径不会伪造 SQL、rows 或 docs。----------
     sql = observation.sql if observation else None
@@ -94,14 +97,18 @@ def _project_response(*, result: AgentRunResult, trace_id: str, started_at: floa
         answer_status=result.answer_status,
         citations=citations,
         reason_code=result.reason_code,
+        turn_action=turn.turn_action,
+        graph_invocation_count=turn.graph_invocation_count,
+        thread=ThreadView.model_validate(turn.thread.as_dict()) if turn.thread else None,
     )
 
 
 def _record_trace(
-    *, request: Request, request_body: QueryRequest, response: AgentResponse, result: AgentRunResult
+    *, request: Request, request_body: QueryRequest, response: AgentResponse, turn: AgentTurnResult
 ) -> None:
     """把同一份 Harness result 写成 JSONL 安全投影，Trace 不重新判断 route 或四轴。"""
 
+    result = turn.result
     observation = result.observation
     decision = result.route_decision
     trace_record = TraceRecord(
@@ -136,12 +143,17 @@ def _record_trace(
             "termination_action": decision.termination_action,
             "decision_source": decision.decision_source,
             "requirement_identity": decision.requirement.identity if decision.requirement else None,
+            "clarification": decision.clarification_spec.safe_projection() if decision.clarification_spec else None,
         },
         graph_steps=list(result.graph_steps),
         caller_safe_ref=result.caller_safe_ref,
         tool_observation=_observation_projection(observation),
         evidence_refs=list(observation.evidence_refs) if observation else [],
         termination_action=result.termination_action,
+        turn_action=turn.turn_action,
+        graph_invocation_count=turn.graph_invocation_count,
+        thread_lifecycle=turn.lifecycle.safe_projection() if turn.lifecycle else None,
+        checkpoint_runtime=turn.checkpoint_runtime,
     )
     path = _trace_path(request)
     if path is None:
@@ -152,7 +164,7 @@ def _record_trace(
 
 @router.post("/query", response_model=AgentResponse)
 def query(request_body: QueryRequest, request: Request, db: Session = Depends(get_db)) -> AgentResponse:
-    """执行 M35 统一查询入口，所有 SQL/RAG/terminal 路径都必须穿过同一次 Harness。"""
+    """执行 M36 turn seam；旧单轮与新 pending/resume 都从同一 Harness module 投影。"""
 
     started_at = perf_counter()
     trace_id = _trace_id(request)
@@ -175,7 +187,69 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
         sql_tool=Text2SQLToolAdapter(db=db, schema_vector_index=getattr(request.app.state, "schema_vector_index", None)),
         rag_tool=RAGToolAdapter(),
     )
-    result = run_harness(request=harness_request, runtime=runtime)
-    response = _project_response(result=result, trace_id=trace_id, started_at=started_at)
-    _record_trace(request=request, request_body=request_body, response=response, result=result)
+    checkpoint_manager: ThreadCheckpointManager = request.app.state.thread_checkpoint_manager
+    turn = run_turn(
+        request=TurnRequest(
+            harness_request=harness_request,
+            thread_id=request_body.thread_id,
+            expected_version=request_body.expected_version,
+            clarification_answers=request_body.clarification_answers,
+        ),
+        runtime=runtime,
+        checkpoint_manager=checkpoint_manager,
+    )
+    response = _project_response(turn=turn, trace_id=trace_id, started_at=started_at)
+    _record_trace(request=request, request_body=request_body, response=response, turn=turn)
     return response
+
+
+@router.delete("/query/threads/{thread_id}", response_model=ThreadControlResponse)
+def clear_query_thread(
+    thread_id: str,
+    request: Request,
+    user_role: str = Query(default="ops"),
+    expected_version: int = Query(ge=1),
+) -> ThreadControlResponse:
+    """显式清理 pending/resolved checkpoint；thread id 本身不能授权这个动作。"""
+
+    resolver = getattr(request.app.state, "caller_resolver", None)
+    resolution = resolver.resolve(user_role) if resolver is not None else None
+    checkpoint_manager: ThreadCheckpointManager = request.app.state.thread_checkpoint_manager
+    control = clear_thread(
+        thread_id=thread_id,
+        expected_version=expected_version,
+        caller=resolution.caller if resolution else None,
+        checkpoint_manager=checkpoint_manager,
+    )
+
+    # clear 没有业务 Graph/Tool，但仍写一条 lifecycle Trace，便于证明谁在何时让状态失效。
+    trace_record = TraceRecord(
+        trace_id=_trace_id(request),
+        question="[thread-clear]",
+        user_role=user_role,
+        route="none",
+        answer=control.message,
+        safety_status=control.safety_status,
+        cost=CostInfo(),
+        execution_status="completed" if control.ok else "not_started",
+        answer_status="no_answer",
+        reason_code=control.reason_code,
+        caller_safe_ref=resolution.caller.audit_ref if resolution else None,
+        termination_action="answer" if control.ok else ("blocked" if control.safety_status == "blocked" else "failed"),
+        turn_action="rejected" if not control.ok else "clear",
+        graph_invocation_count=0,
+        thread_lifecycle=control.lifecycle.safe_projection(),
+        checkpoint_runtime=checkpoint_manager.runtime_identity,
+    )
+    path = _trace_path(request)
+    if path is None:
+        append_trace(trace_record)
+    else:
+        append_trace(trace_record, path=path)
+    return ThreadControlResponse(
+        ok=control.ok,
+        reason_code=control.reason_code,
+        safety_status=control.safety_status,
+        message=control.message,
+        thread=ThreadView.model_validate(control.thread.as_dict()) if control.thread else None,
+    )

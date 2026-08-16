@@ -1,4 +1,4 @@
-"""M6 Streamlit 演示页：通过真实 HTTP 调用展示 DataPilot v1 查询闭环。
+"""Streamlit 演示页：通过真实 HTTP 展示单轮查询与 M36 结构化澄清恢复。
 
 ★ 这个页面只负责演示，不承载业务逻辑。所有 SQL 生成、安全拦截、Trace 和图表都来自
 FastAPI `/api/query`，避免前端复制一套 Agent 流程。
@@ -36,18 +36,25 @@ def _post_query(
     *,
     force_new_pipeline: bool = False,
     schema_retrieval_profile: str = "default",
+    thread_id: str | None = None,
+    expected_version: int | None = None,
+    clarification_answers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """调用 FastAPI `/api/query` 并返回 AgentResponse 字典。"""
+    """调用 FastAPI `/api/query`；resume 字段只在补条件时成组发送。"""
 
-    payload = json.dumps(
-        {
-            "question": question,
-            "user_role": user_role,
-            "force_new_pipeline": force_new_pipeline,
-            "schema_retrieval_profile": schema_retrieval_profile,
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
+    request_body: dict[str, Any] = {
+        "question": question,
+        "user_role": user_role,
+        "force_new_pipeline": force_new_pipeline,
+        "schema_retrieval_profile": schema_retrieval_profile,
+    }
+    if thread_id is not None:
+        request_body.update(
+            thread_id=thread_id,
+            expected_version=expected_version,
+            clarification_answers=clarification_answers or {},
+        )
+    payload = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
     request = Request(
         api_url,
         data=payload,
@@ -123,8 +130,52 @@ def _render_response(body: dict[str, Any]) -> None:
             "docs_used": body.get("docs_used", []),
             "tool_calls": body.get("tool_calls", []),
             "reason_code": body.get("reason_code"),
+            "turn_action": body.get("turn_action"),
+            "graph_invocation_count": body.get("graph_invocation_count"),
+            "thread": body.get("thread"),
             "cost": body.get("cost", {}),
         }
+    )
+
+
+def _render_clarification_form(
+    *,
+    body: dict[str, Any],
+    api_url: str,
+    user_role: str,
+    force_new_pipeline: bool,
+    schema_retrieval_profile: str,
+) -> dict[str, Any] | None:
+    """按服务端 closed-world spec 画表单；前端不猜缺失字段或自行改写问题。"""
+
+    thread = body.get("thread") or {}
+    clarification = thread.get("clarification") or {}
+    fields = clarification.get("fields") or []
+    if thread.get("status") != "pending" or not fields:
+        return None
+
+    st.subheader("补充条件")
+    st.info(clarification.get("prompt") or "请补充缺失条件。")
+    answers: dict[str, str] = {}
+    with st.form("m36-clarification-form"):
+        for field in fields:
+            key, label = field["key"], field["label"]
+            if field.get("value_type") == "enum":
+                answers[key] = st.selectbox(label, field.get("allowed_values") or [])
+            else:
+                answers[key] = st.text_input(label, max_chars=field.get("max_length", 80))
+        resumed = st.form_submit_button("提交补充并继续", type="primary")
+    if not resumed:
+        return None
+    return _post_query(
+        api_url=api_url,
+        question="补充结构化条件",
+        user_role=user_role,
+        force_new_pipeline=force_new_pipeline,
+        schema_retrieval_profile=schema_retrieval_profile,
+        thread_id=thread["thread_id"],
+        expected_version=thread["checkpoint_version"],
+        clarification_answers=answers,
     )
 
 
@@ -236,7 +287,25 @@ def main() -> None:
         except (URLError, TimeoutError) as exc:
             st.error(f"API request failed: {exc}")
             return
+        st.session_state["last_response"] = body
+
+    body = st.session_state.get("last_response")
+    if body:
         _render_response(body)
+        try:
+            resumed_body = _render_clarification_form(
+                body=body,
+                api_url=api_url,
+                user_role=user_role,
+                force_new_pipeline=force_new_pipeline,
+                schema_retrieval_profile=schema_retrieval_profile,
+            )
+        except (URLError, TimeoutError) as exc:
+            st.error(f"API resume failed: {exc}")
+            return
+        if resumed_body is not None:
+            st.session_state["last_response"] = resumed_body
+            st.rerun()
 
 
 if __name__ == "__main__":

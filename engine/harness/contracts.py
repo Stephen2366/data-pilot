@@ -21,10 +21,79 @@ AnswerStatus = Literal[
 ]
 SafetyStatus = Literal["passed", "blocked"]
 TerminationAction = Literal["answer", "clarify", "unsupported", "blocked", "failed"]
+ClarificationValueType = Literal["text", "time_range", "enum"]
 
 
 class HarnessContractError(ValueError):
     """Harness 收到不闭合的 route/observation 时抛出的合同错误。"""
+
+
+@dataclass(frozen=True)
+class ClarificationFieldSpec:
+    """一次澄清中允许用户补充的单个 typed 字段。
+
+    ★ M36 不把任意聊天文本直接拼回 Prompt，而是先要求 caller 按闭集字段补条件。这样既能
+    精确检查“缺了什么”，也能阻止额外 key 偷渡成新的系统指令或检索动作。
+    """
+
+    key: str
+    label: str
+    value_type: ClarificationValueType
+    allowed_values: tuple[str, ...] = ()
+    max_length: int = 80
+
+    def __post_init__(self) -> None:
+        """在字段说明进入 Router/checkpoint 前执行 closed-world 校验。"""
+
+        if self.value_type not in {"text", "time_range", "enum"}:
+            raise HarnessContractError("未知 clarification value_type")
+        if not self.key.strip() or not self.label.strip() or self.max_length <= 0:
+            raise HarnessContractError("clarification field 必须有 key/label 和正数 max_length")
+        if self.value_type == "enum" and not self.allowed_values:
+            raise HarnessContractError("enum clarification field 必须声明 allowed_values")
+        if self.value_type != "enum" and self.allowed_values:
+            raise HarnessContractError("只有 enum clarification field 可以声明 allowed_values")
+
+    def safe_projection(self) -> dict[str, Any]:
+        """返回可公开的字段说明，不包含任何用户已经填写的值。"""
+
+        return {
+            "key": self.key,
+            "label": self.label,
+            "value_type": self.value_type,
+            "allowed_values": list(self.allowed_values),
+            "max_length": self.max_length,
+        }
+
+
+@dataclass(frozen=True)
+class ClarificationSpec:
+    """Router 为 pending clarification 生成的 closed-world 恢复说明。"""
+
+    identity: str
+    prompt: str
+    fields: tuple[ClarificationFieldSpec, ...]
+    context_template: Literal["subject", "analytics_scope"]
+
+    def __post_init__(self) -> None:
+        """拒绝重复字段和未知 Context 模板，避免恢复层临时猜测。"""
+
+        if self.context_template not in {"subject", "analytics_scope"}:
+            raise HarnessContractError("未知 clarification context_template")
+        if not self.identity.strip() or not self.prompt.strip() or not self.fields:
+            raise HarnessContractError("clarification spec 必须有 identity/prompt/fields")
+        keys = [field.key for field in self.fields]
+        if len(keys) != len(set(keys)):
+            raise HarnessContractError("clarification spec field key 不能重复")
+
+    def safe_projection(self) -> dict[str, Any]:
+        """公开待补问题与字段合同；context template 属内部控制信息，不向客户端暴露。"""
+
+        return {
+            "identity": self.identity,
+            "prompt": self.prompt,
+            "fields": [field.safe_projection() for field in self.fields],
+        }
 
 
 @dataclass(frozen=True)
@@ -44,6 +113,8 @@ class HarnessRequest:
     schema_fusion_strategy: str = "weighted"
 
     def __post_init__(self) -> None:
+        """保证 Graph identity 与当前问题非空。"""
+
         if not self.question.strip() or not self.run_id.strip():
             raise HarnessContractError("question 和 run_id 不能为空")
 
@@ -58,8 +129,11 @@ class RouteDecision:
     termination_action: TerminationAction
     decision_source: Literal["deterministic", "controller"] = "deterministic"
     requirement: AnswerEvidenceRequirement | None = None
+    clarification_spec: ClarificationSpec | None = None
 
     def __post_init__(self) -> None:
+        """校验 route、Evidence requirement 与终止动作组成闭合决定。"""
+
         if self.route == "none" and self.needs_evidence:
             raise HarnessContractError("none route 不能请求 Evidence")
         if self.route != "none" and not self.needs_evidence:
@@ -68,6 +142,10 @@ class RouteDecision:
             raise HarnessContractError("RAG route 必须带受控 requirement")
         if self.route != "rag" and self.requirement is not None:
             raise HarnessContractError("只有 RAG route 可以携带 requirement")
+        if self.termination_action == "clarify" and self.clarification_spec is None:
+            raise HarnessContractError("clarify 决定必须携带 closed-world clarification spec")
+        if self.termination_action != "clarify" and self.clarification_spec is not None:
+            raise HarnessContractError("只有 clarify 决定可以携带 clarification spec")
 
 
 @dataclass(frozen=True)
@@ -106,6 +184,8 @@ class ToolObservation:
     langfuse_span_mode: str = "post_hoc"
 
     def __post_init__(self) -> None:
+        """防止 Tool 类型、route 与安全状态在投影时互相矛盾。"""
+
         if self.route == "sql" and self.tool_name != "text2sql":
             raise HarnessContractError("SQL Observation 必须来自 text2sql Tool")
         if self.route == "rag" and self.tool_name != "rag_answer_flow":
@@ -133,6 +213,8 @@ class AgentRunResult:
     caller_safe_ref: str | None
 
     def __post_init__(self) -> None:
+        """确保最终四轴、Router 决定与 Observation 都来自同一路径。"""
+
         if self.route != self.route_decision.route:
             raise HarnessContractError("最终 route 必须与 RouteDecision 一致")
         if self.observation is not None and self.observation.route != self.route:
@@ -141,4 +223,3 @@ class AgentRunResult:
             raise HarnessContractError("需要 Tool 的 route 不能缺 Observation")
         if self.safety_status == "blocked" and not self.answer:
             raise HarnessContractError("blocked 结果仍必须有安全的用户文案")
-

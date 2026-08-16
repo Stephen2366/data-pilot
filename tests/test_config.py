@@ -71,3 +71,10 @@ def test_settings_load_langfuse_and_judge_config() -> None:
     assert settings.langfuse_secret_key == "sk-test"
     assert settings.langfuse_base_url == "http://localhost:3000"
     assert settings.eval_judge_model == "deepseek-v3-judge"
+
+
+def test_thread_checkpoint_ttl_is_finite_and_configurable() -> None:
+    """M36 进程内 pending 状态不能无限存活，且部署时可缩短 TTL。"""
+
+    assert Settings(_env_file=None).thread_checkpoint_ttl_seconds == 900
+    assert Settings(_env_file=None, THREAD_CHECKPOINT_TTL_SECONDS="30").thread_checkpoint_ttl_seconds == 30
