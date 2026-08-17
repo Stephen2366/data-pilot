@@ -8,7 +8,7 @@ terminal 固化不取证停止、controller 唯一投影最终四轴。
 from __future__ import annotations
 
 import operator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -48,7 +48,10 @@ def _route_node(state: HarnessState, runtime: Runtime[HarnessRuntime]) -> dict[s
     else:
         # Router interface 不接收 DB、Evidence 或正文，避免控制层反向依赖 Tool 细节。
         router: Router = runtime.context.router or DeterministicRouter()
-        decision = router.decide(request)
+        # M37 旧 EvidenceRef 只供同 route 深 Tool 做 validity；Router 只能看 current task，
+        # 不能据旧文档/SQL identity 改 route 或把审计坐标当业务上下文。
+        router_request = replace(request, follow_up_context=None) if request.follow_up_context else request
+        decision = router.decide(router_request)
     return {"route_decision": decision, "graph_steps": ["route"]}
 
 

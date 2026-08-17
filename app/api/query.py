@@ -1,4 +1,4 @@
-"""M35/M36 `/api/query`：把 HTTP 请求投影到唯一的 turn-level Harness。
+"""M35–M37 `/api/query`：把 HTTP 请求投影到唯一的 turn-level Harness。
 
 ★ API 不自行选择 Text2SQL、管理 checkpoint 或拼安全状态。它只解析 caller、注入依赖，
 再把 `AgentTurnResult` 单向投影成兼容响应与 JSONL Trace。
@@ -164,7 +164,7 @@ def _record_trace(
 
 @router.post("/query", response_model=AgentResponse)
 def query(request_body: QueryRequest, request: Request, db: Session = Depends(get_db)) -> AgentResponse:
-    """执行 M36 turn seam；旧单轮与新 pending/resume 都从同一 Harness module 投影。"""
+    """执行唯一 turn seam；旧单轮、clarification 和一次 follow-up 共用同一投影。"""
 
     started_at = perf_counter()
     trace_id = _trace_id(request)
@@ -180,6 +180,7 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
         force_new_pipeline=request_body.force_new_pipeline,
         schema_retrieval_profile=request_body.schema_retrieval_profile,
         schema_fusion_strategy=request_body.schema_fusion_strategy,
+        enable_bounded_follow_up=request_body.enable_bounded_follow_up,
     )
 
     # 步骤 2：DB Session、深 Tool 与可选 Schema index 仅属于本次 invoke 的 runtime context。
@@ -194,6 +195,8 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             thread_id=request_body.thread_id,
             expected_version=request_body.expected_version,
             clarification_answers=request_body.clarification_answers,
+            follow_up_action=request_body.follow_up_action,
+            follow_up_fields=request_body.follow_up_fields,
         ),
         runtime=runtime,
         checkpoint_manager=checkpoint_manager,

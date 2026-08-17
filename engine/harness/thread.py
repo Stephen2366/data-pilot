@@ -1,4 +1,4 @@
-"""M36 进程内 clarification checkpoint 与最小 Context Builder。
+"""M36/M37 进程内 clarification/follow-up checkpoint 与最小 Context Builder。
 
 方案 A 的核心不是“用字典记聊天”，而是把一个未完成任务做成有 owner、版本、过期时间和
 单调状态迁移的待办卡。外部只调用 create/resume/resolve/clear；锁、校验顺序和 Context
@@ -17,13 +17,24 @@ from typing import Callable, Literal, Mapping
 from uuid import uuid4
 
 from engine.governance import TrustedCaller
-from engine.harness.contracts import ClarificationSpec, HarnessRequest
+from engine.harness.contracts import (
+    AgentRunResult,
+    ClarificationFieldSpec,
+    ClarificationSpec,
+    FollowUpActionSpec,
+    FollowUpExecutionContext,
+    FollowUpSpec,
+    HarnessRequest,
+    KnowledgeRuntimeKind,
+)
+from engine.rag.evidence import EvidenceRef
+from engine.rag.answer_flow import AnswerEvidenceRequirement
 
-THREAD_STATE_VERSION = "m36-thread-v1"
+THREAD_STATE_VERSION = "m37-thread-v2"
 DEFAULT_THREAD_TTL_SECONDS = 900
 
-ThreadStatus = Literal["pending", "claimed", "resolved", "cleared"]
-ThreadAction = Literal["created", "resumed", "resolved", "cleared", "rejected"]
+ThreadStatus = Literal["pending", "claimed", "follow_up_ready", "follow_up_claimed", "resolved", "cleared"]
+ThreadAction = Literal["created", "resumed", "follow_up_created", "follow_up_claimed", "resolved", "cleared", "rejected"]
 ThreadSafety = Literal["passed", "blocked"]
 
 THREAD_REASON_CODES = frozenset(
@@ -40,6 +51,12 @@ THREAD_REASON_CODES = frozenset(
         "thread_checkpoint_failed",
         "state_version_incompatible",
         "budget_exhausted",
+        "follow_up_ready",
+        "follow_up_claimed",
+        "follow_up_invalid",
+        "follow_up_not_available",
+        "follow_up_budget_exhausted",
+        "follow_up_snapshot_invalid",
     }
 )
 
@@ -65,6 +82,23 @@ class PendingTask:
     schema_retrieval_profile: str
     schema_fusion_strategy: str
     clarification_spec: ClarificationSpec
+    enable_bounded_follow_up: bool = False
+
+
+@dataclass(frozen=True)
+class FollowUpTask:
+    """成功回答的最小任务/Evidence 快照；明确排除旧答案、rows、正文和 citation。"""
+
+    original_question: str
+    active_sql_role: str
+    force_new_pipeline: bool
+    schema_retrieval_profile: str
+    schema_fusion_strategy: str
+    route: Literal["sql", "rag"]
+    evidence_refs: tuple[EvidenceRef, ...]
+    requirement: AnswerEvidenceRequirement | None
+    knowledge_runtime_kind: KnowledgeRuntimeKind
+    follow_up_spec: FollowUpSpec
 
 
 @dataclass(frozen=True)
@@ -76,7 +110,7 @@ class PendingThreadCheckpoint:
     state_version: str
     version: int
     status: ThreadStatus
-    task: PendingTask
+    task: PendingTask | FollowUpTask
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
@@ -94,6 +128,8 @@ class ThreadProjection:
     status: ThreadStatus
     expires_at: datetime
     clarification: dict[str, object] | None = None
+    follow_up: dict[str, object] | None = None
+    follow_up_budget_remaining: int = 0
 
     def as_dict(self) -> dict[str, object]:
         """转换为 Pydantic/Trace 都能消费的 JSON-safe 字典。"""
@@ -105,6 +141,8 @@ class ThreadProjection:
             "status": self.status,
             "expires_at": self.expires_at.isoformat(),
             "clarification": self.clarification,
+            "follow_up": self.follow_up,
+            "follow_up_budget_remaining": self.follow_up_budget_remaining,
         }
 
 
@@ -121,6 +159,7 @@ class ThreadLifecycleFact:
     resume_count: int
     expires_at: datetime | None
     context_ref: str | None = None
+    follow_up_budget_remaining: int = 0
 
     def safe_projection(self) -> dict[str, object]:
         """形成长期 Trace 白名单投影。"""
@@ -135,6 +174,7 @@ class ThreadLifecycleFact:
             "resume_count": self.resume_count,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "context_ref": self.context_ref,
+            "follow_up_budget_remaining": self.follow_up_budget_remaining,
         }
 
 
@@ -145,6 +185,67 @@ class ResumeClaim:
     request: HarnessRequest
     projection: ThreadProjection
     lifecycle: ThreadLifecycleFact
+
+
+@dataclass(frozen=True)
+class FollowUpClaim:
+    """一次 follow-up 原子 claim 的闭合输出。"""
+
+    request: HarnessRequest
+    projection: ThreadProjection
+    lifecycle: ThreadLifecycleFact
+
+
+_SQL_FOLLOW_UP = FollowUpSpec(
+    identity="follow-up-sql-scope-v1",
+    actions=(
+        FollowUpActionSpec(
+            action="adjust_sql_scope",
+            label="调整统计范围",
+            fields=(
+                ClarificationFieldSpec("time_range", "时间范围", "time_range", max_length=80),
+                ClarificationFieldSpec(
+                    "group_by", "分组维度", "enum", allowed_values=("渠道", "商品", "退款原因"), max_length=20
+                ),
+            ),
+            requirement_equivalent=False,
+        ),
+    ),
+)
+
+_RAG_FOLLOW_UP = FollowUpSpec(
+    identity="follow-up-rag-evidence-v1",
+    actions=(
+        FollowUpActionSpec(
+            action="explain_same_evidence",
+            label="换一种方式解释同一规则",
+            fields=(
+                ClarificationFieldSpec(
+                    "style", "解释方式", "enum", allowed_values=("通俗说明", "分步说明"), max_length=20
+                ),
+            ),
+            requirement_equivalent=True,
+        ),
+        FollowUpActionSpec(
+            action="ask_related_evidence",
+            label="询问需要新证据的相关规则",
+            fields=(ClarificationFieldSpec("detail", "具体问题", "text", max_length=80),),
+            requirement_equivalent=False,
+        ),
+    ),
+)
+
+_FOLLOW_UP_CONTROL_TOKENS = (
+    "忽略之前",
+    "忽略系统",
+    "system prompt",
+    "调用tool",
+    "调用 tool",
+    "改走sql",
+    "改走 sql",
+    "route=",
+    "<tool_call",
+)
 
 
 class ClarificationContextBuilder:
@@ -198,7 +299,7 @@ class ClarificationContextBuilder:
 
 
 class ThreadCheckpointManager:
-    """M36 方案 A 的进程内 checkpoint 深 module。
+    """M36/M37 方案 A 的进程内 bounded checkpoint 深 module。
 
     单个 ``RLock`` 同时保护状态检查与 claim 写入，等价于一个很小的 compare-and-set。Graph
     执行在锁外发生：慢 Tool 不会阻塞其他 thread，但同一 version 已先标为 claimed，因而不会
@@ -227,7 +328,7 @@ class ThreadCheckpointManager:
         """返回可写入 Trace/Eval 的解析后运行身份。"""
 
         return {
-            "adapter": "inprocess-clarification-checkpoint-v1",
+            "adapter": "inprocess-bounded-thread-v2",
             "state_version": self._accepted_state_version,
             "ttl_seconds": self._ttl_seconds,
         }
@@ -252,6 +353,7 @@ class ThreadCheckpointManager:
                 schema_retrieval_profile=request.schema_retrieval_profile,
                 schema_fusion_strategy=request.schema_fusion_strategy,
                 clarification_spec=spec,
+                enable_bounded_follow_up=request.enable_bounded_follow_up,
             ),
             created_at=now,
             updated_at=now,
@@ -308,6 +410,7 @@ class ThreadCheckpointManager:
             force_new_pipeline=checkpoint.task.force_new_pipeline,
             schema_retrieval_profile=checkpoint.task.schema_retrieval_profile,
             schema_fusion_strategy=checkpoint.task.schema_fusion_strategy,
+            enable_bounded_follow_up=checkpoint.task.enable_bounded_follow_up,
         )
         return ResumeClaim(
             request=request,
@@ -320,13 +423,151 @@ class ThreadCheckpointManager:
             ),
         )
 
+    def create_follow_up_ready(
+        self,
+        request: HarnessRequest,
+        result: AgentRunResult,
+    ) -> tuple[ThreadProjection, ThreadLifecycleFact]:
+        """为显式 opt-in 的成功 turn 建立一张最多消费一次的 follow-up 卡。"""
+
+        task = self._follow_up_task(request, result)
+        if request.caller is None:
+            raise ThreadLifecycleError("conversation_unavailable", "无可信 caller", safety_status="blocked")
+        now = self._now()
+        checkpoint = PendingThreadCheckpoint(
+            thread_id=uuid4().hex,
+            owner_ref=self._owner_ref(request.caller),
+            state_version=THREAD_STATE_VERSION,
+            version=1,
+            status="follow_up_ready",
+            task=task,
+            created_at=now,
+            updated_at=now,
+            expires_at=now + timedelta(seconds=self._ttl_seconds),
+        )
+        with self._lock:
+            self._checkpoints[checkpoint.thread_id] = checkpoint
+        return self._projection(checkpoint), self._fact(
+            checkpoint, action="follow_up_created", reason_code="follow_up_ready", before=None
+        )
+
+    def promote_claimed_to_follow_up(
+        self,
+        thread_id: str,
+        *,
+        claimed_version: int,
+        request: HarnessRequest,
+        result: AgentRunResult,
+    ) -> tuple[ThreadProjection, ThreadLifecycleFact]:
+        """clarification 成功后在同一 owner/version 链上进入 follow-up-ready。"""
+
+        task = self._follow_up_task(request, result)
+        with self._lock:
+            checkpoint = self._checkpoints.get(thread_id)
+            if checkpoint is None or checkpoint.status != "claimed" or checkpoint.version != claimed_version:
+                raise ThreadLifecycleError("thread_version_conflict", "无法推进非当前 claimed checkpoint")
+            ready = replace(
+                checkpoint,
+                version=checkpoint.version + 1,
+                status="follow_up_ready",
+                task=task,
+                updated_at=self._now(),
+            )
+            self._checkpoints[thread_id] = ready
+        return self._projection(ready), self._fact(
+            ready, action="follow_up_created", reason_code="follow_up_ready", before=checkpoint.version
+        )
+
+    def claim_follow_up(
+        self,
+        *,
+        thread_id: str,
+        expected_version: int,
+        caller: TrustedCaller | None,
+        active_sql_role: str | None,
+        action: str,
+        fields: Mapping[str, str],
+        run_id: str,
+    ) -> FollowUpClaim:
+        """先校验 closed-world delta，再以 compare-and-set 消费唯一 follow-up 预算。"""
+
+        if caller is None:
+            raise ThreadLifecycleError("conversation_unavailable", "caller 不可信", safety_status="blocked")
+        with self._lock:
+            checkpoint = self._checkpoints.get(thread_id)
+            if checkpoint is None or not secrets.compare_digest(checkpoint.owner_ref, self._owner_ref(caller)):
+                raise ThreadLifecycleError(
+                    "conversation_unavailable", "thread 不存在或不属于当前 caller", safety_status="blocked"
+                )
+            self._validate_follow_up_claim(
+                checkpoint, expected_version=expected_version, active_sql_role=active_sql_role
+            )
+            task = checkpoint.task
+            if not isinstance(task, FollowUpTask):
+                raise ThreadLifecycleError("state_version_incompatible", "follow-up task 类型不兼容")
+            action_spec = next((item for item in task.follow_up_spec.actions if item.action == action), None)
+            if action_spec is None:
+                raise ThreadLifecycleError("follow_up_invalid", "action 不在服务端签发集合")
+            normalized = self._validated_fields(action_spec.fields, fields, reason_code="follow_up_invalid")
+            question = self._follow_up_question(task, action_spec, normalized)
+            context_ref = "context:" + sha256(
+                json.dumps(
+                    {"previous_route": task.route, "action": action, "fields": normalized},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+            claimed = replace(
+                checkpoint,
+                version=checkpoint.version + 1,
+                status="follow_up_claimed",
+                updated_at=self._now(),
+                resume_count=checkpoint.resume_count + 1,
+                context_ref=context_ref,
+            )
+            self._checkpoints[thread_id] = claimed
+
+        follow_up_context = FollowUpExecutionContext(
+            action=action,
+            previous_route=task.route,
+            requirement_equivalent=action_spec.requirement_equivalent,
+            previous_requirement=task.requirement,
+            current_requirement=(
+                task.requirement
+                if action_spec.requirement_equivalent
+                else AnswerEvidenceRequirement(max_claims=1)
+                if task.route == "rag"
+                else None
+            ),
+            old_evidence_refs=task.evidence_refs,
+            knowledge_runtime_kind=task.knowledge_runtime_kind,
+        )
+        request = HarnessRequest(
+            question=question,
+            run_id=run_id,
+            caller=caller,
+            active_sql_role=task.active_sql_role,
+            force_new_pipeline=task.force_new_pipeline,
+            schema_retrieval_profile=task.schema_retrieval_profile,
+            schema_fusion_strategy=task.schema_fusion_strategy,
+            follow_up_context=follow_up_context,
+        )
+        return FollowUpClaim(
+            request=request,
+            projection=self._projection(claimed),
+            lifecycle=self._fact(
+                claimed, action="follow_up_claimed", reason_code="follow_up_claimed", before=checkpoint.version
+            ),
+        )
+
     def resolve(self, thread_id: str, *, claimed_version: int) -> tuple[ThreadProjection, ThreadLifecycleFact]:
         """Graph 结束后把已 claim checkpoint 单调推进为 resolved。"""
 
         with self._lock:
             checkpoint = self._checkpoints.get(thread_id)
-            if checkpoint is None or checkpoint.status != "claimed" or checkpoint.version != claimed_version:
+            if checkpoint is None or checkpoint.status not in {"claimed", "follow_up_claimed"} or checkpoint.version != claimed_version:
                 raise ThreadLifecycleError("thread_version_conflict", "无法 resolve 非当前 claimed checkpoint")
+            was_follow_up = checkpoint.status == "follow_up_claimed"
             resolved = replace(
                 checkpoint,
                 version=checkpoint.version + 1,
@@ -335,7 +576,10 @@ class ThreadCheckpointManager:
             )
             self._checkpoints[thread_id] = resolved
         return self._projection(resolved), self._fact(
-            resolved, action="resolved", reason_code="clarification_resumed", before=checkpoint.version
+            resolved,
+            action="resolved",
+            reason_code="follow_up_claimed" if was_follow_up else "clarification_resumed",
+            before=checkpoint.version,
         )
 
     def clear(
@@ -382,6 +626,7 @@ class ThreadCheckpointManager:
             state_version=self._accepted_state_version,
             resume_count=0,
             expires_at=None,
+            follow_up_budget_remaining=0,
         )
 
     def _validate_resumable(
@@ -406,11 +651,133 @@ class ThreadCheckpointManager:
         if active_sql_role != checkpoint.task.active_sql_role:
             raise ThreadLifecycleError("thread_context_mismatch", "active role 与 pending task 不一致", safety_status="blocked")
 
+    def _validate_follow_up_claim(
+        self,
+        checkpoint: PendingThreadCheckpoint,
+        *,
+        expected_version: int,
+        active_sql_role: str | None,
+    ) -> None:
+        """按 M36 相同 owner/version/TTL 顺序检查 follow-up-ready。"""
+
+        if checkpoint.state_version != self._accepted_state_version:
+            raise ThreadLifecycleError("state_version_incompatible", "checkpoint state version 不兼容")
+        if checkpoint.status == "cleared":
+            raise ThreadLifecycleError("thread_cleared", "checkpoint 已清理")
+        if checkpoint.status in {"follow_up_claimed", "resolved", "claimed"}:
+            raise ThreadLifecycleError("follow_up_budget_exhausted", "follow-up 已消费")
+        if checkpoint.status != "follow_up_ready":
+            raise ThreadLifecycleError("follow_up_not_available", "当前 thread 不能追问")
+        if self._now() >= checkpoint.expires_at:
+            raise ThreadLifecycleError("thread_expired", "checkpoint 已过期")
+        if checkpoint.version != expected_version:
+            raise ThreadLifecycleError("thread_version_conflict", "checkpoint version 已变化")
+        task = checkpoint.task
+        if not isinstance(task, FollowUpTask) or active_sql_role != task.active_sql_role:
+            raise ThreadLifecycleError("thread_context_mismatch", "active role 与 follow-up task 不一致", safety_status="blocked")
+
+    @staticmethod
+    def _validated_fields(
+        specs: tuple[ClarificationFieldSpec, ...],
+        values: Mapping[str, str],
+        *,
+        reason_code: str,
+    ) -> dict[str, str]:
+        """复用 clarification 的字段纪律，但保留独立稳定 reason。"""
+
+        if set(values) != {field.key for field in specs}:
+            raise ThreadLifecycleError(reason_code, "follow-up fields 不闭合")
+        normalized: dict[str, str] = {}
+        for field in specs:
+            raw = values[field.key]
+            if not isinstance(raw, str):
+                raise ThreadLifecycleError(reason_code, "follow-up field 必须是字符串")
+            value = " ".join(raw.split())
+            if not value or len(value) > field.max_length:
+                raise ThreadLifecycleError(reason_code, "follow-up field 为空或过长")
+            if field.value_type == "enum" and value not in field.allowed_values:
+                raise ThreadLifecycleError(reason_code, "follow-up enum 不在允许集合")
+            lowered = value.lower().replace("　", " ")
+            if any(token in lowered for token in _FOLLOW_UP_CONTROL_TOKENS):
+                raise ThreadLifecycleError(reason_code, "follow-up field 包含控制指令")
+            normalized[field.key] = value
+        return normalized
+
+    @staticmethod
+    def _follow_up_question(
+        task: FollowUpTask,
+        action: FollowUpActionSpec,
+        fields: Mapping[str, str],
+    ) -> str:
+        """只用三个固定模板形成 current task，不执行自由文本 query rewrite。"""
+
+        original = task.original_question.rstrip("?？。 ")
+        if action.action == "adjust_sql_scope":
+            return f"查询{original}，时间范围为{fields['time_range']}，按{fields['group_by']}统计"
+        if action.action == "explain_same_evidence":
+            return f"请用{fields['style']}解释同一条规则：{original}"
+        if action.action == "ask_related_evidence":
+            return f"围绕原任务“{original}”，关于{fields['detail']}请说明相关规则。"
+        raise ThreadLifecycleError("follow_up_invalid", "未知 follow-up action")
+
+    @staticmethod
+    def _follow_up_task(request: HarnessRequest, result: AgentRunResult) -> FollowUpTask:
+        """从唯一成功结果建立不含业务内容的快照；任何缺口都失败关闭。"""
+
+        observation = result.observation
+        if (
+            not request.enable_bounded_follow_up
+            or request.caller is None
+            or request.active_sql_role is None
+            or result.route not in {"sql", "rag"}
+            or result.execution_status != "completed"
+            or result.answer_status != "complete"
+            or result.safety_status != "passed"
+            or observation is None
+            or not observation.evidence_refs
+        ):
+            raise ThreadLifecycleError("follow_up_snapshot_invalid", "结果不具备 follow-up 快照资格")
+        try:
+            refs = tuple(EvidenceRef(**item) for item in observation.evidence_refs)
+        except (TypeError, ValueError) as exc:
+            raise ThreadLifecycleError("follow_up_snapshot_invalid", "EvidenceRef 投影不闭合") from exc
+        runtime_kind: KnowledgeRuntimeKind = "not_applicable"
+        spec = _SQL_FOLLOW_UP
+        requirement = None
+        if result.route == "rag":
+            raw_kind = observation.diagnostics.get("knowledge_runtime_kind", "business_release")
+            if raw_kind not in {"business_release", "external_profile"}:
+                raise ThreadLifecycleError("follow_up_snapshot_invalid", "knowledge runtime kind 未登记")
+            runtime_kind = raw_kind
+            spec = _RAG_FOLLOW_UP
+            requirement = result.route_decision.requirement
+            if requirement is None:
+                raise ThreadLifecycleError("follow_up_snapshot_invalid", "RAG requirement 缺失")
+        return FollowUpTask(
+            original_question=request.question,
+            active_sql_role=request.active_sql_role,
+            force_new_pipeline=request.force_new_pipeline,
+            schema_retrieval_profile=request.schema_retrieval_profile,
+            schema_fusion_strategy=request.schema_fusion_strategy,
+            route=result.route,
+            evidence_refs=refs,
+            requirement=requirement,
+            knowledge_runtime_kind=runtime_kind,
+            follow_up_spec=spec,
+        )
+
     def _projection(self, checkpoint: PendingThreadCheckpoint) -> ThreadProjection:
         """仅向合法 caller 返回 raw id；resolved/cleared 不再暴露待补字段。"""
 
         clarification = (
-            checkpoint.task.clarification_spec.safe_projection() if checkpoint.status == "pending" else None
+            checkpoint.task.clarification_spec.safe_projection()
+            if checkpoint.status == "pending" and isinstance(checkpoint.task, PendingTask)
+            else None
+        )
+        follow_up = (
+            checkpoint.task.follow_up_spec.safe_projection()
+            if checkpoint.status == "follow_up_ready" and isinstance(checkpoint.task, FollowUpTask)
+            else None
         )
         return ThreadProjection(
             thread_id=checkpoint.thread_id,
@@ -419,6 +786,8 @@ class ThreadCheckpointManager:
             status=checkpoint.status,
             expires_at=checkpoint.expires_at,
             clarification=clarification,
+            follow_up=follow_up,
+            follow_up_budget_remaining=1 if checkpoint.status == "follow_up_ready" else 0,
         )
 
     def _fact(
@@ -441,6 +810,7 @@ class ThreadCheckpointManager:
             resume_count=checkpoint.resume_count,
             expires_at=checkpoint.expires_at,
             context_ref=checkpoint.context_ref,
+            follow_up_budget_remaining=1 if checkpoint.status == "follow_up_ready" else 0,
         )
 
     def _now(self) -> datetime:

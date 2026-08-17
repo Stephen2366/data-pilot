@@ -1,8 +1,8 @@
-"""M36 turn-level Harness seam：统一单轮、pending、resume 与 lifecycle 拒绝。
+"""M36/M37 turn-level Harness seam：统一单轮、clarification、follow-up 与拒绝。
 
 API 只调用 ``run_turn``，不直接创建 checkpoint、合并问题或拼四轴。这样 M35 的 compiled
-Graph 仍是业务 route/Tool/controller，而 M36 只在它外面增加一次 pre-Tool clarification
-lifecycle；两层不会各自生成业务答案。
+Graph 仍是业务 route/Tool/controller；外层只管理 pre-Tool clarification 和一次 bounded
+follow-up lifecycle，两层不会各自生成业务答案。
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from engine.harness.thread import (
     ThreadProjection,
 )
 
-TurnAction = Literal["initial", "resume", "rejected"]
+TurnAction = Literal["initial", "resume", "follow_up", "rejected"]
 
 
 @dataclass(frozen=True)
@@ -31,15 +31,23 @@ class TurnRequest:
     thread_id: str | None = None
     expected_version: int | None = None
     clarification_answers: Mapping[str, str] = field(default_factory=dict)
+    follow_up_action: str | None = None
+    follow_up_fields: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """区分 initial/resume 并拒绝缺字段的半截恢复请求。"""
 
-        is_resume = self.thread_id is not None
-        if is_resume != (self.expected_version is not None):
+        has_thread = self.thread_id is not None
+        if has_thread != (self.expected_version is not None):
             raise ValueError("thread_id 与 expected_version 必须同时提供")
-        if is_resume != bool(self.clarification_answers):
-            raise ValueError("resume 必须提供 clarification_answers；initial turn 不得提供")
+        is_resume = bool(self.clarification_answers)
+        is_follow_up = self.follow_up_action is not None
+        if is_resume and is_follow_up:
+            raise ValueError("clarification resume 与 follow-up 不能同时提交")
+        if has_thread != (is_resume or is_follow_up):
+            raise ValueError("thread turn 必须提交 clarification answers 或 follow-up action")
+        if not is_follow_up and self.follow_up_fields:
+            raise ValueError("initial/resume 不得提供 follow-up fields")
         if self.expected_version is not None and self.expected_version <= 0:
             raise ValueError("expected_version 必须为正数")
 
@@ -85,6 +93,8 @@ def run_turn(
 
     if request.thread_id is None:
         return _run_initial(request.harness_request, runtime=runtime, checkpoint_manager=checkpoint_manager)
+    if request.follow_up_action is not None:
+        return _run_follow_up(request, runtime=runtime, checkpoint_manager=checkpoint_manager)
     return _run_resume(request, runtime=runtime, checkpoint_manager=checkpoint_manager)
 
 
@@ -132,12 +142,13 @@ def _run_initial(
 
     result = run_harness(request=request, runtime=runtime)
     if result.answer_status != "clarification_required":
-        return AgentTurnResult(
+        turn = AgentTurnResult(
             result=result,
             turn_action="initial",
             graph_invocation_count=1,
             checkpoint_runtime=checkpoint_manager.runtime_identity,
         )
+        return _attach_initial_follow_up(turn, request=request, checkpoint_manager=checkpoint_manager)
 
     spec = result.route_decision.clarification_spec
     if spec is None:  # RouteDecision 自身会拒绝该状态；保留防御以防未来反序列化绕过 dataclass。
@@ -213,10 +224,18 @@ def _run_resume(
     if result.answer_status == "clarification_required":
         result = _budget_exhausted_result(result)
     try:
-        projection, lifecycle = checkpoint_manager.resolve(
-            thread_id,
-            claimed_version=claim.projection.checkpoint_version,
-        )
+        if claim.request.enable_bounded_follow_up and _is_follow_up_eligible(result):
+            projection, lifecycle = checkpoint_manager.promote_claimed_to_follow_up(
+                thread_id,
+                claimed_version=claim.projection.checkpoint_version,
+                request=claim.request,
+                result=result,
+            )
+        else:
+            projection, lifecycle = checkpoint_manager.resolve(
+                thread_id,
+                claimed_version=claim.projection.checkpoint_version,
+            )
         # 一个 resume turn 对外记录 pending version → resolved version，内部 claimed 版本不让
         # 调用者拼接；这样 Trace 可以直接证明整个 turn 只消费了一次执行权。
         lifecycle = replace(lifecycle, version_before=claim.lifecycle.version_before)
@@ -237,6 +256,102 @@ def _run_resume(
         lifecycle=lifecycle,
         checkpoint_runtime=checkpoint_manager.runtime_identity,
     )
+
+
+def _run_follow_up(
+    request: TurnRequest,
+    *,
+    runtime: HarnessRuntime,
+    checkpoint_manager: ThreadCheckpointManager,
+) -> AgentTurnResult:
+    """消费一次 follow-up 预算；拒绝发生在 Graph 前，accepted 仍恰好一次 Graph。"""
+
+    harness_request = request.harness_request
+    thread_id = request.thread_id or ""
+    try:
+        claim = checkpoint_manager.claim_follow_up(
+            thread_id=thread_id,
+            expected_version=request.expected_version or 0,
+            caller=harness_request.caller,
+            active_sql_role=harness_request.active_sql_role,
+            action=request.follow_up_action or "",
+            fields=request.follow_up_fields,
+            run_id=harness_request.run_id,
+        )
+    except ThreadLifecycleError as exc:
+        return AgentTurnResult(
+            result=_lifecycle_failure_result(
+                reason_code=exc.reason_code,
+                safety_status=exc.safety_status,
+                caller_safe_ref=harness_request.caller.audit_ref if harness_request.caller else None,
+            ),
+            turn_action="rejected",
+            graph_invocation_count=0,
+            lifecycle=checkpoint_manager.lifecycle_rejection(thread_id=thread_id, error=exc),
+            checkpoint_runtime=checkpoint_manager.runtime_identity,
+        )
+
+    result = run_harness(request=claim.request, runtime=runtime)
+    # follow-up action 已冻结 route；Router 若给出另一 route 或再次澄清，必须停止，不能跨 Tool 补救。
+    expected_route = claim.request.follow_up_context.previous_route if claim.request.follow_up_context else None
+    if result.route != expected_route or result.answer_status == "clarification_required":
+        result = _lifecycle_failure_result(
+            reason_code="follow_up_invalid",
+            safety_status="passed",
+            caller_safe_ref=result.caller_safe_ref,
+            graph_steps=result.graph_steps,
+        )
+    try:
+        projection, lifecycle = checkpoint_manager.resolve(
+            thread_id, claimed_version=claim.projection.checkpoint_version
+        )
+        lifecycle = replace(lifecycle, version_before=claim.lifecycle.version_before)
+    except ThreadLifecycleError:
+        result = _lifecycle_failure_result(
+            reason_code="thread_checkpoint_failed",
+            safety_status="passed",
+            caller_safe_ref=result.caller_safe_ref,
+            graph_steps=result.graph_steps,
+        )
+        projection, lifecycle = claim.projection, claim.lifecycle
+    return AgentTurnResult(
+        result=result,
+        turn_action="follow_up",
+        graph_invocation_count=1,
+        thread=projection,
+        lifecycle=lifecycle,
+        checkpoint_runtime=checkpoint_manager.runtime_identity,
+    )
+
+
+def _is_follow_up_eligible(result: AgentRunResult) -> bool:
+    """只有完整、安全且带 Evidence 的 SQL/RAG 结果可以签发追问。"""
+
+    return bool(
+        result.route in {"sql", "rag"}
+        and result.execution_status == "completed"
+        and result.answer_status == "complete"
+        and result.safety_status == "passed"
+        and result.observation is not None
+        and result.observation.evidence_refs
+    )
+
+
+def _attach_initial_follow_up(
+    turn: AgentTurnResult,
+    *,
+    request: HarnessRequest,
+    checkpoint_manager: ThreadCheckpointManager,
+) -> AgentTurnResult:
+    """附加 checkpoint 失败不篡改已经真实完成的业务结果。"""
+
+    if not request.enable_bounded_follow_up or not _is_follow_up_eligible(turn.result):
+        return turn
+    try:
+        projection, lifecycle = checkpoint_manager.create_follow_up_ready(request, turn.result)
+    except ThreadLifecycleError:
+        return turn
+    return replace(turn, thread=projection, lifecycle=lifecycle)
 
 
 def _budget_exhausted_result(previous: AgentRunResult) -> AgentRunResult:
@@ -298,5 +413,9 @@ def _public_message(reason_code: str) -> str:
         "state_version_incompatible": "当前对话版本不兼容，请重新发起请求。",
         "budget_exhausted": "补充后仍无法确定任务，本次恢复已停止。",
         "thread_checkpoint_failed": "当前对话状态无法安全保存或更新，请重新发起请求。",
+        "follow_up_invalid": "追问动作或字段不符合当前任务允许的范围。",
+        "follow_up_not_available": "当前任务没有可用的追问状态，请重新发起请求。",
+        "follow_up_budget_exhausted": "本次有限追问已经使用，不能再次执行。",
+        "follow_up_snapshot_invalid": "当前结果无法安全建立追问状态。",
     }
     return messages.get(reason_code, "当前请求无法安全完成，请重新发起请求。")

@@ -1,4 +1,4 @@
-"""M35 将既有 Text2SQL / RAG 深 module 适配为统一 ToolObservation。"""
+"""M35–M37 将 Text2SQL/RAG 深 module 适配为统一 ToolObservation。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 import json
 from time import perf_counter
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,7 @@ from engine.nl2sql.generator import LLMGenerationError, generate_sql
 from engine.nl2sql.pipeline import Text2SQLPipelineResult, run_text2sql_pipeline
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.nl2sql.templates import match_template
-from engine.rag.answer_flow import RAGAnswerFlow, RAGAnswerRequest
+from engine.rag.answer_flow import AnswerEvidenceRequirement, RAGAnswerFlow, RAGAnswerRequest
 from engine.rag.evidence import EvidenceLedger, make_sql_evidence
 from engine.sql_guard.guard import validate_readonly_sql
 from engine.sql_guard.precheck import looks_like_dangerous_sql
@@ -189,6 +189,17 @@ def _sql_observation(
     ledger = ledger.transition(evidence_ids=(evidence.ref.evidence_id,), to_stage="selected")
     ledger = ledger.transition(evidence_ids=(evidence.ref.evidence_id,), to_stage="generation_visible")
     answer = _build_answer(answer_hint, result.rows)
+    diagnostics: dict[str, Any] = {"result_fingerprint": fingerprint}
+    if request.follow_up_context is not None:
+        diagnostics["evidence_validity"] = {
+            "runtime_kind": "not_applicable",
+            "requirement_equivalent": False,
+            "decision": "reacquired",
+            "reason": "sql_has_no_snapshot",
+            "old_new_relation": "changed" if any(
+                ref.content_identity != fingerprint for ref in request.follow_up_context.old_evidence_refs
+            ) else "unchanged_but_fresh_query",
+        }
     return ToolObservation(
         tool_name="text2sql",
         route="sql",
@@ -206,7 +217,7 @@ def _sql_observation(
         trace_steps=tuple(trace_steps),
         evidence_refs=(evidence.ref.audit_projection(),),
         ledger_projection=ledger.safe_projection(),
-        diagnostics={"result_fingerprint": fingerprint},
+        diagnostics=diagnostics,
         sql_time_ms=result.sql_time_ms,
         langfuse_trace_id=lifecycle.get("trace_id"),
         langfuse_trace_url=lifecycle.get("trace_url"),
@@ -338,20 +349,56 @@ class Text2SQLToolAdapter:
 
 
 class RAGToolAdapter:
-    """只调用 `RAGAnswerFlow.run()`；Graph 不接触 Knowledge/Gate/Composer 内部细节。"""
+    """只调用 `RAGAnswerFlow.run()`；含 M37 runtime 隔离但不泄露 RAG 内部控制。"""
 
-    def __init__(self, *, answer_flow: RAGAnswerFlow | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        answer_flow: RAGAnswerFlow | None = None,
+        knowledge_runtime_kind: Literal["business_release", "external_profile"] = "business_release",
+    ) -> None:
         self._answer_flow = answer_flow or RAGAnswerFlow()
+        self._knowledge_runtime_kind = knowledge_runtime_kind
 
     def run(self, request: HarnessRequest) -> ToolObservation:
         """把已经闭合的 AnswerFlow 四轴结果原样映射到 ToolObservation。"""
 
         if request.caller is None:
             raise ValueError("未解析 caller 不得进入 RAG Tool")
+        follow_up = request.follow_up_context
+        if (
+            follow_up is not None
+            and follow_up.knowledge_runtime_kind != self._knowledge_runtime_kind
+        ):
+            raise ValueError("follow-up knowledge runtime 与旧 Evidence 不一致")
+        requirement = (
+            follow_up.current_requirement
+            if follow_up is not None and follow_up.current_requirement is not None
+            else AnswerEvidenceRequirement()
+        )
         result = self._answer_flow.run(
-            RAGAnswerRequest(question=request.question, caller=request.caller, run_id=request.run_id)
+            RAGAnswerRequest(
+                question=request.question,
+                caller=request.caller,
+                run_id=request.run_id,
+                requirement=requirement,
+                knowledge_runtime_kind=self._knowledge_runtime_kind,
+                prior_evidence_refs=follow_up.old_evidence_refs if follow_up is not None else (),
+                requirement_equivalent=follow_up.requirement_equivalent if follow_up is not None else False,
+            )
         )
         safe = result.safe_projection()
+        diagnostics = dict(safe["diagnostics"])
+        diagnostics["knowledge_runtime_kind"] = self._knowledge_runtime_kind
+        validity = dict(safe["evidence_validity"])
+        if follow_up is not None:
+            validity["previous_requirement_identity"] = (
+                follow_up.previous_requirement.identity if follow_up.previous_requirement else None
+            )
+            validity["current_requirement_identity"] = (
+                follow_up.current_requirement.identity if follow_up.current_requirement else None
+            )
+        diagnostics["evidence_validity"] = validity
         status = "success" if result.execution_status == "completed" and result.safety_status == "passed" else (
             "blocked" if result.safety_status == "blocked" else "error"
         )
@@ -374,7 +421,7 @@ class RAGToolAdapter:
             tool_calls=(tool_call,),
             evidence_refs=tuple(item["ref"] for item in safe["ledger"]["evidence"]),
             ledger_projection=safe["ledger"],
-            diagnostics=safe["diagnostics"],
+            diagnostics=diagnostics,
             blocked_reason=("当前身份无权访问相关文档。" if result.safety_status == "blocked" else None),
             error_type=None if result.safety_status == "passed" else result.reason_code,
         )

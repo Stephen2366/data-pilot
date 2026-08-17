@@ -32,7 +32,7 @@ alembic/                # 数据库迁移
   versions/             # Alembic migration 版本
 
 engine/                 # 通用引擎，换行业不用改
-  harness/              # 顶层单轮 LangGraph Harness（M35）
+  harness/              # 顶层 LangGraph Harness 与有界 turn/thread 控制（M35–M37）
   router/               # 意图路由（SQL / RAG / 混合）（暂无此文件夹）
   nl2sql/               # NL2SQL 流水线
   sql_guard/            # SQL 沙箱安全

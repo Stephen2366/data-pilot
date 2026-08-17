@@ -9,7 +9,7 @@
 | 目标 | 环境变量 | 说明 |
 |---|---|---|
 | 默认 Qwen 主链路 | `LLM_PROVIDER=qwen`；`QWEN_MODEL=qwen3.7-plus` | 当前默认。Qwen provider 读取 `QWEN_MODEL`，不是 `LLM_MODEL`。`.env` 中的 `LLM_MODEL=deepseek-v4-flash` 仅作为显式切回 DeepSeek 时的备用入口。 |
-| API Text2SQL 路径 | 默认 `force_new_pipeline=true`；显式 `false` | `/api/query` 先进入 M36 turn seam；accepted turn 再恰好调用一次 M35 Graph。路由为 SQL 后，Text2SQL Tool 默认走 Schema Retrieval → QueryPlan → SQL Guard 新链路。显式 `false` 只让该 Tool 走 legacy baseline，不绕过 turn/Harness。 |
+| API Text2SQL 路径 | 默认 `force_new_pipeline=true`；显式 `false` | `/api/query` 先进入 M37 turn seam；accepted initial/resume/follow-up 再恰好调用一次 M35 Graph。路由为 SQL 后，Text2SQL Tool 默认走 Schema Retrieval → QueryPlan → SQL Guard 新链路。显式 `false` 只让该 Tool 走 legacy baseline，不绕过 turn/Harness。 |
 | DeepSeek 主模型对照 | `LLM_PROVIDER=deepseek`；`LLM_MODEL=deepseek-v4-flash` | 显式切换时使用；`LLM_MODEL` 在现有代码语义里主要服务 DeepSeek provider。 |
 | LLM 可靠性配置 | `LLM_TIMEOUT_SECONDS=45`；`LLM_MAX_RETRIES=0`；`LLM_RETRY_BACKOFF_SECONDS=1` | M25 默认不自动重试。只对明确标记为 transient 的 timeout / 网络 / 429 / 5xx 生效；聚焦实验在当前 shell 临时覆盖，不直接改 `.env` 默认。 |
 | Legacy L3 judge | `EVAL_JUDGE_MODEL=<模型名>` | 仅服务冻结旧 runner 语义；当前 M27 CLI 不提供 `--judge-model`，也不把 LLM-as-Judge 作为默认裁决器。 |
@@ -18,14 +18,15 @@
 
 | 目标 | 配置 / 入口 | 说明 |
 |---|---|---|
-| M36 turn seam | `POST /api/query` | initial、pending 和一次 resume 共用同一入口。普通/accepted turn 恰好调用一次 M35 Graph；thread lifecycle 前置拒绝调用零次 Graph，每个 accepted turn 至多一个 Text2SQL 或 RAG Tool。 |
+| M37 turn seam | `POST /api/query` | initial、pending/resume 和一次 follow-up 共用同一入口。普通/accepted turn 恰好调用一次 M35 Graph；thread lifecycle 前置拒绝调用零次 Graph，每个 accepted turn 至多一个 Text2SQL 或 RAG Tool。 |
 | 结构化 resume | 请求同时提供 `thread_id`、`expected_version`、`clarification_answers` | 三项必须成组出现；只接受 checkpoint 声明的闭集字段。一次恢复后仍不明确时以 budget stop 结束，不创建嵌套 pending。 |
+| 显式一次 follow-up | initial 请求设置 `enable_bounded_follow_up=true`；后续提交 `thread_id`、`expected_version`、`follow_up_action`、`follow_up_fields` | 只有成功 SQL/RAG 才返回服务端 closed-world spec。SQL `adjust_sql_scope` 每次重查；业务 RAG `explain_same_evidence` 可按当前 active identity 重新授权并重水化，`ask_related_evidence` 重检索；external RAG 总是重检索。只能成功消费一次。 |
 | 显式 clear | `DELETE /api/query/threads/{thread_id}?user_role=<role>&expected_version=<version>` | clear 不调用 Graph/Tool，但会记录 lifecycle Trace；thread id 本身不能授权操作。 |
-| 进程内 checkpoint | `THREAD_CHECKPOINT_TTL_SECONDS=900` | `inprocess-clarification-checkpoint-v1` 只保存 pre-Tool pending clarification；owner 绑定可信 caller + tenant/active role。重启或多 worker 不恢复/共享。 |
+| 进程内 checkpoint | `THREAD_CHECKPOINT_TTL_SECONDS=900` | runtime `inprocess-bounded-thread-v2`、state `m37-thread-v2`；只保存 pending clarification 或成功结果的最小 task/EvidenceRef/spec/budget，不保存旧 answer/rows/正文/citation。owner 绑定可信 caller + tenant/active role；重启或多 worker 不恢复/共享。 |
 | Fixture Caller resolver | `APP_ENV=local`、`demo` 或 `test` | 只有这三个环境会由应用启动过程注入 fixture resolver，供本地演示和测试使用；请求中的 `user_role` 只选择 fixture 身份，不能自行授权。 |
 | 无 Caller resolver | 其他 `APP_ENV`，或应用未注入 resolver | Graph 的 route 节点直接生成 `caller_untrusted`，不调用业务 Router adapter 或 Tool，返回 blocked / no-answer。生产接线必须显式提供真实认证 resolver。 |
 
-最小 initial 请求仍兼容旧形状：`{"question":"这个怎么处理？","user_role":"ops"}`。若响应返回 pending thread，resume 形状为 `{"question":"补充条件","user_role":"ops","thread_id":"<id>","expected_version":1,"clarification_answers":{"subject":"退款政策"}}`；字段名和值域以响应中的 clarification spec 为准。
+最小 initial 请求仍兼容旧形状：`{"question":"这个怎么处理？","user_role":"ops"}`。若响应返回 pending thread，resume 形状为 `{"question":"补充条件","user_role":"ops","thread_id":"<id>","expected_version":1,"clarification_answers":{"subject":"退款政策"}}`。要开启一次追问，在成功 initial 中增加 `"enable_bounded_follow_up":true`，再严格按响应 `follow_up.actions[].fields` 提交，例如 SQL：`{"question":"执行结构化追问","user_role":"ops","thread_id":"<id>","expected_version":1,"follow_up_action":"adjust_sql_scope","follow_up_fields":{"time_range":"2026年7月","group_by":"商品"}}`。客户端不能自行声明 Evidence 等价性，也不能添加 spec 外字段。
 
 ## Schema Retrieval / Embedding 链路
 
@@ -42,7 +43,7 @@
 | 目标 | 环境变量 / 命令 | 说明 |
 |---|---|---|
 | 本地 JSONL trace | M27 默认写入 `eval/traces/`，可用 `--trace-dir eval/traces` 指定目录 | 默认不依赖 LangFuse；JSONL 默认不提交。 |
-| `/api/query` M36 Trace | 默认 `eval/traces/traces.jsonl` | 记录 `turn_action`、不可逆 thread/context ref、checkpoint 版本迁移、Graph 次数和公开结果；不记录 raw thread id、clarification answer value 或 checkpoint dump。clear/rejected 也各写一条 lifecycle Trace。 |
+| `/api/query` M37 Trace | 默认 `eval/traces/traces.jsonl` | 记录 `turn_action`、不可逆 thread/context ref、checkpoint 版本迁移、Graph/Tool 次数及安全 Evidence validity/reacquisition reason；不记录 raw thread id、clarification/follow-up 字段值、旧 answer/rows/正文/citation 或 checkpoint dump。clear/rejected 也各写一条 lifecycle Trace。 |
 | 本地 M27 eval | `LANGFUSE_ENABLED=false`；按下方 selector 命令运行 | completed EvalRun JSON + Markdown report 是新事实源；M27 不生成旧 triage JSON。 |
 | LangFuse Cloud trace/score | `LANGFUSE_ENABLED=true`，必要时 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` | Cloud 仍是旁路增强；M27 当前只构造严格 allowlist assertion payload，实际上传需显式授权，不能影响本地 EvalRun。 |
 | LangFuse smoke | `python scripts\smoke_phase3b_langfuse.py`；Cloud 硬门禁加 `--require-langfuse` | M18 的主验证入口，用于 API / JSONL / trace mapping / score / visibility。 |

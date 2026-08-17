@@ -259,4 +259,3 @@ def test_explicit_clear_prevents_resume_without_graph() -> None:
         checkpoint_manager=manager,
     )
     assert (rejected.graph_invocation_count, rejected.result.reason_code) == (0, "thread_cleared")
-

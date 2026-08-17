@@ -1,7 +1,8 @@
-"""M35/M36 顶层 Harness。
+"""M35–M37 顶层 Harness。
 
 ``run_harness`` 保留 M35 单轮兼容；M36 的 ``run_turn`` 在外侧增加一次 clarification
-checkpoint lifecycle。SQL 和 RAG 的复杂流程仍留在各自深 module。
+checkpoint lifecycle；M37 在同一 turn seam 增加显式 opt-in 的一次 Evidence follow-up。
+SQL 和 RAG 的复杂流程仍留在各自深 module。
 """
 
 from engine.harness.graph import HarnessRuntime, build_harness, run_harness

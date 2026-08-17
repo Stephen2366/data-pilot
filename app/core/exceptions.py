@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from app.schemas.common import ErrorResponse
@@ -101,6 +102,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     # 第 1 层：业务异常。抛出哪个子类，就用它自带的 code / message / status_code。
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+        """把显式业务异常映射为其声明的 HTTP 状态和安全 details。"""
+
         return error_response(
             status_code=exc.status_code,
             code=exc.code,
@@ -114,17 +117,23 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        """把 FastAPI/Pydantic 校验错误编码成稳定的 422 JSON。"""
+
         return error_response(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             code=ValidationAppError.code,
             message=ValidationAppError.message,
             trace_id=get_trace_id(request),
-            details=exc.errors(),
+            # Pydantic v2 的 model_validator 会把原始 ValueError 放进 ctx；先走 FastAPI
+            # encoder 才能稳定输出 422，不能让“请求形状非法”反而升级成 JSON 500。
+            details=jsonable_encoder(exc.errors()),
         )
 
     # 第 3 层：未知异常兜底。对外只说 internal_error，细节留在服务端日志里排查。
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        """未知异常只公开固定错误码，避免把服务端细节泄露给调用方。"""
+
         return error_response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             code="internal_error",

@@ -1,4 +1,4 @@
-"""M35 Harness 的最小跨节点合同。
+"""M35–M37 Harness 的最小跨节点/turn 合同。
 
 ★ 这些 dataclass 是 Graph state 中可审计的“事实卡片”，而不是把 SQL/RAG 内部对象塞进顶层
 State 的万能袋。调用者只需要认识请求、route 决定、Tool Observation 和最终结果四种对象。
@@ -12,6 +12,7 @@ from typing import Any, Literal
 from app.schemas.agent import ToolCallTrace
 from engine.governance import TrustedCaller
 from engine.rag.answer_flow import AnswerEvidenceRequirement
+from engine.rag.evidence import EvidenceRef
 from engine.trace.recorder import TraceStep
 
 Route = Literal["sql", "rag", "none"]
@@ -22,6 +23,7 @@ AnswerStatus = Literal[
 SafetyStatus = Literal["passed", "blocked"]
 TerminationAction = Literal["answer", "clarify", "unsupported", "blocked", "failed"]
 ClarificationValueType = Literal["text", "time_range", "enum"]
+KnowledgeRuntimeKind = Literal["business_release", "external_profile", "not_applicable"]
 
 
 class HarnessContractError(ValueError):
@@ -97,6 +99,89 @@ class ClarificationSpec:
 
 
 @dataclass(frozen=True)
+class FollowUpActionSpec:
+    """成功回答后由服务端签发的一种 closed-world 追问动作。"""
+
+    action: Literal["adjust_sql_scope", "explain_same_evidence", "ask_related_evidence"]
+    label: str
+    fields: tuple[ClarificationFieldSpec, ...]
+    requirement_equivalent: bool
+
+    def __post_init__(self) -> None:
+        """动作与等价性由代码冻结，客户端不能自行声明 Evidence 可复用。"""
+
+        if not self.label.strip() or len({field.key for field in self.fields}) != len(self.fields):
+            raise HarnessContractError("follow-up action spec 非法")
+        if self.action == "explain_same_evidence" and not self.requirement_equivalent:
+            raise HarnessContractError("同 Evidence 解释动作必须声明 requirement 等价")
+        if self.action != "explain_same_evidence" and self.requirement_equivalent:
+            raise HarnessContractError("只有同 Evidence 解释动作可以声明 requirement 等价")
+
+    def safe_projection(self) -> dict[str, Any]:
+        """公开动作和字段说明，不公开旧任务值或 Evidence identity。"""
+
+        return {
+            "action": self.action,
+            "label": self.label,
+            "fields": [field.safe_projection() for field in self.fields],
+        }
+
+
+@dataclass(frozen=True)
+class FollowUpSpec:
+    """一个成功 SQL/RAG 结果允许消费的一次追问动作集合。"""
+
+    identity: str
+    actions: tuple[FollowUpActionSpec, ...]
+
+    def __post_init__(self) -> None:
+        """拒绝空集合和重复 action，避免 API 临时发明行为。"""
+
+        action_names = [item.action for item in self.actions]
+        if not self.identity.strip() or not action_names or len(action_names) != len(set(action_names)):
+            raise HarnessContractError("follow-up spec 必须非空且 action 唯一")
+
+    def safe_projection(self) -> dict[str, Any]:
+        """返回客户端可据以渲染表单的安全视图。"""
+
+        return {"identity": self.identity, "actions": [item.safe_projection() for item in self.actions]}
+
+
+@dataclass(frozen=True)
+class FollowUpExecutionContext:
+    """仅交给本轮深 Tool 的旧证据审计坐标，不包含旧答案、rows 或正文。"""
+
+    action: str
+    previous_route: Literal["sql", "rag"]
+    requirement_equivalent: bool
+    previous_requirement: AnswerEvidenceRequirement | None
+    current_requirement: AnswerEvidenceRequirement | None
+    old_evidence_refs: tuple[EvidenceRef, ...]
+    knowledge_runtime_kind: KnowledgeRuntimeKind
+
+    def __post_init__(self) -> None:
+        """禁止跨 route/跨 runtime 伪造可复用上下文。"""
+
+        if not self.action.strip() or not self.old_evidence_refs:
+            raise HarnessContractError("follow-up execution context 缺少 action/EvidenceRef")
+        expected_kind = "sql" if self.previous_route == "sql" else "document"
+        if any(ref.evidence_kind != expected_kind for ref in self.old_evidence_refs):
+            raise HarnessContractError("follow-up route 与旧 Evidence kind 不一致")
+        if self.previous_route == "sql" and self.knowledge_runtime_kind != "not_applicable":
+            raise HarnessContractError("SQL follow-up 不得声明 knowledge runtime")
+        if self.previous_route == "rag" and self.previous_requirement is None:
+            raise HarnessContractError("RAG follow-up 必须携带服务端旧 requirement")
+        if self.previous_route == "rag" and self.current_requirement is None:
+            raise HarnessContractError("RAG follow-up 必须形成服务端新 requirement")
+        if self.previous_route == "rag" and self.previous_requirement and self.current_requirement:
+            identities_equal = self.previous_requirement.identity == self.current_requirement.identity
+            if identities_equal != self.requirement_equivalent:
+                raise HarnessContractError("follow-up requirement identity 与等价声明不一致")
+        if self.previous_route == "sql" and (self.previous_requirement is not None or self.current_requirement is not None):
+            raise HarnessContractError("SQL follow-up 不得携带 RAG requirement")
+
+
+@dataclass(frozen=True)
 class HarnessRequest:
     """一次单轮运行的安全输入。
 
@@ -111,6 +196,8 @@ class HarnessRequest:
     force_new_pipeline: bool = True
     schema_retrieval_profile: str = "default"
     schema_fusion_strategy: str = "weighted"
+    enable_bounded_follow_up: bool = False
+    follow_up_context: FollowUpExecutionContext | None = None
 
     def __post_init__(self) -> None:
         """保证 Graph identity 与当前问题非空。"""

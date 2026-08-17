@@ -66,6 +66,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - M31–M33 的 trusted caller、ACL 双检、Evidence ledger、active revision、outbound policy、Answer Gate 和 Citation Validator 均保留；external adapter 不能绕过。
 - 方案 B 的 `ClaimDraft` 为自然语言 `text` + 同一 Evidence 中逐字存在的 `support_text` + `evidence_id` + `anchor`。只允许 whitespace canonicalization，不做 fuzzy/semantic support 放行。
 - M34 Composer identity 为 `rag-qwen-evidence-support-nonthinking-unbounded-v4`：`enable_thinking=false`，应用层不发送 `max_tokens`；provider 服务端限制仍在。该配置只属于 M34 external Answer Eval，不是业务默认 Composer。
+- M37 在成功 RAG turn 外增加一次显式 opt-in follow-up。只有 22 条业务 release 的同 requirement 解释动作，才可重新加载当前 active 原件并精确核对 authority/revision/content/anchor、重新执行 ACL/用途授权后重建本轮 Evidence；identity/requirement 变化走同一 Knowledge Tool 一次。external profile 每次 follow-up 都重新检索，不进入业务 rehydrate seam。
 
 ## 当前评测结论
 
@@ -92,13 +93,14 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 - M33 `phase4-rag-answer-v1`：9 Scenario / 60 required，证明确定性抽取式回答与 citation 闭环。
 - M35 `phase4-harness-v1`：5 Scenario / 全 required，证明顶层单轮 Harness 的唯一路由、至多一个 Tool、保守终止与 Caller 失败关闭合同。
 - M36 `phase4-harness-turn-v1`：8 组 sequence，证明 initial pending → 一次 resume/clear、owner/version/TTL/concurrency/budget stop 和安全 Trace；Graph 本身仍无 checkpoint。
+- M37 `phase4-harness-followup-v1`：10 组 sequence / 22 turn evidence / 50 required，证明 SQL 强制重查、业务 Evidence 重水化或变化后重检索、external 强制重检索、ACL 零 retrieval 拒绝，以及 owner/delta/budget/concurrency 的 pre-Graph stop。该确定性 contract 不属于长期真实 RAG 质量基线。
 
 ## 活跃风险与后续边界
 
 - **召回和多文档质量**：主要缺口仍是 lexical 漏召回、selected budget 和 context packing；下一步按上方 Answer Eval 失败结构分层定位。
 - **support 合同**：Composer 仍有输出被严格合同拒绝。不得通过 fuzzy/semantic 字符串放行换取表面 complete rate；若引入语义支持判断，需要独立合同和证据。
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
-- **能力范围**：M36 已在 `/api/query` 的 M35 单轮 Graph 外接入一次有界结构化 clarification 恢复；Hybrid、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
+- **能力范围**：M37 已在 `/api/query` 的 M35 单轮 Graph 外接入一次有界 clarification 恢复和一次显式 opt-in follow-up；这不是自由多轮。Hybrid、第二次追问、跨 route、多 Tool、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **默认切换**：semantic candidate、Hybrid、rerank 或新 recipe 必须产生新 identity，并以同 split 的单变量 A/B 和 held-out 证据经用户确认后才能切换。

@@ -1,4 +1,4 @@
-"""M33 可信 RAG 回答闭环：selected Evidence → Gate → claim → citation。
+"""M33 可信 RAG 回答闭环，以及 M37 业务 Document Evidence 窄重水化。
 
 本模块对 P3 只暴露一个 :class:`RAGAnswerFlow` 深 interface。调用者提交问题、可信 caller
 和结构化 Evidence requirement 后，模块内部依次调用 M32 Knowledge Tool、执行回答 Gate、
@@ -22,6 +22,7 @@ from engine.governance import (
     OUTBOUND_POLICY_IDENTITY,
     AuthorizationDecision,
     TrustedCaller,
+    authorize_document,
     document_safe_ref,
 )
 from engine.rag.catalog import CatalogEntry, KNOWN_PURPOSES
@@ -32,18 +33,23 @@ from engine.rag.evidence import (
     Evidence,
     EvidenceContractError,
     EvidenceLedger,
+    EvidenceRef,
     ValidatedCitation,
     allocate_citation_slot,
     validate_citations,
+    make_document_evidence,
 )
 from engine.rag.knowledge_tool import (
+    ExecutionOutcome as RetrievalExecutionOutcome,
     KnowledgeBundleView,
     KnowledgeRequest,
     KnowledgeTool,
     RetrievalOutcome,
+    RetrievalDiagnostics,
+    RetrievalReason,
 )
 from engine.rag.release import ActivePointer, ReleaseBundle, ReleaseError, load_active_release
-from engine.rag.retrieval import RetrievalBudget
+from engine.rag.retrieval import RetrievalBudget, query_fingerprint
 
 RouteStatus = Literal["rag"]
 ExecutionStatus = Literal["completed", "external_unavailable", "failed"]
@@ -179,6 +185,9 @@ class RAGAnswerRequest:
     requirement: AnswerEvidenceRequirement = AnswerEvidenceRequirement()
     retrieval_budget: RetrievalBudget = RetrievalBudget()
     confirmed_conditions: tuple[str, ...] = ()
+    knowledge_runtime_kind: Literal["business_release", "external_profile"] = "business_release"
+    prior_evidence_refs: tuple[EvidenceRef, ...] = ()
+    requirement_equivalent: bool = False
 
     def __post_init__(self) -> None:
         """保证本轮可以形成稳定 KnowledgeRequest 和 Evidence identity。"""
@@ -186,6 +195,10 @@ class RAGAnswerRequest:
         if not self.question.strip() or not self.run_id.strip() or self.purpose not in KNOWN_PURPOSES:
             raise AnswerFlowContractError("answer_request_invalid", "question/run_id/purpose 非法")
         _required_unique_texts("confirmed_conditions", self.confirmed_conditions)
+        if self.knowledge_runtime_kind not in {"business_release", "external_profile"}:
+            raise AnswerFlowContractError("answer_request_invalid", "knowledge runtime kind 未登记")
+        if self.requirement_equivalent and not self.prior_evidence_refs:
+            raise AnswerFlowContractError("answer_request_invalid", "等价复用必须携带旧 EvidenceRef")
 
 
 @dataclass(frozen=True)
@@ -318,6 +331,7 @@ class RAGAnswerResult:
     gate_decision: GateDecision | None
     retrieval_reason: str
     diagnostics: AnswerFlowDiagnostics
+    evidence_validity: Mapping[str, Any]
 
     @property
     def docs_used(self) -> tuple[dict[str, str], ...]:
@@ -356,6 +370,7 @@ class RAGAnswerResult:
             "ledger": public_ledger,
             "gate": public_gate,
             "diagnostics": self.diagnostics.safe_projection(),
+            "evidence_validity": dict(self.evidence_validity),
         }
 
 
@@ -431,6 +446,15 @@ class DeterministicEvidenceComposer:
             text = _strip_markdown_heading(evidence.payload.content)
             if not text:
                 raise AnswerFlowContractError("composer_output_invalid", "Document Evidence 没有可展示正文")
+            # M37 的两个解释样式仍是 deterministic presentation，不让模型自由改写事实。
+            # support_text 始终保持原文，后续 citation validator 因而仍校验同一份 Evidence。
+            if question.startswith("请用通俗说明解释同一条规则"):
+                text = f"通俗说明：{text}"
+            elif question.startswith("请用分步说明解释同一条规则"):
+                paragraphs = [item.strip() for item in text.split("\n\n") if item.strip()]
+                text = "分步说明：\n" + "\n".join(
+                    f"{index}. {paragraph}" for index, paragraph in enumerate(paragraphs, start=1)
+                )
             drafts.append(
                 ClaimDraft(
                     text=text,
@@ -471,23 +495,15 @@ class RAGAnswerFlow:
         started_at = perf_counter()
         tool_calls = gate_calls = composer_calls = validator_calls = 0
 
-        # 步骤 1：复用 M32 深 module，只取得 selected Evidence =========================
-        tool_calls += 1
-        outcome = self._knowledge_tool.retrieve(
-            KnowledgeRequest(
-                question=request.question,
-                caller=request.caller,
-                purpose=request.purpose,
-                run_id=request.run_id,
-                budget=request.retrieval_budget,
-                confirmed_conditions=request.confirmed_conditions,
-            )
-        )
+        # 步骤 1：follow-up 先裁决旧 Evidence；普通/SQL 无关请求仍走原 M32 深 module。====
+        outcome, validity = self._obtain_evidence(request, started_at=started_at)
+        tool_calls = 0 if validity.get("decision") in {"rehydrated", "denied", "unavailable"} else 1
         early = self._from_retrieval_failure(
             request=request,
             outcome=outcome,
             started_at=started_at,
             counts=(tool_calls, gate_calls, composer_calls, validator_calls),
+            evidence_validity=validity,
         )
         if early is not None:
             return early
@@ -505,6 +521,7 @@ class RAGAnswerFlow:
                 gate_decision=None,
                 started_at=started_at,
                 counts=(tool_calls, gate_calls, composer_calls, validator_calls),
+                evidence_validity=validity,
             )
         current_entries = _bundle_entry_index(bundle)
 
@@ -523,6 +540,7 @@ class RAGAnswerFlow:
                 bundle=bundle,
                 started_at=started_at,
                 counts=(tool_calls, gate_calls, composer_calls, validator_calls),
+                evidence_validity=validity,
             )
         if gate.context is None:
             raise AnswerFlowContractError("gate_output_invalid", "allow decision 必须携带 generation context")
@@ -547,6 +565,7 @@ class RAGAnswerFlow:
                 started_at=started_at,
                 counts=(tool_calls, gate_calls, composer_calls, validator_calls),
                 bundle=bundle,
+                evidence_validity=validity,
             )
         self._validate_claim_drafts(drafts=drafts, context=gate.context, max_claims=request.requirement.max_claims)
 
@@ -576,6 +595,7 @@ class RAGAnswerFlow:
                 started_at=started_at,
                 counts=(tool_calls, gate_calls, composer_calls, validator_calls),
                 bundle=bundle,
+                evidence_validity=validity,
             )
 
         claims, citations = self._validated_output(
@@ -604,6 +624,198 @@ class RAGAnswerFlow:
                 counts=(tool_calls, gate_calls, composer_calls, validator_calls),
                 bundle=bundle,
                 context=gate.context,
+            ),
+            evidence_validity=validity,
+        )
+
+    def _obtain_evidence(
+        self,
+        request: RAGAnswerRequest,
+        *,
+        started_at: float,
+    ) -> tuple[RetrievalOutcome, dict[str, Any]]:
+        """执行 M37 窄 B：仅业务 release 的等价 action 可跳过 retrieval。"""
+
+        def retrieve(reason: str) -> tuple[RetrievalOutcome, dict[str, Any]]:
+            """统一执行至多一次 Knowledge Tool，并记录为什么必须重新取证。"""
+
+            outcome = self._knowledge_tool.retrieve(
+                KnowledgeRequest(
+                    question=request.question,
+                    caller=request.caller,
+                    purpose=request.purpose,
+                    run_id=request.run_id,
+                    budget=request.retrieval_budget,
+                    confirmed_conditions=request.confirmed_conditions,
+                )
+            )
+            return outcome, {
+                "runtime_kind": request.knowledge_runtime_kind,
+                "requirement_equivalent": request.requirement_equivalent,
+                "decision": "reacquired",
+                "reason": reason,
+                "old_new_relation": "not_comparable",
+            }
+
+        if not request.prior_evidence_refs:
+            return retrieve("initial_or_no_prior_evidence")
+        if request.knowledge_runtime_kind == "external_profile":
+            return retrieve("external_profile_always_retrieves")
+        if not request.requirement_equivalent:
+            return retrieve("requirement_changed")
+
+        # 业务专用 locator 只读取当前 active bundle；没有正文缓存，也不接受 external profile。
+        try:
+            _pointer, bundle = self._active_loader()
+        except ReleaseError:
+            outcome = self._empty_rehydrate_outcome(
+                request=request,
+                started_at=started_at,
+                bundle=None,
+                reason_code="active_release_unavailable",
+                execution_outcome="external_unavailable",
+            )
+            return outcome, {
+                "runtime_kind": "business_release",
+                "requirement_equivalent": True,
+                "decision": "unavailable",
+                "reason": "active_release_unavailable",
+                "old_new_relation": "unavailable",
+            }
+
+        current_entries = tuple(bundle.entries)
+        located: list[CatalogEntry] = []
+        for ref in request.prior_evidence_refs:
+            matches = [
+                entry
+                for entry in current_entries
+                if entry.authority_ref == ref.authority_identity
+                and entry.revision == ref.revision
+                and entry.content_identity == ref.content_identity
+                and entry.anchor == ref.anchor
+                and entry.status == "active"
+            ]
+            if len(matches) != 1:
+                return retrieve("document_identity_changed")
+            located.append(matches[0])
+
+        candidates: list[Evidence] = []
+        generation_auth: list[tuple[str, AuthorizationDecision]] = []
+        for entry in located:
+            pre_selection = authorize_document(
+                caller=request.caller,
+                entry=entry,
+                purpose=request.purpose,
+                phase="pre_selection",
+            )
+            if not pre_selection.allowed:
+                outcome = self._empty_rehydrate_outcome(
+                    request=request,
+                    started_at=started_at,
+                    bundle=bundle,
+                    reason_code="no_authorized_evidence",
+                    execution_outcome="completed",
+                )
+                return outcome, {
+                    "runtime_kind": "business_release",
+                    "requirement_equivalent": True,
+                    "decision": "denied",
+                    "reason": "reauthorization_denied",
+                    "old_new_relation": "undisclosed",
+                }
+            evidence = make_document_evidence(
+                run_id=request.run_id,
+                release_identity=bundle.release_identity,
+                entry=entry,
+                purpose=request.purpose,
+                authorization=pre_selection,
+                runtime_ref="rehydrate:business-active-identity-v1",
+            )
+            pre_generation = authorize_document(
+                caller=request.caller,
+                entry=entry,
+                purpose=request.purpose,
+                phase="pre_generation",
+            )
+            if not pre_generation.allowed:
+                outcome = self._empty_rehydrate_outcome(
+                    request=request,
+                    started_at=started_at,
+                    bundle=bundle,
+                    reason_code="no_authorized_evidence",
+                    execution_outcome="completed",
+                )
+                return outcome, {
+                    "runtime_kind": "business_release",
+                    "requirement_equivalent": True,
+                    "decision": "denied",
+                    "reason": "reauthorization_denied",
+                    "old_new_relation": "undisclosed",
+                }
+            candidates.append(evidence)
+            generation_auth.append((evidence.ref.evidence_id, pre_generation))
+
+        ledger = EvidenceLedger.from_candidates(run_id=request.run_id, evidence=tuple(candidates))
+        ledger = ledger.transition(
+            evidence_ids=tuple(item.ref.evidence_id for item in candidates), to_stage="selected"
+        )
+        outcome = RetrievalOutcome(
+            execution_outcome="completed",
+            reason_code="evidence_retrieved",
+            selected_evidence=tuple(candidates),
+            ledger=ledger,
+            pre_generation_authorizations=tuple(generation_auth),
+            diagnostics=RetrievalDiagnostics(
+                run_ref="run:" + sha256(request.run_id.encode("utf-8")).hexdigest()[:20],
+                query_fingerprint=query_fingerprint(request.question, request.confirmed_conditions),
+                release_identity=bundle.release_identity,
+                corpus_identity=bundle.corpus_identity,
+                adapter_identity="knowledge-business-rehydrate-v1",
+                recipe_identity="business-active-identity-locator-v1",
+                adapter_calls=0,
+                authorized_entry_count=len(candidates),
+                candidate_count=len(candidates),
+                selected_count=len(candidates),
+                elapsed_ms=round((perf_counter() - started_at) * 1000, 3),
+            ),
+        )
+        return outcome, {
+            "runtime_kind": "business_release",
+            "requirement_equivalent": True,
+            "decision": "rehydrated",
+            "reason": "current_identity_and_acl_confirmed",
+            "old_new_relation": "unchanged_current",
+        }
+
+    @staticmethod
+    def _empty_rehydrate_outcome(
+        *,
+        request: RAGAnswerRequest,
+        started_at: float,
+        bundle: KnowledgeBundleView | None,
+        reason_code: RetrievalReason,
+        execution_outcome: RetrievalExecutionOutcome,
+    ) -> RetrievalOutcome:
+        """构造零泄露重水化失败；ACL deny 不允许转去 retrieval 猜测文档存在性。"""
+
+        return RetrievalOutcome(
+            execution_outcome=execution_outcome,
+            reason_code=reason_code,
+            selected_evidence=(),
+            ledger=EvidenceLedger.from_candidates(run_id=request.run_id, evidence=()),
+            pre_generation_authorizations=(),
+            diagnostics=RetrievalDiagnostics(
+                run_ref="run:" + sha256(request.run_id.encode("utf-8")).hexdigest()[:20],
+                query_fingerprint=query_fingerprint(request.question, request.confirmed_conditions),
+                release_identity=bundle.release_identity if bundle else None,
+                corpus_identity=bundle.corpus_identity if bundle else None,
+                adapter_identity="knowledge-business-rehydrate-v1",
+                recipe_identity="business-active-identity-locator-v1",
+                adapter_calls=0,
+                authorized_entry_count=0,
+                candidate_count=0,
+                selected_count=0,
+                elapsed_ms=round((perf_counter() - started_at) * 1000, 3),
             ),
         )
 
@@ -856,6 +1068,7 @@ class RAGAnswerFlow:
         outcome: RetrievalOutcome,
         started_at: float,
         counts: tuple[int, int, int, int],
+        evidence_validity: dict[str, Any],
     ) -> RAGAnswerResult | None:
         """把 M32 取证事实投影到四轴，保持技术、安全和业务失败正交。"""
 
@@ -882,6 +1095,7 @@ class RAGAnswerFlow:
             gate_decision=None,
             started_at=started_at,
             counts=counts,
+            evidence_validity=evidence_validity,
         )
 
     def _from_gate_denial(
@@ -892,6 +1106,7 @@ class RAGAnswerFlow:
         bundle: KnowledgeBundleView,
         started_at: float,
         counts: tuple[int, int, int, int],
+        evidence_validity: dict[str, Any],
     ) -> RAGAnswerResult:
         """Gate deny 不调用 Composer/validator，并按 reason 唯一映射四轴。"""
 
@@ -912,6 +1127,7 @@ class RAGAnswerFlow:
             started_at=started_at,
             counts=counts,
             bundle=bundle,
+            evidence_validity=evidence_validity,
         )
 
     def _failure_result(
@@ -926,6 +1142,7 @@ class RAGAnswerFlow:
         started_at: float,
         counts: tuple[int, int, int, int],
         bundle: KnowledgeBundleView | None = None,
+        evidence_validity: dict[str, Any] | None = None,
     ) -> RAGAnswerResult:
         """集中构造无答卷结果，防止某条错误分支意外保留 claim/citation。"""
 
@@ -948,6 +1165,7 @@ class RAGAnswerFlow:
                 bundle=bundle,
                 context=gate_decision.context if gate_decision else None,
             ),
+            evidence_validity=evidence_validity or {},
         )
 
     def _diagnostics(

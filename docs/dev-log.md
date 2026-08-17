@@ -2840,3 +2840,194 @@ python -m uvicorn app.main:app --reload
 
 预计第二次走 `route=rag`、`turn_action=resume`，thread 变为 `resolved`。再次原样提交会在 Graph 前得到 `thread_already_resumed`，不会重复调用 Tool。也可以用“退款情况怎么样？”触发 `time_range + group_by` 表单。这里的 caller 是 **local/demo fixture**，checkpoint 只在当前 API 进程内有效；不要把这个体验解释成生产认证或持久会话。
 
+## ★ M37 受控有限追问与 Document Evidence 窄复用
+
+（2026-08-17）
+
+**简述**：在 M36 的一次澄清恢复之后，为成功的 SQL/RAG 回答增加一次**显式开启、服务端限定、重新判断 Evidence 有效性**的追问；既让用户能继续问，又不把旧答案和旧权限当成永久事实。
+
+### 先用大白话讲
+
+M36 解决的是“问题缺条件，补一次再继续”，但回答成功后任务就结束了。如果用户接着说“改成 7 月、按商品看”或“把这条退款规则讲得通俗一点”，系统没有安全的继续方式。最偷懒的做法，是把上一轮问答整段重新塞给模型；问题在于上一轮 SQL 数据可能已经变了，文档可能更新或撤权，旧答案还可能把不该长期保存的 rows、正文和 citation 带进下一轮。
+
+M37 把一次追问做成一张**有使用次数、允许动作和证据检查规则的服务端票据**。客户端只有显式开启后才能拿到票据，而且只能按服务端给出的字段填写一次。SQL 像重新去数据库窗口取号，必须再查；外部大语料也必须再检索；业务文档只有在“还是解释同一条规则”时，才允许按当前原件重新核对版本和权限，再为本轮重新签发 Evidence。它不是自由聊天，而是一条能说清楚“为什么继续、凭什么继续、什么时候必须停”的工程闭环。
+
+### 这次做了什么
+
+**核心矛盾**是：追问需要上一轮上下文，但安全回答又不能盲信上一轮结果。M37 没有用完整聊天历史解决这个矛盾，而是把“任务条件”“允许修改的字段”“旧 Evidence 的审计坐标”“本轮重新取证决定”拆开保存，并让 accepted follow-up 仍然只经过一次 M35 Graph 和至多一个深 Tool。
+
+1. **把成功回答变成一次可控、默认关闭的 follow-up-ready 状态**
+
+   **原来的问题**是成功 SQL/RAG turn 没有后续状态；如果直接让所有回答自动保存上下文，会改变旧接口行为，也会让普通请求无意间进入会话生命周期。M37 增加 `enable_bounded_follow_up`：只有客户端显式设置为 `true`，且本轮确实成功并产生 Evidence，服务端才创建 `follow_up_ready` checkpoint；旧请求继续得到 `thread=None`。
+
+   这里的 **closed-world follow-up（闭世界追问）**，意思是服务端先签发动作和字段白名单，客户端只能从中选择。SQL 只有 `adjust_sql_scope`，可调整时间和分组；RAG 有“解释同一 Evidence”和“询问相关 Evidence”两类动作。额外字段、非法枚举、控制指令、错误 owner/version、过期和并发输家都在 Graph 前拒绝，不消耗业务 Tool。
+
+   选择显式 opt-in，而不是默认给每个结果建 thread，是为了保留兼容性，并避免把一个短期任务票据误解成永久聊天会话。**验证证据**覆盖默认 threadless、TTL、clear、重启丢失、错误 owner、非法 delta、预算重放和并发单赢家。它证明一次受控追问的生命周期成立，**没有证明**第二次追问、长历史或跨进程会话已经存在。
+
+2. **用 Evidence validity 决定“重新加载”还是“重新检索”**
+
+   **原来的问题**是旧 EvidenceRef 只能证明上一轮当时用了什么，不能自动证明当前文档仍 active、当前 caller 仍有权限，或新问题仍需要同一份证据。若直接复用旧正文，revision 变化和 ACL 撤销都会被绕过；若所有情况都无脑重检索，又浪费了业务文档已有的精确 identity，并掩盖了“同一证据仍有效”这一重要能力。
+
+   M37 实现用户确认的**窄 B**。只有 22-entry 业务 release 中的“同一 Evidence requirement 解释/改述”可以走 rehydrate：系统重新加载当前 active bundle，用 `authority_identity + revision + content_identity + anchor` 精确定位原件，再分别执行 pre-selection 和 pre-generation 授权。全部一致才重建本轮 Evidence；identity 变化或 requirement 不等价时，同一个 RAG Tool 最多重新检索一次；ACL/用途拒绝则零 retrieval 停止，不能靠重新搜索探测文档存在性。
+
+   **Rehydrate（重水化）**不是复用旧 Evidence 对象，而是用旧审计坐标找到当前权威原件，再生成新的 run-scoped Evidence、ledger 和 citation。测试证明同一业务规则可以零 Knowledge retrieval 完成解释，但新旧 evidence/citation id 不相同；revision、requirement、ACL 和 external runtime 也都有反例。这个结论只适用于当前业务 release，**不能外推**为任意外部知识库都能安全缓存或复用。
+
+3. **SQL 和 external profile 坚持重新取证，不用“看起来一样”冒充新鲜**
+
+   **原来的问题**是 SQL Evidence 的 revision 实际接近查询时间，当前系统没有可靠的业务 snapshot identity。即使追问条件没变，也无法证明数据库数据没有变化。EnterpriseRAG-Bench external profile 虽然也有 Evidence identity，但本模块没有建立通用的 external locator、权限同步和复用合同。
+
+   因此 SQL follow-up 每次都重新经过 Text2SQL、SQL Guard 和查询执行，并签发新 SQL Evidence；external RAG 每次都调用检索。Trace 中会记录 `sql_has_no_snapshot`、`external_profile_always_retrieves`、`requirement_changed` 或 `document_identity_changed` 等 **reacquisition reason（重新取证原因）**，而不是只给一个模糊的“缓存未命中”。
+
+   这个边界比直接复用旧 rows 更贵，但它避免把“结果 fingerprint 一样”误写成“数据仍然新鲜”。M37 sequence Eval 对 SQL 强制重查、external 强制检索和新 run Evidence 做了确定性断言。它**没有测量**真实数据库高并发下的性能成本，也没有证明 external 复用永远不值得做；这里只证明在当前身份合同不足时必须保守重新取证。
+
+4. **让 Router、API、Trace 和 Eval 都只看到自己该看的事实**
+
+   **原来的问题**是把旧 EvidenceRef 交给 Router，可能让控制层根据旧证据偷偷改 route；把旧 answer、rows、正文或 raw thread id 写进 checkpoint/Trace，又会扩大隐私、授权和重放风险。多轮 Eval 如果只看最终响应，也无法证明中间是否重复调用 Tool 或复用了旧 run id。
+
+   M37 在进入 Router 前剥离 `follow_up_context`，Router 只根据当前结构化任务决定原 route；旧 Evidence 审计坐标只交给同 route 的深 Tool 做 validity。checkpoint 只保存最小 task snapshot、EvidenceRef、服务端 spec 和一次预算；Trace 只保存不可逆 thread/context ref、版本迁移、Graph/Tool 次数和安全 validity reason。API 的半截 follow-up 还暴露了一个 Pydantic v2 细节：`ctx.error` 中的 `ValueError` 不能直接 JSON 序列化，因此统一 422 handler 先经过 `jsonable_encoder`，非法请求才能稳定返回 422 而不是意外 500。
+
+   新增的 `phase4-harness-followup-v1` 使用 **Sequence Eval** 记录 10 组完整序列、22 份 turn execution evidence 和 50 条 required assertion，并拒绝漏 turn、重复执行、超预算和旧 Evidence id 注入。全仓 **427 passed、3 skipped、1 warning**，说明确定性合同和旧能力兼容；但本轮没有运行真实 LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测，所以不能把这些数字解释成开放问法质量或生产性能提升。
+
+### 新概念
+
+- **Bounded follow-up（有界追问）**：不是“可以一直聊”，而是成功结果附带的一次性后续动作。它有明确 owner、version、TTL、字段白名单和消费预算，类似一张只能在指定窗口办理指定业务一次的号码票。
+- **Evidence requirement（证据需求）**：描述新回答需要什么证据，而不是描述用户说了哪句话。两次问题文字不同，只要服务端确认它们仍要求同一证据，才可能进入业务 rehydrate；客户端不能自己宣称“它们等价”。
+- **Evidence validity（证据有效性）**：回答“旧证据的审计坐标在当前时刻是否仍能支持新 claim”。它同时考虑 requirement、Evidence kind、revision/content/anchor、ACL 和用途，不等同于缓存是否命中。
+- **Rehydrate（重水化）**：拿旧 EvidenceRef 当索引，重新读取当前权威原件并重新授权，再构造本轮新 Evidence。可以类比 JPA 根据主键重新从数据库加载实体，而不是继续信任一份脱离 Session 的旧对象。
+- **Reacquisition（重新取证）**：旧证据不满足当前条件时，再执行 SQL 或 Knowledge Tool。它不是失败兜底，而是被 Trace/Eval 明确记录的正确分支。
+- **Run-scoped identity（运行级身份）**：Evidence、ledger 和 citation 只属于一次 run。即使正文完全相同，新一轮也要生成新 id，避免把上一轮授权和审计事实偷渡到当前轮。
+- **Runtime isolation（运行口径隔离）**：业务 22-entry release 与 EnterpriseRAG-Bench external profile 有不同的加载器、身份和证据能力，不能因为都叫 RAG 就共用一条复用规则。
+
+### 代码阅读路线
+
+1. **先看 HTTP 能提交什么、为什么不能混搭字段**：`app/schemas/agent.py` → `app/core/exceptions.py`
+
+   从请求模型看 `enable_bounded_follow_up`、`follow_up_action` 和 `follow_up_fields` 如何与 clarification 字段互斥，再看响应中的 follow-up spec、status 和剩余预算。异常处理器展示了非法半截请求如何稳定投影成 422；重点理解**公开输入形状先阻止歧义**，不需要背每个 Pydantic 字段声明。
+
+2. **读服务端如何冻结动作与 Evidence 上下文**：`engine/harness/contracts.py`
+
+   主角是 `FollowUpActionSpec`、`FollowUpSpec` 和 `FollowUpExecutionContext`。先看动作与 requirement equivalence 为什么由服务端代码决定，再看 context 如何校验 route、Evidence kind、runtime 和 requirement identity。这里解决的是**客户端不能自报证据可复用**。
+
+3. **沿一次性票据读生命周期和结构化 Context Builder**：`engine/harness/thread.py`
+
+   先看 `FollowUpTask` 保存哪些最小事实，再沿 `create_follow_up_ready()`、`claim_follow_up()` 和 projection 阅读 `follow_up_ready → follow_up_claimed → resolved`。重点关注锁内 owner/version/TTL/spec 校验、控制指令拒绝与预算消费；然后看 SQL/RAG 三个服务端 action 怎样生成 current task。旧 answer、rows、正文和 citation 没出现在 task 中，正是这层的安全价值。
+
+4. **看 turn seam 如何保证一次 Graph、一次 Tool**：`engine/harness/turn.py` → `engine/harness/graph.py`
+
+   从 `TurnRequest` 的 clarification/follow-up 互斥开始，沿 `run_turn()` 看 initial、resume、follow-up、rejected 四条路径。follow-up 先原子 claim，再调用原 M35 Graph，结束后不再创建下一张追问票；Graph 的 route node 会把旧 Evidence context 剥离。这里要理解**跨轮控制在 Graph 外，单轮业务执行仍在 Graph 内**。
+
+5. **比较 SQL、业务 RAG、external RAG 的取证分支**：`engine/harness/adapters.py` → `engine/rag/answer_flow.py`
+
+   SQL adapter 只会生成新查询 Evidence，并解释没有 snapshot；RAG adapter 把可信 runtime kind、当前 requirement 和旧 refs 交给 AnswerFlow。重点读 `RAGAnswerFlow._obtain_evidence()`：无旧证据走正常检索，external/requirement 变化重检索，业务等价动作才尝试 active identity locator 与双阶段授权。后面的 Gate、Composer 和 citation validator 继续复用 M33 合同，不必重新精读全部回答流水线。
+
+6. **最后从公开证据验证没有旁路**：`app/api/query.py` → `engine/trace/recorder.py` → `eval/harness_followup_contracts.py` → `tests/test_m37_*.py`
+
+   API 只调用 `run_turn()` 并从同一结果投影响应/Trace；Trace 看不到 raw thread id 和旧内容；Eval 把 initial、accepted/rejected follow-up 组成序列。测试分别检查生命周期、业务重水化、HTTP/Trace 和 completed artifact 反例。这样能从“用户发请求”一路核对到“为什么重查或重水化”。
+
+核心调用链是：
+
+`POST /api/query（enable_bounded_follow_up=true）`
+→ `M35 Graph → SQL/RAG 成功 + Evidence`
+→ `ThreadCheckpointManager.create_follow_up_ready()`
+→ `服务端返回 action/fields + thread/version`
+→ `POST /api/query（结构化 follow-up）`
+→ `owner/version/TTL/spec/budget 校验 + 原子 claim`
+→ `Context Builder 形成 current task`
+→ `Router（看不到旧 Evidence）`
+→ `同 route Tool 做 validity / rehydrate / reacquire`
+→ `新 run Evidence + resolved + Response/Trace/Sequence Eval`
+
+**模块闭环**：M35 建立一次请求只调用一个可信 Tool，M36 允许缺条件时暂停并恢复一次，M37 又允许成功结果在重新判断 Evidence 后追问一次。三者共同形成了“**能停、能补、能继续，但不会无限跑或盲信旧证据**”的 P4 有界 Agent 主链。
+
+### 设计要点
+
+- **窄 B 是正式能力，不是临时占位**：业务同 requirement 的 Evidence 重水化、identity/requirement 变化后重检索、SQL/external 强制重取证都有实现和反例；不能以后悄悄退化成旧答案复用。
+- **默认关闭保护兼容性**：旧客户端不建 thread；只有明确需要追问的调用方承担状态和 TTL 语义。
+- **证据等价由服务端判断**：如果让客户端传 `reuse=true`，它就能绕过 revision、ACL 和用途裁决。
+- **ACL deny 不 fallback retrieval**：否则攻击者可以借搜索结果差异探测已撤权文档；安全停止优先于“尽量回答”。
+- **旧 Evidence 不进入 Router**：控制层不能用上一轮证据改 route，validity 只属于同 route 深 Tool。
+- **当前边界是真实合同的一部分**：一次追问、单进程 checkpoint、三个 action、业务 release 窄重水化；第二次追问、自由历史、external 复用、跨 route/Hybrid、持久化和生产认证仍未完成喵。
+
+### 面试怎么讲
+
+**可直接复述**：我在 DataPilot 的 M37 中实现了成功 SQL/RAG 回答后的一次受控追问，但没有把上一轮聊天历史直接回灌模型。客户端必须显式 opt-in，服务端返回 closed-world action/field spec；后续请求先校验 owner、tenant、role、TTL、version 和一次预算，再原子 claim，accepted follow-up 仍恰好运行一次 M35 Graph、至多一个同 route 深 Tool。关键是我增加了 Evidence validity：SQL 因为没有可靠业务 snapshot 始终重查，EnterpriseRAG-Bench external 始终重检索；只有业务 22-entry release 的同 requirement 解释动作，才能根据 authority、revision、content identity 和 anchor 重新加载当前原件并重新授权，随后签发全新的 run Evidence、ledger 和 citation。identity 或 requirement 变化重检索一次，ACL 变化零 retrieval 停止。API、Trace 和 10 组 sequence Eval 都从同一 turn/lifecycle/validity 事实投影，最终 50/50 required assertions 和全仓 427 条测试通过。我同时明确它不是自由多轮或生产会话，第二次追问、持久化、Hybrid 和生产认证都不在本模块结论里。
+
+1. **[基础追问] 同一条政策只是换种说法，为什么还要生成新的 Evidence 和 citation id？**
+
+   旧 id 证明的是上一轮 run 当时选中了什么、谁有权限以及引用了什么。新一轮即使定位到相同正文，也必须重新读取 active 原件、核对 revision/content/anchor 并重新授权；只有这些条件仍成立，才用当前 run id 构造新 Evidence、ledger 和 citation。这样审计时可以明确区分“上一轮曾经有效”和“这一轮重新证明有效”，不会把旧授权跨轮继承。
+
+2. **[工程/深挖追问] 为什么 SQL 不比较 result fingerprint，相同就直接复用？**
+
+   fingerprint 相同只能说明两份已获得结果内容一样，不能在查询前证明数据库没变。当前系统没有事务快照版本、CDC offset 或业务数据版本可作为 freshness identity，因此跳过查询没有证据基础。M37 选择每次重新走 Text2SQL、Guard 和执行，再在 diagnostics 里记录新旧 fingerprint 的关系；这是把“是否新鲜”和“结果是否碰巧相同”分开。
+
+3. **[工程/深挖追问] 业务文档 ACL 变化后为什么不重新检索，也许还能找到别的公开文档回答？**
+
+   当前 action 的语义是“解释上一轮同一 Evidence”。当系统已经根据旧审计坐标定位到目标文档、又发现当前 caller 无权访问时，fallback retrieval 会暴露文档存在性，还可能把同一受限主题通过候选差异旁路出来。因此该分支零 retrieval 安全停止。如果产品需要“无权解释原文时，改为搜索其他公开材料”，那是一个不同 requirement 和不同服务端 action，需要独立定义泄露边界与 Eval，不能在 ACL deny 分支暗中改变任务。
+
+4. **[工程/深挖追问] 你怎么证明并发追问不会执行两次 Tool？**
+
+   follow-up-ready checkpoint 带 expected version，manager 在同一个 `RLock` 临界区完成校验与 `follow_up_ready → follow_up_claimed`。两个线程用 barrier 同时提交时，只有一个能消费 version 和预算；另一个在 Graph 前 rejected。Sequence Eval 和 turn 测试同时断言 accepted 数量不超过 1、rejected 的 Graph/Tool 次数为 0，以及新 Evidence 的 run id 只属于赢家。
+
+5. **[压力追问] 你为了“一次追问”加了状态机、Evidence validity 和 50 条断言，这是不是过度设计？**
+
+   如果追问只是无状态改写文本，这套设计确实太重；但 DataPilot 的回答可能执行 SQL、读取有 ACL 和 revision 的企业文档，并形成可审计 citation。真正的风险不是“模型没听懂”，而是重复执行、旧权限继承、过期文档复用和 Trace 无法证明发生了什么。M37 没有建设完整会话平台，只复用了 M36 manager，冻结三个 action、一次预算和一个业务 rehydrate seam；10 组 sequence/50 条断言分别覆盖重新取证和生命周期反例。它增加的复杂度对应已有安全合同，但还不能据此宣称生产多轮能力，跨进程、开放问法和性能成本仍需后续证据喵。
+
+### 验证与下一步
+
+- **M37 专项**：最终 `14 passed, 1 warning`，覆盖 turn 生命周期、业务 Document Evidence 重水化、API/Trace 和 Eval completed validator。
+- **受影响回归**：M31–M37 为 `162 passed, 1 warning in 39.19s`；API/配置为 `19 passed, 1 warning in 92.14s`。
+- **Sequence Eval**：10 sequences / 22 turn evidence / 50 required assertions，`50 passed`；artifact identity 为 `1185edf04c42439dedf5e3dc051be13060a462bd05e79c48d3b975fdce634b25`。
+- **全仓确定性回归**：后台任务退出码 `0`，`427 passed, 3 skipped, 1 warning in 509.36s`；warning 是既有 Starlette TestClient/httpx deprecation，3 skip 为既有条件型远程/Milvus 用例。
+- **静态交付**：`compileall -q app engine eval tests demo` 与 `git diff --check` 通过。
+- **尚未证明**：未运行真实 LLM、远程 embedding、Milvus、LangFuse Cloud、M27 真实 Text2SQL Eval 或 M34 external 大评测；没有生产多 worker、性能或开放对话结论。
+- **下一步建议**：重新对照 Phase 4 roadmap 选择剩余能力切片。M37 不等于 P4 完成，不能默认扩到第二次追问、external 复用、跨 route/Hybrid 或持久 checkpoint。
+
+可复制验证命令：
+
+```powershell
+# M37 聚焦回归；预计看到 14 passed 和 1 个既有 TestClient/httpx deprecation warning。
+python -m pytest -q -p no:cacheprovider tests/test_m37_followup_turn.py tests/test_m37_rag_rehydration.py tests/test_m37_api_trace.py tests/test_m37_followup_eval.py --basetemp=.agent_work/temp/m37-review
+
+# 全仓确定性回归；收工快照为 427 passed、3 skipped、1 warning，通常需要数分钟。
+# 按 AGENTS.md，预计超过 2 分钟时应使用后台任务并把日志/退出码/完成标记写入 .agent_work/temp/。
+python -m pytest -q -p no:cacheprovider --basetemp=.agent_work/temp/m37-full-recheck
+
+# Python 语法/导入编译；预计无输出并以 exit 0 结束。
+python -m compileall -q app engine eval tests demo
+```
+
+**本地启动体验：** M37 可以通过 FastAPI Swagger 体验“成功 SQL → 一次结构化追问”。先按 `docs/state/runbook.md` 准备数据库/seed 和 local/demo 环境，再启动服务：
+
+```powershell
+# 启动 FastAPI；环境未激活时使用 AGENTS.md 中记录的完整 Python 路径。
+python -m uvicorn app.main:app --reload
+```
+
+打开 **Swagger UI**：`http://127.0.0.1:8000/docs`，调用 `POST /api/query`，首次提交：
+
+```json
+{
+  "question": "各渠道订单量是多少？",
+  "user_role": "ops",
+  "enable_bounded_follow_up": true
+}
+```
+
+预计得到 `route=sql`、完整结果，以及 `thread.status=follow_up_ready`、`follow_up_budget_remaining=1` 和服务端签发的 `adjust_sql_scope` 字段说明。复制响应中的 `thread_id` 与 `checkpoint_version`，再次调用同一接口：
+
+```json
+{
+  "question": "执行结构化追问",
+  "user_role": "ops",
+  "thread_id": "替换为首次响应中的值",
+  "expected_version": 1,
+  "follow_up_action": "adjust_sql_scope",
+  "follow_up_fields": {
+    "time_range": "2026年7月",
+    "group_by": "商品"
+  }
+}
+```
+
+预计第二次返回 `turn_action=follow_up`、新的 SQL Evidence 和 `thread.status=resolved`。再次原样提交会在 Graph 前被拒绝，不会重复查询；增加 spec 外字段也会得到稳定 422 或 `follow_up_invalid`。这里使用的是 **local/demo fixture caller**，thread 只存在于当前 API 进程，不能解释成生产认证、持久会话或自由聊天。
+

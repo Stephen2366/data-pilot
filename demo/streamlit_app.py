@@ -1,4 +1,4 @@
-"""Streamlit 演示页：通过真实 HTTP 展示单轮查询与 M36 结构化澄清恢复。
+"""Streamlit 演示页：通过真实 HTTP 展示单轮、结构化澄清与一次受控追问。
 
 ★ 这个页面只负责演示，不承载业务逻辑。所有 SQL 生成、安全拦截、Trace 和图表都来自
 FastAPI `/api/query`，避免前端复制一套 Agent 流程。
@@ -39,21 +39,27 @@ def _post_query(
     thread_id: str | None = None,
     expected_version: int | None = None,
     clarification_answers: dict[str, str] | None = None,
+    enable_bounded_follow_up: bool = False,
+    follow_up_action: str | None = None,
+    follow_up_fields: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """调用 FastAPI `/api/query`；resume 字段只在补条件时成组发送。"""
+    """调用 `/api/query`；clarification/follow-up 只发送服务端签发的结构化字段。"""
 
     request_body: dict[str, Any] = {
         "question": question,
         "user_role": user_role,
         "force_new_pipeline": force_new_pipeline,
         "schema_retrieval_profile": schema_retrieval_profile,
+        "enable_bounded_follow_up": enable_bounded_follow_up,
     }
     if thread_id is not None:
-        request_body.update(
-            thread_id=thread_id,
-            expected_version=expected_version,
-            clarification_answers=clarification_answers or {},
-        )
+        request_body.update(thread_id=thread_id, expected_version=expected_version)
+        # Thread turn 不能再次开启新 thread；只允许两种互斥 payload。
+        request_body.pop("enable_bounded_follow_up", None)
+        if follow_up_action is not None:
+            request_body.update(follow_up_action=follow_up_action, follow_up_fields=follow_up_fields or {})
+        else:
+            request_body.update(clarification_answers=clarification_answers or {})
     payload = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
     request = Request(
         api_url,
@@ -179,6 +185,50 @@ def _render_clarification_form(
     )
 
 
+def _render_follow_up_form(
+    *,
+    body: dict[str, Any],
+    api_url: str,
+    user_role: str,
+    force_new_pipeline: bool,
+    schema_retrieval_profile: str,
+) -> dict[str, Any] | None:
+    """按服务端 action spec 画一次追问表单，不建设自由聊天输入框。"""
+
+    thread = body.get("thread") or {}
+    spec = thread.get("follow_up") or {}
+    actions = spec.get("actions") or []
+    if thread.get("status") != "follow_up_ready" or not actions:
+        return None
+    st.subheader("一次受控追问")
+    action_by_label = {item["label"]: item for item in actions}
+    with st.form("m37-follow-up-form"):
+        label = st.selectbox("追问动作", list(action_by_label))
+        selected = action_by_label[label]
+        values: dict[str, str] = {}
+        for field in selected.get("fields") or []:
+            if field.get("value_type") == "enum":
+                values[field["key"]] = st.selectbox(field["label"], field.get("allowed_values") or [])
+            else:
+                values[field["key"]] = st.text_input(
+                    field["label"], max_chars=field.get("max_length", 80)
+                )
+        submitted = st.form_submit_button("执行一次追问", type="primary")
+    if not submitted:
+        return None
+    return _post_query(
+        api_url=api_url,
+        question="执行服务端签发的结构化追问",
+        user_role=user_role,
+        force_new_pipeline=force_new_pipeline,
+        schema_retrieval_profile=schema_retrieval_profile,
+        thread_id=thread["thread_id"],
+        expected_version=thread["checkpoint_version"],
+        follow_up_action=selected["action"],
+        follow_up_fields=values,
+    )
+
+
 def _install_page_style() -> None:
     """用少量 CSS 把 Streamlit 默认页面收紧成运营控制台气质。"""
 
@@ -266,6 +316,7 @@ def main() -> None:
             "New Text2SQL",
             value=schema_retrieval_profile != "default",
         )
+        enable_bounded_follow_up = st.toggle("Enable one follow-up", value=False)
         st.divider()
         for question in DEMO_QUESTIONS:
             if st.button(question, use_container_width=True):
@@ -283,6 +334,7 @@ def main() -> None:
                 user_role=user_role,
                 force_new_pipeline=force_new_pipeline,
                 schema_retrieval_profile=schema_retrieval_profile,
+                enable_bounded_follow_up=enable_bounded_follow_up,
             )
         except (URLError, TimeoutError) as exc:
             st.error(f"API request failed: {exc}")
@@ -305,6 +357,20 @@ def main() -> None:
             return
         if resumed_body is not None:
             st.session_state["last_response"] = resumed_body
+            st.rerun()
+        try:
+            followed_body = _render_follow_up_form(
+                body=body,
+                api_url=api_url,
+                user_role=user_role,
+                force_new_pipeline=force_new_pipeline,
+                schema_retrieval_profile=schema_retrieval_profile,
+            )
+        except (URLError, TimeoutError) as exc:
+            st.error(f"API follow-up failed: {exc}")
+            return
+        if followed_body is not None:
+            st.session_state["last_response"] = followed_body
             st.rerun()
 
 
