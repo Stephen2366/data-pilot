@@ -15,7 +15,22 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
 from engine.harness.adapters import RAGTool, Text2SQLTool
-from engine.harness.contracts import AgentRunResult, HarnessContractError, HarnessRequest, RouteDecision, ToolObservation
+from engine.harness.contracts import (
+    AgentRunResult,
+    BranchResult,
+    HarnessContractError,
+    HarnessRequest,
+    HybridResult,
+    RouteDecision,
+    ToolObservation,
+)
+from engine.harness.hybrid import (
+    DeterministicHybridSynthesizer,
+    HybridSynthesisError,
+    HybridSynthesizer,
+    build_safe_partial_drafts,
+    validate_hybrid_claims,
+)
 from engine.harness.router import DeterministicRouter, Router
 
 
@@ -26,6 +41,7 @@ class HarnessRuntime:
     sql_tool: Text2SQLTool
     rag_tool: RAGTool
     router: Router | None = None
+    hybrid_synthesizer: HybridSynthesizer | None = None
 
 
 class HarnessState(TypedDict, total=False):
@@ -34,6 +50,8 @@ class HarnessState(TypedDict, total=False):
     request: HarnessRequest
     route_decision: RouteDecision
     observation: ToolObservation
+    hybrid_sql: BranchResult
+    hybrid_rag: BranchResult
     # ★ 没有并行节点，但仍显式声明 append reducer，防止将来加分支时静默覆盖审计步骤。
     graph_steps: Annotated[list[str], operator.add]
     result: AgentRunResult
@@ -55,7 +73,7 @@ def _route_node(state: HarnessState, runtime: Runtime[HarnessRuntime]) -> dict[s
     return {"route_decision": decision, "graph_steps": ["route"]}
 
 
-def _next_node(state: HarnessState) -> Literal["sql_tool", "rag_tool", "terminal"]:
+def _next_node(state: HarnessState) -> Literal["sql_tool", "rag_tool", "hybrid_sql_tool", "terminal"]:
     """把 RouteDecision 的闭集枚举映射为唯一下一跳；未知值立即合同失败。"""
 
     decision = state["route_decision"]
@@ -63,6 +81,8 @@ def _next_node(state: HarnessState) -> Literal["sql_tool", "rag_tool", "terminal
         return "sql_tool"
     if decision.route == "rag":
         return "rag_tool"
+    if decision.route == "hybrid":
+        return "hybrid_sql_tool"
     if decision.route == "none":
         return "terminal"
     raise HarnessContractError(f"未登记的 route edge: {decision.route}")
@@ -80,6 +100,28 @@ def _rag_tool_node(state: HarnessState, runtime: Runtime[HarnessRuntime]) -> dic
     return {"observation": runtime.context.rag_tool.run(state["request"]), "graph_steps": ["rag_tool"]}
 
 
+def _hybrid_sql_tool_node(state: HarnessState, runtime: Runtime[HarnessRuntime]) -> dict[str, Any]:
+    """执行 Hybrid 的第一支 SQL 深 Tool；同一 run 只换受控 branch question。"""
+
+    plan = state["route_decision"].hybrid_plan
+    if plan is None:
+        raise HarnessContractError("Hybrid route 缺少 HybridPlan")
+    request = replace(state["request"], question=plan.sql_question)
+    observation = runtime.context.sql_tool.run_for_hybrid(request)
+    return {"hybrid_sql": BranchResult("sql", observation), "graph_steps": ["hybrid_sql_tool"]}
+
+
+def _hybrid_rag_tool_node(state: HarnessState, runtime: Runtime[HarnessRuntime]) -> dict[str, Any]:
+    """执行 retrieval + Gate 版本的 RAG branch；绝不生成自然语言 RAG 子答案。"""
+
+    plan = state["route_decision"].hybrid_plan
+    if plan is None:
+        raise HarnessContractError("Hybrid route 缺少 HybridPlan")
+    request = replace(state["request"], question=plan.rag_question)
+    observation = runtime.context.rag_tool.run_for_hybrid(request, requirement=plan.requirement)
+    return {"hybrid_rag": BranchResult("rag", observation), "graph_steps": ["hybrid_rag_tool"]}
+
+
 def _terminal_node(state: HarnessState) -> dict[str, Any]:
     """固化澄清、拒绝或 caller fail-closed 的无 Tool 终止分支。"""
 
@@ -89,7 +131,7 @@ def _terminal_node(state: HarnessState) -> dict[str, Any]:
     return {"graph_steps": ["terminal"]}
 
 
-def _controller_node(state: HarnessState) -> dict[str, Any]:
+def _controller_node(state: HarnessState, runtime: Runtime[HarnessRuntime]) -> dict[str, Any]:
     """★ Harness 中唯一写最终四轴和公开终止语义的控制节点。"""
 
     request = state["request"]
@@ -125,6 +167,9 @@ def _controller_node(state: HarnessState) -> dict[str, Any]:
             )
         return {"result": result, "graph_steps": ["controller"]}
 
+    if decision.route == "hybrid":
+        return _hybrid_controller(state, runtime)
+
     if observation is None:
         raise HarnessContractError("Tool route 缺少 Observation")
     if observation.route != decision.route:
@@ -147,6 +192,93 @@ def _controller_node(state: HarnessState) -> dict[str, Any]:
     return {"result": result, "graph_steps": ["controller"]}
 
 
+def _hybrid_controller(state: HarnessState, runtime: Runtime[HarnessRuntime]) -> dict[str, Any]:
+    """★ 唯一 Hybrid controller：按 required branch、safety 与 validator 决定 complete/partial/stop。"""
+
+    request = state["request"]
+    decision = state["route_decision"]
+    plan = decision.hybrid_plan
+    sql_branch, rag_branch = state.get("hybrid_sql"), state.get("hybrid_rag")
+    if plan is None or sql_branch is None or rag_branch is None:
+        raise HarnessContractError("Hybrid join 缺少 plan 或 branch result")
+    branches = (sql_branch, rag_branch)
+    steps = tuple([*state.get("graph_steps", []), "controller"])
+    # SQL 安全拦截不能被另一条文档规则淡化；明确停止且不给出跨来源建议。
+    if sql_branch.observation.safety_status == "blocked":
+        hybrid = HybridResult(branches=branches, reason_code="hybrid_sql_safety_blocked")
+        result = AgentRunResult(
+            route="hybrid", execution_status="completed", answer_status="no_answer", safety_status="blocked",
+            reason_code="hybrid_sql_safety_blocked", answer="数据查询未通过安全校验，无法形成混合结论。",
+            route_decision=decision, observation=None, hybrid=hybrid, termination_action="blocked", graph_steps=steps,
+            caller_safe_ref=request.caller.audit_ref if request.caller else None,
+        )
+        return {"result": result, "graph_steps": ["controller"]}
+
+    # 已拒绝的 Document branch 不得把 title/ref/hit 或内部原因带到 partial；只可公开另一支的
+    # 已授权独立事实。实际自然语言由 Synthesizer 的 sql_partial/rag_partial operator 产生。
+    if plan.conflict_fact_key is not None and sql_branch.evidence_ready and rag_branch.evidence_ready:
+        hybrid = HybridResult(branches=branches, reason_code="hybrid_evidence_conflict")
+        result = AgentRunResult(
+            route="hybrid", execution_status="completed", answer_status="insufficient_evidence", safety_status="passed",
+            reason_code="hybrid_evidence_conflict", answer="两类证据对同一事实存在冲突，当前不生成建议性结论。",
+            route_decision=decision, observation=None, hybrid=hybrid, termination_action="failed", graph_steps=steps,
+            caller_safe_ref=request.caller.audit_ref if request.caller else None,
+        )
+        return {"result": result, "graph_steps": ["controller"]}
+
+    synthesizer = runtime.context.hybrid_synthesizer or DeterministicHybridSynthesizer()
+    try:
+        drafts = synthesizer.compose(plan=plan, branches=branches)
+        claims, citations = validate_hybrid_claims(plan=plan, branches=branches, drafts=drafts)
+    except (HybridSynthesisError, HarnessContractError):
+        # ★ 不重跑任一 Tool。降级路径完全绕开失败 adapter，只从已经验证的单支 Evidence 形成
+        # partial；两个分支都成功时仍只公布其中一支独立事实，绝不伪造跨来源关联。
+        try:
+            drafts = build_safe_partial_drafts(plan=plan, branches=branches)
+            claims, citations = validate_hybrid_claims(plan=plan, branches=branches, drafts=drafts)
+        except (HybridSynthesisError, HarnessContractError):
+            claims, citations = (), ()
+        if claims:
+            hybrid = HybridResult(
+                branches=branches, claims=claims, citations=citations, reason_code="hybrid_synthesizer_partial"
+            )
+            result = AgentRunResult(
+                route="hybrid", execution_status="failed", answer_status="partial", safety_status="passed",
+                reason_code="hybrid_synthesizer_partial", answer="\n\n".join(str(item["text"]) for item in claims),
+                route_decision=decision, observation=None, hybrid=hybrid, termination_action="failed", graph_steps=steps,
+                caller_safe_ref=request.caller.audit_ref if request.caller else None,
+            )
+            return {"result": result, "graph_steps": ["controller"]}
+        hybrid = HybridResult(branches=branches, reason_code="hybrid_synthesizer_invalid")
+        result = AgentRunResult(
+            route="hybrid", execution_status="failed", answer_status="no_answer", safety_status="passed",
+            reason_code="hybrid_synthesizer_invalid", answer="当前无法安全合成混合结论。",
+            route_decision=decision, observation=None, hybrid=hybrid, termination_action="failed", graph_steps=steps,
+            caller_safe_ref=request.caller.audit_ref if request.caller else None,
+        )
+        return {"result": result, "graph_steps": ["controller"]}
+
+    if not claims:
+        hybrid = HybridResult(branches=branches, reason_code="hybrid_required_evidence_unavailable")
+        result = AgentRunResult(
+            route="hybrid", execution_status="completed", answer_status="insufficient_evidence", safety_status="passed",
+            reason_code="hybrid_required_evidence_unavailable", answer="当前缺少形成混合结论所需的证据。",
+            route_decision=decision, observation=None, hybrid=hybrid, termination_action="failed", graph_steps=steps,
+            caller_safe_ref=request.caller.audit_ref if request.caller else None,
+        )
+        return {"result": result, "graph_steps": ["controller"]}
+    complete = all(branch.evidence_ready for branch in branches)
+    reason = "hybrid_completed" if complete else "hybrid_safe_partial"
+    hybrid = HybridResult(branches=branches, claims=claims, citations=citations, reason_code=reason)
+    result = AgentRunResult(
+        route="hybrid", execution_status="completed", answer_status="complete" if complete else "partial", safety_status="passed",
+        reason_code=reason, answer="\n\n".join(str(item["text"]) for item in claims), route_decision=decision,
+        observation=None, hybrid=hybrid, termination_action="answer", graph_steps=steps,
+        caller_safe_ref=request.caller.audit_ref if request.caller else None,
+    )
+    return {"result": result, "graph_steps": ["controller"]}
+
+
 def build_harness() -> Any:
     """编译无 checkpoint 的固定单轮图；依赖全部在 invoke context 注入。"""
 
@@ -154,12 +286,18 @@ def build_harness() -> Any:
     builder.add_node("route", _route_node)
     builder.add_node("sql_tool", _sql_tool_node)
     builder.add_node("rag_tool", _rag_tool_node)
+    builder.add_node("hybrid_sql_tool", _hybrid_sql_tool_node)
+    builder.add_node("hybrid_rag_tool", _hybrid_rag_tool_node)
     builder.add_node("terminal", _terminal_node)
     builder.add_node("controller", _controller_node)
     builder.add_edge(START, "route")
-    builder.add_conditional_edges("route", _next_node, {"sql_tool": "sql_tool", "rag_tool": "rag_tool", "terminal": "terminal"})
+    builder.add_conditional_edges("route", _next_node, {
+        "sql_tool": "sql_tool", "rag_tool": "rag_tool", "hybrid_sql_tool": "hybrid_sql_tool", "terminal": "terminal"
+    })
     builder.add_edge("sql_tool", "controller")
     builder.add_edge("rag_tool", "controller")
+    builder.add_edge("hybrid_sql_tool", "hybrid_rag_tool")
+    builder.add_edge("hybrid_rag_tool", "controller")
     builder.add_edge("terminal", "controller")
     builder.add_edge("controller", END)
     return builder.compile()

@@ -18,7 +18,7 @@
 
 | 目标 | 配置 / 入口 | 说明 |
 |---|---|---|
-| M37 turn seam | `POST /api/query` | initial、pending/resume 和一次 follow-up 共用同一入口。普通/accepted turn 恰好调用一次 M35 Graph；thread lifecycle 前置拒绝调用零次 Graph，每个 accepted turn 至多一个 Text2SQL 或 RAG Tool。 |
+| M38 turn / Harness seam | `POST /api/query` | initial、pending/resume 和一次 follow-up 共用同一入口。SQL/RAG accepted turn 各至多一个深 Tool；canonical Hybrid initial 仍只 invoke 一次 Graph，但按薄计划依次执行 SQL、RAG 各一次（总计至多两个），两支 required。Hybrid 不签发 M37 follow-up；thread lifecycle 前置拒绝调用零次 Graph。 |
 | 结构化 resume | 请求同时提供 `thread_id`、`expected_version`、`clarification_answers` | 三项必须成组出现；只接受 checkpoint 声明的闭集字段。一次恢复后仍不明确时以 budget stop 结束，不创建嵌套 pending。 |
 | 显式一次 follow-up | initial 请求设置 `enable_bounded_follow_up=true`；后续提交 `thread_id`、`expected_version`、`follow_up_action`、`follow_up_fields` | 只有成功 SQL/RAG 才返回服务端 closed-world spec。SQL `adjust_sql_scope` 每次重查；业务 RAG `explain_same_evidence` 可按当前 active identity 重新授权并重水化，`ask_related_evidence` 重检索；external RAG 总是重检索。只能成功消费一次。 |
 | 显式 clear | `DELETE /api/query/threads/{thread_id}?user_role=<role>&expected_version=<version>` | clear 不调用 Graph/Tool，但会记录 lifecycle Trace；thread id 本身不能授权操作。 |
@@ -43,7 +43,7 @@
 | 目标 | 环境变量 / 命令 | 说明 |
 |---|---|---|
 | 本地 JSONL trace | M27 默认写入 `eval/traces/`，可用 `--trace-dir eval/traces` 指定目录 | 默认不依赖 LangFuse；JSONL 默认不提交。 |
-| `/api/query` M37 Trace | 默认 `eval/traces/traces.jsonl` | 记录 `turn_action`、不可逆 thread/context ref、checkpoint 版本迁移、Graph/Tool 次数及安全 Evidence validity/reacquisition reason；不记录 raw thread id、clarification/follow-up 字段值、旧 answer/rows/正文/citation 或 checkpoint dump。clear/rejected 也各写一条 lifecycle Trace。 |
+| `/api/query` M38 Trace | 默认 `eval/traces/traces.jsonl` | 单路沿用 M37 字段；Hybrid 额外记录安全 branch 摘要、薄 plan identity、Graph/Tool 次数和 citation identity。Hybrid JSONL 不保存 Document 正文、完整 SQL rows、private typed Evidence 或 denied branch 的真实原因/ref；Hybrid 不签发 follow-up。 |
 | 本地 M27 eval | `LANGFUSE_ENABLED=false`；按下方 selector 命令运行 | completed EvalRun JSON + Markdown report 是新事实源；M27 不生成旧 triage JSON。 |
 | LangFuse Cloud trace/score | `LANGFUSE_ENABLED=true`，必要时 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` | Cloud 仍是旁路增强；M27 当前只构造严格 allowlist assertion payload，实际上传需显式授权，不能影响本地 EvalRun。 |
 | LangFuse smoke | `python scripts\smoke_phase3b_langfuse.py`；Cloud 硬门禁加 `--require-langfuse` | M18 的主验证入口，用于 API / JSONL / trace mapping / score / visibility。 |

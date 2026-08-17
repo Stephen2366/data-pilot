@@ -12,10 +12,10 @@ from typing import Any, Literal
 from app.schemas.agent import ToolCallTrace
 from engine.governance import TrustedCaller
 from engine.rag.answer_flow import AnswerEvidenceRequirement
-from engine.rag.evidence import EvidenceRef
+from engine.rag.evidence import Evidence, EvidenceLedger, EvidenceRef
 from engine.trace.recorder import TraceStep
 
-Route = Literal["sql", "rag", "none"]
+Route = Literal["sql", "rag", "hybrid", "none"]
 ExecutionStatus = Literal["not_started", "completed", "external_unavailable", "failed"]
 AnswerStatus = Literal[
     "complete", "partial", "clarification_required", "unsupported", "insufficient_evidence", "no_answer"
@@ -28,6 +28,33 @@ KnowledgeRuntimeKind = Literal["business_release", "external_profile", "not_appl
 
 class HarnessContractError(ValueError):
     """Harness 收到不闭合的 route/observation 时抛出的合同错误。"""
+
+
+@dataclass(frozen=True)
+class HybridPlan:
+    """M38 的薄双分支计划。
+
+    ★ 它像列车的换乘单：只写哪两条既有深链路要跑、各自的问题和 RAG requirement；不携带
+    Tool 输出、正文、SQL，也不允许 Router 在这里生成答案或决定 ACL。受控 operator 是方案 A
+    的能力边界，未登记的开放 Hybrid 问法必须保守停止。
+    """
+
+    identity: str
+    operator: Literal["refund_reason_and_policy", "metric_value_and_definition"]
+    sql_question: str
+    rag_question: str
+    requirement: AnswerEvidenceRequirement
+    required_branches: tuple[Literal["sql", "rag"], ...] = ("sql", "rag")
+    # 仅供确定性合同/测试表达“同一个事实键的两个值”；正常 canonical operator 不设该字段。
+    conflict_fact_key: str | None = None
+
+    def __post_init__(self) -> None:
+        """拒绝可让 required 或计划边界变得模糊的输入。"""
+
+        if not self.identity.strip() or not self.sql_question.strip() or not self.rag_question.strip():
+            raise HarnessContractError("HybridPlan 必须有 identity 和两个 branch question")
+        if self.required_branches != ("sql", "rag"):
+            raise HarnessContractError("M38 Hybrid 的 SQL/RAG 两支必须且只能都是 required")
 
 
 @dataclass(frozen=True)
@@ -216,6 +243,7 @@ class RouteDecision:
     termination_action: TerminationAction
     decision_source: Literal["deterministic", "controller"] = "deterministic"
     requirement: AnswerEvidenceRequirement | None = None
+    hybrid_plan: HybridPlan | None = None
     clarification_spec: ClarificationSpec | None = None
 
     def __post_init__(self) -> None:
@@ -224,11 +252,13 @@ class RouteDecision:
         if self.route == "none" and self.needs_evidence:
             raise HarnessContractError("none route 不能请求 Evidence")
         if self.route != "none" and not self.needs_evidence:
-            raise HarnessContractError("SQL/RAG route 必须请求 Evidence")
+            raise HarnessContractError("SQL/RAG/Hybrid route 必须请求 Evidence")
         if self.route == "rag" and self.requirement is None:
             raise HarnessContractError("RAG route 必须带受控 requirement")
         if self.route != "rag" and self.requirement is not None:
             raise HarnessContractError("只有 RAG route 可以携带 requirement")
+        if (self.route == "hybrid") != (self.hybrid_plan is not None):
+            raise HarnessContractError("Hybrid route 必须且只能携带 HybridPlan")
         if self.termination_action == "clarify" and self.clarification_spec is None:
             raise HarnessContractError("clarify 决定必须携带 closed-world clarification spec")
         if self.termination_action != "clarify" and self.clarification_spec is not None:
@@ -243,7 +273,7 @@ class ToolObservation:
     AnswerFlow，顶层只保存已校验 citation、ledger 和 EvidenceRef 的安全投影。
     """
 
-    tool_name: Literal["text2sql", "rag_answer_flow"]
+    tool_name: Literal["text2sql", "rag_answer_flow", "rag_evidence_gate"]
     route: Literal["sql", "rag"]
     execution_status: ExecutionStatus
     answer_status: AnswerStatus
@@ -261,6 +291,10 @@ class ToolObservation:
     trace_steps: tuple[TraceStep, ...] = ()
     evidence_refs: tuple[dict[str, Any], ...] = ()
     ledger_projection: dict[str, Any] | None = None
+    # 这两个字段只在 Harness 进程内作为 Hybrid controller 的受控输入；API/Trace 的白名单
+    # 投影绝不读取它们，避免把正文或完整 SQL result 变成长期可见数据。
+    evidence_ledger: EvidenceLedger | None = field(default=None, repr=False, compare=False)
+    raw_evidence: tuple[Evidence, ...] = field(default=(), repr=False, compare=False)
     diagnostics: dict[str, Any] = field(default_factory=dict)
     blocked_reason: str | None = None
     error_type: str | None = None
@@ -275,12 +309,57 @@ class ToolObservation:
 
         if self.route == "sql" and self.tool_name != "text2sql":
             raise HarnessContractError("SQL Observation 必须来自 text2sql Tool")
-        if self.route == "rag" and self.tool_name != "rag_answer_flow":
-            raise HarnessContractError("RAG Observation 必须来自 RAGAnswerFlow")
+        if self.route == "rag" and self.tool_name not in {"rag_answer_flow", "rag_evidence_gate"}:
+            raise HarnessContractError("RAG Observation 必须来自 RAGAnswerFlow 或其 Evidence Gate")
         if self.safety_status == "blocked" and not self.blocked_reason:
             raise HarnessContractError("安全拦截必须携带可公开的 blocked_reason")
         if self.safety_status == "passed" and self.blocked_reason is not None:
             raise HarnessContractError("技术失败不能借用 blocked_reason")
+
+
+@dataclass(frozen=True)
+class BranchResult:
+    """Hybrid 单支的私有结果卡片，保留四轴与可验证 Evidence，但不保存子答案。"""
+
+    branch: Literal["sql", "rag"]
+    observation: ToolObservation
+
+    def __post_init__(self) -> None:
+        """分支名必须与深 Tool 实际 route 一致，防止 join 把结果放错格。"""
+
+        if self.observation.route != self.branch:
+            raise HarnessContractError("Hybrid branch 与 Observation route 不一致")
+
+    @property
+    def evidence_ready(self) -> bool:
+        """只有成功、已入 generation_visible 且保有本轮 typed Evidence 才能交给 Synthesizer。"""
+
+        ledger = self.observation.evidence_ledger
+        return bool(
+            self.observation.execution_status == "completed"
+            and self.observation.safety_status == "passed"
+            and ledger is not None
+            and self.observation.raw_evidence
+            and all(ledger.stage_of(item.ref.evidence_id) == "generation_visible" for item in self.observation.raw_evidence)
+        )
+
+
+@dataclass(frozen=True)
+class HybridResult:
+    """唯一 controller 形成的 Hybrid 公开事实及安全 branch 摘要。"""
+
+    branches: tuple[BranchResult, ...]
+    claims: tuple[dict[str, Any], ...] = ()
+    citations: tuple[dict[str, Any], ...] = ()
+    reason_code: str = "hybrid_completed"
+
+    def branch(self, name: Literal["sql", "rag"]) -> BranchResult:
+        """按闭集名称获取唯一分支，缺失/重复一律作为合同失败。"""
+
+        matches = [item for item in self.branches if item.branch == name]
+        if len(matches) != 1:
+            raise HarnessContractError("Hybrid 必须恰好拥有 SQL 与 RAG 各一个 branch result")
+        return matches[0]
 
 
 @dataclass(frozen=True)
@@ -298,6 +377,7 @@ class AgentRunResult:
     termination_action: TerminationAction
     graph_steps: tuple[str, ...]
     caller_safe_ref: str | None
+    hybrid: HybridResult | None = None
 
     def __post_init__(self) -> None:
         """确保最终四轴、Router 决定与 Observation 都来自同一路径。"""
@@ -306,7 +386,12 @@ class AgentRunResult:
             raise HarnessContractError("最终 route 必须与 RouteDecision 一致")
         if self.observation is not None and self.observation.route != self.route:
             raise HarnessContractError("Observation route 与最终 route 不一致")
-        if self.observation is None and self.route != "none":
+        if self.route == "hybrid":
+            if self.observation is not None or self.hybrid is None:
+                raise HarnessContractError("Hybrid 结果必须使用独立双分支事实，不能伪装成单 Observation")
+        elif self.hybrid is not None:
+            raise HarnessContractError("非 Hybrid route 不得携带 HybridResult")
+        elif self.observation is None and self.route != "none":
             raise HarnessContractError("需要 Tool 的 route 不能缺 Observation")
         if self.safety_status == "blocked" and not self.answer:
             raise HarnessContractError("blocked 结果仍必须有安全的用户文案")

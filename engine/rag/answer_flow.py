@@ -374,6 +374,27 @@ class RAGAnswerResult:
         }
 
 
+@dataclass(frozen=True)
+class RAGPreparedEvidence:
+    """Hybrid 专用的 RAG 深链输出：只完成 retrieval + Shared Gate。
+
+    ★ 这不是第二个 AnswerFlow。它复用同一份 Knowledge Tool、active release 与 Gate，把
+    ``generation_visible`` 的 Document Evidence 交给上层唯一 Hybrid Synthesizer；因此不会先
+    生成一个 RAG 子答案，再让另一个组件把两个自然语言答案拼接起来。
+    """
+
+    result: RAGAnswerResult | None
+    gate: GateDecision | None
+    diagnostics: AnswerFlowDiagnostics
+    evidence_validity: Mapping[str, Any]
+
+    @property
+    def available(self) -> bool:
+        """只有 Gate 允许且生成上下文存在时，Document Evidence 才能离开 RAG 深链。"""
+
+        return self.result is None and self.gate is not None and self.gate.allowed and self.gate.context is not None
+
+
 def _public_reason(reason: AnswerReason) -> str:
     """把内部精确 root cause 收敛为不会暴露文档存在性的公开 reason。"""
 
@@ -625,6 +646,91 @@ class RAGAnswerFlow:
                 bundle=bundle,
                 context=gate.context,
             ),
+            evidence_validity=validity,
+        )
+
+    def prepare_for_hybrid(self, request: RAGAnswerRequest) -> RAGPreparedEvidence:
+        """执行 Hybrid RAG branch 到 Shared Gate 为止，不调用 Composer 或 citation validator。
+
+        这里复用 ``run`` 前半段而不是由 Harness 自己调用私有 Gate：RAG 仍独占 release 重载、
+        ACL 双检和 Evidence stage 迁移。成功时 controller 只会得到 Gate 明确允许的 context；
+        失败时返回既有四轴结果，且不会产生任何可被当成答案的自然语言子结果。
+        """
+
+        started_at = perf_counter()
+        tool_calls = gate_calls = 0
+        outcome, validity = self._obtain_evidence(request, started_at=started_at)
+        tool_calls = 0 if validity.get("decision") in {"rehydrated", "denied", "unavailable"} else 1
+        early = self._from_retrieval_failure(
+            request=request,
+            outcome=outcome,
+            started_at=started_at,
+            counts=(tool_calls, gate_calls, 0, 0),
+            evidence_validity=validity,
+        )
+        if early is not None:
+            return RAGPreparedEvidence(
+                result=early,
+                gate=None,
+                diagnostics=early.diagnostics,
+                evidence_validity=validity,
+            )
+
+        try:
+            _pointer, bundle = self._active_loader()
+        except ReleaseError:
+            failed = self._failure_result(
+                outcome=outcome,
+                execution_status="external_unavailable",
+                answer_status="no_answer",
+                safety_status="passed",
+                reason_code="active_release_unavailable",
+                gate_decision=None,
+                started_at=started_at,
+                counts=(tool_calls, gate_calls, 0, 0),
+                evidence_validity=validity,
+            )
+            return RAGPreparedEvidence(
+                result=failed,
+                gate=None,
+                diagnostics=failed.diagnostics,
+                evidence_validity=validity,
+            )
+
+        gate_calls = 1
+        gate = self._gate(
+            request=request,
+            outcome=outcome,
+            bundle=bundle,
+            current_entries=_bundle_entry_index(bundle),
+        )
+        if not gate.allowed or gate.context is None:
+            failed = self._from_gate_denial(
+                outcome=outcome,
+                gate=gate,
+                bundle=bundle,
+                started_at=started_at,
+                counts=(tool_calls, gate_calls, 0, 0),
+                evidence_validity=validity,
+            )
+            return RAGPreparedEvidence(
+                result=failed,
+                gate=gate,
+                diagnostics=failed.diagnostics,
+                evidence_validity=validity,
+            )
+
+        diagnostics = self._diagnostics(
+            outcome=outcome,
+            started_at=started_at,
+            counts=(tool_calls, gate_calls, 0, 0),
+            bundle=bundle,
+            context=gate.context,
+        )
+        return RAGPreparedEvidence(
+            result=None,
+            gate=gate,
+            diagnostics=diagnostics,
             evidence_validity=validity,
         )
 

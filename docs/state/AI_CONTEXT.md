@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4-roadmap.md`                                     |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M37 受控有限追问与 Document Evidence 窄复用已开发并完成技术收工，已验收（2026-08-17） |
-| 当前 plan    | `docs/notes/m37-plan.md`                                     |
-| 当前 notes   | `docs/notes/m37-notes.md`                                    |
-| 待决事项     | 下一模块规划时判断 P4 剩余能力的最合适切片；M37 不等于完成整个 P4，尚未触发第二次追问、跨 route/Hybrid、持久 checkpoint、远程 Router 或生产认证决策门 |
+| 当前活动模块 | M38 保守 Hybrid 双 Evidence 编排已验收通过（2026-08-17） |
+| 当前 plan    | `docs/notes/m38-plan.md`                                     |
+| 当前 notes   | `docs/notes/m38-notes.md`                                    |
+| 待决事项     | M38 G-M38-1 方案 A 已落地；远程方案 B/C 仍受能力账本的重开门约束，不新增 Hybrid 数据出站 |
 | 更新时间     | 2026-08-17                                                   |
 
 ## 必读规则
@@ -35,7 +35,7 @@
 - 默认模型：Qwen `qwen3.7-plus`（`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`）；45s、retry0、backoff1。
 - Schema Retrieval 默认：inmemory + deterministic + weighted；Milvus / DashScope embedding 仅在显式实验中开启。
 - 业务 Knowledge Retrieval 默认：`knowledge-deterministic-lexical-v1`。它与 Text2SQL Schema Retrieval 是两套独立检索链路；这不代表语义最优，未来替换仍需独立候选 identity、held-out 失败证据、A/B 与用户确认。
-- Harness：LangGraph `>=1.1.2,<2`；M35 Graph 固定拓扑 `route → (sql_tool | rag_tool | terminal) → controller`，每个 accepted turn 最多一个 Tool。M37 在 Graph 外保留一次 pre-Tool clarification，并增加一次显式 opt-in follow-up；旧 EvidenceRef 只交给同 route 深 Tool，Router 看不到。未知或 Hybrid 请求继续保守停止。
+- Harness：LangGraph `>=1.1.2,<2`；SQL/RAG 单路仍为 `route → tool → controller`、各至多一个深 Tool。M38 canonical Hybrid 为 `route → hybrid_sql_tool → hybrid_rag_tool → controller`，SQL/RAG 都 required、各至多一次、总计至多两个深 Tool；Router 只签发薄计划，RAG branch 只执行 retrieval + Gate，不生成子答案。未知 Hybrid 继续保守停止；M37 follow-up 仍只覆盖 SQL/RAG。
 - Thread checkpoint：方案 A，应用持有 `inprocess-bounded-thread-v2`，state `m37-thread-v2`，默认 TTL `900s`（`THREAD_CHECKPOINT_TTL_SECONDS`）。除 M36 一次结构化恢复外，成功 SQL/RAG 可在显式开启后签发一次 closed-world follow-up；owner 绑定 trusted caller + tenant/active role，同 version 原子单 claim，重启/多 worker 不恢复或共享。checkpoint 不保存旧 answer/rows/正文/citation。
 - Evidence follow-up：SQL 没有可靠业务 snapshot，永远重查；EnterpriseRAG-Bench external 永远重检索；只有业务 22-entry release 的同 requirement 解释动作可按当前 active authority/revision/content/anchor 重新加载并重新授权，随后签发新 run Evidence/ledger/citation。requirement/identity 变化重检索一次，ACL/用途拒绝零 retrieval 停止。
 - Caller：`local/demo/test` 使用明确标记的 fixture resolver，请求 `user_role` 只能选择 resolver 已解析的 role；其他环境没有 authenticated resolver 时在 Tool 前失败关闭。生产认证尚未建设。
@@ -49,6 +49,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-17 | M38 完成 P5 保守 Hybrid 双 Evidence 基线：本地确定性 Synthesizer、双 required branch、typed SQL/Document Evidence、safe partial/conflict/合成失败降级、API/Trace 投影和 `phase4-harness-hybrid-v1`（5 Scenario / 25 required）。全仓 deterministic pytest `436 passed, 3 skipped, 1 warning in 599.87s`，compileall/diff check 通过；未运行真实 Hybrid LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测。 |
 | 2026-08-17 | M37 完成 P4 的一次有界 follow-up + Evidence validity/重新取证切片：`phase4-harness-followup-v1` 覆盖 10 sequences / 22 turn evidence / 50 required，50/50 通过，identity `1185edf0...634b25`。全仓 deterministic pytest `427 passed, 3 skipped, 1 warning in 509.36s`，compileall/diff check 通过；未运行真实 LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测。 |
 | 2026-08-16 | M36 完成 P4/G5 首个有界恢复切片：应用持有 versioned in-process checkpoint，支持 pending→一次 resume/clear、owner+tenant/active-role、TTL/state version、原子单 claim、budget stop 和安全 Trace；`phase4-harness-turn-v1` 覆盖 8 组 sequence。全仓 deterministic pytest `416 passed, 1 warning in 594.12s`，compileall/diff check 通过；未运行真实 LLM/远程 Eval。 |
 | 2026-08-16 | SQL 四轴映射按用户确认的方案 A 收口：QueryPlan output-projection mismatch 是执行前确定性合同拒绝，保持 `completed / no_answer / blocked`；LLM JSON/SQL 解析失败是 `external_unavailable / no_answer / passed`，不写 `blocked_reason`。SQL Guard、语义拒绝和 driver/pipeline 技术错误各有独立分支。 |
@@ -59,20 +60,21 @@
 
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
 
-- (2026-08-17) M37 已在 M36 clarification 之后完成一次 closed-world follow-up 与 Evidence validity/重新取证闭环，但不等于完成整个 P4。下一轮必须按 roadmap 重新选择剩余能力切片；“窄 B”是正式边界，不得退化为直接复用旧答案，也不得默认扩到 external、第二次追问、跨 route、长历史、持久化、Tool retry 或 P5 Hybrid。M34 lexical 漏召回和 multi-document context packing 仍是独立候选。
+- (2026-08-17) M37 单独不等于 P4，但 M36 + M37 已共同完成 roadmap 定义的 P4 最小可验收基线；不宣称通用多轮。第二次追问、长历史 compact 和持久 checkpoint 不是当前 P4 硬门；跨 route/跨 Tool 补证据由 M38 的 P5 Hybrid 正式承接。M37“窄 B”仍是正式边界，不得退化为直接复用旧答案或默认扩到 external。
+- (2026-08-17) M38 已按 P5 口径完成保守 Hybrid 纵向基线：方案 A 的本地确定性 Synthesizer 是正式默认与长期 fallback；SQL/RAG 默认 required，不触发 G6 optional 放宽，不新增 Hybrid 数据出站。P5 不等于开放式跨来源研究 Agent；下一个路线判断应先做 P6 go/no-go，而不是把 Router 放宽或悄悄接远程 Synthesizer。
 - (2026-08-10) Text2SQL 的确定性收尾问题已修复；若未来重跑 Text2SQL，必须使用 `m27-v3` 新序列，并完整记录 collection、embedding、corpus 与 run-scoped index identity。现有 v1/v2 数字只作历史解释。
 - (2026-08-09) 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
 
-## 防遗忘能力账本（M29–M37）
+## 防遗忘能力账本（M29–M38）
 
 > 记录已经存在、但容易被“当前窄实现已完成”掩盖的能力缺口和重开门。优先级表示防遗忘/复核顺序，不自动决定下一模块；下一模块仍须按 roadmap、最新失败证据和独立 plan 裁决。原方案字母只在对应 module plan 内有效，禁止脱离具体方案写“以后从 A 升级 B”。
 
 | 优先级 | 能力缺口 | 当前结论与硬性重开门 | 路线归属 |
 |---|---|---|---|
-| P0 | M36–M37 只完成一次 clarification、一次 closed-world follow-up 和最小 Context Builder，尚无明确的整个 P4 关闭清单 | 规划下一模块时必须先逐项判断 P4 剩余能力并冻结“做到什么算 P4 完成”；不能因已有一次追问就宣称通用多轮，也不能用“以后完善”代替归属明确的模块或明确 no-go | P4 主线 |
 | P0 | M34 已证实 lexical 漏召回、selected budget / multi-document context packing 和 Composer support 拒绝会严重限制答案质量 | 最迟在 P6 go/no-go 中把失败簇转成单变量候选实验或有证据的 no-go；semantic candidate 已在同 split 输给 lexical，禁止把“直接切 semantic”写成完善版方案 | P6 证据审查；不混入 P4/P5 |
+| P1 | M38 方案 A 只冻结正式本地确定性 Hybrid Synthesizer；远程方案 B 与双 adapter 方案 C 未实施 | B 的重开门：受控 operators 对真实开放 Hybrid 问法形成稳定失败簇，且用户明确批准 receiver、`hybrid_synthesis` 用途、question/conditions、SQL safe result、Document Evidence/identity 的数据类别与字段，并提供真实 provider 精确运行授权。C 的重开门：除上述授权外，还需有未污染 Hybrid held-out、多轮可比预算和明确 A/B 决策价值；禁止仅为“代码里有两个 adapter”扩大 M38。无稳定净收益时 A 继续作为默认与 fallback | P5 后续质量/出站条件项 |
 | P1 | 当前只有 demo/test caller resolver，生产认证尚未建设 | 出现非本地部署、真实用户/tenant、JWT/OAuth/SSO 或企业目录需求时，必须在现有 `CallerResolver` seam 接正式认证 adapter；“所有环境手工注入 resolver”不等于生产认证 | Phase 4 后续部署门 |
-| P2 | M35 deterministic Router 对开放问法和混合意图较窄 | 先建立开放问法/混合意图 decision set 并形成稳定失败簇，再比较规则扩充、受控模型 fallback 或远程 Router；不得以“LLM 更完善”为由无 Eval 切换。P5 Hybrid 仍按独立薄计划和双 Evidence 合同实现 | P3 后续质量；P5 独立主线 |
+| P2 | M35/M38 deterministic Router 只覆盖 closed-world SQL/RAG 和两类 canonical Hybrid operator | 先建立开放问法/混合意图 decision set 并形成稳定失败簇，再比较规则扩充、受控模型 fallback 或远程 Router；不得以“LLM 更完善”为由无 Eval 切换 | P3/P5 后续质量 |
 | P3 | `knowledge_docs` 有损 legacy 表仍保留 | 出现新 runtime consumer、知识后台/多实例发布、从旧表恢复授权/catalog，或双事实源风险时，必须正式设计数据库 projection 或删除 legacy 表；禁止继续追加字段把它伪装成 authority | 数据治理条件项 |
 | 条件项 | M37 checkpoint 仍为进程内，重启/多 worker 不恢复且 tombstone 不清扫 | 只有重启恢复或多 worker 会话成为 required Scenario 时才设计持久 checkpoint；LangGraph `InMemorySaver` 仍是内存态，不得把更换框架内存实现冒充持久化升级。清扫策略按容量证据单独触发 | P4/部署条件项 |
 
@@ -87,7 +89,7 @@
 | QueryPlan 可能过宽，或 SQL 与计划不一致 | contract pass 不等于答案正确 | 保持保守 AST 边界，用 output/result/trace 共同定位。 |
 | 生产认证尚未建设；请求体 `user_role` 仍是客户端自报字符串 | 不能作为文档 ACL、生产身份或 thread owner 的独立信任来源 | M35–M37 让 `/api/query` 在 local/demo/test 通过显式 fixture resolver 解析 caller，role 只能选择 resolved role；thread 再绑定 owner+tenant/active role，其他环境缺 authenticated resolver 时 Tool 前失败关闭。 |
 | M37 checkpoint 仅在单进程内存，resolved/cleared tombstone 暂不清扫 | 重启或多 worker 时 pending/follow-up-ready 不可恢复；长时间大量创建 thread 会增长进程内容器 | 当前明确返回 `conversation_unavailable`，不伪装持久会话；只有重启恢复成为 required Scenario 才重开存储决策，清扫策略按真实容量证据另行规划。 |
-| M35 deterministic Router 对开放问法较窄 | 未知或 Hybrid 问题会保守停止，不能代表已具备通用意图理解 | 保持可注入 seam；只有真实失败簇、受控 Eval 和出站决策成立后，才规划远程 Router 或 fallback。 |
+| M35/M38 deterministic Router 对开放问法较窄 | 未登记 Hybrid、开放问法会保守停止；当前只证明两类 canonical operator，不代表通用意图理解 | 保持可注入 seam；只有真实失败簇、受控 Eval 和出站决策成立后，才规划规则扩张、远程 Router 或 Synthesizer。 |
 | `knowledge_docs` 物理表仍存在且是有损 legacy 投影 | 新调用者若绕过 source-backed catalog 读取旧表，会丢失 revision/authority/identity/完整 ACL，并重新制造旁路 | Text2SQL 已从 Schema/prompt/RBAC 双重隔离；seed 只从 staged catalog 派生，旧表不得作为 authority/runtime catalog。 |
 | M34 full Answer Eval 的 complete 不等于正确 | lexical 漏召回、semantic 与多文档题会产生“有 citation 但答非所问”；全题 all-gold cited 仅 44.44%，multi-document 5.26%，semantic 28.85% | 后续先按失败簇改善 gold coverage/context packing；不得用 complete rate 代替 correctness，也不得未经新计划重跑大规模 provider。 |
 | Active Knowledge release 损坏时不会自动 fallback；当前虽有 previous，但旧 11-entry release 已不等于当前 authority | 自动复活旧正文可能绕过撤销/ACL，或丢失新增内容 | 启动失败关闭；显式 rollback 仍必须重新通过当前 authority/revision/policy 校验。 |

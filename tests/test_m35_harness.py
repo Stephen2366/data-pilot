@@ -94,7 +94,7 @@ def test_graph_has_only_the_planned_single_round_nodes() -> None:
 
 
 def test_router_is_conservative_for_sql_rag_clarification_and_hybrid() -> None:
-    """Router 只输出闭集 route，未知/Hybrid 不会默认调 Tool。"""
+    """Router 只输出闭集 route；M38 只为登记的 Hybrid operator 签发薄计划。"""
 
     router = DeterministicRouter()
 
@@ -102,8 +102,10 @@ def test_router_is_conservative_for_sql_rag_clarification_and_hybrid() -> None:
     assert router.decide(_request("退款政策是什么？")).route == "rag"
     assert router.decide(_request("这个怎么处理？")).reason_code == "clarification_required"
     hybrid = router.decide(_request("查询退款率并说明退款政策"))
-    assert hybrid.route == "none"
-    assert hybrid.reason_code == "hybrid_unsupported"
+    assert hybrid.route == "hybrid"
+    assert hybrid.hybrid_plan is not None
+    assert hybrid.hybrid_plan.required_branches == ("sql", "rag")
+    assert router.decide(_request("查询订单量并说明配送政策")).reason_code == "hybrid_unsupported"
 
 
 def test_each_graph_route_invokes_at_most_one_tool() -> None:
@@ -114,7 +116,7 @@ def test_each_graph_route_invokes_at_most_one_tool() -> None:
 
     sql = run_harness(request=_request("各渠道订单量是多少？"), runtime=runtime)
     rag = run_harness(request=_request("退款政策是什么？"), runtime=runtime)
-    none = run_harness(request=_request("查询退款率并说明退款政策"), runtime=runtime)
+    none = run_harness(request=_request("请帮我预测明天销售"), runtime=runtime)
 
     assert (sql.route, sql.execution_status, sql.answer_status) == ("sql", "completed", "complete")
     assert (rag.route, rag.execution_status, rag.answer_status) == ("rag", "completed", "complete")

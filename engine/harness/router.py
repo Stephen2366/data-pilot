@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from engine.harness.contracts import ClarificationFieldSpec, ClarificationSpec, HarnessRequest, RouteDecision
+from engine.harness.contracts import ClarificationFieldSpec, ClarificationSpec, HarnessRequest, HybridPlan, RouteDecision
 from engine.rag.answer_flow import AnswerEvidenceRequirement
 
 
@@ -88,7 +88,10 @@ class DeterministicRouter:
         has_rag = any(hint in text for hint in self._RAG_HINTS)
         has_sql = any(hint in normalized for hint in self._SQL_HINTS)
         if has_rag and (has_sql or any(hint in text for hint in self._HYBRID_HINTS)):
-            return RouteDecision("none", "hybrid_unsupported", False, "unsupported")
+            plan = self._hybrid_plan_for(text)
+            if plan is None:
+                return RouteDecision("none", "hybrid_unsupported", False, "unsupported")
+            return RouteDecision("hybrid", "hybrid_plan_required", True, "answer", hybrid_plan=plan)
         if has_rag:
             return RouteDecision(
                 "rag",
@@ -100,3 +103,26 @@ class DeterministicRouter:
         if has_sql:
             return RouteDecision("sql", "sql_evidence_required", True, "answer")
         return RouteDecision("none", "unsupported_request", False, "unsupported")
+
+    @staticmethod
+    def _hybrid_plan_for(text: str) -> HybridPlan | None:
+        """把两类 canonical 演示问法投影为薄计划；未登记组合不猜测分支任务。"""
+
+        normalized = text.lower()
+        if "gmv" in normalized and any(hint in text for hint in ("口径", "定义", "说明")):
+            return HybridPlan(
+                identity="hybrid-metric-value-and-definition-v1",
+                operator="metric_value_and_definition",
+                sql_question="查询 2026 年 6 月 GMV",
+                rag_question="GMV 的定义和统计口径是什么？",
+                requirement=AnswerEvidenceRequirement(required_terms=("GMV",)),
+            )
+        if "退款" in text and any(hint in text for hint in ("政策", "规则", "材料")):
+            return HybridPlan(
+                identity="hybrid-refund-reason-and-policy-v1",
+                operator="refund_reason_and_policy",
+                sql_question="退款原因排名",
+                rag_question="质量问题退款规则",
+                requirement=AnswerEvidenceRequirement(required_terms=("质量问题",)),
+            )
+        return None

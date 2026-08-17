@@ -30,12 +30,18 @@ class Text2SQLTool(Protocol):
     def run(self, request: HarnessRequest) -> ToolObservation:
         """执行完整 SQL 流水线，返回统一四轴 Observation。"""
 
+    def run_for_hybrid(self, request: HarnessRequest) -> ToolObservation:
+        """执行同一 SQL 深链并保留仅供 Hybrid controller 消费的 typed Evidence。"""
+
 
 class RAGTool(Protocol):
     """RAGAnswerFlow 深 module 的 Harness seam。"""
 
     def run(self, request: HarnessRequest) -> ToolObservation:
         """执行一次既有 AnswerFlow，不在 Graph 内重写其 Gate/Composer/Validator。"""
+
+    def run_for_hybrid(self, request: HarnessRequest, *, requirement: AnswerEvidenceRequirement) -> ToolObservation:
+        """执行 retrieval + Gate，绝不生成一个 RAG 自然语言子答案。"""
 
 
 def _result_fingerprint(columns: list[str], rows: list[dict[str, Any]]) -> str:
@@ -217,6 +223,8 @@ def _sql_observation(
         trace_steps=tuple(trace_steps),
         evidence_refs=(evidence.ref.audit_projection(),),
         ledger_projection=ledger.safe_projection(),
+        evidence_ledger=ledger,
+        raw_evidence=(evidence,),
         diagnostics=diagnostics,
         sql_time_ms=result.sql_time_ms,
         langfuse_trace_id=lifecycle.get("trace_id"),
@@ -252,6 +260,11 @@ class Text2SQLToolAdapter:
         if request.force_new_pipeline:
             return self._run_new_pipeline(request)
         return self._run_legacy_pipeline(request)
+
+    def run_for_hybrid(self, request: HarnessRequest) -> ToolObservation:
+        """Hybrid SQL branch 复用原 Tool；private Evidence 由 `_sql_observation` 单点构造。"""
+
+        return self.run(request)
 
     def _run_new_pipeline(self, request: HarnessRequest) -> ToolObservation:
         """复用既有 Schema Retrieval → QueryPlan → Guard 深链。"""
@@ -424,4 +437,75 @@ class RAGToolAdapter:
             diagnostics=diagnostics,
             blocked_reason=("当前身份无权访问相关文档。" if result.safety_status == "blocked" else None),
             error_type=None if result.safety_status == "passed" else result.reason_code,
+        )
+
+    def run_for_hybrid(self, request: HarnessRequest, *, requirement: AnswerEvidenceRequirement) -> ToolObservation:
+        """只运行 RAG 取证与 Gate，把已授权 Document Evidence 留在 Harness 私有边界。"""
+
+        if request.caller is None:
+            raise ValueError("未解析 caller 不得进入 RAG Tool")
+        prepared = self._answer_flow.prepare_for_hybrid(
+            RAGAnswerRequest(
+                question=request.question,
+                caller=request.caller,
+                run_id=request.run_id,
+                requirement=requirement,
+                knowledge_runtime_kind=self._knowledge_runtime_kind,
+            )
+        )
+        if not prepared.available:
+            failed = prepared.result
+            if failed is None:
+                raise ValueError("Hybrid RAG Gate 未返回闭合失败结果")
+            safe = failed.safe_projection()
+            diagnostics = dict(safe["diagnostics"])
+            diagnostics["knowledge_runtime_kind"] = self._knowledge_runtime_kind
+            diagnostics["hybrid_rag_mode"] = "evidence_gate_only"
+            return ToolObservation(
+                tool_name="rag_evidence_gate",
+                route="rag",
+                execution_status=failed.execution_status,
+                answer_status=failed.answer_status,
+                safety_status=failed.safety_status,
+                reason_code=failed.reason_code,
+                tool_calls=(
+                    ToolCallTrace(
+                        tool_name="rag_evidence_gate",
+                        status="blocked" if failed.safety_status == "blocked" else "error",
+                        latency_ms=failed.diagnostics.elapsed_ms,
+                        error_type=failed.reason_code,
+                    ),
+                ),
+                diagnostics=diagnostics,
+                error_type=failed.reason_code if failed.execution_status != "completed" else None,
+                blocked_reason=("文档证据未获授权。" if failed.safety_status == "blocked" else None),
+            )
+
+        gate = prepared.gate
+        if gate is None or gate.context is None:
+            raise ValueError("Hybrid RAG Gate 成功结果缺少 context")
+        evidence = gate.context.evidence
+        return ToolObservation(
+            tool_name="rag_evidence_gate",
+            route="rag",
+            execution_status="completed",
+            answer_status="complete",
+            safety_status="passed",
+            reason_code="hybrid_document_evidence_ready",
+            tool_calls=(
+                ToolCallTrace(
+                    tool_name="rag_evidence_gate",
+                    status="success",
+                    latency_ms=prepared.diagnostics.elapsed_ms,
+                ),
+            ),
+            evidence_refs=tuple(item.ref.audit_projection() for item in evidence),
+            ledger_projection=gate.ledger.safe_projection(),
+            evidence_ledger=gate.ledger,
+            raw_evidence=evidence,
+            diagnostics={
+                **prepared.diagnostics.safe_projection(),
+                "knowledge_runtime_kind": self._knowledge_runtime_kind,
+                "hybrid_rag_mode": "evidence_gate_only",
+            },
         )

@@ -58,20 +58,46 @@ def _observation_projection(observation: ToolObservation | None) -> dict[str, An
     }
 
 
+def _hybrid_branch_projection(result: Any) -> list[dict[str, Any]]:
+    """形成 Hybrid branch 的最小安全摘要；拒绝分支不暴露 EvidenceRef 或内部 reason。"""
+
+    if result.hybrid is None:
+        return []
+    projected: list[dict[str, Any]] = []
+    for branch in result.hybrid.branches:
+        observation = branch.observation
+        allowed = observation.safety_status == "passed" and branch.evidence_ready
+        projected.append(
+            {
+                "branch": branch.branch,
+                "execution_status": observation.execution_status,
+                "answer_status": observation.answer_status,
+                "safety_status": observation.safety_status,
+                "reason_code": observation.reason_code if observation.safety_status == "passed" else "branch_not_disclosed",
+                "evidence_refs": list(observation.evidence_refs) if allowed else [],
+            }
+        )
+    return projected
+
+
 def _project_response(*, turn: AgentTurnResult, trace_id: str, started_at: float) -> AgentResponse:
     """★ 唯一 AgentResponse projector：旧字段只从同一份 Harness 事实派生。"""
 
     result = turn.result
     observation = result.observation
+    hybrid_branches = _hybrid_branch_projection(result)
     # 步骤 1：从 Observation 取得兼容字段；none 路径不会伪造 SQL、rows 或 docs。----------
-    sql = observation.sql if observation else None
-    columns = list(observation.columns) if observation else []
-    rows = list(observation.rows) if observation else []
-    tables_used = list(observation.tables_used) if observation else []
+    hybrid_sql = result.hybrid.branch("sql").observation if result.hybrid is not None else None
+    sql = observation.sql if observation else (hybrid_sql.sql if hybrid_sql else None)
+    columns = list(observation.columns) if observation else (list(hybrid_sql.columns) if hybrid_sql else [])
+    rows = list(observation.rows) if observation else (list(hybrid_sql.rows) if hybrid_sql else [])
+    tables_used = list(observation.tables_used) if observation else (list(hybrid_sql.tables_used) if hybrid_sql else [])
     docs_used = list(observation.docs_used) if observation else []
-    chart_spec = observation.chart_spec if observation else None
-    tool_calls = list(observation.tool_calls) if observation else []
-    citations = list(observation.citations) if observation else []
+    chart_spec = observation.chart_spec if observation else (hybrid_sql.chart_spec if hybrid_sql else None)
+    tool_calls = list(observation.tool_calls) if observation else (
+        [call for branch in result.hybrid.branches for call in branch.observation.tool_calls] if result.hybrid else []
+    )
+    citations = list(observation.citations) if observation else (list(result.hybrid.citations) if result.hybrid else [])
 
     # 步骤 2：blocked_reason 只表达安全裁决；技术故障只能在 reason/error_type 中诊断。----
     blocked_reason = observation.blocked_reason if observation and result.safety_status == "blocked" else None
@@ -88,7 +114,7 @@ def _project_response(*, turn: AgentTurnResult, trace_id: str, started_at: float
         blocked_reason=blocked_reason,
         cost=CostInfo(
             latency_ms=round((perf_counter() - started_at) * 1000, 3),
-            sql_time_ms=observation.sql_time_ms if observation else 0.0,
+            sql_time_ms=observation.sql_time_ms if observation else (hybrid_sql.sql_time_ms if hybrid_sql else 0.0),
         ),
         tool_calls=tool_calls,
         error_type=observation.error_type if observation else (result.reason_code if result.execution_status == "failed" else None),
@@ -100,6 +126,7 @@ def _project_response(*, turn: AgentTurnResult, trace_id: str, started_at: float
         turn_action=turn.turn_action,
         graph_invocation_count=turn.graph_invocation_count,
         thread=ThreadView.model_validate(turn.thread.as_dict()) if turn.thread else None,
+        hybrid_branches=hybrid_branches,
     )
 
 
@@ -110,6 +137,7 @@ def _record_trace(
 
     result = turn.result
     observation = result.observation
+    hybrid_branches = _hybrid_branch_projection(result)
     decision = result.route_decision
     trace_record = TraceRecord(
         trace_id=response.trace_id,
@@ -119,7 +147,9 @@ def _record_trace(
         answer=response.answer,
         sql=response.sql,
         columns=response.columns,
-        rows=response.rows,
+        # Hybrid 的完整 SQL rows 只保留在本次 API 兼容视图，默认 JSONL 仅保存 result identity；
+        # 否则两支 private Evidence 会被 Trace 旁路长期化。
+        rows=[] if result.hybrid is not None else response.rows,
         tables_used=response.tables_used,
         docs_used=response.docs_used,
         chart_spec=response.chart_spec,
@@ -144,12 +174,14 @@ def _record_trace(
             "decision_source": decision.decision_source,
             "requirement_identity": decision.requirement.identity if decision.requirement else None,
             "clarification": decision.clarification_spec.safe_projection() if decision.clarification_spec else None,
+            "hybrid_plan_identity": decision.hybrid_plan.identity if decision.hybrid_plan else None,
         },
         graph_steps=list(result.graph_steps),
         caller_safe_ref=result.caller_safe_ref,
         tool_observation=_observation_projection(observation),
         evidence_refs=list(observation.evidence_refs) if observation else [],
         termination_action=result.termination_action,
+        hybrid_branches=hybrid_branches,
         turn_action=turn.turn_action,
         graph_invocation_count=turn.graph_invocation_count,
         thread_lifecycle=turn.lifecycle.safe_projection() if turn.lifecycle else None,

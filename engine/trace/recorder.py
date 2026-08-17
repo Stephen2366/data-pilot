@@ -84,6 +84,7 @@ class TraceRecord(BaseModel):
     tool_observation: dict[str, Any] | None = None
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     termination_action: str | None = None
+    hybrid_branches: list[dict[str, Any]] = Field(default_factory=list)
     # M36/M37：只记录不可逆 thread ref、版本迁移与安全 validity；raw thread_id、
     # checkpoint、追问字段值和旧 answer/rows/正文都不进 Trace。
     turn_action: Literal["initial", "resume", "follow_up", "rejected", "clear"] = "initial"

@@ -29,7 +29,7 @@ SCENARIOS = (
     HarnessScenario("sql", "各渠道订单量是多少？", "sql", "complete"),
     HarnessScenario("rag", "退款政策是什么？", "rag", "complete"),
     HarnessScenario("clarification", "这个怎么处理？", "none", "clarification_required"),
-    HarnessScenario("hybrid_unsupported", "查询退款率并说明退款政策", "none", "unsupported"),
+    HarnessScenario("hybrid_unsupported", "查询订单量并说明配送政策", "none", "unsupported"),
     HarnessScenario("caller_untrusted", "各渠道订单量是多少？", "none", "no_answer", caller_trusted=False),
 )
 

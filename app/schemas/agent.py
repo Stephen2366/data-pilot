@@ -175,3 +175,5 @@ class AgentResponse(BaseModel):
     turn_action: Literal["initial", "resume", "follow_up", "rejected"] = "initial"
     graph_invocation_count: int = Field(default=1, ge=0, le=1)
     thread: ThreadView | None = None
+    # M38：只给出 branch 的安全状态与已验证引用，不把私有 typed Evidence 塞回 API。
+    hybrid_branches: list[dict[str, Any]] = Field(default_factory=list)

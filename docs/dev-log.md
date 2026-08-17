@@ -3031,3 +3031,167 @@ python -m uvicorn app.main:app --reload
 
 预计第二次返回 `turn_action=follow_up`、新的 SQL Evidence 和 `thread.status=resolved`。再次原样提交会在 Graph 前被拒绝，不会重复查询；增加 spec 外字段也会得到稳定 422 或 `follow_up_invalid`。这里使用的是 **local/demo fixture caller**，thread 只存在于当前 API 进程，不能解释成生产认证、持久会话或自由聊天。
 
+## ★ M38 保守 Hybrid 双 Evidence 编排
+
+（2026-08-17）
+
+**简述**：让 DataPilot 在同一次请求中完成“查数据库事实 + 查业务规则”的**保守 Hybrid**回答；只有两类证据都经验证时才给跨来源结论，失败时宁可降级或停止，也不拼凑答案。
+
+### 先用大白话讲
+
+以前系统面对“退款原因是什么，同时政策怎么规定”这类问题，会知道它同时需要 SQL 和文档，却只能保守说“不支持”。如果直接把两个 Tool 的自然语言答案拼起来，表面上很方便，实际上很危险：SQL 可能被 Guard 拦下，文档可能没权限，两个结论也可能互相冲突；更糟的是，系统会失去“这句话到底由哪份证据支持”的证明。
+
+M38 把 Hybrid 做成一张**双窗口办事单**。Router 只填写“要去 SQL 窗口和文档窗口，各问什么”，两个深 Tool 各跑一次；最后由一个 controller 统一检查两份 Evidence。两份都齐，才给完整的跨来源回答；只剩一份时，只讲那份可以独立成立的事实；SQL 安全拦截、证据冲突或合成失败时，也有固定的安全收口。这样它不是“更会聊天”，而是先把**双证据协作的责任边界**做清楚。
+
+### 这次做了什么
+
+**核心问题**是：系统已有可信 SQL 和可信 RAG，但两条链路以前只能二选一；一旦问题同时需要数据事实与规则依据，就既拿不到完整证据，也没有统一的失败合同。M38 在不增加远程出站的前提下，把两条既有深链路放进同一个 Harness，并让 API、Trace 与 Eval 都从同一次运行事实投影。
+
+1. **用薄计划把“混合问题”变成两条受控分支**
+
+   **原来的问题**是 Router 对 Hybrid 只能返回 `hybrid_unsupported`。直接把 Router 改成能自由规划很多步骤，看上去能力更强，但会把 SQL QueryPlan、权限、Tool 执行和答案生成混在一起，后续很难检查预算和责任。
+
+   M38 新增 **HybridPlan（混合计划）**：它只包含受控 operator、SQL/RAG 各自的问题和 RAG 的 Evidence requirement，相当于一张“去哪两个窗口、各办什么事”的短表单。当前只登记两类 canonical 问法：退款原因+规则、GMV 值+口径；未登记的 Hybrid 仍安全停止。Graph 固定为 `route → hybrid_sql_tool → hybrid_rag_tool → controller`，SQL/RAG 各至多一次、总计至多两次。
+
+   这里没有为了演示而接远程 Planner 或让 Router 看正文；**关键取舍**是宁可覆盖窄，也要保证 Router 只计划、不执行、不授权、不写答案。专项测试和 `phase4-harness-hybrid-v1` 都检查 branch budget 与单次 Graph。它证明的是这两类受控操作能稳定执行，**没有证明**系统能理解任意开放式跨来源研究问题。
+
+2. **让 Synthesizer 看 Evidence，而不是拼两个子答案**
+
+   **原来的问题**是 SQL adapter 虽然能构造 typed SQL Evidence，RAG AnswerFlow 也有完整 Document Evidence，但公开 `ToolObservation` 只保留安全投影。如果 Hybrid 只拿公开结果，只能拼两个自然语言子答案，既无法验证原始证据，也可能把 RAG 的 Composer 重复调用一次。
+
+   M38 在 Harness 内部增加 **private typed Evidence seam（私有类型证据接缝）**。SQL 分支继续走 SQL Guard 后构造 SQL Evidence；RAG 新增 `prepare_for_hybrid()`，复用 Knowledge Tool、active release、ACL 双检和 Shared Gate，却在 Composer 前停止。也就是说，RAG 分支只说“这些文档证据已经被允许给合成器看”，并不先写一段 RAG 答案。
+
+   这样 **唯一 Hybrid Synthesizer** 只消费同一 run、已到 `generation_visible` 阶段的 SQL/Document Evidence。跨来源 claim 必须同时绑定两种 evidence id；API 和 JSONL Trace 不读取完整 Evidence，因此不保存文档正文或 Hybrid SQL 的完整 rows。真实 API/Trace 测试验证了双 citation 和非泄露投影；这并不意味着任意文档组合都能自动形成高质量结论，检索质量仍由后续 P6 处理。
+
+3. **把完整、partial、冲突和合成失败都交给唯一 controller**
+
+   **原来的问题**是“两个 Tool 都能跑”不等于“结果可以安全回答”。如果缺少 required 文档分支还输出完整结论，或遇到冲突时模型静默选边，用户看到的答案会比证据更自信。
+
+   M38 规定 SQL/RAG 默认都是 **required branch（必需分支）**。两支 Evidence 都可用，controller 才允许 `complete`；只有一支可用时，最多返回它独立成立的 `partial`，并明确不形成跨来源结论。SQL Guard 是全局停止，不能用文档规则把危险查询包装成建议；RAG ACL 被拒绝时，公开 branch 摘要不含真实原因或 EvidenceRef，避免侧信道。
+
+   冲突由结构化 fact key 固定为 `hybrid_evidence_conflict`，不让模型选边；Synthesizer invalid/unavailable 时也不重跑 SQL/RAG，只由独立 fallback 输出单来源 partial 或停止。**验证证据**覆盖 complete、SQL/RAG partial、ACL 非披露、SQL Guard、conflict、Synthesizer failure 和 artifact 篡改。它没有证明自动冲突检测已经覆盖所有业务语义；目前冲突只在受控计划的结构化事实键上裁决。
+
+4. **把同一事实投影到 API、Trace 和独立 Eval**
+
+   **原来的问题**是如果 API、Trace、Eval 各自重新猜一次 Hybrid 状态，很容易出现“用户看到 complete，Trace 显示 partial”的口径漂移；如果 Trace 为了调试直接落完整 Evidence，又会变成新的数据泄露面。
+
+   `AgentRunResult` 新增 Hybrid 私有事实，`/api/query` 只派生兼容 SQL 表格/图表视图、validated citation 和安全 branch summary；Trace 对 Hybrid 清空完整 SQL rows，不保存 Document body、private ledger 或被拒绝分支的真实原因。新的 **Hybrid sequence Eval** 采用“一题一次 Graph、多断言复用同一份 execution evidence”的协议，5 个 Scenario、25 条 required assertion，并拒绝缺断言或伪造两次 execution 的 artifact。
+
+   本模块最终全仓 **436 passed、3 skipped、1 warning**，compileall 与 diff check 通过。3 个 skip 是既有 Milvus/远端 embedding 条件用例，warning 是既有 TestClient/httpx deprecation；未运行真实 Hybrid LLM、远程 embedding/Milvus 或 LangFuse Cloud。因此这些结果证明**确定性控制与安全合同闭合**，不等价于真实线上质量、成本或开放问法效果提升。
+
+### 新概念
+
+- **HybridPlan（薄混合计划）**：只描述两个已知深 Tool 要做什么，不描述怎么回答。可以类比 Spring 服务层收到的受控 DTO：字段固定、职责很小，不能偷偷塞入执行结果或权限判断。
+- **Required branch（必需分支）**：完整结论必须等所有声明必需的证据到齐；它像审批流程里的会签，少任何一个签字都不能把结果标成“已批准”。
+- **Cross-source binding（跨来源绑定）**：一条同时谈数据和规则的 claim，要明确连接到 SQL Evidence 和 Document Evidence。不是“末尾放两个 sources”，而是能回查这句话的每个来源。
+- **Gate-only RAG branch**：RAG 只做到检索、当前版本检查、ACL/用途授权和生成上下文，不提前生成子答案。这样一个 controller 才能对最终 claim 负责。
+- **Safe partial（安全部分回答）**：不是“尽量回答一半”，而是只发布一份证据单独就能成立的结论，并明确不能推出跨来源关系。
+- **Fail-closed（失败关闭）**：证据不足、权限拒绝、citation 非法或状态不闭合时，不猜一个看似合理的答案；这是企业数据 Agent 中“宁可少答，也不越权或乱答”的工程原则。
+
+### 代码阅读路线
+
+1. **从路由和薄计划开始**：`engine/harness/router.py` → `engine/harness/contracts.py`
+
+   先看 `DeterministicRouter._hybrid_plan_for()` 怎样只为两类 canonical 问法签发 `HybridPlan`，再看 plan 的 required branch 校验。重点是理解 **Router 只决定“跑什么”**，不会看到正文、rows 或 Tool 输出。
+
+2. **读双分支如何穿过同一张 Graph**：`engine/harness/graph.py`
+
+   从 `_next_node()` 看 `hybrid` 如何进入 `hybrid_sql_tool`，再顺着 `_hybrid_sql_tool_node()`、`_hybrid_rag_tool_node()` 和 `_hybrid_controller()` 阅读。这里解决的是**预算和最终状态只有一个裁决点**；不必把每个 LangGraph API 背下来。
+
+3. **看深 Tool 如何给出私有 Evidence**：`engine/harness/adapters.py` → `engine/rag/answer_flow.py`
+
+   SQL 路径的 `_sql_observation()` 构造已 Guard 的 SQL Evidence；RAG 路径的 `prepare_for_hybrid()` 复用现有 retrieval/Gate，在 Composer 前返回。重点理解为什么 `raw_evidence` 只能留在进程内，不能直接加到 API schema。
+
+4. **读本地合成与引用校验**：`engine/harness/hybrid.py`
+
+   先看 `DeterministicHybridSynthesizer` 如何把受控 operator 变成结构化草稿，再看 `validate_hybrid_claims()` 如何检查 run、kind、stage 和双来源 binding。最后看 `build_safe_partial_drafts()`：它是合成器失败时的独立降级，不会重新调用 Tool。
+
+5. **沿公开投影确认没有泄露旁路**：`app/api/query.py` → `app/schemas/agent.py` → `engine/trace/recorder.py`
+
+   API 从同一个 `AgentRunResult` 派生兼容字段、citation 和 `hybrid_branches`；Trace 只拿安全摘要。这里要特别留意 denied branch 为什么统一显示 `branch_not_disclosed`。
+
+6. **最后看可重复证据**：`eval/harness_hybrid_contracts.py` → `tests/test_m38_hybrid_*.py`
+
+   Eval 固定 5 个 Scenario 和 25 条断言，测试再覆盖 API/Trace、partial、conflict、synth failure 与 artifact 篡改。它们共同回答“这一次到底跑了几支 Tool、凭什么 complete、失败有没有偷偷重跑”。
+
+核心调用链：
+
+`POST /api/query`
+→ `run_turn()`
+→ `Router 生成 HybridPlan`
+→ `SQL Tool（Guard + SQL Evidence）`
+→ `RAG Tool（retrieve + Gate + Document Evidence）`
+→ `Hybrid controller / Synthesizer / validator`
+→ `AgentRunResult`
+→ `API + JSONL Trace + Hybrid Eval`
+
+**模块闭环**：M35 建立单轮唯一 Harness，M36/M37 把澄清和一次追问做成有界流程，M38 再让同一次运行安全汇合两类 Evidence。它们共同把 DataPilot 推到 **P5 的保守 Hybrid 基线**：能双取证、能证明、也能在失败时收住。
+
+### 设计要点
+
+- **正式本地 Synthesizer，不是临时简化版**：当前目标是证明双 Evidence、required、partial/conflict 和 citation 的控制合同；远程 LLM 会新增 question、SQL 结果、Document Evidence 的出站决策，不能为了自然措辞偷偷放行。
+- **不拼子答案**：两个已写好的自然语言答案各自可能省略条件或使用不同口径；直接拼接无法验证最终跨来源 claim，也会形成双 Composer 责任。
+- **完整 Evidence 不公开**：Harness 内部需要它来验证，API/Trace 只需要最小安全投影；这和后端把 ORM 实体与 DTO 分开，是同一种边界控制。
+- **P5 已闭环但范围仍窄**：两类 canonical operator、串行两支、一次 initial Hybrid；开放 Router、optional branch、Hybrid follow-up、远程 adapter、生产认证和长会话都不是本模块结论喵。
+
+### 面试怎么讲
+
+**可直接复述**：我在 DataPilot 的 M38 中实现了保守 Hybrid 编排，让一个问题能在同一次 Harness run 内同时获取 SQL 数据事实和 RAG 文档规则。我没有让模型自由决定 Tool 或拼接两个子答案，而是让 Router 只生成薄 `HybridPlan`，Graph 按固定顺序各调用 SQL/RAG 一次，两个分支默认 required。SQL 和 RAG 分别产出本轮 typed Evidence，其中 Hybrid RAG 只执行 retrieval+Gate，不提前生成自然语言答案。唯一 controller 再调用本地确定性 Synthesizer，跨来源 claim 必须同时绑定 SQL 和 Document Evidence；缺一支时只能输出独立 partial，SQL Guard、ACL 拒绝、冲突和 Synthesizer failure 都有固定安全收口，且不会重跑 Tool。API、Trace 和 5 Scenario/25 required 的 Hybrid Eval 都从同一个 `AgentRunResult` 投影。最终专项/API Trace 9 项通过、全仓 436 passed；我明确没有把这说成开放式 Hybrid Agent 或远程模型质量提升。
+
+1. **[基础追问] 为什么 Hybrid 不能直接把 SQL 和 RAG 的两个答案拼起来？**
+
+   两个子答案只能证明各自“写过一段话”，不能证明最终那句跨来源结论同时受两类 Evidence 支持。它们还可能采用不同条件或遗漏权限状态。M38 让 RAG 分支停在 Gate，最终 claim 由唯一 Synthesizer/validator 生成并绑定两个 evidence id，因此可以检查 run、Evidence kind 和 stage；这比末尾拼两个 source 更可审计。
+
+2. **[工程/深挖追问] 既然两支都是 required，为什么还允许 partial？会不会误导用户？**
+
+   required 的意思是“不能形成完整跨来源结论”，不是成功分支的独立事实也必须丢掉。partial 只在计划预先允许、且一支 Evidence 单独能支持的情况下输出，并明确说明不能形成跨来源结论。SQL Guard 则更严格：它是安全拦截，RAG 不能拿来淡化危险请求；ACL 拒绝的文档分支也不泄露 ref/reason。完整、partial、blocked 的差异由 controller 的四轴状态和测试断言，而不是靠最终文案猜测。
+
+3. **[工程/深挖追问] Synthesizer 不可用时为什么不重新跑 SQL/RAG，或切到远程 LLM？**
+
+   已经成功的深 Tool 是本轮已获得的事实，重跑会超出父级预算，也会造成 SQL 结果变化或重复查询。M38 的 fallback 只消费已验证的单支 Evidence，给出安全 partial 或停止。远程 LLM 则是另一个数据出站用途，需要 question、SQL safe result、Document Evidence 的逐字段授权和真实运行证据；用户当前确认的是本地方案 A，所以不能把“兜底”变成未经授权的外发。
+
+4. **[压力追问] 你只支持两类 Hybrid 问法，这不就是把 demo 规则写死了吗？**
+
+   这个质疑合理。当前价值不是展示通用自然语言推理，而是先验证双 Evidence 的控制合同是否成立：两支预算、ACL、required、冲突、citation、API/Trace/Eval 要先有可信答案。两类 operator 让每一步都能确定性复现，5 个 Scenario/25 条 required 和全仓回归也能准确归因。如果后续开放问法确实形成稳定失败簇，才会比较规则扩充、远程 Router 或 Synthesizer，并先做 outbound、held-out 和预算决策；在那之前，把未知问题保守停止比假装通用更诚实喵。
+
+### 验证与下一步
+
+- **M38 专项/API Trace**：`9 passed, 1 warning in 12.04s`，覆盖 complete、partial、ACL 非披露、SQL Guard、conflict、Synthesizer failure、artifact 篡改和真实 HTTP/Trace。
+- **M36/M37 回归**：`12 passed in 0.85s`，证明澄清和一次 follow-up 没被 Hybrid 扩张。
+- **Hybrid Eval**：`phase4-harness-hybrid-v1` 为 5 Scenario / 25 required assertion；它是确定性控制/安全合同，不与 M27/M34 质量基线混算。
+- **全仓确定性回归**：后台任务退出码 0，`436 passed, 3 skipped, 1 warning in 599.87s`；compileall 与 `git diff --check` 通过。
+- **下一步**：按 P6 对 M34 的 lexical 漏召回、context packing、Composer support rejection 做 go/no-go。不要把 Router 放宽、远程 Synthesizer、optional branch 或 Hybrid follow-up混入同一模块。
+
+可复制验证命令：
+
+```powershell
+# M38 合同与 API/Trace 聚焦验证；预计 9 passed 和 1 个既有 TestClient/httpx deprecation warning。
+python -m pytest -q -p no:cacheprovider tests/test_m38_hybrid_harness.py tests/test_m38_hybrid_eval.py tests/test_m38_hybrid_api_trace.py --basetemp=.agent_work/temp/m38-review
+
+# 全仓确定性回归；收工快照为 436 passed、3 skipped、1 warning，通常需要数分钟。
+# 按 AGENTS.md，预计超过 2 分钟时请使用后台任务，并将日志/退出码/完成标记放入 .agent_work/temp/。
+python -m pytest -q -p no:cacheprovider --basetemp=.agent_work/temp/m38-full-recheck
+
+# Python 语法/导入编译；预计无输出并以 exit 0 结束。
+python -m compileall -q app engine eval tests
+```
+
+**本地启动体验：** 先按 `docs/state/runbook.md` 准备数据库/seed 和 local/demo 环境，再启动 FastAPI：
+
+```powershell
+# 环境未激活时，使用 AGENTS.md 中的完整 Python 路径。
+python -m uvicorn app.main:app --reload
+```
+
+打开 **Swagger UI**：`http://127.0.0.1:8000/docs`，调用 `POST /api/query` 并提交：
+
+```json
+{
+  "question": "查询退款原因并说明退款政策",
+  "user_role": "ops",
+  "force_new_pipeline": false
+}
+```
+
+预计返回 `route=hybrid`、`answer_status=complete`、两条分别标为 `sql` / `document` 的 citation，以及 `hybrid_branches` 中 SQL/RAG 的安全摘要。Trace 会有 `route → hybrid_sql_tool → hybrid_rag_tool → controller`，但不会保存文档正文或完整 Hybrid SQL rows。当前是 **local/demo fixture caller**，且 Hybrid 不会签发 M37 follow-up；不要把这次体验解释为开放 Hybrid、远程模型或生产认证。
+
