@@ -1,0 +1,541 @@
+{
+  "format": "phase4-rag-subgraph-readiness-v1",
+  "split_identity": "f8164d3f57fe4c262f3a8f7ecd293196748d2abcbd4f387f3fbb8f50208138dd",
+  "profile_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+  "input_artifact_identities": {
+    "lexical_dev": "7b444240067f990dc1bc11d45b5010e0e8306a5100f29cd9d6d3a4da6188d182",
+    "lexical_held_out": "4d77b74080da851c3c3fa58cac39d5317946ac6ded952349b3e69b4a02fa75c7",
+    "semantic_dev": "f207369360bac6f57ae3c46d628b6d87746fe9b398a7e712988fecd4cf27ac26",
+    "semantic_held_out": "32ab5f303047c4fcf52fa70657ec806fbed9735cb4ce593139fa7c3fde88c8c6",
+    "answer": "d9fa2b20863c568cbc7091dea4724c5d69d74979b5b4ba3d3eb14ff101eeb41f"
+  },
+  "input_runtime_identities": {
+    "lexical_retrieval": "knowledge-enterprise-sqlite-lexical-v1::fts5-unicode61-or-bm25-dedup-physical-v1",
+    "semantic_retrieval": "knowledge-enterprise-milvus-semantic-v1::qwen-dense-cosine-dedup-physical-v1",
+    "answer_composer": "rag-qwen-evidence-support-nonthinking-unbounded-v4"
+  },
+  "input_file_sha256": {
+    "answer": "75592af855ab05993fe5593c2e90210d0f42f74b10fda18a56b3023578fd99fa",
+    "lexical_dev": "ea5022c4bf89229d2515fb71e9ff2e8ddbb162cf22178f572c57837abc56edd2",
+    "lexical_held_out": "649a3899147b2e8e33486277e15aa9f327472c548784e6b55431aa4548f645e5",
+    "semantic_dev": "92d72f1a4230bea8e1f4b1c89d84811b9e7b9940249e86989537293ebc371ccb",
+    "semantic_held_out": "7b022f7bc0d6785c1dfaaad5bc83f02d66125984ecc0c122e20a78857c8b5957",
+    "split": "8ec4b4395b74796a9a606947f1cabf736ce8b6efb8cbdda205e7f1d647e27a95"
+  },
+  "dev_case_count": 60,
+  "held_out_case_count": 120,
+  "classifications": [
+    {
+      "question_id": "qst_0016",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0019",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0022",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0023",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0029",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0031",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0045",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0047",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0050",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0059",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0062",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0079",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0086",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0091",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0116",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0117",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0118",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0122",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0151",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0155",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0157",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0181",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0186",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0198",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0199",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0200",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0211",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0215",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0216",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0233",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0236",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0248",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0252",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0268",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0272",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0279",
+      "layer": "provider_unavailable",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0282",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0283",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0289",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0318",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0338",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0341",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0353",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 2,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 0,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0384",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0386",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0387",
+      "layer": "provider_unavailable",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0388",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0389",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0393",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 2,
+      "generation_visible_gold_count": 2,
+      "cited_gold_count": 1,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0400",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 0,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0408",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 2,
+      "generation_visible_gold_count": 2,
+      "cited_gold_count": 2,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0420",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 2,
+      "generation_visible_gold_count": 2,
+      "cited_gold_count": 1,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0428",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0431",
+      "layer": "context_selection_or_packing_gap",
+      "candidate_gold_count": 2,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 2
+    },
+    {
+      "question_id": "qst_0433",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 3,
+      "generation_visible_gold_count": 3,
+      "cited_gold_count": 3,
+      "expected_gold_count": 6
+    },
+    {
+      "question_id": "qst_0442",
+      "layer": "composer_support_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 8
+    },
+    {
+      "question_id": "qst_0447",
+      "layer": "retrieval_candidate_gap",
+      "candidate_gold_count": 0,
+      "generation_visible_gold_count": 0,
+      "cited_gold_count": 0,
+      "expected_gold_count": 6
+    },
+    {
+      "question_id": "qst_0457",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0461",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    },
+    {
+      "question_id": "qst_0462",
+      "layer": "not_classifiable",
+      "candidate_gold_count": 1,
+      "generation_visible_gold_count": 1,
+      "cited_gold_count": 1,
+      "expected_gold_count": 1
+    }
+  ],
+  "layer_counts": {
+    "composer_support_gap": 10,
+    "context_selection_or_packing_gap": 13,
+    "not_classifiable": 24,
+    "provider_unavailable": 2,
+    "retrieval_candidate_gap": 11
+  },
+  "conditions": {
+    "reproducible_non_provider_failure_cluster": {
+      "status": "met",
+      "evidence": "dev 中有 24 个 retrieval/context 主层 Scenario",
+      "gap": null
+    },
+    "observation_driven_new_evidence_action": {
+      "status": "not_met",
+      "evidence": "现有 artifact 只记录一次固定 retrieval，没有任何第二动作的新增 Evidence 证据",
+      "gap": "尚未验证由首次 Observation 选择、且能新增 Evidence 的允许动作"
+    },
+    "dev_and_unpolluted_held_out_protocol": {
+      "status": "met",
+      "evidence": "60/120 split 闭合；本审计只分类 dev，held-out 只做 identity 校验",
+      "gap": null
+    },
+    "comparable_extra_budget": {
+      "status": "not_met",
+      "evidence": "已有单轮 latency/call/token 基线，但没有第二动作或父子预算定义",
+      "gap": "无法比较额外调用、延迟、出站与调试成本"
+    }
+  },
+  "recommendation": "no_go",
+  "no_provider_call_count": 0,
+  "audit_identity": "324ec7f8f4c7d4edf81bc73dc638905000d08d22861b079d26ebbaabc4b726c6"
+}

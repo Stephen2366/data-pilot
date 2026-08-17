@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4-roadmap.md`                                     |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M38 保守 Hybrid 双 Evidence 编排已验收通过（2026-08-17） |
-| 当前 plan    | `docs/notes/m38-plan.md`                                     |
-| 当前 notes   | `docs/notes/m38-notes.md`                                    |
-| 待决事项     | M38 G-M38-1 方案 A 已落地；远程方案 B/C 仍受能力账本的重开门约束，不新增 Hybrid 数据出站 |
+| 当前活动模块 | M39 P6 RAG Subgraph 入场证据审计技术收工完成，待人工检查（2026-08-17） |
+| 当前 plan    | `docs/notes/m39-plan.md`                                     |
+| 当前 notes   | `docs/notes/m39-notes.md`                                    |
+| 待决事项     | 用户已选 M39 G-M39-1 方案 A；严格 no-go 已证实，P6 不实现 Subgraph，后续另按 P7 规划 |
 | 更新时间     | 2026-08-17                                                   |
 
 ## 必读规则
@@ -49,6 +49,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-17 | M39 完成 P6 只读 readiness audit：六份冻结 M34 输入须同时匹配 SHA-256、identity、split、retrieval runtime 与 Composer identity；只分类 60 dev，120 held-out 仅作闭合核验，零 provider 调用。结果为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；“Observation 驱动新增 Evidence 动作”与“可比额外预算”均未被既有证据证明，故严格 `no_go`，external lexical 默认不变。全仓 deterministic pytest `441 passed, 3 skipped, 1 warning in 517.57s`。 |
 | 2026-08-17 | M38 完成 P5 保守 Hybrid 双 Evidence 基线：本地确定性 Synthesizer、双 required branch、typed SQL/Document Evidence、safe partial/conflict/合成失败降级、API/Trace 投影和 `phase4-harness-hybrid-v1`（5 Scenario / 25 required）。全仓 deterministic pytest `436 passed, 3 skipped, 1 warning in 599.87s`，compileall/diff check 通过；未运行真实 Hybrid LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测。 |
 | 2026-08-17 | M37 完成 P4 的一次有界 follow-up + Evidence validity/重新取证切片：`phase4-harness-followup-v1` 覆盖 10 sequences / 22 turn evidence / 50 required，50/50 通过，identity `1185edf0...634b25`。全仓 deterministic pytest `427 passed, 3 skipped, 1 warning in 509.36s`，compileall/diff check 通过；未运行真实 LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测。 |
 | 2026-08-16 | M36 完成 P4/G5 首个有界恢复切片：应用持有 versioned in-process checkpoint，支持 pending→一次 resume/clear、owner+tenant/active-role、TTL/state version、原子单 claim、budget stop 和安全 Trace；`phase4-harness-turn-v1` 覆盖 8 组 sequence。全仓 deterministic pytest `416 passed, 1 warning in 594.12s`，compileall/diff check 通过；未运行真实 LLM/远程 Eval。 |
@@ -61,7 +62,8 @@
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
 
 - (2026-08-17) M37 单独不等于 P4，但 M36 + M37 已共同完成 roadmap 定义的 P4 最小可验收基线；不宣称通用多轮。第二次追问、长历史 compact 和持久 checkpoint 不是当前 P4 硬门；跨 route/跨 Tool 补证据由 M38 的 P5 Hybrid 正式承接。M37“窄 B”仍是正式边界，不得退化为直接复用旧答案或默认扩到 external。
-- (2026-08-17) M38 已按 P5 口径完成保守 Hybrid 纵向基线：方案 A 的本地确定性 Synthesizer 是正式默认与长期 fallback；SQL/RAG 默认 required，不触发 G6 optional 放宽，不新增 Hybrid 数据出站。P5 不等于开放式跨来源研究 Agent；下一个路线判断应先做 P6 go/no-go，而不是把 Router 放宽或悄悄接远程 Synthesizer。
+- (2026-08-17) M38 已按 P5 口径完成保守 Hybrid 纵向基线：方案 A 的本地确定性 Synthesizer 是正式默认与长期 fallback；SQL/RAG 默认 required，不触发 G6 optional 放宽，不新增 Hybrid 数据出站。P5 不等于开放式跨来源研究 Agent。
+- (2026-08-17) M39 已按用户确认的方案 A 完成 P6 入场审计并严格 no-go：固定 Pipeline 的 retrieval/context/Composer/provider 失败不能替代“Observation → 允许动作 → 新 Evidence”的实证，且没有父子预算可比较。P6 因审计闭环完成，不实现 RAG Subgraph、不切 lexical 默认；若将来重开，须有未污染 dev 对具体允许动作的新增 Evidence 证据、冻结的 held-out decision protocol 与可比额外预算，随后另立 M40。下一能力入口按 roadmap 的 P7 收口另行规划。
 - (2026-08-10) Text2SQL 的确定性收尾问题已修复；若未来重跑 Text2SQL，必须使用 `m27-v3` 新序列，并完整记录 collection、embedding、corpus 与 run-scoped index identity。现有 v1/v2 数字只作历史解释。
 - (2026-08-09) 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
 
@@ -71,7 +73,7 @@
 
 | 优先级 | 能力缺口 | 当前结论与硬性重开门 | 路线归属 |
 |---|---|---|---|
-| P0 | M34 已证实 lexical 漏召回、selected budget / multi-document context packing 和 Composer support 拒绝会严重限制答案质量 | 最迟在 P6 go/no-go 中把失败簇转成单变量候选实验或有证据的 no-go；semantic candidate 已在同 split 输给 lexical，禁止把“直接切 semantic”写成完善版方案 | P6 证据审查；不混入 P4/P5 |
+| P0 | M34 已证实 lexical 漏召回、selected budget / multi-document context packing 和 Composer support 拒绝会严重限制答案质量 | M39 已以冻结 M34 证据完成 P6 strict no-go：没有 Observation 驱动新增 Evidence 的允许动作和可比额外预算。semantic candidate 已在同 split 输给 lexical，禁止直接切换；单变量 Pipeline 候选须独立计划，Subgraph 只有满足新 dev/held-out/budget 重开门后才可进入 M40 | P6 已闭环；质量候选 / P7 后续 |
 | P1 | M38 方案 A 只冻结正式本地确定性 Hybrid Synthesizer；远程方案 B 与双 adapter 方案 C 未实施 | B 的重开门：受控 operators 对真实开放 Hybrid 问法形成稳定失败簇，且用户明确批准 receiver、`hybrid_synthesis` 用途、question/conditions、SQL safe result、Document Evidence/identity 的数据类别与字段，并提供真实 provider 精确运行授权。C 的重开门：除上述授权外，还需有未污染 Hybrid held-out、多轮可比预算和明确 A/B 决策价值；禁止仅为“代码里有两个 adapter”扩大 M38。无稳定净收益时 A 继续作为默认与 fallback | P5 后续质量/出站条件项 |
 | P1 | 当前只有 demo/test caller resolver，生产认证尚未建设 | 出现非本地部署、真实用户/tenant、JWT/OAuth/SSO 或企业目录需求时，必须在现有 `CallerResolver` seam 接正式认证 adapter；“所有环境手工注入 resolver”不等于生产认证 | Phase 4 后续部署门 |
 | P2 | M35/M38 deterministic Router 只覆盖 closed-world SQL/RAG 和两类 canonical Hybrid operator | 先建立开放问法/混合意图 decision set 并形成稳定失败簇，再比较规则扩充、受控模型 fallback 或远程 Router；不得以“LLM 更完善”为由无 Eval 切换 | P3/P5 后续质量 |

@@ -63,6 +63,7 @@
 | 构建 / 恢复 semantic candidate | `python scripts\build_m34_semantic_candidate.py --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity <profile-identity> --output .agent_work\temp\m34-semantic-build.json` |
 | 真实 Qwen 三题 AnswerFlow smoke | `python scripts\smoke_m34_remote_answer.py --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity <profile-identity> --output .agent_work\temp\m34-remote-answer-smoke.json` |
 | 真实 Qwen 180 题 Answer Eval | `python scripts\run_m34_answer_eval.py --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity <profile-identity> --output .agent_work\temp\m34-answer-eval.json` |
+| M39 P6 只读 readiness audit | `python scripts\audit_m39_p6_readiness.py --split eval\cases\enterprise-rag-bench-v1.0.0-split.json --lexical-dev .agent_work\temp\m34-lexical-tool-dev-retrieval.json --lexical-held-out .agent_work\temp\m34-lexical-tool-heldout-retrieval.json --semantic-dev .agent_work\temp\m34-semantic-tool-dev-retrieval.json --semantic-held-out .agent_work\temp\m34-semantic-tool-heldout-retrieval.json --answer .agent_work\temp\m34-answer-eval-full-v4.json --output eval\reports\m39-p6-readiness.json --report eval\reports\m39-p6-readiness.md`；只读取已有 JSON，六份输入 hash/identity/split/runtime 任一不符即失败关闭，零 Tool/AnswerFlow/provider 调用。 |
 
 ## Eval 命令入口
 

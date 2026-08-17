@@ -19,6 +19,15 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M39 P6 RAG Subgraph 入场证据审计（2026-08-17）
+
+- **改动范围**：用户未指定模块起始 commit；开工时只有已确认但未跟踪的 `docs/notes/m39-plan.md`，收工以 `git status --short`、未暂存/暂存清单和未跟踪文件归并，暂存区为空。新增 `eval/subgraph_readiness.py`、`scripts/audit_m39_p6_readiness.py`、`tests/test_m39_subgraph_readiness.py`、`eval/reports/m39-p6-readiness.{json,md}` 与 `docs/notes/m39-notes.md`，并同步 `AI_CONTEXT`、RAG/Eval state、runbook 和本文。未修改 Knowledge Tool、AnswerFlow、Harness、Hybrid、ACL、outbound、external profile/pointer、数据库/seed/Alembic、模型/embedding/LangFuse 或 README。
+- **用户决策与结论**：G-M39-1 用户确认方案 A（严格证据优先）：任一入场条件缺失即记录 no-go，保持 `enterprise-lexical` 默认，不为展示实现 Subgraph。六份冻结 M34 输入同时通过 SHA-256、dataset/question-set/split/profile、dev/held-out、lexical/semantic adapter+recipe 与 Answer Composer 身份闭合后，审计只分类 60 dev、120 held-out 只作闭合核验。结果为 retrieval candidate gap `11`、context selection/packing gap `13`、Composer support gap `10`、provider unavailable `2`、not classifiable `24`；有可复现的非 provider cohort 和分集隔离，但没有由首次 Observation 选择、能新增 Evidence 的允许动作证据，也没有父子/额外预算可比性。因此严格 `no_go`，P6 审计闭环完成，但不宣称 Subgraph 或质量提升完成。
+- **合同与安全边界**：审计对缺文件、hash/identity/split/runtime 不一致、重复/缺失 Scenario、错误 execution count 失败关闭，绝不把不可比输入降格成 no-go。分类只用同次 lexical retrieval @20 与 AnswerFlow 四阶段 ledger；Composer unavailable / support rejection 不冒充 retrieval loop，stage 不足宁可 `not_classifiable`。报告不保存题目、Document 正文、完整答案或完整 Evidence；全程零 Knowledge Tool、AnswerFlow、LLM、embedding、Milvus、LangFuse Cloud 与 M34 大评测调用。
+- **参考资料**：按 `phase4-reference.md` 定点复核 agentic-rag-for-dummies 的 `graph.py::create_agent_graph`、`graph_state.py::AgentState`、`nodes.py` context/stop 逻辑和 `tools.py` child/parent retrieval。借鉴“子图需明确 Observation、动作、状态、stop 与预算”的反向入场门，以及搜索和上下文扩展必须区分；不照搬其强制首搜、LLM rewrite/summary、字符串 Observation、全历史、InMemorySaver、parent 扩展、fallback answer 或开放 loop，因为这些不能替代 DataPilot 的 Tool/Evidence/ACL/分集/出站合同。
+- **验证快照**：M39 专项 `5 passed in 0.43s`；真实既有 M34 artifact 的只读 CLI 产出 audit identity `324ec7f8f4c7d4edf81bc73dc638905000d08d22861b079d26ebbaabc4b726c6` 与 `no_go`，零 provider 调用；M31–M38 受影响回归 `203 passed, 1 warning in 58.09s`。首次相关回归受历史固定 `pytest-tmp` Windows 锁影响，已有 155 项通过后 48 项在临时目录清理 setup 报错；未改默认配置，改用独立 M39 `--basetemp` 后通过。最终后台全仓 deterministic pytest 退出码 `0`，`441 passed, 3 skipped, 1 warning in 517.57s`；`compileall` 与 `git diff --check` 通过。3 skip 为既有 Milvus/远端 embedding 条件项，warning 为既有 Starlette TestClient/httpx 弃用提示，均不阻塞。
+- **遗留 / Handoff**：等待用户人工检查与 `accept-module`。M39 没有实现 RAG Subgraph、query rewrite、parent/child、rerank、hybrid retrieval、context 参数调优、Composer 合同变更、LLM Judge、远程节点或默认切换。未来仅当未污染 dev 能证明具体允许动作由首次 Observation 选择后确实新增有效 Evidence，并冻结 held-out decision protocol 和可比额外预算时，才可经用户确认另立 M40；否则按 roadmap 进入 P7 收口，任何单变量 Pipeline 候选也须独立计划。
+
 ### [模块任务] M38 保守 Hybrid 双 Evidence 编排（2026-08-17）
 
 - **改动范围**：用户未指定起始 commit；收工按 `git status --short`、未暂存/暂存/未跟踪清单归并，暂存区为空。模块修改 Harness contracts/router/graph/adapters、RAG AnswerFlow、`/api/query`/schema/Trace、M35 Harness fixture/Eval；新增 `engine/harness/hybrid.py`、`eval/harness_hybrid_contracts.py`、三份 M38 测试与 `docs/notes/m38-{plan,notes}.md`；收工同步 `AI_CONTEXT`、runbook、RAG/Eval state 与本文。没有数据库/seed/Alembic、模型/embedding、outbound policy、LangFuse、M34 external profile 或 README 改动。

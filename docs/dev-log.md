@@ -3195,3 +3195,126 @@ python -m uvicorn app.main:app --reload
 
 预计返回 `route=hybrid`、`answer_status=complete`、两条分别标为 `sql` / `document` 的 citation，以及 `hybrid_branches` 中 SQL/RAG 的安全摘要。Trace 会有 `route → hybrid_sql_tool → hybrid_rag_tool → controller`，但不会保存文档正文或完整 Hybrid SQL rows。当前是 **local/demo fixture caller**，且 Hybrid 不会签发 M37 follow-up；不要把这次体验解释为开放 Hybrid、远程模型或生产认证。
 
+## ★ M39 P6 RAG Subgraph 入场证据审计
+
+（2026-08-17）
+
+**简述**：用已经完成的 M34 证据做了一次**只读资格审查**，结论是当前没有资格建设多步 RAG Subgraph；保持 lexical 默认，比为了展示 Agent 而增加循环更可靠。
+
+### 先用大白话讲
+
+M34 发现了不少 RAG 问题：有些正确文档根本没被找到，有些找到了却没装进上下文，还有些是模型写出的内容过不了严格引用合同。它们都可能让最终回答不好，但不是同一种病。
+
+如果看到“答案不够好”就立刻加一个会反复搜索的 Agent 子图，像是医院看到所有病人发烧就开同一种药：可能多花时间和成本，却治错位置。M39 做的是**先看片子再决定要不要动手术**。它只读已经冻结的 M34 结果，分清问题在哪一层，并检查是否真的存在“看完第一次结果，再决定下一步取什么证据”的收益证据。结果没有：因此 P6 的正确结论是 **no-go**，先不建 Subgraph。
+
+### 这次做了什么
+
+**核心矛盾**是：已有 retrieval 和 Answer/Citation 的失败数字，但它们不足以证明多轮 Agent 检索会带来净收益。M39 没有增加任何线上能力，而是把“是否值得增加复杂度”变成可复核的工程判断，避免把质量问题、外部不可用和架构选择混在一起。
+
+1. **先把历史证据锁死，防止拿错材料做结论**
+
+   **原来的问题**是 M34 的 lexical、semantic、Answer Eval 都是不同运行产物；如果文件被替换、split 混了、adapter 或 Composer 不同，继续比较就像把不同班级的考试卷放在同一张排名表里。
+
+   M39 的 `audit_paths()` 对六份指定 JSON 同时校验 **SHA-256、dataset/question-set/split/profile identity、dev/held-out、retrieval adapter+recipe 和 Composer identity**。这叫 **closed-world（封闭输入）**：审计只承认这组冻结材料，缺文件或不一致就失败关闭，不会“凑一个 no-go”。真实审计的报告身份为 `324ec7f8...b726c6`，而且 **零 provider 调用**。
+
+   这比“重新跑一次试试”更合适，因为本模块要判断的是已有证据能不能支持路线，而不是偷偷开一轮新的实验。它证明输入可追溯，**不证明**答案质量提升。
+
+2. **把失败按 Evidence 流转阶段分层，而不是把低分都叫检索差**
+
+   **原来的问题**是低 citation coverage 可能来自至少四个地方：top-20 根本没召回 gold、召回后没有进入 generation-visible、Composer 的 support 合同拒绝，或 provider 暂时不可用。把它们全部当成“应该循环检索”，会让未来实现针对错误层次优化。
+
+   `build_p6_readiness_audit()` 用同一次 lexical retrieval 的 @20 覆盖和 AnswerFlow 的 **candidate → selected → generation_visible → cited** ledger 分层。它把 60 个 dev Scenario 互斥归为：**retrieval 11**、**context/packing 13**、**Composer 10**、**provider unavailable 2**、**not classifiable 24**。`not_classifiable` 不是偷懒，而是承认阶段证据不足时不猜测。
+
+   这相当于后端排障时先分清是数据库没查到、DTO 丢字段、校验器拒绝还是外部服务超时；**关键取舍**是宁可保留“不知道”，也不把错误归因包装成一个看似更智能的 Graph。
+
+3. **把 held-out 当期末卷，不拿来设计补救动作**
+
+   **原来的问题**是 120 条 held-out 已经跑过一次，里面当然也有逐题信息；如果开发时按这些失败挑 query rewrite、top-k 或 parent 扩展，后面的 A/B 就会变成“看过答案后的考试”。
+
+   M39 只对 60 条 **dev** 逐题分类，held-out 只用于 split 和 identity 的闭合核验。这让后续真的有候选动作时，仍保留一组没被调参污染的决策集。专项测试还覆盖 provider failure 不得伪装 retrieval gap、错误 runtime/split/hash 必须失败关闭。
+
+   所以这次不是拒绝改进 RAG，而是保护未来改进的**评测公信力**；当前不能证明的是任何一个特定的 query rewrite、parent/child 或 rerank 会有效。
+
+4. **用四项入场条件给出 no-go，而不是留下模糊“以后优化”**
+
+   **原来的问题**是参考项目确实有 RAG Graph，但“别人有 Graph”不构成 DataPilot 也应该加 Graph 的证据。真正的子图至少要说清楚：第一次 Observation 看到了什么、允许做哪一个下一步动作、能新增什么 Evidence、何时停止，以及增加的调用和延迟值不值得。
+
+   M39 的报告把四项条件逐项列出：**可复现非 provider 失败簇**和**dev/held-out 隔离**满足；但没有任何已验证的 **Observation 驱动新增 Evidence 动作**，也没有**可比额外预算**。任一条件缺失即为 `no_go`。因此没有实现 Subgraph、没有切 semantic、没有改 `enterprise-lexical` 默认，也没有用“先做简化版以后再换正式方案”绕过这条门槛。
+
+   **验证证据**包括 5 项专项测试、203 项 M31–M38 相关回归，以及后台全仓 `441 passed, 3 skipped, 1 warning`。这证明审计和既有合同没有被破坏，**不证明**多轮 RAG 的质量、成本或生产价值已经被验证。
+
+### 新概念
+
+- **Readiness audit（入场审计）**：不是效果评测，而是判断“现有证据是否足以授权下一类复杂实现”。类似上线前的变更评审：不是问代码能不能写，而是问该不该写、依据够不够。
+- **Closed-world input（封闭输入）**：只接受身份和哈希都匹配的一组文件。它像数据库迁移校验 schema version，避免把看似格式正确但来源不同的数据混进结论。
+- **Failure taxonomy（失败分类）**：给每个 Scenario 一个互斥的主失败层，方便定位责任。它不是给系统贴标签，而是防止把 Composer 或 provider 问题误交给 retrieval 去解决。
+- **Held-out pollution（保留集污染）**：用期末卷的逐题答案调参数后，再拿同一份卷子证明效果，会高估真实收益。M39 只消费 dev 的逐题信息，保留 held-out 的未来决策价值。
+
+### 代码阅读路线
+
+1. **先读审计核心**：`eval/subgraph_readiness.py`
+
+   从 `audit_paths()` 开始看六份文件如何完成 hash/identity/runtime 闭合，再读 `build_p6_readiness_audit()` 如何严格限制为 dev 分类。重点是理解 **输入不可信时为什么失败关闭**，而不是记住每个 JSON 字段。
+
+2. **再看失败分类**：`eval/subgraph_readiness.py` 的 `_classify_dev_execution()` 与 `_stage_document_counts()`
+
+   前者按 provider、Composer、retrieval @20 和 ledger 阶段顺序选择唯一主层；后者把最终 ledger stage 还原为累计可见范围。它们解决的是“同一失败到底属于哪里”，并刻意保留 `not_classifiable`。
+
+3. **看命令行入口和安全报告**：`scripts/audit_m39_p6_readiness.py` → `eval/reports/m39-p6-readiness.md`
+
+   CLI 显式接收六个路径，只调用本地审计函数；Markdown 只输出身份、计数和条件，不写题目、正文、完整答案或 Evidence。阅读时留意 `sys.path` shim 只是让脚本能导入仓库模块，不会启动 RAG runtime。
+
+4. **最后看反例测试**：`tests/test_m39_subgraph_readiness.py`
+
+   测试用最小 JSON fixture 验证 held-out 不进入 taxonomy、provider 不被算成 retrieval、split/runtime/hash 篡改失败。它们比只看一次成功报告更能说明安全边界。
+
+核心数据流：
+
+`六份冻结 M34 JSON`
+→ `SHA / identity / split / runtime 校验`
+→ `仅 dev 的 retrieval + ledger 分层`
+→ `四项 P6 条件`
+→ `安全 JSON / Markdown no-go 报告`
+
+### 设计要点
+
+- **no-go 是交付，不是空白**：它明确保留了 lexical 默认，并给出以后重新打开 Subgraph 的证据门槛。
+- **不把 gold 放回运行时**：gold 只作离线分类锚点，不能进入 Tool、Gate 或 Composer；否则相当于考试时偷看标准答案。
+- **不替代现有安全链路**：审计不改 Knowledge Tool、AnswerFlow、ACL、outbound、Harness 或 Hybrid；它只读历史 artifact。
+- **后续必须独立立项**：只有未污染 dev 证明具体允许动作可以新增 Evidence，并冻结 held-out 协议和可比预算，才可经用户确认另建 M40；否则按 P7 收口喵。
+
+### 面试怎么讲
+
+**可直接复述**：我在 DataPilot 的 M39 没有为了用 LangGraph 而新增 RAG Agent，而是先为“是否值得做多步检索”建立了只读 readiness audit。它对冻结的 M34 retrieval/Answer artifact 做 hash、identity、split、runtime 闭合检查，只用 dev 的逐题 ledger 和 retrieval coverage 把失败分为候选召回、context packing、Composer support、provider unavailable 与不可分类五层，held-out 不参与动作设计。审计发现虽然有 24 个 retrieval/context 主层失败，但没有任何证据证明第一次 Observation 能指导一个允许动作新增 Evidence，也无法比较额外调用预算，所以严格 no-go，保持 lexical 默认。专项测试、203 项相关回归和 441 项全仓回归通过。这个模块的价值是把“质量不够好”与“应该加 Agent 循环”分开，避免没有收益证据的复杂化。
+
+1. **[基础追问] 既然检索和上下文有 24 个失败，为什么不直接做多轮 RAG？**
+
+   失败数量只能说明当前固定 Pipeline 有问题，不能说明循环动作能解决它。多轮 RAG 必须明确第一次 Observation 触发什么动作、该动作会新增什么 Evidence、何时停止以及额外成本。M39 只有固定单轮运行的证据，没有这条因果链；直接实现会把“猜测可能有效”伪装成工程结论。
+
+2. **[工程/深挖追问] 为什么 held-out 只做身份核验，不能用来分析失败？**
+
+   held-out 的作用是未来判断新候选是否真的泛化。如果先按它的逐题失败选择 rewrite、parent expansion 或参数，之后的提升很可能只是对这 120 题过拟合。M39 用 hash、split 和 execution 闭合确认它仍是同一份期末卷，但不消费逐题信息；这比“多拿一点数据调得更好”更能保证后续 A/B 的可信度。
+
+3. **[压力追问] 你做了一堆审计，却没有提升答案质量，这是不是工程自嗨？**
+
+   这个质疑合理：M39 的产出不是用户可见的更好答案。它解决的是路线风险——如果没有 Observation 驱动新增 Evidence 和可比预算的证据，直接加 Agent loop 可能只会增加延迟、费用、出站面和排障复杂度。M39 用冻结 artifact、5 项专项测试、203 项相关回归和 441 项全仓回归把 no-go 变成可复核结论；下一步若要追求质量，需要另立单变量 Pipeline 实验或按 P7 收口，而不是把未知收益说成已经实现喵。
+
+### 验证与下一步
+
+- **专项审计测试**：`5 passed in 0.43s`，覆盖 taxonomy、provider 隔离、split/runtime/hash 失败关闭。
+- **真实历史证据审计**：读取六份 M34 artifact，得到 `recommendation=no_go` 和 audit `324ec7f8...b726c6`，没有 provider 调用。
+- **相关与全仓回归**：M31–M38 为 `203 passed, 1 warning`；最终全仓为 `441 passed, 3 skipped, 1 warning in 517.57s`。skip 是既有 Milvus/远端 embedding 条件项，warning 是既有 TestClient/httpx 弃用提示。
+- **下一步**：按 Phase 4 roadmap 另行规划 P7；若日后要重开 Subgraph，先满足未污染 dev 的新增 Evidence 证据、held-out 协议和可比预算门槛。
+
+可复制验证命令：
+
+```powershell
+# M39 专项测试；预计 5 passed。
+python -m pytest -q -p no:cacheprovider tests/test_m39_subgraph_readiness.py
+
+# 只读审计。前提：六份冻结的 M34 JSON 仍存在于 .agent_work/temp；预计输出 recommendation=no_go。
+python scripts/audit_m39_p6_readiness.py --split eval/cases/enterprise-rag-bench-v1.0.0-split.json --lexical-dev .agent_work/temp/m34-lexical-tool-dev-retrieval.json --lexical-held-out .agent_work/temp/m34-lexical-tool-heldout-retrieval.json --semantic-dev .agent_work/temp/m34-semantic-tool-dev-retrieval.json --semantic-held-out .agent_work/temp/m34-semantic-tool-heldout-retrieval.json --answer .agent_work/temp/m34-answer-eval-full-v4.json --output eval/reports/m39-p6-readiness.json --report eval/reports/m39-p6-readiness.md
+```
+
+**本地启动体验：** 本模块暂无独立 API 或页面，因为它是一个**离线只读路线审计**，不是新的 RAG 服务能力。运行上面的 CLI 后，直接查看 `eval/reports/m39-p6-readiness.md`：你会看到 dev 的五类失败计数、四项 P6 条件和 `no_go`。报告不会展示题目、文档正文、完整答案或私有 Evidence。
+

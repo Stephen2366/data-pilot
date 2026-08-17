@@ -77,6 +77,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - gold 不进入 runtime，只在 Tool 返回后评分；retrieval gold coverage 不能冒充答案正确率。
 - completed Answer/Citation Eval 证明真实 Tool → Evidence → AnswerFlow → citation 链路与账本可复现，但暴露出 lexical 漏召回、多文档 context packing 不足和 Composer support 合同拒绝三类主要缺口。
 - `answer_status=complete` 只表示回答、support 和 citation 合同闭合，不等于答案正确；M34 没有启用 LLM Judge。
+- M39 只读审计已将冻结 M34 的 60 dev 分为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；120 held-out 未逐题消费。现有材料没有“首次 Observation 选择允许动作后新增 Evidence”的证据，也没有可比额外预算，因此 P6 为严格 `no_go`，不接入 RAG Subgraph、不切 external lexical 默认。可复核报告见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
 
 semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活候选：
 
@@ -99,7 +100,7 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 
 ## 活跃风险与后续边界
 
-- **召回和多文档质量**：主要缺口仍是 lexical 漏召回、selected budget 和 context packing；下一步按上方 Answer Eval 失败结构分层定位。
+- **召回和多文档质量**：主要缺口仍是 lexical 漏召回、selected budget 和 context packing；M39 已完成 P6 分层审计，但没有证据授权多步子图。单变量 Pipeline 候选须独立计划；Subgraph 重开必须先在未污染 dev 证明 Observation 驱动动作新增 Evidence，并冻结 held-out 协议和可比预算。
 - **support 合同**：Composer 仍有输出被严格合同拒绝。不得通过 fuzzy/semantic 字符串放行换取表面 complete rate；若引入语义支持判断，需要独立合同和证据。
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
 - **能力范围**：M38 已把两类 canonical SQL + Document Hybrid 接入同一 Harness，但不是自由多轮或开放跨来源研究。第二次追问、Hybrid follow-up、optional branch、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
