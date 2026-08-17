@@ -8,7 +8,7 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4-roadmap.md`                                     |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M37 受控有限追问与 Document Evidence 窄复用已开发并完成技术收工，等待人工检查与验收（2026-08-17） |
+| 当前活动模块 | M37 受控有限追问与 Document Evidence 窄复用已开发并完成技术收工，已验收（2026-08-17） |
 | 当前 plan    | `docs/notes/m37-plan.md`                                     |
 | 当前 notes   | `docs/notes/m37-notes.md`                                    |
 | 待决事项     | 下一模块规划时判断 P4 剩余能力的最合适切片；M37 不等于完成整个 P4，尚未触发第二次追问、跨 route/Hybrid、持久 checkpoint、远程 Router 或生产认证决策门 |
@@ -62,6 +62,19 @@
 - (2026-08-17) M37 已在 M36 clarification 之后完成一次 closed-world follow-up 与 Evidence validity/重新取证闭环，但不等于完成整个 P4。下一轮必须按 roadmap 重新选择剩余能力切片；“窄 B”是正式边界，不得退化为直接复用旧答案，也不得默认扩到 external、第二次追问、跨 route、长历史、持久化、Tool retry 或 P5 Hybrid。M34 lexical 漏召回和 multi-document context packing 仍是独立候选。
 - (2026-08-10) Text2SQL 的确定性收尾问题已修复；若未来重跑 Text2SQL，必须使用 `m27-v3` 新序列，并完整记录 collection、embedding、corpus 与 run-scoped index identity。现有 v1/v2 数字只作历史解释。
 - (2026-08-09) 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
+
+## 防遗忘能力账本（M29–M37）
+
+> 记录已经存在、但容易被“当前窄实现已完成”掩盖的能力缺口和重开门。优先级表示防遗忘/复核顺序，不自动决定下一模块；下一模块仍须按 roadmap、最新失败证据和独立 plan 裁决。原方案字母只在对应 module plan 内有效，禁止脱离具体方案写“以后从 A 升级 B”。
+
+| 优先级 | 能力缺口 | 当前结论与硬性重开门 | 路线归属 |
+|---|---|---|---|
+| P0 | M36–M37 只完成一次 clarification、一次 closed-world follow-up 和最小 Context Builder，尚无明确的整个 P4 关闭清单 | 规划下一模块时必须先逐项判断 P4 剩余能力并冻结“做到什么算 P4 完成”；不能因已有一次追问就宣称通用多轮，也不能用“以后完善”代替归属明确的模块或明确 no-go | P4 主线 |
+| P0 | M34 已证实 lexical 漏召回、selected budget / multi-document context packing 和 Composer support 拒绝会严重限制答案质量 | 最迟在 P6 go/no-go 中把失败簇转成单变量候选实验或有证据的 no-go；semantic candidate 已在同 split 输给 lexical，禁止把“直接切 semantic”写成完善版方案 | P6 证据审查；不混入 P4/P5 |
+| P1 | 当前只有 demo/test caller resolver，生产认证尚未建设 | 出现非本地部署、真实用户/tenant、JWT/OAuth/SSO 或企业目录需求时，必须在现有 `CallerResolver` seam 接正式认证 adapter；“所有环境手工注入 resolver”不等于生产认证 | Phase 4 后续部署门 |
+| P2 | M35 deterministic Router 对开放问法和混合意图较窄 | 先建立开放问法/混合意图 decision set 并形成稳定失败簇，再比较规则扩充、受控模型 fallback 或远程 Router；不得以“LLM 更完善”为由无 Eval 切换。P5 Hybrid 仍按独立薄计划和双 Evidence 合同实现 | P3 后续质量；P5 独立主线 |
+| P3 | `knowledge_docs` 有损 legacy 表仍保留 | 出现新 runtime consumer、知识后台/多实例发布、从旧表恢复授权/catalog，或双事实源风险时，必须正式设计数据库 projection 或删除 legacy 表；禁止继续追加字段把它伪装成 authority | 数据治理条件项 |
+| 条件项 | M37 checkpoint 仍为进程内，重启/多 worker 不恢复且 tombstone 不清扫 | 只有重启恢复或多 worker 会话成为 required Scenario 时才设计持久 checkpoint；LangGraph `InMemorySaver` 仍是内存态，不得把更换框架内存实现冒充持久化升级。清扫策略按容量证据单独触发 | P4/部署条件项 |
 
 ## 已知的坑（活跃列表）
 
