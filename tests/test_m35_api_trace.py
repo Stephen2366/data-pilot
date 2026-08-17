@@ -72,6 +72,8 @@ def test_sql_response_and_trace_are_projections_of_one_graph_run(tmp_path: Path)
     assert trace["graph_steps"] == ["route", "sql_tool", "controller"]
     assert trace["route_decision"]["route"] == "sql"
     assert trace["evidence_refs"][0]["evidence_kind"] == "sql"
+    assert trace["runtime_identity"]["status"] == "complete"
+    assert trace["runtime_identity"]["route_runtime"]["runtime_ref"] == "text2sql-legacy-v1"
 
 
 def test_rag_response_uses_validated_citations_and_trace_never_contains_document_body(tmp_path: Path) -> None:
@@ -105,6 +107,8 @@ def test_rag_response_uses_validated_citations_and_trace_never_contains_document
         return False
 
     assert has_document_body(trace) is False
+    assert trace["runtime_identity"]["status"] == "complete"
+    assert trace["runtime_identity"]["route_runtime"]["release_identity"]
 
 
 def test_unknown_requested_role_fails_closed_before_sql_or_rag_tool(tmp_path: Path) -> None:
@@ -126,3 +130,4 @@ def test_unknown_requested_role_fails_closed_before_sql_or_rag_tool(tmp_path: Pa
     assert body["tables_used"] == [] and body["docs_used"] == []
     assert trace["caller_safe_ref"] is None
     assert trace["graph_steps"] == ["route", "terminal", "controller"]
+    assert trace["runtime_identity"]["route_runtime"] == {"kind": "none", "reason_code": "caller_untrusted"}

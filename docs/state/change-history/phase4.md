@@ -19,6 +19,14 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M40 P7 跨路径 Trace 运行身份与阶段保证包（2026-08-17）
+
+- **改动范围**：起始 commit 为 `64e7c74 M39 Subgraph审计`；开工前工作树已有 `docs/module-plan-template.md`、`docs/notes/m39-{plan,notes}.md` 与 `docs/state/AI_CONTEXT.md` 的用户改动，M40 不归并或覆盖前两项，仅在 AI_CONTEXT 上追加当前状态。本模块新增 `engine/trace/runtime.py`、`eval/phase4_assurance.py`、`scripts/run_m40_phase4_assurance.py`、两份 M40 测试与 M40 notes/plan；修改 API/Trace projector、Hybrid result/graph 和既有 SQL/RAG/Hybrid API Trace 测试，并更新本条、AI_CONTEXT、runbook、eval-baselines。未改 Knowledge Tool、AnswerFlow、ACL、outbound、Router、默认模型/embedding/retrieval、数据库/seed/Alembic、M34 profile 或 README。
+- **关键记录与用户选择**：M40 从同一 `AgentTurnResult` 的已安全投影生成 `phase4-trace-runtime-v1`，SQL 仅读 ledger runtime ref，RAG 仅读既有 diagnostics，Hybrid 追加 thin-plan、Synthesizer 与 branch 摘要；identity 缺失稳定记为 `unavailable`，不阻断 API。五路径 rehearsal 对同源 response/Trace 计算安全 execution identity，缺路径、重复、runtime 缺失、四轴/证据/lifecycle 不闭合或敏感字段泄露均失败关闭。P7 manifest 只允许 exact nine-family catalog；M39 audit 必须仍是带完整输入身份的 `no_go`。澄清恢复演练发现用户可见 answer 会自然复述 subject，和“Trace 绝不出现任何补充值”字面要求冲突；选项 A 保留既有 answer Trace 合同、禁止 raw `thread_id` 与结构化 clarification/follow-up 参数副本，选项 B 改写 Trace answer 合同。风险是 B 会改变长期 Trace 语义；建议 A，用户确认 A。
+- **参考资料**：定点复核 `agentic-rag-for-dummies` 的显式状态累计与保存运行输出再评测，以及 DB-GPT retrieval evaluator 的检索/回答分层；借鉴安全执行事实和分层证据，不照搬完整 context/history、开放循环、RAGAS/LLM Judge、DB-GPT DAG 或跨 family 平均分。
+- **验证快照**：M40 聚焦 `6 passed, 1 warning in 12.72s`；M31–M39 受影响 deterministic 回归 `208 passed, 1 warning in 51.21s`；后台全仓 deterministic pytest 退出码 `0`，`447 passed, 3 skipped, 1 warning in 503.36s`。3 skip 为既有 Milvus/远端 embedding 条件项；唯一 warning 为既有 FastAPI TestClient/httpx 弃用提示，均不阻塞。`compileall` 与 `git diff --check` 通过。
+- **遗留 / Handoff**：P7 technical Gate 已闭合，仍待用户人工检查与 `accept-module`；它不证明生产认证、真实外部服务质量、开放 Router、长历史/持久 checkpoint，也不代表 RAG Subgraph 已实现。后续若重新进入 P6，必须满足 M39 的新增 Evidence、held-out 协议与可比预算重开门；否则下一项能力选择应从 roadmap、M40 notes、AI_CONTEXT 与防遗忘账本重新规划。
+
 ### [模块任务] M39 P6 RAG Subgraph 入场证据审计（2026-08-17）
 
 - **改动范围**：用户未指定模块起始 commit；开工时只有已确认但未跟踪的 `docs/notes/m39-plan.md`，收工以 `git status --short`、未暂存/暂存清单和未跟踪文件归并，暂存区为空。新增 `eval/subgraph_readiness.py`、`scripts/audit_m39_p6_readiness.py`、`tests/test_m39_subgraph_readiness.py`、`eval/reports/m39-p6-readiness.{json,md}` 与 `docs/notes/m39-notes.md`，并同步 `AI_CONTEXT`、RAG/Eval state、runbook 和本文。未修改 Knowledge Tool、AnswerFlow、Harness、Hybrid、ACL、outbound、external profile/pointer、数据库/seed/Alembic、模型/embedding/LangFuse 或 README。

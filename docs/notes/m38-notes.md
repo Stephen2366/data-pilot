@@ -1,7 +1,5 @@
 # M38 保守 Hybrid 双 Evidence 编排 — 实施素材
 
-> 状态：技术收工完成，等待人工检查 / `accept-module`（2026-08-17）
->
 > 范围以 [m38-plan.md](m38-plan.md) 为准：P5 的保守 Hybrid 纵向基线；正式本地确定性 Synthesizer，不新增 Hybrid 数据出站。
 
 ## Implementation checklist

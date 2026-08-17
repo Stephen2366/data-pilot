@@ -1,7 +1,5 @@
 # M39 P6 RAG Subgraph 入场证据审计与 go/no-go 开发计划
 
-> 状态：技术收工完成，等待人工检查 / `accept-module`（2026-08-17）
->
 > 能力里程碑：Phase 4 `P6`；本模块闭环 P6 必做的失败证据审查与可复核 go/no-go，不实现 RAG Subgraph。若结论为 no-go，P6 按 roadmap 口径完成；只有所有入场条件随后成立，才由独立 M40 进入实验 adapter。
 >
 > 主要问题：M34 已经证明 external RAG 存在 lexical 漏召回、selected/context packing 和 Composer support 拒绝，但现有证据还不能证明“根据第一次 Observation 再做一次取证”会新增有效 Evidence，因此不能把质量缺口直接等同为建设 Agentic RAG 的理由。

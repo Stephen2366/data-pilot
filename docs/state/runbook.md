@@ -2,7 +2,7 @@
 
 > 本文是 DataPilot 的运行入口：只说明“怎么开启哪条链路、怎么跑命令、哪些默认不能随手改”。Trigger：只要要运行命令、切模型、开 LangFuse、跑 eval、改环境变量，必须先读本文。当前状态先读 `docs/state/AI_CONTEXT.md`，评测数字和错因追溯读 `docs/state/eval-baselines.md`，Milvus / embedding 细节读 `docs/state/schema-retrieval-milvus-embedding.md`。
 
-更新时间：2026-08-17
+更新时间：2026-08-18
 
 ## 模型链路
 
@@ -43,7 +43,7 @@
 | 目标 | 环境变量 / 命令 | 说明 |
 |---|---|---|
 | 本地 JSONL trace | M27 默认写入 `eval/traces/`，可用 `--trace-dir eval/traces` 指定目录 | 默认不依赖 LangFuse；JSONL 默认不提交。 |
-| `/api/query` M38 Trace | 默认 `eval/traces/traces.jsonl` | 单路沿用 M37 字段；Hybrid 额外记录安全 branch 摘要、薄 plan identity、Graph/Tool 次数和 citation identity。Hybrid JSONL 不保存 Document 正文、完整 SQL rows、private typed Evidence 或 denied branch 的真实原因/ref；Hybrid 不签发 follow-up。 |
+| `/api/query` M40 Trace | 默认 `eval/traces/traces.jsonl` | SQL、RAG、Hybrid、lifecycle Trace 均新增 `phase4-trace-runtime-v1`：只从同一 turn 的 safe ledger / diagnostics / branch 投影 Harness、Tool、release/recipe/policy、薄 plan 与 Synthesizer identity；缺 identity 记 `unavailable` 不影响 API。Hybrid JSONL 不保存 Document 正文、完整 SQL rows、private typed Evidence 或 denied branch 的真实原因/ref；不保存 raw `thread_id` 或结构化 thread 参数副本。 |
 | 本地 M27 eval | `LANGFUSE_ENABLED=false`；按下方 selector 命令运行 | completed EvalRun JSON + Markdown report 是新事实源；M27 不生成旧 triage JSON。 |
 | LangFuse Cloud trace/score | `LANGFUSE_ENABLED=true`，必要时 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7897` | Cloud 仍是旁路增强；M27 当前只构造严格 allowlist assertion payload，实际上传需显式授权，不能影响本地 EvalRun。 |
 | LangFuse smoke | `python scripts\smoke_phase3b_langfuse.py`；Cloud 硬门禁加 `--require-langfuse` | M18 的主验证入口，用于 API / JSONL / trace mapping / score / visibility。 |

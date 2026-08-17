@@ -1,7 +1,5 @@
 # M37 受控有限追问与 Document Evidence 窄复用开发计划
 
-> 状态：已开发并完成技术收工，等待用户人工检查与验收（2026-08-17）
->
 > 能力里程碑：Phase 4 `P4`；本模块闭环“成功 SQL/RAG 回答后的单次受控追问 → 旧 Evidence 有效性裁决 → 业务 Document Evidence 窄复用或重新取证 → 新答案”的能力切片，不等于完成通用多轮 Context Builder、通用 Evidence 缓存或整个 P4
 >
 > 主要问题：M36 只能恢复 pending clarification；成功回答后 thread 已终止，系统既不能安全理解有限追问，也不能证明新 claim 使用的是重新授权、仍有效的新 Evidence

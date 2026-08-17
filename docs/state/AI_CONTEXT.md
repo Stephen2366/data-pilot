@@ -8,11 +8,11 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4-roadmap.md`                                     |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M39 P6 RAG Subgraph 入场证据审计技术收工完成，待人工检查（2026-08-17） |
-| 当前 plan    | `docs/notes/m39-plan.md`                                     |
-| 当前 notes   | `docs/notes/m39-notes.md`                                    |
-| 待决事项     | 用户已选 M39 G-M39-1 方案 A；严格 no-go 已证实，P6 不实现 Subgraph，后续另按 P7 规划 |
-| 更新时间     | 2026-08-17                                                   |
+| 当前活动模块 | M40 P7 跨路径 Trace 运行身份与阶段保证包已验收通过（2026-08-18） |
+| 当前 plan    | `docs/notes/m40-plan.md`                                     |
+| 当前 notes   | `docs/notes/m40-notes.md`                                    |
+| 待决事项     | P6 严格 no-go 仍固定；M40 P7 technical assurance 通过不等于 Phase 4 人工验收或生产认证 |
+| 更新时间     | 2026-08-18                                                   |
 
 ## 必读规则
 
@@ -41,6 +41,7 @@
 - Caller：`local/demo/test` 使用明确标记的 fixture resolver，请求 `user_role` 只能选择 resolver 已解析的 role；其他环境没有 authenticated resolver 时在 Tool 前失败关闭。生产认证尚未建设。
 - M34 external benchmark：项目外 EnterpriseRAG-Bench v1.0.0 独立 profile；当前 external adapter 保持 `enterprise-lexical`，`enterprise-unit-paragraph-2400-v1` 无 overlap；semantic candidate 不胜 lexical，未激活。业务 22 条 active release 不变。
 - LangFuse 默认关闭，JSONL trace 为主；SQL 安全为只读 AST + RBAC + 敏感字段策略。
+- Trace runtime identity：`/api/query` 的 SQL、RAG、Hybrid、澄清恢复和安全拒绝 Trace 均从同一 `AgentTurnResult` 投影 `phase4-trace-runtime-v1`。缺少安全 identity 只标 `unavailable`、不阻断业务；P7 canonical rehearsal 视其为失败。Trace 不保存 raw `thread_id` 或结构化 clarification/follow-up 参数副本，但沿用既有用户可见 `answer` 保存合同。
 - 现有 Text2SQL chat/schema embedding 出站在 transport 前按 `phase4-outbound-v1` 精确登记；所有新增 Knowledge/RAG 数据类别与节点用途继续默认拒绝，LangFuse Cloud 未获放行。
 
 ## 最近验证事实
@@ -49,6 +50,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-17 | M40 完成 P7 技术收口：五条 deterministic API/Trace rehearsal（SQL、RAG、Hybrid、澄清恢复、安全拒绝）验证 response/Trace 同源、四轴、Evidence/citation、Graph/lifecycle 预算、安全 runtime identity 与非泄露；P7 closed-world manifest 只允许 P1、P2 retrieval/answer、P3、P4 turn/follow-up、P5、M39 P6 verified `no_go`、P7 rehearsal 九个 family，拒绝 M27 历史与 M34 质量数字填槽。M40 聚焦 6 passed、M31–M39 回归 208 passed、全仓 deterministic pytest 447 passed / 3 skipped / 1 warning；technical Gate 不等于人工验收、生产认证或 P6 Subgraph 完成。 |
 | 2026-08-17 | M39 完成 P6 只读 readiness audit：六份冻结 M34 输入须同时匹配 SHA-256、identity、split、retrieval runtime 与 Composer identity；只分类 60 dev，120 held-out 仅作闭合核验，零 provider 调用。结果为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；“Observation 驱动新增 Evidence 动作”与“可比额外预算”均未被既有证据证明，故严格 `no_go`，external lexical 默认不变。全仓 deterministic pytest `441 passed, 3 skipped, 1 warning in 517.57s`。 |
 | 2026-08-17 | M38 完成 P5 保守 Hybrid 双 Evidence 基线：本地确定性 Synthesizer、双 required branch、typed SQL/Document Evidence、safe partial/conflict/合成失败降级、API/Trace 投影和 `phase4-harness-hybrid-v1`（5 Scenario / 25 required）。全仓 deterministic pytest `436 passed, 3 skipped, 1 warning in 599.87s`，compileall/diff check 通过；未运行真实 Hybrid LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测。 |
 | 2026-08-17 | M37 完成 P4 的一次有界 follow-up + Evidence validity/重新取证切片：`phase4-harness-followup-v1` 覆盖 10 sequences / 22 turn evidence / 50 required，50/50 通过，identity `1185edf0...634b25`。全仓 deterministic pytest `427 passed, 3 skipped, 1 warning in 509.36s`，compileall/diff check 通过；未运行真实 LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测。 |
@@ -63,11 +65,11 @@
 
 - (2026-08-17) M37 单独不等于 P4，但 M36 + M37 已共同完成 roadmap 定义的 P4 最小可验收基线；不宣称通用多轮。第二次追问、长历史 compact 和持久 checkpoint 不是当前 P4 硬门；跨 route/跨 Tool 补证据由 M38 的 P5 Hybrid 正式承接。M37“窄 B”仍是正式边界，不得退化为直接复用旧答案或默认扩到 external。
 - (2026-08-17) M38 已按 P5 口径完成保守 Hybrid 纵向基线：方案 A 的本地确定性 Synthesizer 是正式默认与长期 fallback；SQL/RAG 默认 required，不触发 G6 optional 放宽，不新增 Hybrid 数据出站。P5 不等于开放式跨来源研究 Agent。
-- (2026-08-17) M39 已按用户确认的方案 A 完成 P6 入场审计并严格 no-go：固定 Pipeline 的 retrieval/context/Composer/provider 失败不能替代“Observation → 允许动作 → 新 Evidence”的实证，且没有父子预算可比较。P6 因审计闭环完成，不实现 RAG Subgraph、不切 lexical 默认；若将来重开，须有未污染 dev 对具体允许动作的新增 Evidence 证据、冻结的 held-out decision protocol 与可比额外预算，随后另立 M40。下一能力入口按 roadmap 的 P7 收口另行规划。
+- (2026-08-17) M39 已按用户确认的方案 A 完成 P6 入场审计并严格 no-go；M40 已完成 P7 的技术收口，安全 Trace runtime identity 和 nine-family assurance 可供人工检查。二者均不改变 external lexical 默认，也不实现 Subgraph；P7 technical Gate 不等于整个 Phase 4 已验收。若未来重开 Subgraph，须有未污染 dev 对具体允许动作的新增 Evidence 证据、冻结的 held-out decision protocol 与可比额外预算，并另立计划。
 - (2026-08-10) Text2SQL 的确定性收尾问题已修复；若未来重跑 Text2SQL，必须使用 `m27-v3` 新序列，并完整记录 collection、embedding、corpus 与 run-scoped index identity。现有 v1/v2 数字只作历史解释。
 - (2026-08-09) 默认保持 Qwen `qwen3.7-plus` + inmemory deterministic + weighted；任何切换需要单变量重复证据与用户确认。
 
-## 防遗忘能力账本（M29–M38）
+## 防遗忘能力账本（M29–M40）
 
 > 记录已经存在、但容易被“当前窄实现已完成”掩盖的能力缺口和重开门。优先级表示防遗忘/复核顺序，不自动决定下一模块；下一模块仍须按 roadmap、最新失败证据和独立 plan 裁决。原方案字母只在对应 module plan 内有效，禁止脱离具体方案写“以后从 A 升级 B”。
 

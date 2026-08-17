@@ -1,7 +1,5 @@
 # M39 P6 RAG Subgraph 入场证据审计 — 实施素材
 
-> 状态：技术收工完成，待人工检查 / `accept-module`（2026-08-17）
->
 > 范围以 [m39-plan.md](m39-plan.md) 为准：只读 M34 证据审计与严格 P6 no-go 判断；不实现 RAG Subgraph、不运行 provider、不改变默认路径。
 
 ## Implementation checklist

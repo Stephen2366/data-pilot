@@ -21,6 +21,7 @@ from engine.harness.graph import HarnessRuntime
 from engine.harness.thread import ThreadCheckpointManager
 from engine.harness.turn import AgentTurnResult, TurnRequest, clear_thread, run_turn
 from engine.trace.recorder import TraceRecord, append_trace
+from engine.trace.runtime import build_trace_runtime_identity
 
 
 router = APIRouter(prefix="/api", tags=["query"])
@@ -186,6 +187,7 @@ def _record_trace(
         graph_invocation_count=turn.graph_invocation_count,
         thread_lifecycle=turn.lifecycle.safe_projection() if turn.lifecycle else None,
         checkpoint_runtime=turn.checkpoint_runtime,
+        runtime_identity=build_trace_runtime_identity(result=result, checkpoint_runtime=turn.checkpoint_runtime),
     )
     path = _trace_path(request)
     if path is None:
@@ -275,6 +277,12 @@ def clear_query_thread(
         graph_invocation_count=0,
         thread_lifecycle=control.lifecycle.safe_projection(),
         checkpoint_runtime=checkpoint_manager.runtime_identity,
+        runtime_identity={
+            "format": "phase4-trace-runtime-v1", "status": "complete",
+            "harness_identity": "phase4-harness-langgraph-v1", "route": "none",
+            "checkpoint_runtime": checkpoint_manager.runtime_identity,
+            "route_runtime": {"kind": "thread_control", "reason_code": control.reason_code}, "missing": [],
+        },
     )
     path = _trace_path(request)
     if path is None:

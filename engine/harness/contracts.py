@@ -352,6 +352,8 @@ class HybridResult:
     claims: tuple[dict[str, Any], ...] = ()
     citations: tuple[dict[str, Any], ...] = ()
     reason_code: str = "hybrid_completed"
+    # M40：仅保留 Synthesizer adapter identity，供 Trace 回查；不保存 prompt 或正文输入。
+    synthesizer_identity: str | None = None
 
     def branch(self, name: Literal["sql", "rag"]) -> BranchResult:
         """按闭集名称获取唯一分支，缺失/重复一律作为合同失败。"""

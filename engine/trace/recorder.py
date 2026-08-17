@@ -91,6 +91,8 @@ class TraceRecord(BaseModel):
     graph_invocation_count: int = Field(default=1, ge=0, le=1)
     thread_lifecycle: dict[str, Any] | None = None
     checkpoint_runtime: dict[str, Any] | None = None
+    # M40：跨 SQL/RAG/Hybrid 的最小 runtime identity，不替代 Evidence 或详细 diagnostics。
+    runtime_identity: dict[str, Any] | None = None
 
 
 class TraceBackend(Protocol):

@@ -1,7 +1,5 @@
 # M36 结构化澄清恢复与轻量 Thread Checkpoint 开发计划
 
-> 状态：已确认可执行
->
 > 能力里程碑：Phase 4 `P4`；本模块只闭环 P4/G5 的首个顶层恢复切片“澄清后在同一 thread 恢复一次”，不等于完成 P4 的 Evidence 复用、通用 Tool 恢复或完整 Context Builder
 >
 > 主要问题：M35 能正确返回 `clarification_required`，但该状态现在是死胡同；用户补充条件时系统无法证明这是同一任务、同一可信 caller，也不能受控地恢复取证

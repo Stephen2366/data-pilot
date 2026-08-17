@@ -72,3 +72,5 @@ def test_hybrid_response_and_trace_project_one_two_branch_run_without_raw_eviden
     serialized = json.dumps(trace, ensure_ascii=False)
     assert "质量问题退款须" not in serialized
     assert '"content"' not in serialized
+    assert trace["runtime_identity"]["status"] == "complete"
+    assert trace["runtime_identity"]["route_runtime"]["synthesizer_identity"] == "hybrid-deterministic-structured-v1"

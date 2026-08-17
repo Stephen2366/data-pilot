@@ -1,7 +1,5 @@
 # M36 结构化澄清恢复与轻量 Thread Checkpoint 实施素材
 
-> 状态：施工完成，待人工检查与验收
->
 > 对应计划：[m36-plan.md](m36-plan.md)
 
 ## Implementation checklist

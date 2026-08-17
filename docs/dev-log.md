@@ -3318,3 +3318,140 @@ python scripts/audit_m39_p6_readiness.py --split eval/cases/enterprise-rag-bench
 
 **本地启动体验：** 本模块暂无独立 API 或页面，因为它是一个**离线只读路线审计**，不是新的 RAG 服务能力。运行上面的 CLI 后，直接查看 `eval/reports/m39-p6-readiness.md`：你会看到 dev 的五类失败计数、四项 P6 条件和 `no_go`。报告不会展示题目、文档正文、完整答案或私有 Evidence。
 
+## ★ M40 P7 跨路径 Trace 运行身份与阶段保证包
+
+（2026-08-18）
+
+**简述**：给每条 SQL、RAG、Hybrid 和多轮请求的 Trace 补上可安全回查的“运行身份证”，再把已有 Phase 4 合同收成一份不凑分的技术保证包；它证明控制链路闭合，**不等于**整个 Phase 4 已人工验收。
+
+### 先用大白话讲
+
+之前 DataPilot 已经能处理 SQL、查规则、混合取证、澄清恢复和安全拒绝，也分别有很多测试。但如果有人看到一条 JSONL Trace，仍要自己猜：这次 SQL 用的是哪条 runtime、RAG 用的是哪套 release 和检索 recipe、Hybrid 的合成器是什么；而且单项测试全绿，也不保证没有漏掉某个阶段合同。
+
+M40 做的事像给快递包裹补一张**物流单**：不把包裹里的正文、SQL rows 或 thread 参数写上去，只写“这单走了哪条受控链路、用了哪个版本、有没有缺关键身份”。然后用五条固定故事把 response 和同一次 Trace 对起来，最后把 P1 到 P7 必须存在的证据逐格核对。这样系统不是“看起来测试很多”，而是能说明**这次结果从哪来、哪些合同已经验证、哪些仍然没有证明**。
+
+### 这次做了什么
+
+**核心问题**是：Trace、API 和各种 Eval 原本都从同一套业务能力派生，但运行身份分散在不同字段里，阶段收口很容易被“把几份旧报告摆在一起”替代。M40 没有新增 Tool、RAG Subgraph 或模型调用；它把已有的安全事实组织成可复核的证据链，并保留 M39 的严格 no-go。
+
+1. **给 Trace 增加最小 runtime identity，而不是再造一套运行状态**
+
+   **原来的问题**是 SQL 的 runtime 在 Evidence ledger，RAG 的 release、corpus、recipe 和 policy identity 在 diagnostics，Hybrid 又多了薄计划和 Synthesizer。Trace 消费者若自行拼字段，很容易因为某条 route 漏字段而误判，甚至为了“补齐”去读取 private Evidence、正文或完整 rows。
+
+   M40 新增 `phase4-trace-runtime-v1`。`engine/trace/runtime.py` 只从同一个 `AgentTurnResult` 已有的**安全投影**取值：SQL 读 safe ledger 的 `runtime_ref`；RAG 读已公开 diagnostics；Hybrid 记录 thin plan、Synthesizer identity 和每支的安全摘要。可以把它理解为后端 DTO：它只搬运允许长期保存的坐标，不把 ORM 内部对象整个塞到日志里。
+
+   **关键机制**是缺字段时写 `status=unavailable` 和 missing path，但 Trace 仍是旁路，不能把一次本来完成的 API 请求打成失败。P7 的固定演练会把 canonical 成功路径的 `unavailable` 判失败，避免空字典伪装成身份。测试覆盖了 SQL 只读取 safe ledger、缺 identity 不影响结果，以及 SQL/RAG/Hybrid/拒绝路径的完整投影。它**尚未证明**任何新的模型、检索质量或生产 receiver 行为。
+
+2. **用五条真实 API 故事证明“response 和 Trace 是同一件事”**
+
+   **原来的问题**是分别测试 SQL、RAG 或 Hybrid 不足以证明整条用户路径没有在 Trace 侧重新判断状态，也不容易一次覆盖澄清恢复和安全拒绝。
+
+   `tests/test_m40_trace_rehearsal.py` 在隔离 SQLite、fixture caller 和临时 JSONL 中各执行一次：SQL、RAG、Hybrid、澄清→恢复、安全拒绝。每个 Scenario 都核对 trace id、route、四轴状态、Graph 次数、Evidence/citation 坐标、lifecycle 和 runtime envelope。随后把这些**同次安全投影**计算为 `execution_identity`，像给一张已核对的收据盖不可逆指纹；artifact 本身不含 answer 正文、rows、raw thread id 或结构化参数。
+
+   实施中发现一个真实取舍：恢复 RAG 后，用户可见 answer 自然会提到用户补充的业务主题。如果把“Trace 不出现任何补充值”理解成任何同样的词都不能出现，就必须删掉既有 Trace answer，属于改变长期 Trace 合同。用户最终选择 **方案 A**：保留 answer 的既有可观测性，但禁止直接保存 raw `thread_id`、`clarification_answers` 和 `follow_up_fields` 结构或独立参数副本。这样区分了“答案正常谈业务”与“把 thread 请求参数当日志字段落盘”。
+
+3. **把 P1–P7 收成 closed-world assurance，而不是把分数平均成“总能力”**
+
+   **原来的问题**是安全发布、RAG retrieval、RAG answer、Harness、turn、follow-up、Hybrid 和 M39 no-go 各有自己的分母与 Gate。直接混入 M27 历史结果、M34 质量数字或人工说明，可能做出一个漂亮但不诚实的总分。
+
+   `eval/phase4_assurance.py` 用**closed-world（封闭清单）**限制 assurance 只能有九个 family：P1、P2 retrieval、P2 answer、P3、P4 turn、P4 follow-up、P5、P6 no-go、P7 rehearsal。每项都要有自己的 contract/artifact identity 且必须 passed；漏项、重复、顺序漂移、hash 被改、M39 不再是 verified no-go，都会失败关闭。CLI `scripts/run_m40_phase4_assurance.py` 只读取已验证 rehearsal 和冻结 M39 报告，输出 JSON 与 Markdown matrix。
+
+   **重要取舍**是 P6 的 `no_go` 在这里也写成通过：意思是“路线决策被如实验证并纳入保证包”，不是“RAG Subgraph 质量通过”。M40 聚焦测试验证 family 篡改、缺路径、runtime 不可用和 CLI 输出；M31–M39 回归证明旧合同没有被破坏。它**不能证明**生产认证、真实外部服务质量、开放 Router、长期会话，更不能把 P7 technical Gate 说成 Phase 4 已结束。
+
+### 新概念
+
+- **Runtime identity envelope（运行身份信封）**：Trace 上统一的最小版本/配置坐标。它像一次接口调用的 build 信息，不记录用户完整数据，却能让人知道这次结果是哪套受控链路产生的。
+- **Cross-path rehearsal（跨路径演练）**：把多个真实用户故事固定下来，每条只执行一次，再从同一份执行事实做很多断言。它避免“为了测试 Trace 又重新跑一遍业务”的双账本问题。
+- **Execution identity（执行指纹）**：对 trace id、四轴、runtime、Evidence/lifecycle 和预算等安全投影做 hash。它不还原正文，但能发现后来换了另一份执行事实。
+- **Closed-world assurance（封闭保证包）**：不是平均分，而是一张必须填满的检查表。每个格子只接受指定 family 的身份和结果，陌生或历史数字不能补洞。
+
+### 代码阅读路线
+
+1. **先看 Trace 身份从哪里来**：`app/api/query.py::_record_trace` → `engine/trace/runtime.py::build_trace_runtime_identity`
+
+   API 仍只投影同一个 `AgentTurnResult`；runtime helper 再按 SQL/RAG/Hybrid route 读取安全 ledger 或 diagnostics。重点理解 **Trace 没有重新路由或重新执行 Tool**，它只是记录已发生的安全事实。
+
+2. **再看 Hybrid 为什么需要额外身份**：`engine/harness/contracts.py::HybridResult` → `engine/harness/graph.py::_hybrid_controller`
+
+   M40 只给 `HybridResult` 增加 Synthesizer identity，并在真正生成 complete/partial 结果的 controller 处赋值。这样 Trace 能知道谁合成了结论，却看不到 prompt 或完整 Evidence。
+
+3. **读 rehearsal 和反例**：`tests/test_m40_trace_rehearsal.py` → `tests/test_m40_phase4_assurance.py`
+
+   前者让五条 API 路径各执行一次，后者验证 missing runtime、漏 family、M39 no-go 和 CLI 输出。这里解决的是 **一次执行、多断言共享证据**，而不是增加新的业务能力。
+
+4. **最后读总保证包**：`eval/phase4_assurance.py` → `scripts/run_m40_phase4_assurance.py`
+
+   先看 rehearsal validator 怎样拒绝漏/重路径，再看 nine-family catalog 怎样拒绝历史质量数字。CLI 只负责读取已验证输入、运行 deterministic family、写出 JSON/Markdown；它不会启动真实 LLM 或重跑 M34。
+
+核心数据流：
+
+`同一 AgentTurnResult`
+→ `安全 runtime identity + JSONL Trace`
+→ `五路径 response/Trace rehearsal`
+→ `execution identity`
+→ `P1–P7 exact-nine-family assurance`
+→ `JSON / Markdown capability matrix`
+
+### 设计要点
+
+- **先保留旁路性质**：Trace 缺 identity 只做诊断，不把观测系统变成业务失败源；但 canonical 演练不能接受这种缺口。
+- **同词不等于参数泄露**：用户确认 A 后，answer 自然包含业务主题是兼容的；直接保存 raw thread id 或结构化参数副本才是禁止项。
+- **no-go 也应被验证**：M39 的 no-go 是一项严格路线结论，不是“没做完”的空白；P7 负责保证它没有被悄悄翻转。
+- **不做阶段总分**：不同 family 的分母和含义不同，P7 只核验它们是否齐全可追溯；它不证明模型质量、生产授权或整个 Phase 4 已完成汪。
+
+### 面试怎么讲
+
+**可直接复述**：我在 DataPilot 的 M40 做的是 Phase 4 的技术收口。前面 SQL、RAG、Hybrid 和多轮链路已有独立合同，但 Trace 的运行身份分散，阶段结论也容易被不同来源的报告拼凑。我给 `/api/query` 的 Trace 加了版本化 runtime identity，只从同一 `AgentTurnResult` 的 safe ledger、diagnostics 和 Hybrid 摘要读取身份；缺字段只标 unavailable，不阻断业务。然后用 SQL、RAG、Hybrid、澄清恢复、安全拒绝五条真实 API 路径，验证 response/Trace 的 id、四轴、Evidence/citation、预算和 lifecycle 同源，并生成安全 execution fingerprint。最后做 closed-world assurance，只允许 P1 到 P7 九个指定 family，M39 no-go 也必须原样验证，M27/M34 的历史或质量数字不能补洞。专项 7 项、M31–M39 的 208 项和全仓 447 项测试都通过。这个工作证明的是确定性控制和可追溯性闭合，不是把它包装成真实模型质量或 Phase 4 的最终验收。
+
+1. **[基础追问] 为什么 runtime identity 不直接从每个 Tool 的内部对象读取，拿到的信息不是更全吗？**
+
+   更全不等于更安全。Tool 内部可能有 Document 正文、完整 SQL rows、原始授权过程或 prompt；Trace 是长期旁路存储，直接读取会多出一个泄露面。M40 只消费已经经过白名单投影的 ledger 和 diagnostics，相当于 Controller 返回 DTO 而不是 ORM 实体。身份缺失时保守记 unavailable，由 rehearsal fail closed，而不是为了日志完整性跨越数据边界。
+
+2. **[工程/深挖追问] 为什么 P7 不把各个 contract 的通过率加权成一个百分比分数？**
+
+   这些 family 的分母根本不可比：P1 是安全发布断言，P2 有 retrieval/answer 两层，P4 是 sequence，P6 是 no-go 路线审计。加权后一个高分 family 可能掩盖另一个必须存在的安全合同。P7 的目标是“所有必要门都在、来源未被替换”，所以用 exact catalog 和 identity 闭合；质量趋势仍留在各自的 M27/M34 账本里。
+
+3. **[压力追问] 这不就是日志字段加几个 hash，再包一层报告吗？业务价值在哪里？**
+
+   这个质疑有道理：M40 没有让用户答案更自然，也没有提高 M34 的召回率。它解决的是复杂 Agent 最容易被忽略的工程问题——当 API、Trace、Eval 和路线决策分别变多后，如何证明它们还是同一条受控事实链，而不是各自讲一个故事。M40 用五条真实路径、family 篡改反例、208 项相关回归和 447 项全仓回归说明这个闭环存在；它仍不替代真实质量、生产认证或人工验收。若要继续提升业务能力，必须按 M39 的证据门另立计划，而不是把 P7 的可追溯性冒充成效果提升喵。
+
+### 验证与下一步
+
+- **M40 专项**：`7 passed, 1 warning in 13.04s`，覆盖 C1 runtime identity/降级、C2 五路径演练与反例、C3 family/M39 no-go/CLI 输出。
+- **受影响回归**：M31–M39 为 `208 passed, 1 warning in 51.21s`，说明 Evidence、RAG、Harness、thread、Hybrid 和 P6 no-go 没有回归。
+- **全仓确定性回归**：后台任务退出码 0，`447 passed, 3 skipped, 1 warning in 503.36s`。skip 是既有 Milvus/远端 embedding 条件项；warning 是既有 TestClient/httpx 弃用提示。`compileall` 与 `git diff --check` 通过。
+- **下一步**：先由用户人工检查 P7 five-path Trace 和 capability matrix，再运行 `accept-module`。不要因为 P7 technical Gate 通过就宣布 Phase 4、RAG Subgraph、生产认证或真实外部质量已经完成。
+
+可复制验证命令：
+
+```powershell
+# M40 的 Trace / rehearsal / assurance 聚焦验证；预计 7 passed 和 1 个既有 TestClient/httpx warning。
+python -m pytest -q -p no:cacheprovider tests/test_m40_phase4_assurance.py tests/test_m40_trace_rehearsal.py --basetemp=.agent_work/temp/m40-review
+
+# 检查 Python 语法与导入；预计无输出并以 exit 0 结束。
+python -m compileall -q engine/trace eval scripts/run_m40_phase4_assurance.py
+
+# 从已验证的 C2 rehearsal JSON 生成 P7 assurance JSON/Markdown。
+# 前提：--rehearsal 指向由五路径演练产出的安全 artifact；此命令只跑本地 deterministic family。
+python scripts/run_m40_phase4_assurance.py --rehearsal .agent_work/temp/<m40-rehearsal>.json --output .agent_work/temp/m40-assurance.json --report .agent_work/temp/m40-assurance.md
+```
+
+**本地启动体验：** M40 没有新页面，仍通过现有 FastAPI 接口观察 Trace。先按 `docs/state/runbook.md` 准备 local/demo 环境和数据库/seed，再启动：
+
+```powershell
+# 环境未激活时，使用 AGENTS.md 中的完整 Python 路径。
+python -m uvicorn app.main:app --reload
+```
+
+打开 Swagger UI：`http://127.0.0.1:8000/docs`，调用 `POST /api/query`：
+
+```json
+{
+  "question": "查询退款原因并说明退款政策",
+  "user_role": "ops",
+  "force_new_pipeline": false
+}
+```
+
+预计返回 `route=hybrid`、`answer_status=complete` 和 SQL/document citation。随后查看 `eval/traces/traces.jsonl` 的同一 `trace_id`：你会看到 `runtime_identity` 中的 thin plan、Synthesizer 与两支 runtime 摘要，但看不到文档正文、完整 Hybrid rows、raw thread id 或结构化 thread 参数。当前仍是 local/demo fixture caller；不要把这次体验解释成开放 Hybrid、真实外部模型或生产认证。
+

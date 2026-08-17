@@ -1,7 +1,5 @@
 # M38 保守 Hybrid 双 Evidence 编排开发计划
 
-> 状态：已确认可执行（2026-08-17）
->
 > 能力里程碑：Phase 4 `P5`；本模块一次闭环保守 Hybrid 的完整纵向基线，包括薄计划、SQL/RAG 双分支、原始 typed Evidence 汇合、required branch、partial/conflict、Synthesizer 降级、双来源 citation、Trace/API 与 sequence Eval；完成后可按 roadmap 口径验收 P5，但不等于开放式跨数据源研究 Agent
 >
 > 主要问题：当前 Harness 遇到同时需要数据库事实和业务规则的问题只会返回 `hybrid_unsupported`，既不能取得两类 Evidence，也没有在分支失败、证据冲突或合成器不可用时安全保留独立成立结果的统一合同

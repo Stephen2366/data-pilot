@@ -2,7 +2,7 @@
 
 > 本文是评测数字、分母、artifact、实验状态与可比性规则的唯一详细账本。`rag-current-state.md` 只保留 RAG 当前运行口径和结论摘要；两处出现同一 profile identity 时，以本文判断“能否比较”，以 `rag-current-state.md` 判断“当前运行使用什么”。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
-更新时间：2026-08-17
+更新时间：2026-08-18
 
 ## 当前状态
 
@@ -13,6 +13,7 @@
 - **默认运行配置**：仍以 [runbook.md](runbook.md) 为准；M27 没有切换模型、检索、embedding、数据库、oracle、timeout 或 retry。
 - **M38 Hybrid 合同**：`phase4-harness-hybrid-v1` 是独立 deterministic 控制/安全 artifact（5 Scenario / 25 required），不与 M27 或 M34 的真实质量/长期数字混算；完整能力边界见 `rag-current-state.md` 和 Phase 4 changelog。
 - **M39 P6 readiness audit**：只读取六份冻结 M34 输入并校验 SHA-256 / identity / split / runtime；它不是新的 retrieval 或 Answer Eval，也不新增质量基线。audit `324ec7f8...b726c6` 的严格 `no_go`、dev 分层计数与重开缺口见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
+- **M40 P7 technical assurance**：`phase4-assurance-v1` 是九个现有 deterministic family 的 closed-world 技术 Gate，另以 `phase4-trace-rehearsal-v1` 关联 SQL、RAG、Hybrid、澄清恢复和安全拒绝的同次 API/Trace 安全投影。它只登记 contract/artifact identity 与 P6 verified `no_go`，不产生新的质量分数、不混入 M27/M34 数字，也不等于 Phase 4 人工验收或生产就绪。
 - **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
 ## 读数与分母

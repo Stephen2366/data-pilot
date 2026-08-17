@@ -240,7 +240,8 @@ def _hybrid_controller(state: HarnessState, runtime: Runtime[HarnessRuntime]) ->
             claims, citations = (), ()
         if claims:
             hybrid = HybridResult(
-                branches=branches, claims=claims, citations=citations, reason_code="hybrid_synthesizer_partial"
+                branches=branches, claims=claims, citations=citations, reason_code="hybrid_synthesizer_partial",
+                synthesizer_identity=synthesizer.identity,
             )
             result = AgentRunResult(
                 route="hybrid", execution_status="failed", answer_status="partial", safety_status="passed",
@@ -269,7 +270,10 @@ def _hybrid_controller(state: HarnessState, runtime: Runtime[HarnessRuntime]) ->
         return {"result": result, "graph_steps": ["controller"]}
     complete = all(branch.evidence_ready for branch in branches)
     reason = "hybrid_completed" if complete else "hybrid_safe_partial"
-    hybrid = HybridResult(branches=branches, claims=claims, citations=citations, reason_code=reason)
+    hybrid = HybridResult(
+        branches=branches, claims=claims, citations=citations, reason_code=reason,
+        synthesizer_identity=synthesizer.identity,
+    )
     result = AgentRunResult(
         route="hybrid", execution_status="completed", answer_status="complete" if complete else "partial", safety_status="passed",
         reason_code=reason, answer="\n\n".join(str(item["text"]) for item in claims), route_decision=decision,
