@@ -68,8 +68,8 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
     rag-current-state.md # RAG 知识原件、运行基线、外部语料与评测证据边界速查
   notes/                # 模块计划与过程素材库（mX-plan.md / mX-notes.md）
   ref-discussion/       # 网上技术讨论原文收集（未筛选素材）
-  dev-log(M0-M19).md    # 用户学习复盘（M0~M19）
-  dev-log.md            # 用户学习复盘（M20以后）
+  dev-log(M0-M28).md    # 用户学习复盘（M0 ~ M28）
+  dev-log.md            # 用户学习复盘（M29 以后）
   module-plan-template.md # 模块计划模板（新模块开工时复制为 docs/notes/<m>-plan.md）
 
 

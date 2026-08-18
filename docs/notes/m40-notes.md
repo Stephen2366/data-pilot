@@ -120,3 +120,32 @@
 - 已完整回读 M40 的 dev-log 和本清单；内容、命令与验证事实均可回溯到本 notes。
 - `finish-docs` 阶段只修改 `docs/dev-log.md` 与本文，未改动 AI_CONTEXT、CHANGELOG_INDEX 或技术历史。
 - 收尾 `git diff --check` 通过后，可进入用户人工检查和 `accept-module` 验收门；P7 technical Gate 不等同 Phase 4 或 P6 的完成。
+
+## Phase 4 中半阶段总结 finish-docs 执行清单（M35–M40）
+
+> 本清单参考 skill 的“dev-log 交付门”，按阶段总结模板改造：保留问题—方案—证据—边界、面试叙述和扫读锚点等硬要求；用阶段主线图、阶段成果与边界替代模块专属的代码阅读路线、验证命令和本地启动体验。
+
+- [x] 有“简述”和“先用大白话讲”，准确说明阶段问题、方案、价值和边界。
+- [x] “这次做了什么”先有阶段矛盾概览，再有至少 3 条一级编号，且按能力主线组织，不按 M35–M40 逐篇缩写。
+- [x] “这次做了什么”的每个编号点均说明原问题/影响、关键概念、解决机制、重要取舍、真实验证证据和未证明边界；不适用项可省略。
+- [x] 有阶段主线图，能够看出 Harness、turn/thread、follow-up、Hybrid、P6 audit 与 P7 assurance 如何衔接。
+- [x] “关键知识点串联”只提炼阶段级概念，并用通俗语言解释，不重复罗列各模块术语。
+- [x] 有“阶段设计取舍”，最后一个句号按 skill 规则写为“汪。”。
+- [x] “面试怎么讲”先有可直接复述的阶段叙述，覆盖目标、方案、验证和边界。
+- [x] 面试追问使用 `[基础追问]`、`[工程/深挖追问]`、`[压力追问]` 分层；数量多于单模块，回答缩进且没有送分、纯定义或凑数问题。
+- [x] 压力回答承认合理质疑、澄清阶段目标、给出真实证据并说明补齐方向，最后一个句号按 skill 规则写为“喵。”。
+- [x] “阶段成果与边界”明确区分已完成、未完成和刻意不做；P6 `no_go`、P7 technical Gate、生产认证和真实质量口径没有被夸大。
+- [x] “下一阶段怎么接”只基于 notes、roadmap/state 和 Handoff，不凭空冻结新模块或把条件项写成必做项。
+- [x] 阶段总结各小节均使用 `**...**` 提供扫读重点，且全文不使用四级标题。
+- [x] 已完整回读新增阶段总结，并逐项核对 M35–M40 notes、AI_CONTEXT 和 Phase 4 技术档案。
+- [x] 已确认本轮未修改代码、测试、AI_CONTEXT、CHANGELOG_INDEX、change-history 或其它 state 文档。
+- [x] 已运行 `git diff --check`，并记录 Git 范围与最终检查结果。
+
+### 阶段总结阶段性检查结果
+
+- 新增章节位于 M40 之后，共 201 行；阶段模板的 8 个三级小节齐全，四级标题数量为 0。
+- “这次做了什么”按 5 条能力主线组织；面试部分为 2 个基础、7 个工程/深挖、1 个压力追问。
+- 已完整回读新增章节；未因自检补写内容，未发现 notes/state 外推或 P6/P7 口径夸大。
+- 本轮文件 `docs/dev-log.md` 与本 notes 的 scoped `git diff --check` 通过，仅有 LF→CRLF 提示。
+- 全工作树 `git diff --check` 未通过：本轮开始前已存在的用户改动 `.codex/skills/finish-docs/SKILL.md` 第 260、263、265 行含 trailing whitespace。按 finish-docs 文件范围限制，本轮未擅自修改该 skill，因此最后一项暂不勾选，也不宣称 finish-docs 完成。
+- 其余既有工作树改动为 `docs/notes/m34-notes.md` 和未跟踪 `docs/notes/phase4-rag-capability-status.md`；本轮未修改它们，也未修改任何代码、测试或 `docs/state/` 文件。
