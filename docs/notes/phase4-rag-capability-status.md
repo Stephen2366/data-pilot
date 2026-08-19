@@ -1,241 +1,454 @@
-# Phase 4 RAG 能力现状、缺口与演进候选
+# Phase 4 Agent / RAG 能力现状、Roadmap Debt 与后续演进
 
-> **用途**：面向后续 RAG 工程演进的状态清单：解释现有能力、质量缺口、尚未实现能力及其推进条件。它不替代当前事实源：运行与边界以 [`AI_CONTEXT.md`](../state/AI_CONTEXT.md) 为准，RAG 运行口径以 [`rag-current-state.md`](../state/rag-current-state.md) 为准，评测数字和可比性以 [`eval-baselines.md`](../state/eval-baselines.md) 为准，路线选择以 [`phase4-roadmap.md`](../phase4-roadmap.md) 为准。
+> **用途**：面向 Phase 4 收尾后的 Agent / RAG 工程演进，统一说明当前真实能力、未兑现的 roadmap 主线、条件能力、Phase 4 后能力，以及后续推进与验收顺序。本文不替代当前事实源：运行与边界以 [`AI_CONTEXT.md`](../state/AI_CONTEXT.md) 为准，RAG 运行口径以 [`rag-current-state.md`](../state/rag-current-state.md) 为准，评测数字和可比性以 [`eval-baselines.md`](../state/eval-baselines.md) 为准，Phase 4 原始目标与决策门以 [`phase4-roadmap.md`](../phase4-roadmap.md) 为准。
 >
-> **一句话结论**：DataPilot 已经完成了企业 RAG/Agent 最难补的“控制与证据地基”——可信 Tool、ACL、Evidence/citation、四轴状态、Trace、Eval 和受控 thread；但智能自治层仍然偏薄。目前不能把项目介绍成完整的 Agentic RAG、通用 Agent Loop 或自然多轮对话系统，M40 之后应先补真实回答质量与失败证据，再有界实现 RAG 再取证循环和任务级多轮。
+> **一句话结论**：DataPilot 已经完成 Phase 4 的主要工程闭环，并形成了可信 Tool、ACL、typed Evidence / citation、四轴状态、Trace、Eval、Hybrid 与受控 thread 等较强地基；但 roadmap 中的 P4 只完成了最小的 bounded recovery 切片，通用 Context Builder、first-class Action / Budget / Progress 控制仍有技术债；P6 则按既定决策门合法得到 `no_go`，因此“没有 RAG Subgraph”不是 Phase 4 未完成。M40 之后应并行推进 **RAG 质量与动作证据**、**顶层 Agent Loop 地基补齐**，再基于证据决定是否实现 bounded Agentic RAG，并逐步升级到任务级自然多轮。
 
-阅读这份清单时，需要把四件容易混淆的事分开：
+阅读本文时，必须先区分四个容易混淆的概念：
 
-- **用了 LangGraph，不等于有 Agent Loop**：当前顶层图是固定、无环的编排图；它能安全调度 Tool，但不会在同一次运行中根据 Observation 自主决定再次行动。
-- **保存了 thread，不等于有通用记忆**：当前 checkpoint 是一张短期、一次性任务卡，不是聊天历史、用户画像或跨会话记忆库。
-- **能够追问一次，不等于自然多轮对话**：当前追问必须显式开启，并从服务端签发的 action/field 闭集中选择。
-- **有 RAG Tool，不等于 Agentic RAG**：当前 RAG 是单次检索、Gate、回答和 citation 流程；检索失败后没有由 Observation 驱动的改写、扩展或子问题再取证。
+- **当前已经存在最小的 bounded Agent recovery loop，但还没有 autonomous in-run Agent Loop**：澄清后 resume 与一次 follow-up 已形成跨 turn 的受控恢复闭环；但同一次 Graph invoke 内还不会读取 Tool Observation 后自主选择下一动作并再次调用 Tool。
+- **保存了 thread，不等于有通用记忆**：当前 checkpoint 是短期任务恢复状态，不是聊天历史、用户画像或跨会话记忆库。
+- **能够澄清和追问，不等于自然多轮对话**：当前多轮能力仍是模板化、closed-world、次数受限的任务恢复/追问，不具备通用自由文本 Task Delta 理解。
+- **有 RAG Tool，不等于 Agentic RAG**：当前 RAG 默认仍是确定性 Pipeline；P6 已完成 go/no-go 审查，但尚无由 Observation 驱动的 query rewrite、上下文扩展、子问题检索等多步再取证 Subgraph。
 
-## 1. 概念体现程度
+---
 
-### 1.1 还未正式开发 phase 4 时 roadmap 的预想
+## 1. Phase 4 应怎样判断“完成”
 
-| 概念                  | 体现程度       | 当前方案中的体现                                             |
-| --------------------- | -------------- | ------------------------------------------------------------ |
-| Harness Engineering   | 核心主线       | LangGraph 统一管理状态、Tool 调度、预算、失败恢复、停止条件、Trace 和 Eval。 |
-| Agent Loop / 循环设计 | 核心主线       | `Action → Observation → Evidence Gate → Next Action`，循环有预算、reason code 和明确终止条件。 |
-| Tool Use / 工具调用   | 核心主线       | Text2SQL 和 Knowledge/RAG 作为两个独立 Tool，成功返回 typed Evidence，失败返回结构化错误。 |
-| 工具调用失败处理      | 核心主线       | 区分可恢复、不可恢复、权限拒绝和外部服务不可用；对应有限重试、澄清、partial 或停止。 |
-| Agent 编排            | 核心主线       | LangGraph 负责 SQL、RAG、Hybrid 路由、分支汇合、Evidence 检查和最终状态。 |
-| Agentic RAG           | 中等，条件增强 | RAG 首先使用确定性 Pipeline；中后期若 Eval 证明需要，再加入有界 LangGraph RAG Subgraph。 |
-| ReAct                 | 受控体现       | 采用“动作—观察—再决策”的思想，但不做开放式、无限自主研究。   |
-| Memory                | 有限体现       | 主要建设同一 thread 内的任务状态和短期记忆，不建设通用记忆平台。 |
-| 短期记忆机制          | 主线能力       | 保存已确认条件、指代关系、任务状态、安全摘要和有效 Evidence reference。 |
-| 长期记忆机制          | Phase 4 后考虑 | 不在主线建设跨会话用户画像、偏好和长期历史召回。             |
-| 长期对话记忆召回      | 暂不建设       | 需要额外处理过期、纠错、删除、权限变化和隐私问题，阶段四结束后再决定。 |
-| 多轮对话              | 有限支持       | 支持澄清后恢复任务，以及基于上一轮结果的有限追问；不是通用聊天机器人。 |
-| 上下文管理            | 核心主线       | State 保存运行事实，Context Builder 只向当前节点提供最小必要上下文。 |
-| Context Compact       | 基础版         | 首版主要裁剪无关历史、保留条件和 Evidence reference；复杂自动摘要和多层压缩后置。 |
-| 长上下文治理          | 部分体现       | 区分候选 Evidence、选中 Evidence、进入模型的 Evidence 和最终引用 Evidence；高级压缩后置。 |
-| 测评效果              | 核心主线       | 使用固定 corpus、Scenario、typed assertion 和同题一次执行，分别评 route、retrieval、citation、answer、Hybrid、安全和循环。 |
+### 1.1 Roadmap 原始能力分层
 
-总体上可以概括为：
+Phase 4 roadmap 并没有要求所有设想都必须在阶段内实现。应把能力分为三类：
 
-- **重点做深**：Harness、LangGraph 编排、有界循环、Tool Use、失败恢复、Evidence、上下文管理和 Eval。
-- **有限实现**：多轮对话、短期记忆、ReAct 和 Agentic RAG。
-- **后续补强**：长期记忆、跨会话召回、复杂 context compact、开放式 ReAct 和多 Agent。
+| 类型 | 定义 | 典型能力 | 当前判断 |
+|---|---|---|---|
+| **Roadmap 主线必做 / roadmap debt** | Phase 4 主干明确要求交付，若只做了最小切片或缺少通用组件，应作为技术债继续收口 | P4 bounded recovery、短期状态、Context Builder、全局预算/停止、P5 Hybrid、P7 assurance | 大部分已完成；P4 的通用 Context Builder 与 first-class Action/Budget/Progress 仍不完整 |
+| **条件能力 / conditional capability** | 必须完成决策门，但只有出现合格 Evidence 才要求实现 | P6 bounded RAG Subgraph | 决策门已完成且结论为 `no_go`；因此不实现 Subgraph 是合法 Phase 4 结果 |
+| **Phase 4 后能力 / post-Phase-4 enhancement** | roadmap 明确不要求当前阶段完成 | 跨会话长期记忆、开放 ReAct、多 Agent、复杂 context compact、生产 SSO/OAuth/JWT | 当前未实现，不应作为 Phase 4 debt |
+
+因此，“Phase 4 已完成”应理解为：**既定主线、P6 决策门和 P7 technical assurance 已经收口，但不是 roadmap 中所有远期能力都已经产品化。**
 
 ### 1.2 M40 结束时的概念体现程度
 
-重点关注“目前实际体现程度未达到 roadmap 预想的体现程度”的概念。
-
 | 概念 | 体现程度 | 当前实现 | 明确边界 |
 |---|---|---|---|
-| Harness engineering | 很强 | 顶层 LangGraph Harness 统一路由、Tool 预算、状态、终止、Trace 和 API 投影。SQL/RAG 单路各至多一个深 Tool；Hybrid 固定 SQL/RAG 两支各一次。 | 当前强项是控制面与失败关闭，不是自治规划。 |
-| Agent loop | 尚未真正形成；控制地基已具备 | 当前 Graph 是无环固定拓扑；澄清 resume 和 follow-up 是用户发起的新 turn，Hybrid 双分支是顺序编排，都不是同次运行内的循环。现有 reason code、预算、Observation、状态迁移和停止语义可供后续 Loop 复用。 | 还没有“观察结果后选择下一动作并再次调用 Tool”的运行时闭环。 |
-| Tool use / 工具调用 | 很强 | Knowledge Tool 返回 typed Evidence，SQL 也经深 Tool 执行；答案、引用和 Trace 都消费同次运行事实。 | 不允许任意 Python/Shell、写库或副作用 Tool。 |
-| Agentic RAG | 当前不实现 | M39 已完成 P6 入场审计，严格结论为 `no_go`。 | 没有 query rewrite、多步再检索、子问题拆分或 RAG Subgraph。 |
-| 循环设计 | 设计合同较强，实现尚未进入循环 | 已定义允许动作、预算、终止、无新增 Evidence 停止和禁止顶层/RAG 双循环等原则。 | 这些目前主要是后续循环的安全合同，不能当成已运行的循环能力。 |
-| 短期记忆 | 窄范围已实现 | 进程内 versioned checkpoint 支持 pending clarification、一次 resume / clear 和一次 follow-up；有 owner、TTL、版本和并发旧状态拒绝。 | 本质是最小任务状态，不保存消息历史、旧 answer、rows、正文或 citation；重启或多 worker 不恢复。 |
-| 长期记忆 / 长期对话召回 | 未实现 | 当前没有跨会话用户画像、偏好库或历史对话检索。 | 不能把完整聊天记录长期保存后称为“记忆”。 |
-| 多轮对话 | 窄范围已实现 | 支持一次结构化澄清恢复，以及成功 SQL/RAG 后的一次显式、closed-world 追问；每个 accepted turn 都重新经过 Graph 和权限检查。 | 不是自由文本连续对话；不支持继续追问、Hybrid follow-up、跨 route 任务推进或跨会话连续对话。 |
-| 上下文管理 | Evidence 上下文强；对话上下文初步 | Evidence 有候选、授权、generation-visible、citation 四阶段；thread 侧只有两类 clarification 模板和三类 follow-up 模板，按最小字段重建当前问题。 | 尚无通用的按节点 Context Builder、长历史裁剪、摘要保真或 token 预算治理。 |
-| Context compact | 未实现 | 暂无自动摘要、滚动压缩或上下文裁剪组件。 | 不应把“截断历史”误称为上下文治理。 |
-| 长上下文治理 | 初步具备 | 外部语料按约 2400 字符单元切分，有 revision/content identity/anchor，且有 selected budget 与 Evidence Gate。 | 无 parent/child、rerank、相邻段落扩展或自动长历史 compact；多文档 packing 仍是弱点。 |
-| Agent 编排 | 很强，但属于固定工作流 | 单路固定为 `route → tool → controller`；Hybrid 为 `route → SQL branch → RAG branch → controller`，唯一 controller 负责最终回答。 | Router 只覆盖 closed-world SQL/RAG 与两类 canonical Hybrid；没有动态计划或基于 Observation 的下一步选择。 |
-| ReAct | 主动不采用 | 保留结构化 Action、Observation、Gate、reason code 和状态迁移，方便审计。 | 没有自由 Thought → Action → Observation 循环，也不保存模型原始思维链。 |
-| 工具失败处理 | 确定性失败处理很强；自适应恢复较弱 | 用四轴状态和保守终止表达 `blocked`、`external_unavailable`、`no_answer`、`partial` 等结果；权限/生命周期拒绝在 Tool 前停止。 | 当前通常是安全停止或用户重新发起，没有基于失败类型自动选择 fallback/retry/retrieval recovery。 |
+| Harness engineering | 很强 | 顶层 LangGraph Harness 已统一 SQL / RAG / Hybrid 路由、状态、终止、Trace 和 API 投影。SQL/RAG 单路各至多一个深 Tool；Hybrid 固定两支各一次。 | 当前强项是控制面、typed contract 和失败关闭，不是开放自治规划。 |
+| Agent loop | **最小 bounded recovery 已形成；autonomous in-run loop 未实现** | 条件澄清可以跨 turn resume；成功 SQL/RAG 后支持一次受控 follow-up；每个 accepted turn 都重新经过 Graph、权限与生命周期检查。 | 尚无“读取本次 Tool Observation → 动态选择允许动作 → 同次运行再次调用 Tool → 按 Evidence progress 停止”的循环边。 |
+| Tool use | 很强 | SQL 与 Knowledge/RAG 均作为受控 deep Tool；成功返回 typed Evidence，失败返回结构化状态；最终答案、citation 与 Trace 消费同次运行事实。 | 不提供任意 Python/Shell、写库或其他副作用 Tool。 |
+| Agentic RAG | 条件能力，当前未实现 | M39 已完成 P6 入场审查，历史结论为 `no_go`。 | 没有多步 query rewrite、子问题检索、Observation-driven expansion 或 RAG Subgraph。 |
+| 循环设计 | 合同较强，运行能力仍窄 | 已有 reason code、允许状态、无进展停止、Evidence 生命周期与禁止双循环等原则。 | 当前调用上限主要由固定拓扑和 follow-up 次数结构性限制，并不存在供动态 Agent 持续消费的统一 Budget Ledger。 |
+| 短期任务状态 | 窄范围已实现 | 进程内 versioned checkpoint 支持 pending clarification、resume/clear、一次 follow-up，并处理 owner、TTL、版本与旧状态冲突。 | 不保存完整消息历史、旧 answer、SQL rows、文档正文或 citation；重启与多 worker 不共享。 |
+| 多轮对话 | 窄范围已实现 | 支持结构化澄清恢复与一次 closed-world follow-up。 | 不支持自由连续追问、Hybrid follow-up、自然语言 Task Delta、跨 route 持续推进或跨会话连续任务。 |
+| 上下文管理 | Evidence 上下文较强；对话上下文仍是初级 | 已区分候选 Evidence、授权/选择、generation-visible Evidence 与 citation；thread 侧按最小字段重建问题。 | 仍缺 roadmap 意义上的通用 node-level Context Builder、可 Eval 的节点输入投影与 token budget 治理。 |
+| Context compact | 未实现 | 尚无自动摘要、滚动压缩或长历史 compact。 | 这属于长会话 Scenario 驱动的后续能力，不应为了名词提前建设。 |
+| Agent 编排 | 很强，但目前是固定工作流 | 典型单路为 `route → tool → controller`，Hybrid 为双 Evidence 分支后汇合。 | Router 仍偏 closed-world；没有基于 Observation 的开放式动态计划。 |
+| ReAct | 主动不采用开放式版本 | 保留结构化 Action / Observation / Evidence Gate / reason code，方便审计与 Eval。 | 不保存模型原始思维链，也不做无限 Thought → Action → Observation 研究循环。 |
+| 工具失败处理 | 确定性失败关闭很强；自动恢复较弱 | `blocked`、`external_unavailable`、`no_answer`、`partial` 等状态有明确投影；权限与生命周期拒绝可在 Tool 前停止。 | 大多数失败目前是安全停止或等待下一 turn，不会自动根据失败类型执行 fallback / retry / retrieval recovery。 |
+
+### 1.3 当前最重要的 Phase 4 roadmap debt
+
+P6 `no_go` 不应算作技术债；真正需要继续收口的是 P4 的几个“已有局部实现、但尚未形成通用能力”的部分：
+
+1. **通用 Context Builder**：当前只有围绕 clarification / follow-up 的最小模板或字段重建，还不是“按 Router、SQL、RAG、Controller、Composer 等节点投影最小必要上下文”的统一组件；也缺少对实际入模内容的系统级 Eval。
+2. **first-class Action / Budget / Progress contract**：当前 Tool 调用次数主要由固定 DAG 拓扑天然限制，follow-up 有局部预算，但尚无可供动态 Loop 读取和消费的统一全局预算账本、progress 记录和 action ledger。
+3. **顶层恢复动作仍只有最小切片**：roadmap 允许“澄清后恢复”作为 P4 首个 G5 切片，因此当前已经满足最小 bounded recovery；但 Evidence 失效后重取证、跨 Tool 补证据、结构化失败后的自动保守恢复等尚未普遍进入可执行状态机。
+4. **Task State 仍偏 thread recovery，而不是通用任务状态**：当前状态足以完成受控 resume / follow-up，但还不能稳定表达任务目标、已确认约束、未决问题、route、EvidenceRef、Evidence freshness、预算和终止事实。
+
+---
 
 ## 2. 目前的 RAG 效果：应怎样理解
 
-### 已经可以肯定的工程能力
+### 2.1 已经可以肯定的工程能力
 
-- 知识发布、revision、ACL、Evidence、citation、AnswerFlow、Harness、Trace 和 Eval 都已经形成链路。
-- 外部 EnterpriseRAG-Bench 共有 36,417 篇文档、139,214 个 retrieval units；business release 与 external benchmark 互相隔离。
-- 当前 external 默认是 lexical，而不是 semantic：后者在相同 dev / held-out split 上都没有胜出，因此没有为了“语义检索”标签而切换默认。
-- M40 的 SQL、RAG、Hybrid、澄清恢复和安全拒绝五路径 rehearsal，已验证 response / Trace、Evidence/citation、预算和 lifecycle 的同源关系。
+- 知识发布、revision、ACL、typed Evidence、citation、AnswerFlow、Harness、Trace 与 Eval 已形成完整工程链路。
+- external EnterpriseRAG-Bench 与 business release 保持隔离，不能把外部 benchmark 指标直接当成业务 Runtime 的实际效果。
+- external 当前默认 lexical，而不是 semantic candidate；semantic candidate 在同一 dev / held-out 切分上没有证明净收益，因此没有为了“语义检索”标签切默认。
+- M40 rehearsal 已覆盖 SQL、RAG、Hybrid、澄清恢复和安全拒绝等核心路径，主要证明 response / Trace / Evidence / citation / lifecycle 的合同一致性，而不是证明开放世界问答已经达到生产质量。
 
-### 质量证据与限制
+### 2.2 当前外部 benchmark 基线
 
-下列数字只是当前外部 benchmark 的可比较基线，不与 22 条业务知识回归或 Text2SQL Eval 混算：
+下列数字只用于 external benchmark 内部比较，不与业务 22 条知识回归或 Text2SQL Eval 混算：
 
 | 层次 | 当前结果 | 不能推出什么 |
 |---|---|---|
-| lexical retrieval（held-out，@20） | gold coverage `82.31%`；all-gold `77.50%`；MRR `0.723` | 召回到 gold 文档，不等于最终答案正确。 |
-| semantic candidate（held-out，@20） | gold coverage `77.40%`；all-gold `74.17%`；MRR `0.630` | 不能因“semantic”名称而默认替换 lexical。 |
-| Answer / Citation（180 题） | `146/180` complete；all-gold cited `80/180`（44.44%） | `complete` 只表示回答、support 与 citation 合同闭合，不等于自然语言答案正确。 |
+| lexical retrieval（held-out，@20） | gold coverage `82.31%`；all-gold `77.50%`；MRR `0.723` | 召回到 gold，不等于答案正确。 |
+| semantic candidate（held-out，@20） | gold coverage `77.40%`；all-gold `74.17%`；MRR `0.630` | 不能因为使用 embedding 就默认优于 lexical。 |
+| Answer / Citation（180 题） | `146/180` complete；all-gold cited `80/180`（44.44%） | `complete` 只表示回答、support、citation 合同闭合，不等于自然语言答案正确。 |
 | 难题切片 | multi-document all-gold `2/38`（5.26%）；semantic all-gold `15/52`（28.85%） | 当前不宜宣传为强多文档或强语义 RAG。 |
 
-**当前主要失败簇**：lexical 漏召回、selected budget / multi-document context packing 不足、Composer 严格 support 合同拒绝。M39 审计没有证明“第一次 Observation 后再选一个动作”能稳定新增 Evidence，也没有可比较的额外预算，因此当时不建设 RAG Subgraph 是有证据的取舍，不是遗漏开发。
+当前主要失败簇仍包括 lexical 漏召回、selected/context packing 不足、Composer 严格 support 合同拒绝等。M39 没有证明“第一次 Observation 后自动追加一个动作”可以稳定新增有效 Evidence，也缺少公平的额外预算对照，因此当时不建设 RAG Subgraph 是符合 roadmap 的决策，不是遗漏开发。
 
-但 `no_go` 的含义也不能扩大：M39 只证明**已有的冻结产物不足以支持直接实现 Subgraph**，没有证明 Agentic RAG 对 DataPilot 永远无价值。现有 artifact 记录的是单次 Pipeline 结果，本来就没有执行过“相邻上下文扩展、受控改写、子问题检索”等候选动作，因此无法从中证明动作收益。若 M40 后希望补 Agentic RAG，应先用 diagnostic/dev 做新的、动作级单变量实验，形成 Observation、动作、Evidence 增量和预算证据，再重新打开 P6，而不是修改或回避 M39 的历史结论。
+但 `no_go` 不能被扩大解释为“Agentic RAG 永远无价值”。现有历史 artifact 主要记录单次 Pipeline 结果，本来就没有系统执行过相邻上下文扩展、受控 query rewrite、独立证据需求拆分等候选动作，因此下一阶段如果要重开 P6，必须先产生新的动作级 diagnostic Evidence。
 
-## 3. 当前未实现、但可继续推进的能力
+### 2.3 多文档问题要改为 funnel 诊断，而不是直接归因给 packing
 
-这些能力不是“以后不做”，也不是自动待办。当前状态只表示：还没有足以安全切入默认路径的实现和证据。后续可以针对明确目标立模块、补合同和 Eval；表中的条件用于避免在没有可验证收益时扩大复杂度。
+`multi-document all-gold cited = 5.26%` 是最终漏斗结果，可能同时受到 retrieval、selection/packing、generation-visible context、Composer 与 citation 的影响。不能仅凭这个数字断言“主要问题就是 packing”。
 
-| 能力 | 当前缺口或风险 | 建议推进条件 |
+后续应增加最少一条 multi-document funnel：
+
+```text
+retrieved all-gold
+  → selected all-gold
+  → generation-visible all-gold
+  → supported all-gold
+  → cited all-gold
+```
+
+只有这样才能回答：问题究竟死在召回、装配、生成 support，还是 citation；也才能判断应继续增强确定性 Pipeline，还是确实需要 Observation-driven recovery action。
+
+---
+
+## 3. 当前未实现能力：按性质分类，而不是放在一张“待办表”里
+
+### 3.1 Roadmap debt：建议优先收口
+
+| 能力 | 当前缺口 | 建议推进方式 |
 |---|---|---|
-| 多步 Agentic RAG / RAG Subgraph | 当前没有证明某个 Observation 驱动动作可以新增 Evidence；因此 M39 对“仅凭已有产物直接接入 Subgraph”给出 `no_go`。 | 在 diagnostic/dev 上补动作级实验，证明至少一种恢复动作能根据 Observation 被正确触发并新增有效 Evidence；再冻结 held-out decision set 和可比较预算，重新立项。 |
-| 顶层任务级 Agent Loop | 当前 Harness 每次 invoke 都是无环图；resume/follow-up 依赖用户发起下一次请求，没有同次运行内的动态下一动作。 | 先明确值得自动恢复的失败类型，再把动作闭集、全局/子预算、进展判断、停止和失败投影做成可执行状态迁移。 |
-| 更自然的任务内多轮 | 当前只有结构化澄清和一次签发式追问，无法在多轮中持续维护目标、条件、证据有效性和未决问题。 | 建立真实多轮 Scenario；用 typed TaskState 保存已确认条件、EvidenceRef 和未决项，并让每轮重新路由、授权和判断是否需要取证。 |
-| query rewrite、子问题拆分 | 没有已证实“问题表达”而非 corpus/ACL/gold/外部不可用导致的稳定失败簇。 | 有可复现失败簇，并能为某一个动作写出清楚的收益假设。 |
-| parent/child、相邻上下文扩展、rerank、hybrid retrieval | 都可能改善结果，但同时上会无法归因。 | 每项按单变量 A/B、相同 corpus/合同/runtime、held-out 证据独立裁决。 |
-| 自动 context compact / 长历史摘要 | 当前多轮范围很窄，尚未有真实长会话的压缩质量、漂移和隐私证据。 | 长会话成为正式 Scenario 后，先压缩“已确认条件 + EvidenceRef + 未决问题”，而不是任意总结全文。 |
-| 长期记忆与对话召回 | 需要解决 tenant、ACL、过期、用户删除、纠错、审计和错误记忆。 | 有明确跨会话任务需求后，先设计可删除、最小化的用户确认事实，而非长期保存完整对话。 |
-| 持久化 checkpoint | 内存 checkpoint 已满足当前受控 resume / follow-up。 | 重启恢复或多 worker 会话成为 required Scenario 时。 |
-| 开放 Router / 远程 Synthesizer | 当前 closed-world 路由和本地确定性 Hybrid 是已验证基线；远程能力还涉及额外数据出站。 | 真实开放问法形成稳定失败簇，并完成 outbound、held-out、预算及用户授权。 |
-| 生产认证与真实 connector | 目前 caller resolver 是 demo/test seam，外部 benchmark 也不能证明企业真实 ACL、同步、删除与性能。 | 进入非本地部署、真实用户/tenant 或真实企业数据接入时。 |
-| LangFuse Cloud | 默认关闭，避免 question/answer 随观测链路外发。 | 定义 allowlist、脱敏、接收方、用途和失败降级后，并得到明确授权。 |
+| 通用 Context Builder | 目前只有受控 clarification / follow-up 最小重建，没有统一 node projection 与可直接 Eval 的入模合同 | 为 Router / SQL / RAG / Controller / Composer 定义 typed context projection；保留 Evidence identity 与高风险原始 reference |
+| First-class Action / Budget / Progress | 当前调用上限主要来自固定拓扑；没有统一 global budget ledger / action ledger / progress record | 建立 typed action、budget consumption、Evidence delta、no-progress、termination contract，供未来顶层 Loop 与 RAG Subgraph 共用 |
+| 通用 TaskState | 当前 checkpoint 更接近 resume token / 短期恢复卡 | 把目标、已确认条件、未决问题、route、EvidenceRef、freshness、预算和 termination 事实提升为 typed state |
+| 更多顶层 bounded recovery | 已完成澄清后恢复这一最小 G5 切片，但缺少其他通用恢复 | 从 Evidence 失效重取证、跨 Tool 补 Evidence、结构化失败后的安全 fallback 中选择一个真实 Scenario 做第二个切片 |
 
-### 3.1 目前可以怎样介绍，哪些还不能宣传
+### 3.2 Conditional capability：有证据才实现
 
-| 面试亮点 | 当前可以如实说明 | 还缺什么才能升级说法 |
+| 能力 | 当前状态 | 重新进入条件 |
 |---|---|---|
-| 企业级 Agent Harness | 已用 LangGraph 统一 SQL/RAG/Hybrid Tool、四轴状态、预算、Trace 和安全停止。 | 若要说“动态 Agent”，还需 Observation 驱动的下一动作与真实循环边。 |
-| Agentic RAG | 可以说已经完成入场审计、失败分层和 Subgraph 安全接口设计。 | 必须实际实现有界 RAG Subgraph，并用同 corpus 的 Pipeline/Subgraph A/B 证明 Evidence 或答案收益。 |
-| Agent Loop | 可以说已有 typed Action/Observation、reason code、预算和停止合同。 | 必须有至少一条运行路径能观察 Tool 结果、选择允许动作、再次执行并按进展停止。 |
-| 多轮对话 | 可以说支持安全的一次澄清恢复和一次 closed-world follow-up。 | 需要连续任务轮次、自然 delta 理解、状态压缩/保真、Evidence 失效与跨轮 Eval。 |
-| Memory / context engineering | 可以说有 owner/version/TTL checkpoint、EvidenceRef 和最小任务模板。 | 短期任务记忆要能跨多个 turn 稳定工作；context compact 和长期记忆目前都不能宣传为已完成。 |
+| 多步 Agentic RAG / RAG Subgraph | M39 决策为 `no_go`，当前未实现 | diagnostic/dev 上证明至少一种 Observation-driven recovery action 能正确触发并新增有效 Evidence；再冻结可比较 held-out 与预算 |
+| query rewrite / 子问题拆分 | 尚无稳定失败簇证明其必要性 | 证明问题表达或证据需求分解是独立主因，并有动作级收益假设 |
+| parent/child、相邻上下文扩展、rerank、hybrid retrieval | 均可作为确定性 Pipeline 或动作候选实验 | 每项单变量 A/B；不能一起上线后再解释收益 |
+| 开放 Router / remote Synthesizer | 当前 closed-world baseline 更容易验证 | 开放问法形成稳定失败簇，并完成 outbound、held-out、预算和授权合同 |
 
-## 4. 最值得优先补的能力
+### 3.3 Phase 4 后能力：不要误当当前债务
 
-### 第一优先级：先让质量问题“量得准、改得动”
+- 自动长历史 context compact / 多层摘要；
+- 跨会话长期记忆、用户画像和历史召回；
+- 持久分布式 checkpoint（除非重启恢复 / 多 worker 已成为 required Scenario）；
+- 开放 ReAct、研究型 Agent、多 Agent；
+- 生产 SSO/OAuth/JWT、真实企业 connector；
+- LangFuse Cloud 默认外发；
+- 任意 Python/Shell 或写操作类副作用 Tool。
 
-1. **答案正确性评测**：增加人工复核或明确的 gold answer/support 规则。现有 retrieval、`complete` 和 citation 指标分别有价值，但都不能单独代表回答正确。
-2. **多文档 Context Packing**：为 selected Evidence 做确定性排序、去重、文档覆盖和预算装配。这直接针对 multi-document all-gold 只有 5.26% 的真实短板，也能为后续判断“需要改 packing 还是需要循环”提供基线。
-3. **单变量检索增强实验**：从相邻段落扩展、parent/child、rerank、lexical + semantic 融合中按失败簇一次只验证一个候选，固定 corpus、合同、split 和预算。
+这些能力必须由真实 Scenario 和安全/Eval 证据重新立项，不应为了简历关键词直接加入默认路径。
 
-### 第二优先级：重新建立 Agentic RAG 的入场证据
+---
 
-4. **动作级 diagnostic 实验**：对“命中但上下文不全”“查询表达不匹配”“问题确实包含多个独立证据需求”等失败分别验证候选动作，记录动作前后 Evidence 增量、重复率、延迟和成本。
-5. **有界 RAG Subgraph**：只有动作实验成立后，才实现 `retrieve → assess progress → choose allowed action/stop → retrieve`。它必须是真正读取 Observation 决定下一步的子图，不能只是把现有 Pipeline 拆成 LangGraph 节点。
-6. **Pipeline/Subgraph held-out A/B**：相同 Knowledge Tool interface、ACL、Evidence/citation 和预算口径下比较；有稳定净收益才切默认，否则 Subgraph 保持实验 adapter，Pipeline 继续作为 fallback。
+## 4. M40 之后的优先级：两条主线并行，而不是串行等待
 
-### 第三优先级：把“单次追问”升级为任务级多轮
+原先“先 RAG 质量 → 再 Agentic RAG → 最后 TaskState / 多轮”的顺序容易导致顶层 Agent 地基过晚建设。更合理的方式是从 M41 起并行推进两条主线。
 
-7. **Typed TaskState 与通用 Context Builder**：把目标、已确认条件、未决问题、EvidenceRef、预算和终止事实从固定字符串模板提升为可验证的任务状态；每个节点只看最小必要投影。
-8. **有界多轮 Agent Loop**：允许同一任务在若干 turn 中澄清、重新路由、重新取证或安全停止，并持续验证 Evidence 的权限、revision 和用途；仍不建设无限聊天或开放动作空间。
-9. **持久化与 compact 按 Scenario 引入**：先证明重启/多 worker 恢复或长历史确实成为 required 场景，再选择持久 checkpoint 和 typed compact；长期记忆继续独立评估，不与短期任务状态捆绑。
+### P0-A：RAG 质量、失败 funnel 与动作证据
 
-开放问法 Router Eval 可以和上述主线并行准备，但不宜先于 RAG 质量与任务状态成为大改造：否则路由范围变宽，只会让更多问题进入当前仍偏弱的回答链路。
+1. **建立 Answer correctness / faithfulness / support / completeness 的清晰基线**：不能继续用 `complete`、retrieval coverage 或 citation 任一指标替代自然语言回答质量。
+2. **建立 multi-document funnel**：分别记录 retrieved / selected / generation-visible / supported / cited all-gold，定位真实损失层。
+3. **改进 selected/context packing，但不预设它一定是全部根因**：做确定性排序、去重、文档覆盖、预算装配，并记录对 funnel 每层的影响。
+4. **单变量检索增强实验**：相邻段落、parent/child、rerank、lexical + semantic 等一次只验证一个候选。
+5. **动作级 diagnostic**：针对“命中但上下文不完整”“表达不匹配”“多个独立证据需求”等稳定失败簇，记录 Observation → candidate action → Evidence delta → latency/cost。
 
-## 5. 工具调用失败时的现有与未来策略
+### P0-B：顶层 Agent Loop 地基收口
 
-### 现有策略
+1. **Typed TaskState**：统一表达 goal、confirmed constraints、pending questions、route、EvidenceRef、freshness/authorization、budget、termination。
+2. **Typed TaskDelta**：把每个新 user turn 先解释为对当前任务的增量，而不是直接重写整张 TaskState。
+3. **通用 Context Builder**：每个节点只拿当前需要的最小上下文，实际入模内容可在 Eval 中直接检查。
+4. **Action / Budget / Progress Ledger**：明确 allowed action、消耗预算、Tool Observation、Evidence delta、no-progress 与停止原因。
+5. **补第二个顶层 bounded recovery Scenario**：在不进入 RAG 内部策略的前提下，验证 Evidence 失效重取证或跨 Tool 补证据等全局恢复。
 
-- 无可信 caller、权限拒绝、thread owner/version/TTL 不符：**Tool 前失败关闭**，不让调用进入业务链路。
-- 检索无证据、Evidence Gate 不允许回答、citation/support 不成立：返回 `no_answer` 或保守说明，不拼凑答案。
-- 外部 provider、运行时或依赖不可用：返回 `external_unavailable`，不将技术故障伪装成业务拒绝。
-- Hybrid 某支不足：仅在合同允许时保留单支 `partial`；涉及“数据表现 + 业务政策”的 claim 默认要求两支 Evidence。
-- 不自动无限重试：当前默认 retry 为 0，避免重复调用、成本失控和失败被掩盖。
+这两条线可以并行：A 线回答“RAG 什么情况下真的需要额外动作”，B 线回答“系统是否具备安全执行额外动作的通用控制面”。只有两者都成熟，才应该进入真正的 Agentic RAG / 更自然多轮。
 
-### 后续可能的增强
+---
 
-若外部调用变多、失败模式变得稳定，可再规划有限的指数退避、熔断、用户可见重试建议或异步恢复。但每一种恢复都要有明确预算、可观测失败分类和 Eval，不能把“自动重试”变成隐形 Agent loop。
+## 5. Agentic RAG：重新打开 P6 时应怎样实现
 
-## 6. 后续演进时必须保持的工程原则
+### 5.1 先固定职责 seam，避免 Subgraph 与 AnswerFlow 打架
 
-1. **不把 P6 `no_go` 当成 RAG 停止优化。** 它只否定“在当前证据下直接加入多步 Subgraph”；检索、packing、rerank、相邻上下文扩展、回答质量和会话能力仍可以分别推进。
-2. **一次只验证一个改变。** 例如先只改 packing，或只加 rerank；固定 corpus、question split、runtime、Evidence/citation 合同和预算，才能知道是否真的有效。
-3. **先把质量指标补全，再讨论默认切换。** retrieval coverage、`complete`、citation 合同、人工答案正确性分别记录；不能让任一数字代替其他数字。
-4. **循环必须有可证明的进展。** 新增 Agent loop / ReAct-like action 前，应定义 Observation、允许动作、期待新增的 Evidence、最多调用次数、停止条件和失败投影。
-5. **记忆必须先有数据生命周期。** 长期记忆至少需要 tenant/ACL、TTL、用户删除、修正、审计和过期事实处理；没有这些不应长期保存完整聊天。
-6. **上下文治理优先保留可追溯事实。** 无论是 packing、compact 还是长记忆，都应优先保存已确认条件、EvidenceRef、revision 和未决问题；不要只保留不可验证的自然语言摘要。
-7. **工具恢复不能绕过安全与预算。** 重试、fallback、重新检索和新增 Tool 都要经过 caller、ACL、outbound、预算和 Trace/Eval 合同；不能因为“恢复失败”而放宽权限或静默扩大外发。
+RAG Subgraph 的职责应严格限制为**文档 Evidence acquisition**，而不是重新实现 AnswerFlow。建议先抽象统一接口，例如：
 
-## 7. M40 以后的大致路线
+```text
+EvidenceAcquisitionStrategy.acquire(request) -> RetrievalOutcome
+```
 
-下面是基于当前代码和证据给出的**能力顺序建议**，不是已经确认的阶段 roadmap，也不提前冻结具体模块数量、参数或实现文件。后续仍应按项目约定：每次只为当前最小可验收切片写 module plan，完成验证和 state 更新后，再决定下一切片。
+至少提供：
 
-总体路线建议为：
+```text
+DeterministicPipelineAcquirer
+BoundedRAGSubgraphAcquirer
+```
 
-> **先补真实质量与动作证据 → 再做有界 Agentic RAG → 再升级任务级多轮 Agent Loop → 最后按真实部署需要补持久化和长期能力。**
+两种实现共用 corpus、ACL、outbound、Evidence schema、Trace 与上层 AnswerFlow。上层 Gate / Composer / Citation Validator 不因为 Subgraph 存在而复制一套。
 
-### 路线 A：RAG 质量与 Eval 地基（建议下一主线）
-
-**目标**：先回答“现有 RAG 为什么答不好”，并建立后续 Pipeline/Subgraph 都必须共用的正确性基线。
-
-主要包括：
-
-- 建立 answer correctness / support 的人工复核或可验证 gold，避免继续用 `complete` 代替正确率；
-- 先修多文档 selected/context packing，并按失败簇做单变量检索候选实验；
-- 把失败稳定分为 corpus/gold、召回、排序/packing、Composer、provider、ACL 和 query 表达等类型；
-- 保留 diagnostic/dev 用于开发，重新冻结未污染 held-out 用于默认切换。
-
-**完成标志**：能明确指出哪些问题只需确定性 Pipeline 增强，哪些问题必须在看到首次 Observation 后才能选择下一动作；至少形成一个可验证的 Agentic recovery 假设。
-
-### 路线 B：有界 LangGraph RAG Subgraph（核心面试亮点）
-
-**目标**：重新打开 P6，但这次先补 M39 缺少的动作证据，再实现一个真正有循环语义的 RAG 子图。
-
-最小可信形态是：
+### 5.2 最小可信 Subgraph
 
 ```text
 Retrieve
   → Observation / Evidence Progress
-  → Answerable：返回 Evidence
-  → Recoverable：选择一个允许动作并再次取证
+  → Answerable：返回 RetrievalOutcome
+  → Recoverable：从 allowed actions 中选择一个动作
+  → Re-acquire Evidence
   → No progress / Budget exhausted / Unsafe：停止
 ```
 
-这里“Agentic”的关键不是使用 LangGraph，而是子图能够根据当前 Observation 在“停止”和“采用某个已获准的恢复动作”之间做选择，并验证新一轮是否真的增加了有效 Evidence。恢复动作由路线 A 的失败证据决定，可以是受控上下文扩展、query rewrite 或独立证据需求拆分，但不在本状态报告中提前指定默认方案。
+“Agentic”的判定标准不是“用了 LangGraph”，而是：**系统读取第一次 Observation 后，能够在停止与至少一个受控 recovery action 之间作出选择，并通过下一次 Observation 验证是否获得新的有效 Evidence。**
 
-必须继续守住：
+### 5.3 必须保持的边界
 
-- 顶层 Harness 管全局 route、SQL/Hybrid、总预算和最终产品状态；RAG Subgraph 只管文档取证；
-- Pipeline 与 Subgraph 使用同一个 Knowledge Tool interface，复用 ACL、outbound、Evidence/citation 和 Trace 合同；
-- 子图不生成最终答案、不调用 SQL、不放宽权限，也不与顶层对同一失败形成双循环；
-- 用相同 corpus、held-out、预算和回答合同做 A/B。实现成功不等于默认切换，只有稳定净收益才能切换；确定性 Pipeline 始终保留为 fallback。
+- 顶层 Harness 负责全局 route、SQL/Hybrid、总预算和最终产品状态；RAG Subgraph 只负责文档取证。
+- 顶层 Loop 与 RAG Subgraph 使用父子预算；禁止对同一个失败同时在两层重复循环。
+- Subgraph 不生成最终答案、不调用 SQL、不放宽 ACL、不绕过 outbound。
+- Pipeline 必须长期保留为 baseline / fallback；实现 Subgraph 不代表默认切换。
+- 同 corpus、同问题集、同 AnswerFlow、同 Evidence/citation 合同、可比较预算下做 A/B。
 
-**完成标志**：代码中存在真实的 Observation 驱动循环边；Eval 能证明动作选择、Evidence 增量、无增量停止、预算、ACL 等价和 Pipeline/Subgraph 差异。到这一步，DataPilot 才能有底气把“有界 Agentic RAG”作为已实现的面试亮点。
+### 5.4 Agentic RAG 必须有两套验收
 
-### 路线 C：任务级 Agent Loop 与自然多轮
+**External quality acceptance**：在未污染 held-out 上证明 Evidence / answer / citation 的净收益，并报告额外 Tool calls、延迟和成本。
 
-**目标**：把当前“一次澄清/一次签发式追问”升级为同一任务内可持续推进、但仍有预算和终止条件的多轮 Agent。
+**DataPilot business/demo acceptance**：至少有一个实际 business/demo canonical Scenario 可以稳定展示：
 
-建议先做短期任务能力，而不是直接做长期用户记忆：
+```text
+retrieve
+→ observe insufficient Evidence
+→ choose allowed recovery action
+→ retrieve again
+→ Evidence increases
+→ answer / stop
+```
 
-- 用 typed TaskState 保存任务目标、已确认条件、未决问题、route、EvidenceRef、预算和终止事实；
-- 每个新 turn 先理解用户对当前任务的增量，再决定复用、失效、重新取证、换 Tool、澄清或停止；
-- 建立通用 Context Builder，让 Router、SQL、RAG、Subgraph 和 Composer 只看到各自需要的最小上下文；
-- 先覆盖连续澄清、相关追问、Evidence 变化和 Tool 失败后的安全恢复；Hybrid follow-up 只有建立自己的双 Evidence 合同后再开放；
-- 对多轮中的 owner、版本冲突、重复请求、过期、权限变化和无进展停止继续做 required Eval。
+只在 external benchmark 上有效、却无法进入 DataPilot 实际 Runtime 的 Subgraph，不足以成为项目核心面试亮点。
 
-**完成标志**：不再依赖两个 clarification 模板和三种 follow-up 模板才能继续任务；多轮状态、实际入模上下文和每次 Tool/Graph 调用都可观察、可回放、可终止。此时可以宣传“有界多轮 Agent Loop”，但仍不能宣传开放 ReAct 或长期记忆。
+---
 
-### 路线 D：上下文压缩、持久状态与长期记忆（条件补强）
+## 6. 多轮 Agent：TaskState 之外还需要 TaskDelta
 
-这条路线不应为了堆名词立即开工：
+当前“一次 clarification + 一次 signed follow-up”已经证明了跨 turn 安全恢复，但要升级到自然的任务级多轮，仅增加 TaskState 还不够。
 
-- 只有多轮 Eval 出现真实 token/历史增长问题，才实现 typed context compact，优先压缩已确认条件、未决项和 EvidenceRef，不总结替代高风险原始事实；
-- 只有重启恢复或多 worker 成为 required Scenario，才把进程内 checkpoint 换成持久 adapter，并处理 TTL、迁移、删除、并发和权限变化；
-- 只有出现明确跨会话任务，才设计长期记忆。首版只保存用户明确确认、可删除、可纠错、可过期的事实，不长期保存完整聊天；
-- 生产认证、真实 connector、LangFuse Cloud 和更开放 Router 仍按各自安全/出站门独立推进，不能因 Agentic RAG 已实现而自动放行。
+建议形成：
 
-### 建议的模块节奏（仅作排期参考）
+```text
+User Turn
+  → Turn Understanding / Typed TaskDelta
+  → Merge into TaskState
+  → Invalidate / reuse Evidence
+  → Route / Allowed Action
+  → Tool / Controller
+  → Updated TaskState
+```
 
-| 大致位置 | 能力切片 | 路线属性 |
+### 6.1 Typed TaskDelta 至少应区分
+
+- **continue**：继续当前任务，不改变主要约束；
+- **modify_constraint**：例如“把上个月改成本月”；
+- **ask_about_existing_result**：例如“为什么？”、“第二个呢？”；
+- **add_evidence_requirement**：例如“再结合公司政策看看”；
+- **switch_task**：开始新的目标，不继承旧任务语义；
+- **correct_previous_understanding**：例如“不对，我说的是退款率”；
+- **cancel / stop**：显式终止当前任务。
+
+TaskDelta 应是对 TaskState 的受控修改，不允许模型一次自由重写全部状态。
+
+### 6.2 多轮 Eval 必须覆盖的真实行为
+
+- 连续 clarification；
+- 指代与省略；
+- 条件修改；
+- 基于旧 Evidence 的解释；
+- Evidence revision / ACL 变化后的失效；
+- route 从 SQL → Hybrid 或 RAG → Hybrid 的任务推进；
+- Tool 失败后的安全恢复；
+- 重复请求、版本冲突、TTL 过期、无进展停止。
+
+完成后才能把项目升级表述为“**bounded task-oriented multi-turn Agent**”；仍不能宣传为开放聊天机器人或长期记忆系统。
+
+---
+
+## 7. Eval：不仅评答案，还要评“循环是否值得”
+
+### 7.1 Answer / RAG 质量指标
+
+建议至少分开记录：
+
+- retrieval coverage / all-gold；
+- selected / generation-visible coverage；
+- answer correctness；
+- faithfulness / support；
+- completeness；
+- citation coverage / citation correctness；
+- multi-document funnel。
+
+### 7.2 Agent Loop / Agentic RAG 指标
+
+新增 Loop 后至少记录：
+
+- recovery trigger precision：是否在真正可恢复时才触发动作；
+- recovery success rate：额外动作后是否从失败变成可回答；
+- Evidence gain per extra call；
+- duplicate / no-progress rate；
+- average / p95 Tool calls；
+- budget exhaustion rate；
+- latency delta；
+- provider / token cost delta；
+- unsafe recovery prevention：权限、outbound、revision 等是否仍然 fail closed。
+
+这样才能证明“Agentic”带来的不是简单多查一次，而是 Observation-driven 的额外动作在可控成本下产生稳定净收益。
+
+### 7.3 Deterministic Gate 与真实模型 E2E 分离
+
+M40 technical assurance 主要证明 deterministic contract 与运行身份一致性。新增 Agentic RAG / 多轮后，应继续保持 deterministic required Gate，同时增加少量真实 provider E2E showcase 验证真实交互质量。两者分别记录，不允许真实 provider 抖动覆盖 deterministic 安全失败，也不允许 deterministic case 冒充真实问答质量。
+
+---
+
+## 8. 工具调用失败：现有与未来策略
+
+### 8.1 现有策略
+
+- 无可信 caller、权限拒绝、thread owner/version/TTL 不符：**Tool 前失败关闭**。
+- 检索无证据、Evidence Gate 不允许回答、citation/support 不成立：返回 `no_answer` 或保守说明，不拼凑答案。
+- 外部 provider、运行时或依赖不可用：返回 `external_unavailable`，不伪装成业务拒绝。
+- Hybrid 某支不足：仅在合同允许时保留单支 `partial`；同时声称数据表现和业务政策时默认要求两类 Evidence。
+- 不自动无限 retry：当前优先保留失败事实和可观察性，不通过静默重复调用掩盖问题。
+
+### 8.2 后续增强原则
+
+未来允许有限 retry、fallback、重新检索或跨 Tool 补证据时，每个动作都必须拥有：
+
+```text
+trigger reason
+allowed action
+budget cost
+expected Evidence delta
+actual Observation
+progress / no-progress
+termination reason
+```
+
+恢复动作不能绕过 caller、ACL、outbound、revision 或 Trace/Eval 合同。
+
+---
+
+## 9. 后续演进必须保持的工程原则
+
+1. **不要把 P6 `no_go` 当成失败，也不要把它当成永久否决。** 历史结论只说明当时 Evidence 不足以证明多步 Subgraph 值得增加复杂度。
+2. **先补 P4 roadmap debt，再扩大自治边界。** 通用 Context Builder 与 first-class Action/Budget/Progress 是未来 Agent Loop 的地基，不应等到 Subgraph 完成后再补。
+3. **一次只验证一个主要改变。** packing、rerank、query rewrite、parent expansion、Subgraph 不应同时上线后再解释收益。
+4. **循环必须有可证明的进展。** 没有新增 Evidence、状态改善或用户新信息就应停止。
+5. **顶层 Loop 与 RAG 内部 Loop 必须职责分离。** 顶层表达“还缺什么 Evidence”，RAG Subgraph 才决定文档内部如何再取证。
+6. **State 不等于 Context。** State 保存事实；Context Builder 决定当前节点能看什么；完整 State 不应无差别灌入 prompt。
+7. **TaskDelta 不应自由覆盖 TaskState。** 新 turn 只允许以 typed delta 修改必要字段，并明确触发旧 Evidence 的复用或失效。
+8. **记忆必须先有数据生命周期。** 长期记忆至少需要 tenant/ACL、TTL、删除、纠错、审计与过期事实治理。
+9. **上下文治理优先保留可追溯事实。** 优先保存 confirmed constraints、EvidenceRef、revision、未决问题与高风险原始 reference，不用不可验证摘要替代关键事实。
+10. **安全与预算优先于恢复成功率。** 不能为了“Agent 能自动恢复”而放宽权限、扩大外发或无限增加调用。
+
+---
+
+## 10. M40 之后的大致路线
+
+下面是能力顺序建议，不是新的冻结 roadmap。仍应按项目现有方式：每次只为最小可验收切片写 module plan，完成验证与 state 更新后，再决定下一切片。
+
+### Track A：RAG quality & recovery evidence
+
+**目标**：知道 RAG 真正失败在哪里，并证明是否存在值得循环的动作。
+
+建议顺序：
+
+1. Answer correctness / support / completeness 基线；
+2. multi-document funnel；
+3. packing 单变量增强；
+4. retrieval 单变量候选实验；
+5. action-level diagnostic；
+6. 重新执行 P6 go/no-go 审查。
+
+**完成标志**：至少有一个稳定失败簇只能在看到第一次 Observation 后合理决定下一动作，并且该动作有明确 Evidence 增量与成本证据。
+
+### Track B：top-level Agent foundation / Phase 4 debt closure
+
+**目标**：补齐 roadmap P4 尚未通用化的控制面，为未来动态 Loop 和多轮提供统一地基。
+
+建议顺序：
+
+1. typed TaskState；
+2. typed TaskDelta；
+3. node-level Context Builder；
+4. Action / Budget / Progress Ledger；
+5. 第二个顶层 bounded recovery Scenario；
+6. 对实际入模 Context、Evidence reuse/invalidation、budget/stop 做 required Eval。
+
+**完成标志**：不依赖固定字符串模板也能表达任务状态；任一允许恢复动作都能说明“为什么执行、消耗多少预算、得到什么新 Observation、是否产生进展、为什么停止”。
+
+### Track C：bounded Agentic RAG（条件主线）
+
+只有 Track A 形成 `go` Evidence 后才进入：
+
+1. 抽取 `EvidenceAcquisitionStrategy` seam；
+2. 保留 deterministic Pipeline adapter；
+3. 实现 Observation-driven bounded RAG Subgraph；
+4. Pipeline/Subgraph held-out A/B；
+5. business/demo canonical Scenario；
+6. default / experimental / fallback 决策。
+
+如果 A/B 没有稳定净收益，Subgraph 可以保留实验实现但不切默认；这仍然是有效工程结论。
+
+### Track D：bounded task-oriented multi-turn Agent
+
+Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结束：
+
+1. TaskDelta understanding；
+2. 连续任务状态合并；
+3. Evidence reuse / invalidation；
+4. route 变化与跨 Tool 补 Evidence；
+5. bounded multi-turn Scenario；
+6. Hybrid follow-up；
+7. 必要时再引入持久 checkpoint / compact。
+
+**完成标志**：用户可以通过自然语言在同一任务内连续修改条件、追问、补充证据要求或纠正理解；系统每轮都重新判断权限、Evidence 有效性和下一动作，并存在明确停止条件。
+
+### Track E：条件补强
+
+只有真实 Scenario 出现后再建设：
+
+- typed context compact / 长历史摘要；
+- 持久/分布式 checkpoint；
+- 最小长期记忆；
+- 生产认证与企业 connector；
+- 更开放 Router；
+- Cloud observability；
+- 开放研究型 Agent / 多 Agent。
+
+### 建议模块节奏（仅作排期参考）
+
+| 大致位置 | 能力切片 | 属性 |
 |---|---|---|
-| M41 起第一组 | 回答正确性基线、失败分层、多文档 packing 与单变量候选 | 主线必做 |
-| 后续一组 | 动作级 diagnostic 实验与 P6 重开审查 | 主线必做；重新决定 go/no-go |
-| 条件满足后 | 有界 RAG Subgraph、Pipeline/Subgraph A/B 与默认/fallback 决策 | 为形成 Agentic RAG 亮点重点争取，但不能跳过证据门 |
-| Subgraph 基线稳定后 | Typed TaskState、通用 Context Builder、有界自然多轮 Agent Loop | 建议主线 |
-| 有真实 Scenario 后 | context compact、持久 checkpoint、最小长期记忆、生产认证/connector | 条件补强 |
+| M41 起 A 线 | correctness 基线、multi-doc funnel、packing/检索单变量实验 | 主线 |
+| M41 起 B 线 | TaskState / TaskDelta、Context Builder、Action-Budget-Progress contract | Phase 4 debt 收口，可与 A 线并行 |
+| A 线证据成熟后 | action diagnostic + P6 re-open go/no-go | 决策门 |
+| `go` 后 | bounded RAG Subgraph + Pipeline/Subgraph A/B + business demo | 条件主线 / 核心亮点 |
+| B 线稳定后 | 自然多轮 Task Loop、Evidence invalidation、跨 Tool bounded recovery | 主线，可与 Subgraph 演进并行 |
+| 真实部署/长会话需要后 | persistent checkpoint、compact、长期记忆、认证/connector | 条件补强 |
 
-如果求职时间有限，最值得优先形成的完整故事不是一次铺开所有热点，而是：**企业级 Evidence/ACL/Trace 地基 + 一个有真实循环和 A/B 证据的 Agentic RAG Subgraph + 一个可连续推进且能安全停止的任务级多轮案例**。长期记忆、多 Agent 和开放 ReAct 可以明确列为后续方向，不必为了名词覆盖牺牲已有工程可信度。
+如果求职时间有限，最值得优先形成的项目故事是：
+
+> **可信 Evidence/ACL/Trace Harness + 可证明终止的 bounded Agent control plane + 一个由 Eval 证明有净收益的 Observation-driven Agentic RAG 场景 + 一个自然语言可连续推进的任务级多轮场景。**
+
+长期记忆、多 Agent、开放 ReAct 不需要为了关键词覆盖强行加入。
+
+---
+
+## 11. 当前面试表述边界
+
+| 亮点 | 当前可以如实说明 | 升级后的说法需要什么 |
+|---|---|---|
+| 企业 Data Agent Harness | LangGraph 已统一 SQL/RAG/Hybrid、typed Evidence、Trace、ACL 与安全停止 | 若要说“动态 Agent controller”，需 first-class Action/Budget/Progress 与运行中的 Observation-driven action |
+| Agent Loop | 已实现 bounded clarification recovery 与一次受控 follow-up，可称“最小跨-turn bounded recovery loop” | 至少一个同次 run 或通用状态机路径能够 Observation → Next Action → Tool → Progress/Stop |
+| Agentic RAG | 已完成 P6 readiness audit 与安全边界设计；当前历史结论为 `no_go` | 实现真实 bounded RAG Subgraph，并用 held-out + business Scenario 证明净收益 |
+| 多轮对话 | 已支持一次结构化澄清恢复和一次 closed-world follow-up | Typed TaskDelta、连续 TaskState、Evidence 失效/复用、跨 route Eval |
+| Memory / context engineering | 有短期 versioned checkpoint、TTL/owner、EvidenceRef 与最小上下文重建 | 通用 Context Builder 后可升级“task context engineering”；长期记忆需独立生命周期治理 |
+
+---
+
+## 12. 修订记录
+
+### 2026-08-19：Phase 4 完成后能力边界与后续路线校准
+
+- 将“Agent Loop 尚未真正形成”修正为：**已实现最小跨-turn bounded recovery loop，但尚无同次 invoke 内 Observation-driven autonomous loop**，避免否定 roadmap G5 已允许的 clarification recovery 切片。
+- 新增 **roadmap debt / conditional capability / post-Phase-4 enhancement** 三类能力划分，明确 P6 `no_go` 是合法阶段结果，不等同于 Phase 4 未完成。
+- 将 **通用 Context Builder、Typed TaskState / TaskDelta、first-class Action / Budget / Progress contract** 提升为 Phase 4 技术债收口，并调整到 Agentic RAG 之前/并行建设。
+- 将后续路线由单线“RAG → Subgraph → 多轮”调整为 **RAG quality & recovery evidence** 与 **top-level Agent foundation** 两条并行主线。
+- 补充 RAG **multi-document funnel**，避免把最终 all-gold cited 低分直接归因于 packing。
+- 为 Agentic RAG 增加统一 `EvidenceAcquisitionStrategy` seam、父子预算/禁止双循环约束，以及 **external held-out + business/demo Scenario** 双重验收。
+- 为自然多轮增加 **Typed TaskDelta → merge TaskState → Evidence reuse/invalidation → route/action** 的明确演进模型。
+- 补充 Agent Loop / Agentic RAG 的质量指标，包括 recovery success、Evidence gain、no-progress、Tool call、budget exhaustion、latency/cost 等，要求证明循环的净收益而不是仅证明“多调用了一次”。
