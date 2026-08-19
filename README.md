@@ -8,13 +8,13 @@
 
 ### 环境
 
-- Python：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe`
+- Python：3.11+（Anaconda 环境）
 - 数据库：MySQL 开发库 `datapilot_dev`（SQLAlchemy + Alembic 管理建表和迁移；SQLite 仅用于测试兜底）
 
 ### 安装依赖
 
 ```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 ### 配置环境变量
@@ -26,7 +26,7 @@ Copy-Item .env.example .env
 ### 启动 API
 
 ```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
 健康检查：
@@ -137,7 +137,7 @@ Invoke-RestMethod `
 v0 smoke：
 
 ```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_v0.py
+$env:PYTHONDONTWRITEBYTECODE='1'; python scripts\smoke_v0.py
 ```
 
 输出摘要会写入 `.agent_work/temp/v0-smoke.md`。
@@ -232,7 +232,7 @@ $env:DEEPSEEK_BASE_URL='https://api.deepseek.com'
 M4 smoke：
 
 ```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m4_nl2sql.py
+$env:PYTHONDONTWRITEBYTECODE='1'; python scripts\smoke_m4_nl2sql.py
 ```
 
 脚本会为 6 条 simple SQL 生成 prompt 快照到 `.agent_work/temp/prompt-snapshots.md`，
@@ -241,7 +241,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 M5 smoke：
 
 ```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_m5_agent_response.py
+$env:PYTHONDONTWRITEBYTECODE='1'; python scripts\smoke_m5_agent_response.py
 ```
 
 脚本会验证渠道订单量、商品退款率、GMV 和危险 SQL 拦截 4 条用例；摘要写入
@@ -254,7 +254,7 @@ M6 提供最小 EvalOps-lite：从 `eval/cases/smoke.yaml` 读取 6 条 smoke ca
 当前 smoke 覆盖 2 条简单 SQL、2 条聚合、1 条多表 join、1 条安全拦截。
 
 ```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval
+$env:PYTHONDONTWRITEBYTECODE='1'; python -m eval.run_eval
 ```
 
 最新报告写入 `eval/reports/latest.md`。当前验证快照：`6/6 passed`；评测 trace 写入
@@ -264,10 +264,10 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 
 ```powershell
 # 终端 1：启动 FastAPI
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
 
 # 终端 2：启动演示页
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m streamlit run demo\streamlit_app.py
+python -m streamlit run demo\streamlit_app.py
 ```
 
 演示页通过 HTTP 调用本地 `/api/query`，展示 `answer`、`SQL`、表格、Vega-Lite 图表、
@@ -293,13 +293,13 @@ M8-M12 把阶段二 v1 的 SQL 主链路升级为可检索、可计划、可校�
 
 ```powershell
 # 新 pipeline 10 条 formal 回归
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.run_eval --pipeline-mode new_text2sql --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-new-pipeline.md --trace .agent_work/temp/phase3a-new-traces.jsonl
+python -m eval.run_eval --pipeline-mode new_text2sql --cases eval/cases/phase3a-regression.yaml --report eval/reports/phase3a-new-pipeline.md --trace .agent_work/temp/phase3a-new-traces.jsonl
 
 # 生成新旧对照报告
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m eval.compare_phase3a --baseline-trace .agent_work/temp/phase3a-baseline-traces.jsonl --new-trace .agent_work/temp/phase3a-new-traces.jsonl --report eval/reports/phase3a-comparison.md
+python -m eval.compare_phase3a --baseline-trace .agent_work/temp/phase3a-baseline-traces.jsonl --new-trace .agent_work/temp/phase3a-new-traces.jsonl --report eval/reports/phase3a-comparison.md
 
 # 一键 smoke（运行全部报告 + 对照）
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3a_text2sql.py
+python scripts\smoke_phase3a_text2sql.py
 ```
 
 **当前边界（如实说明，不虚报）**：
@@ -340,7 +340,7 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe scripts\smoke_phase3a_
 ### 运行测试
 
 ```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cacheprovider
+$env:PYTHONDONTWRITEBYTECODE='1'; python -m pytest -p no:cacheprovider
 ```
 
 ### 数据库迁移与 Seed
@@ -348,13 +348,13 @@ $env:PYTHONDONTWRITEBYTECODE='1'; D:\.Programs\Python\anaconda3\envs\fastapi0614
 建表主路径使用 Alembic，目标库是 MySQL 开发库 `datapilot_dev`：
 
 ```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m alembic upgrade head
+python -m alembic upgrade head
 ```
 
 写入确定性模拟数据：
 
 ```powershell
-D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m scripts.seed_data --reset
+python -m scripts.seed_data --reset
 ```
 
 M1 seed 固定写入以下数据量：用户 200、商品 50、类目 15、渠道 6、订单 10000、订单明细 18000、退款 1000、工单 300、知识文档 10、优惠券 10、订单优惠券 3000、行为日志 10000、价格历史 150、宽表快照 10000。
