@@ -19,6 +19,12 @@
 
 ## 变更记录（新的在上）
 
+### [小修] 首推 GitHub 前历史清理：抹除 LangFuse 导出 CSV 与知乎存档（2026-08-19）
+
+- **背景与范围**：准备首次 push 到 GitHub，push 前审查确认 HEAD 与历史均无真 secret key，但历史残留两份敏感文件：`1785405281245-lf-dataset_items-export-*.csv`（LangFuse Cloud 数据集导出：projectId、datasetId、真实 public key、sourceTraceId、trace 直链与 18 条 smoke 用例 Q&A）与 `docs/archive-versions/教你如何使用langfuse（大模型过程追踪） - 知乎.mhtml`（1.7MB 网页存档，旧 `2db2683` 添加、重写前已不在 HEAD）。用 `git filter-repo --invert-paths --path-glob '*lf-dataset_items-export*.csv' --path-glob '*.mhtml' --replace-text .agent_work/temp/replace-text.txt` 重写全历史：两文件全历史抹除；LangFuse projectId/datasetId/public key/sourceTraceId、OTel 实例 id 与两条 datapilot trace id 在历史文档中替换为 `<REDACTED_*>` 占位（HEAD 命中 `docs/notes/m18-notes.md`、`docs/archive-versions/phase3b-code-review-findings.md`、`eval/reports/m18-experiment-deepseek-report.md`）。
+- **⚠️ 哈希失效**：自旧 `2db2683`（2026-07-28 "LangFuse Cloud plan -> v5"，mhtml 添加提交）起 76 个提交哈希全部重写，其之前 75 个提交哈希不变。旧 main HEAD `4ce71c3` → 新 `25e5d6d`；M16B→`3e14ba0`、codex-m9.1→`1b1065e`、codex-m9.2→`c5225ec`。本文件及 phase3b/3a/2 引用的 `2db2683` 之后的旧哈希均已失效。
+- **验证与备份**：`reflog expire --all` + `gc --prune=now` 后两文件与全部标识符全历史零残留，旧 CSV blob 与旧 HEAD 对象已销毁，`git fsck` 干净，提交数 151 不变，worktree 干净。清理前全历史备份在 `.agent_work/temp/pre-cleanup-20260819.bundle`（4MB，已忽略不入库），确认无误后可删。
+
 ### [模块任务] M40 P7 跨路径 Trace 运行身份与阶段保证包（2026-08-17）
 
 - **改动范围**：起始 commit 为 `64e7c74 M39 Subgraph审计`；开工前工作树已有 `docs/module-plan-template.md`、`docs/notes/m39-{plan,notes}.md` 与 `docs/state/AI_CONTEXT.md` 的用户改动，M40 不归并或覆盖前两项，仅在 AI_CONTEXT 上追加当前状态。本模块新增 `engine/trace/runtime.py`、`eval/phase4_assurance.py`、`scripts/run_m40_phase4_assurance.py`、两份 M40 测试与 M40 notes/plan；修改 API/Trace projector、Hybrid result/graph 和既有 SQL/RAG/Hybrid API Trace 测试，并更新本条、AI_CONTEXT、runbook、eval-baselines。未改 Knowledge Tool、AnswerFlow、ACL、outbound、Router、默认模型/embedding/retrieval、数据库/seed/Alembic、M34 profile 或 README。
