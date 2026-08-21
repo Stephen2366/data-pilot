@@ -4,6 +4,8 @@
 >
 > **一句话结论**：DataPilot 已经完成 Phase 4 的主要工程闭环，并形成了可信 Tool、ACL、typed Evidence / citation、四轴状态、Trace、Eval、Hybrid 与受控 thread 等较强地基；P4 已通过最小 bounded recovery / thread state 切片达到阶段验收基线，但通用 Context Builder 与面向未来动态 Loop 的 Action / Budget / Progress 控制仍值得继续 hardening；P6 则按既定决策门合法得到 `no_go`，因此“没有 RAG Subgraph”不是 Phase 4 未完成。M40 之后应在**路线层面并行、施工层面交错切片**推进 **RAG 质量与动作证据**、**顶层 Agent foundation**，再基于证据决定是否实现 bounded Agentic RAG，并逐步升级到任务级自然多轮。
 
+> ⚠️ **最新讨论稿注（2026-08-22）**：上段和第 1–10 节主要记录 M40 收口后前两轮调查形成的能力分类与候选路线；第 12 节是当前最新的共同讨论稿，并修订了“Subgraph 是否实现、持久 checkpoint 与 Context Compact 是否只作为条件项”的旧建议。第 12 节可以更新本文内部的候选方向，但在用户完成后续审查并正式写入 roadmap 前，不覆盖现行 `phase4-roadmap.md`、`AI_CONTEXT.md` 当前运行事实或 M39 历史结论。
+
 阅读本文时，必须先区分四个容易混淆的概念：
 
 - **当前已经存在最小的 bounded Agent recovery loop，但还没有 autonomous in-run Agent Loop**：澄清后 resume 与一次 follow-up 已形成跨 turn 的受控恢复闭环；但同一次 Graph invoke 内还不会读取 Tool Observation 后自主选择下一动作并再次调用 Tool。
@@ -25,6 +27,8 @@ Phase 4 roadmap 并没有要求所有设想都必须在阶段内实现，也不�
 | **P4-aligned hardening / 当前工程债** | roadmap 的控制权原则已经明确，但当前实现仍缺通用化或面向动态 Loop 的 first-class 表达；继续收口有助于后续能力，而不推翻既有验收 | 通用 node-level Context Builder；面向动态 Loop 的 Action / Budget / Progress contract | 建议优先 hardening；这是“阶段完成后的工程债/控制面补强”，不是“Phase 4 验收不合格” |
 | **条件能力 / conditional capability** | 必须完成决策门或安全前置条件，但只有出现合格 Evidence / 条件满足时才实现或启用 | P6 bounded RAG Subgraph；LangFuse Cloud 显式恢复 | P6 已完成决策门且为 `no_go`；Cloud observability 继续默认关闭，满足安全条件后才可启用 |
 | **Phase 4 后能力 / post-Phase-4 enhancement** | roadmap 明确不要求当前阶段完成，或应由新 Scenario 重新立项 | 跨会话长期记忆、开放 ReAct、多 Agent、复杂 context compact、生产 SSO/OAuth/JWT | 当前未实现，不应反向算作 Phase 4 debt |
+
+> ⚠️ **最新讨论稿注**：本表仍准确描述原 roadmap 与 M40 收口时的分类；第 12 节进一步提出把 experimental bounded RAG Subgraph、持久任务状态和 session Context Compact 基础版列为后续明确交付目标。该提案仍待审查，尚未改写原 roadmap。
 
 因此，“Phase 4 已完成”应理解为：**既定主线已经按允许的最小切片、决策门与 P7 technical assurance 收口；后续 hardening 与能力泛化用于支撑更强 Agent，而不是重新判定 Phase 4 是否完成。**
 
@@ -143,6 +147,8 @@ retrieved all-gold
 
 ### 3.2 Conditional capability：有证据才实现
 
+> ⚠️ **最新讨论稿注**：本节保留前一轮“是否实现也由 go/no-go 决定”的建议。第 12 节已将 Subgraph **实现本身**改为候选最终交付目标，但恢复动作仍须先通过 action-level Evidence 准入，是否切换默认仍由未污染 held-out 的净收益决定。
+
 | 能力 | 当前状态 | 重新进入条件 |
 |---|---|---|
 | 多步 Agentic RAG / RAG Subgraph | M39 决策为 `no_go`，当前未实现 | diagnostic/dev 上证明至少一种 Observation-driven recovery action 能正确触发并新增有效 Evidence；再冻结可比较 held-out 与预算 |
@@ -152,6 +158,8 @@ retrieved all-gold
 | LangFuse Cloud 显式恢复 | 当前默认关闭，JSONL Trace 仍是本地事实源 | 仅在上传 allowlist、脱敏、data classification、旁路失败降级与 outbound security case 通过后显式启用；不得成为唯一 Trace/Eval 事实源 |
 
 ### 3.3 Phase 4 后能力：不要误当当前债务
+
+> ⚠️ **最新讨论稿注**：第 12 节候选方案已把持久任务 checkpoint 和 session Context Compact 基础版从本节的旧条件项中提升为明确目标；跨会话长期记忆、用户画像、开放研究型 ReAct、多 Agent 与生产认证仍保持范围外。
 
 - 自动长历史 context compact / 多层摘要；
 - 跨会话长期记忆、用户画像和历史召回；
@@ -401,6 +409,8 @@ termination reason
 
 ### Track C：bounded Agentic RAG（条件主线）
 
+> ⚠️ **最新讨论稿注**：本 Track 保留前一轮“有 go Evidence 才实现”的路线。第 12 节候选方案改为“动作必须先有 Evidence，Subgraph 最终需要完整交付；默认化继续条件引入”。
+
 只有 Track A 形成 `go` Evidence 后才进入：
 
 1. 冻结 Subgraph 取证插入点与不变合同（Knowledge Tool 对上层语义、唯一 Gate/Composer/Citation、ACL/outbound、Trace/Eval、父子预算）；
@@ -414,6 +424,8 @@ termination reason
 如果 A/B 没有稳定净收益，Subgraph 可以保留实验实现但不切默认；这仍然是有效工程结论。
 
 ### Track D：bounded task-oriented multi-turn Agent
+
+> ⚠️ **最新讨论稿注**：本 Track 中“必要时再引入持久 checkpoint / compact”已被第 12 节候选方案修订；二者在最新讨论稿中是任务级自然多轮的明确交付目标。
 
 Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结束：
 
@@ -430,6 +442,8 @@ Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结
 **完成标志**：用户可以通过自然语言在同一任务内连续修改条件、追问、补充证据要求或纠正理解；系统每轮都重新判断权限、Evidence 有效性和下一动作，并存在明确停止条件。
 
 ### Track E：条件补强
+
+> ⚠️ **最新讨论稿注**：本 Track 的旧列表不再代表第 12 节候选方案对持久 checkpoint 和 Context Compact 基础版的定位；长期记忆、生产认证、开放 Router、Cloud observability、研究型 Agent 与多 Agent 仍保留条件属性。
 
 只有真实 Scenario 出现后再建设：
 
@@ -471,9 +485,67 @@ Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结
 
 ---
 
-## 12. 修订记录
+## 12. 当前商讨出的大致方案
 
-### 2026-08-19：Phase 4 完成后能力边界与后续路线校准
+> **文档状态**：本节是用户与 AI 在当前能力调查基础上共同商讨出的后续建设方向，用于固定“最终想建成什么”和大致推进顺序。它还不是已确认的 roadmap，不冻结模块编号、文件结构、具体类名、模型、阈值或预算参数。后续将由其他会话继续审查和修正，待方案边界、依赖和验收语义成熟后，再写入 `phase4-roadmap.md`。
+>
+> **用户要求：**本方案不把“更省事、更易实现或更容易验收”作为缩减能力的理由。若确实需要分阶段，可以通过纵向切片分阶段交付，但每个切片都必须服务于下列已明确的最终目标，不得把剩余工作模糊化为“以后按需优化”。
+>
+> **与前文及权威文档的关系**：本节是本文内部最新的候选建设方向，修订第 3 节、第 10 节关于 Subgraph、持久 checkpoint 与 Context Compact 的旧建议；旧段落保留用于解释方案演进。当前方案仍在审查，因此不覆盖现行 roadmap、`AI_CONTEXT.md` 的当前实现/默认事实或 M39 `no_go` 的历史结论。只有用户最终确认并写入 roadmap 后，才完成路线升格。
+
+### 最终能力目标
+
+1. **顶层 Agent Loop**：将当前固定的 `route → Tool → controller → END` 拓扑升级为受控的 `Action → Observation → Evidence/Progress Gate → Next Action/Stop`。Controller 必须能在同次任务运行中根据 Observation 选择允许的下一动作，并使用 first-class Action、Budget、EvidenceDelta、Progress 与 Termination 合同保证权限拒绝、不可恢复错误、无进展和预算耗尽时确定性停止。顶层只负责全局澄清、重新调用某类 Tool、跨 Tool 补 Evidence、Evidence 失效后的重新取证、partial/stop 与父预算，只表达“仍缺哪类 Evidence”，不指定 query rewrite、parent expansion 等 RAG 内部策略。
+2. **Bounded Agentic RAG**：实现真实的 RAG Subgraph，在首次检索后读取 Observation，并能在停止与多种边界清晰的恢复动作之间选择。正式恢复动作只包括需要读取 Observation 后才能决定是否执行、执行哪一种或是否继续的多步取证，例如 Evidence requirement 拆分/子问题检索、受控 query rewrite，以及基于检索进展决定的 parent/neighbor context 扩展；固定执行的一次 parent 补取、邻近扩展、rerank 或 hybrid retrieval 留在 Pipeline adapter 内做单变量实验。Subgraph 只在顶层分配的子预算内负责文档取证，不拥有全局 route、SQL、Hybrid、最终回答或产品状态控制权，也不复制 Gate、Composer、Citation Validator；顶层和子图不得对同一失败各循环一次。确定性 Pipeline 长期保留为 baseline/fallback。
+3. **任务级自然多轮**：建立 `Natural-language Turn → Typed TaskDelta → Controlled TaskState Merge → Evidence reuse/invalidation → Route/Action` 链路，支持连续修改条件、追问旧结果、补充证据需求、纠正理解、切换任务、取消，以及 SQL/RAG/Hybrid 之间的受控 route 变化。这不再只是“一次 clarification + 一次 signed follow-up”，而是可连续推进、可中止、可恢复的 bounded task-oriented Agent。
+4. **持久任务状态与上下文治理**：建立带 schema version、owner/tenant/role、TTL、显式删除、乐观版本/原子 claim 的持久 checkpoint，使同一任务可在进程重启和多 worker 下按安全合同恢复。同时建立 node-level Context Builder，为 Router、Turn Understanding、SQL、RAG、RAG Subgraph、Composer 和 Controller 提供各自的 typed 最小上下文、token/context budget 和可直接 Eval 的实际入模投影，不将完整 State 或历史无差别灌入 prompt。
+5. **Context Compact 基础版**：将 session 内的长历史收敛为结构化 `TaskCompact`，至少保留 current goal、confirmed/corrected constraints、pending questions、unresolved Evidence requirements、active EvidenceRef 及 validity、action/budget/termination 事实、高风险原始 reference，并与最近原始 turns 和当前 turn 共同组成节点上下文。Compact 必须具备来源 turn 范围、版本/fingerprint、失败降级、Evidence 失效复核和 compact 前后行为等价验证；不用不可验证摘要取代时间、金额、指标口径、否定、政策例外或 Evidence identity。
+
+### 大致建设路线
+
+1. **先建立任务运行时合同**：完成 TaskState、TaskDelta、node-level Context、Action/Budget/Progress 的稳定语义，并立即接入一条真实自然语言多轮纵向场景，避免只造横向抽象。TaskDelta contract 保持 adapter-neutral，并提供确定性保守 fallback；若 Turn Understanding 使用模型，必须先独立登记 receiver、node purpose、data class 与字段，取得 `OutboundDecision`，并覆盖未授权、provider unavailable 和结构化解析失败的保守降级。首条场景锚建议使用“查询 7 月退款率 → 改成 8 月 → 不对，我要看退款金额”，先验证 `modify_constraint`、`correct_previous_understanding`、TaskState 受控合并和 SQL Evidence 失效重查。
+
+   **完成标志**：同一条自然语言 sequence 上 TaskState、TaskDelta、Action/Progress 均为 typed 事实，实际 node context 可被 Eval 直接检查；实现不能只依赖固定字符串模板，也不能在模型不可用时自由猜测 delta。
+
+2. **形成真实顶层 Loop**：在不放宽现有 Evidence、ACL、outbound 和四轴状态合同的前提下，加入 Observation-driven next action、无进展停止、全局预算和跨 Tool 补 Evidence，使 Agent Loop 不再依赖固定 DAG 拓扑或用户再发一轮才能继续。顶层只选择全局恢复动作并分配父预算，RAG 内部再取证交给 Subgraph。
+
+   **完成标志**：同次运行内存在由真实 Observation 触发的下一动作，recoverable、no-progress、budget exhausted 与 unsafe stop 均有 required 证据；移除控制回边后相关能力测试必须失败。
+
+3. **完成持久任务多轮**：扩展 TaskDelta 类型、连续 TaskState merge、route 变化与 Evidence reuse/invalidation，接入带 schema version、owner/tenant/role、TTL、clear、乐观版本/原子 claim 的持久 checkpoint，覆盖进程重启、多 worker、重复请求和旧版本并发。
+
+   **完成标志**：条件修改、纠正理解、追问和跨 route 推进在多轮中保持一致；重启、多 worker、TTL、clear 和 version conflict 都有可预测结果，旧 Evidence 复用前始终重新检查 freshness、revision、用途与权限。
+
+4. **完成 Context Engineering 与 Compact 基础版**：为 Router、Turn Understanding、SQL、RAG、RAG Subgraph、Composer 和 Controller 建立各自的 typed 最小投影及 context budget，并把长 session 收敛为结构化 `TaskCompact`。基础版以 typed TaskState 的确定性结构化投影和裁剪为正式能力，不依赖 LLM 自由摘要；LLM 叙述性摘要不属于基础版必需能力，若未来单独引入，必须作为不可信派生字段和独立模型用途重新评估。
+
+   **完成标志**：每个节点只接收合同允许的最小上下文；compact 前后的任务目标、关键条件、Evidence validity、route/next action 等价，高风险原始 reference 可追溯，compact 失败时有保守降级。
+
+5. **用 RAG 失败漏斗指导恢复动作**：先分开度量 retrieved、selected、generation-visible、Composer/support、cited 和 answer correctness/completeness，再在 diagnostic/dev 上单变量比较不同恢复动作，避免把 packing、rewrite、parent expansion 与 Subgraph 一次性捆绑成不可归因的“高级 RAG”。
+
+   **完成标志**：能够把失败定位到 retrieval、selection、generation context、support、citation 或 answer；每个拟进入 Subgraph 的动作都有明确触发条件、预期/实际 EvidenceDelta、额外预算、延迟和安全失败边界。
+
+6. **完整交付 bounded Agentic RAG**：Subgraph 的 allowed action set 必须来自第 5 步识别出的稳定失败簇和 action-level diagnostic Evidence；未证明触发条件、Evidence 增量及安全/成本边界的动作不得进入实现。在同 Knowledge Tool/Evidence/AnswerFlow 合同内实现有父子预算、多种合格恢复动作、Evidence merge/deduplicate、progress/no-progress 判断和确定性停止的 Subgraph，并完成 Pipeline/Subgraph 的未污染 held-out A/B 与 DataPilot 业务演示。若动作证据尚不合格，应继续补 diagnostic Evidence，不得降低准入标准或把 Pipeline 机械拆成 Graph。**Subgraph 实现本身是本方案的明确交付目标；是否切换为默认仍由净收益证据决定。**
+
+   **完成标志**：首次 Observation 能在至少两种不同的合格恢复动作与停止之间作出正确选择；Pipeline/Subgraph 在同合同、未污染 held-out 和可比预算下完成 A/B。即使不切默认，experimental adapter 也必须完整可运行、可回退、可追踪。
+
+7. **最后做跨能力整体验收**：使用北极星 sequence“查询退款表现 → 修改时间和指标 → 追问异常原因 → 增加政策 Evidence requirement → SQL 转 Hybrid → 纠正旧理解”，贯通 SQL、RAG 和 Hybrid，验证顶层 Loop 与 RAG Subgraph 不会对同一失败双重循环，并同时验证 Evidence invalidation、持久恢复、Context Compact、Trace、预算、权限和出站安全。
+
+   **完成标志**：一条连续自然多轮任务能安全贯通 TaskDelta、顶层 Loop、SQL/RAG/Hybrid、RAG Subgraph、持久恢复和 Compact；不存在权限绕过、无界调用、双循环或 compact 后任务语义漂移。
+
+### 历史结论与当前方案的关系
+
+- M39 的 P6 `no_go` 仍是当时冻结 Evidence 下的正确历史结论，不回写为“当时应该强行实现”。
+- 当前方案的变化是：为了形成完整项目亮点，后续建设目标明确包含 experimental bounded RAG Subgraph，不再把“是否实现”无期限地留给未来条件；但仍先用新 diagnostic/dev Evidence 选择真实恢复动作，不为了展示把 Pipeline 机械拆成 Graph。
+- 长期记忆、用户画像、开放研究型 ReAct 和多 Agent 仍不属于这条建设路线；这些是明确的范围边界，不是对 Agent Loop、Agentic RAG、任务级多轮、上下文治理或 Context Compact 基础版的缩减。
+
+---
+
+## 13. 修订记录
+
+2026-08-22：根据后续审查收紧当前讨论稿：声明与旧章节、roadmap 和 `AI_CONTEXT` 的效力关系；补齐顶层 Loop / RAG Subgraph 的职责与父子预算边界；区分 Pipeline 单步增强和 Observation-driven 多步动作；增加 Turn Understanding outbound 前置、首条/北极星场景锚、动作 Evidence 准入；拆分持久多轮与 Context Compact，并为各建设步骤增加高层完成标志。
+
+2026-08-21：新增“当前商讨出的大致方案”小节
+
+2026-08-19：Phase 4 完成后能力边界与后续路线校准
 
 - 将“Agent Loop 尚未真正形成”修正为：**已实现最小跨-turn bounded recovery loop，但尚无同次 invoke 内 Observation-driven autonomous loop**，避免否定 roadmap G5 已允许的 clarification recovery 切片。
 - 初步引入能力分层，明确 P6 `no_go` 是合法阶段结果、不等同于 Phase 4 未完成；本轮进一步把“已收口主线 / P4-aligned hardening / conditional capability / post-Phase-4 enhancement”边界拆清。
@@ -484,8 +556,7 @@ Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结
 - 为自然多轮增加 **Typed TaskDelta → merge TaskState → Evidence reuse/invalidation → route/action** 的明确演进模型。
 - 补充 Agent Loop / Agentic RAG 的质量指标，包括 recovery success、Evidence gain、no-progress、Tool call、budget exhaustion、latency/cost 等，要求证明循环的净收益而不是仅证明“多调用了一次”。
 
-
-### 2026-08-19：第二轮审查后的合同与分类收口
+2026-08-19：第二轮审查后的合同与分类收口
 
 - 将“Roadmap 主线必做 / roadmap debt”拆开：P4 最小 recovery/thread、P5 Hybrid、P7 assurance 明确归入**已收口/最小切片**；通用 TaskState 和第二个 recovery 降级为**主线延伸增强**，不再反向解释为 Phase 4 未完成。
 - 将 `EvidenceAcquisitionStrategy`、`DeterministicPipelineAcquirer` 等具体类设计从路线文档移除，改为只冻结 **Knowledge Tool 对上层语义、Subgraph 取证插入点、唯一 Gate/Composer/Citation、ACL/outbound 与 Trace/Eval** 等不变合同。

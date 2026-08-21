@@ -11,8 +11,9 @@
 | 当前活动模块 | M40 P7 跨路径 Trace 运行身份与阶段保证包已验收通过（2026-08-18） |
 | 当前 plan    | `docs/notes/m40-plan.md`                                     |
 | 当前 notes   | `docs/notes/m40-notes.md`                                    |
+| 候选后续方案 | `docs/notes/phase4-rag-capability-status.md` 第 12 节“当前商讨出的大致方案”；用户与 AI 共同讨论稿，仍待其他会话审查，尚未写入 roadmap |
 | 待决事项     | P6 严格 no-go 仍固定；M40 P7 technical assurance 通过不等于 Phase 4 人工验收或生产认证 |
-| 更新时间     | 2026-08-18                                                   |
+| 更新时间     | 2026-08-22                                                   |
 
 ## 必读规则
 
@@ -62,6 +63,8 @@
 ## 当前路线判断
 
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
+
+- (2026-08-22) `phase4-rag-capability-status.md` 第 12 节保存用户与 AI 当前共同讨论的候选后续方案：拟把 experimental bounded RAG Subgraph、持久任务状态、node-level Context Builder 与 session Context Compact 基础版列为后续明确交付目标，并把“是否实现 Subgraph”与“是否切默认”分开。该方案仍待其他会话审查，尚未写入 roadmap；因此不改变下述 P6 `no_go`、当前进程内 checkpoint、external lexical 默认或任何运行配置。
 
 - (2026-08-17) M37 单独不等于 P4，但 M36 + M37 已共同完成 roadmap 定义的 P4 最小可验收基线；不宣称通用多轮。第二次追问、长历史 compact 和持久 checkpoint 不是当前 P4 硬门；跨 route/跨 Tool 补证据由 M38 的 P5 Hybrid 正式承接。M37“窄 B”仍是正式边界，不得退化为直接复用旧答案或默认扩到 external。
 - (2026-08-17) M38 已按 P5 口径完成保守 Hybrid 纵向基线：方案 A 的本地确定性 Synthesizer 是正式默认与长期 fallback；SQL/RAG 默认 required，不触发 G6 optional 放宽，不新增 Hybrid 数据出站。P5 不等于开放式跨来源研究 Agent。

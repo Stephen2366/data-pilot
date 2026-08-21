@@ -19,6 +19,10 @@
 
 ## 变更记录（新的在上）
 
+### [小修] Phase 4 后续 Agent / RAG 候选方案审查收口（2026-08-22）
+
+- 根据后续独立审查修订 `phase4-rag-capability-status.md` 的共同讨论稿：声明其只更新调查报告内部候选方向、尚不覆盖 roadmap/M39/当前运行事实；补齐顶层 Loop 与 RAG Subgraph 的职责、父子预算和禁止双循环边界，区分 Pipeline 固定单步增强与 Observation-driven 多步动作，增加 Turn Understanding outbound 前置、动作 Evidence 准入、首条/北极星多轮场景以及逐步完成标志，并将持久多轮与 Context Compact 基础版拆开。`AI_CONTEXT.md` 仅增加候选方案入口和非生效提示，P6 `no_go`、进程内 checkpoint、external lexical 默认及所有运行配置保持不变；未修改 roadmap、代码、测试或 Eval 结果。
+
 ### [小修] 首推 GitHub 前历史清理：抹除 LangFuse 导出 CSV 与知乎存档（2026-08-19）
 
 - **背景与范围**：准备首次 push 到 GitHub，push 前审查确认 HEAD 与历史均无真 secret key，但历史残留两份敏感文件：`1785405281245-lf-dataset_items-export-*.csv`（LangFuse Cloud 数据集导出：projectId、datasetId、真实 public key、sourceTraceId、trace 直链与 18 条 smoke 用例 Q&A）与 `docs/archive-versions/教你如何使用langfuse（大模型过程追踪） - 知乎.mhtml`（1.7MB 网页存档，旧 `2db2683` 添加、重写前已不在 HEAD）。用 `git filter-repo --invert-paths --path-glob '*lf-dataset_items-export*.csv' --path-glob '*.mhtml' --replace-text .agent_work/temp/replace-text.txt` 重写全历史：两文件全历史抹除；LangFuse projectId/datasetId/public key/sourceTraceId、OTel 实例 id 与两条 datapilot trace id 在历史文档中替换为 `<REDACTED_*>` 占位（HEAD 命中 `docs/notes/m18-notes.md`、`docs/archive-versions/phase3b-code-review-findings.md`、`eval/reports/m18-experiment-deepseek-report.md`）。
