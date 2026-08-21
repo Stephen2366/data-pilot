@@ -7,6 +7,8 @@
 > 创建时间：2026-08-20  
 > 来源：`docs/ts-integration-plan-v2.md` 重构  
 > 当前状态基线：以 `docs/state/AI_CONTEXT.md` 为准。制定本文时 M40 P7 technical assurance 已验收通过，P6 strict no-go 保持；这不等于 Phase 4 已完成人工验收或生产认证。
+>
+> 截止8.20，本方案还未执行，git 记录的 ts-test 并没有执行本方案。
 
 ---
 

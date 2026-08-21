@@ -823,7 +823,14 @@ python -m compileall -q engine app eval scripts tests
 
 ### 先用大白话讲
 
-以前 DataPilot 虽然已经能做 NL2SQL，也有一些“知识文档”的影子，但它还不像一个真正可靠的企业 RAG：**文档可能混进 SQL 通道，调用方身份可能只是请求里自报的角色，检索到什么和最终引用什么没有一条严谨流水账，回答成功也不等于答对。**上半阶段做的事情，可以类比成给企业资料室建立一整套制度和流水线：
+以前 DataPilot 虽然已经能做 NL2SQL，也有一些“知识文档”的影子，但它还不像一个真正可靠的企业 RAG：
+
+- 文档可能混进 SQL 通道
+- 调用方身份可能只是请求里自报的角色
+- 检索到什么和最终引用什么没有一条严谨流水账
+- 回答成功也不等于答对
+
+上半阶段做的事情，可以类比成给企业资料室建立一整套制度和流水线：
 
 1. 先规定资料室、查询窗口、答复窗口和审计记录各自负责什么；
 2. 把正式制度原件登记成可发布、可回滚的知识版本；
@@ -867,6 +874,104 @@ python -m compileall -q engine app eval scripts tests
    在相同数据和 top-k 下，lexical 的 held-out @20 gold coverage / all-gold / MRR 为 **0.823125 / 0.775000 / 0.723134**，semantic candidate 为 **0.773958 / 0.741667 / 0.630477**。因此系统没有因为“向量检索更像 RAG”就切换默认。真实 Qwen Answer Eval 又执行了 **180 次 AnswerFlow、180 次 provider request、0 retry、405,305 tokens**：146/180 达到合同完整，但 gold document all-cited 只有 **80/180（44.44%）**，multi-document all-gold 只有 **2/38（5.26%）**。
 
    这些数字共同给出阶段最终结论：**build→retrieve→answer→cite→score 的工程闭环已经成立，但回答质量远未完成。**`complete` 只说明结构和引用合同合法，不等于事实正确；合成企业基准也不能替代真实租户 ACL、真实连接器和线上容量证据。上半阶段最重要的价值，是把下一步问题从含糊的“RAG 效果不好”收敛成可定位的召回覆盖、多文档上下文和 composer support 问题。
+
+### 这次做了什么（易读版）
+
+> 本小节是上方“这次做了什么”的同内容易读排版：只拆分长段落、加粗关键词并补充术语解释，事实与数字未改动。
+
+这一阶段处理的不是六个彼此独立的模块，而是一个连续工程矛盾：**怎样让“查文档并回答”从一个能跑的功能，变成一条知道资料来源、遵守权限、保留证据、能够失败、能被客观评测的可信链路。**整个过程分四段主线。
+
+1. **先把“什么算成功”说清楚，避免后面的实现各说各话。**
+
+   阶段起点不是缺一个向量库，而是缺共同合同：
+
+   - 路由选对 ≠ 工具执行成功；
+   - 工具执行成功 ≠ 生成了回答；
+   - 生成了回答 ≠ 没有越权。
+
+   为此，P0 先拆开两个基础口径：
+
+   - **四轴状态**（`route / execution / answer / safety`）：一次请求用四条独立坐标分别记录“该走哪条路、执行成没成、回答完没完、安全过没过”，而不是把所有结果压成一个成功/失败布尔值。
+   - **Evidence 四阶段**（`candidate → selected → generation_visible → cited`）：普通话解释就是“**搜到过、挑中了、真的给模型看过、最终被回答引用过，是四件不同的事**”。
+
+   同时冻结了三项合同：
+
+   - **TrustedCaller**：调用方身份必须由服务端解析，请求里自报的 `role` 不能当授权事实；
+   - **outbound 默认拒绝**：数据要发给外部模型或服务，必须按“接收方 × 用途 × 数据类别 × 字段”显式放行，没有规则就拒绝；
+   - **Eval 闭世界身份**：一次评测如果缺执行、重复执行或串了别的 run，也不能算通过。
+
+   这样选择比“先写一个能返回答案的接口”更慢，但避免后续检索、回答、Trace 和 Eval 分别发明自己的成功口径。
+
+   **P0 的证据**：既有 SQL 主链没有被破坏，合同与安全门完成冻结。它证明的是地基明确，不是 RAG 已经上线。
+
+2. **再把知识变成有权威来源、能原子发布、也不会串进 SQL 的受治理资产。**
+
+   原来的知识可能同时存在于 Markdown、seed 和旧表中，就像一家公司同时有三份“最新版制度”，出了冲突没人知道该信谁。
+
+   上半阶段因此做了三件事：
+
+   - **source-backed catalog（源头目录）**：政策 Markdown 与指标投影是唯一权威原件，数据库表和索引只是派生的运行时投影。7 份政策 Markdown 与 4 份指标投影先形成 11 条规范目录项，完整校验后发布成不可变 release；后续扩展为 22 条时，仍沿用同一发布合同。
+   - **不可变 release + active pointer（原子发布）**：新版本完整构建、校验通过后，active pointer 才一次切换到新版本；失败时继续服务旧版本。rollback（回滚）同样要重新验证，不能在损坏时偷偷回落到某个旧版本。
+   - **SQL 与知识隔离**：物理数据库仍保留 14 张表，但 Text2SQL 的可查询面收紧为 13 张。遗留 `knowledge_docs` 没被破坏性删除，却退出 schema 检索和 SQL 生成边界，schema 文档从 195 条降为 186 条。这个取舍兼顾兼容与隔离：**RAG 知识继续存在，但 SQL Agent 不能把政策文档误当业务表查询。**
+
+   治理还覆盖运行期安全：
+
+   - **双重 ACL（访问控制列表）**：文档权限在“候选选择前”和“生成上下文前”各检查一次；
+   - **出站策略**：按 `receiver × purpose × data class × fields` 精确放行，缺规则就拒绝；
+   - **安全错误投影**：对外错误只给安全文案，不能借拒绝信息暴露未授权文档的标题或 ID。
+
+   所以权限不是接口末尾的一次过滤，而是 **从本地资料到模型上下文的完整数据流约束**。
+
+   **验证**：首版治理落地后，全仓回归 **231 passed**；权限、Evidence 与发布能力加入后，`phase4-v1` 的 8 个场景、12 个 required check 全部通过，全仓回归 **276 passed**。
+
+3. **把检索和回答拆开，再用 Evidence 把它们严谨地接起来。**
+
+   如果一个“RAG 工具”既找材料又写答案，召回错、权限错、生成错和引用错会混成一个黑盒。
+
+   - **Knowledge Tool（知识工具）**：只负责取证，按 `pre-ACL → retrieve → candidate → select → post-ACL → selected → safe projection` 运行，产出受治理的 Document Evidence，却不替回答层下结论。
+   - **首个 adapter 选确定性 lexical（关键词检索）**：不是因为它更先进，而是因为它 **离线可复现、失败容易定位、没有默认外发成本**，适合作为长期对照基线。对应检索 Eval 的 6 个场景、20 个 required check 全部通过，全仓回归 **304 passed**。
+
+   在此之上，**AnswerFlow** 才把 selected Evidence 送入共享安全门和 composer（生成器）：
+
+   - 只有真的进入模型上下文、并被 claim（答案断言）使用的材料，才升级为 `generation_visible`；
+   - 只有 support（逐字证据片段）、anchor（原文定位）与 Evidence 身份全部通过代码校验，citation 才能升级为 `cited`；
+   - composer 输出不合合同就 fail closed（失败关闭），不公开半成品 claim 和 citation。
+
+   这比把 top-k 全部挂到答案后面更严格，但保证了 **“引用过”不是 UI 装饰，而是可回查的执行事实**。
+
+   **验证**：回答合同 Eval 的 9 个场景、60 个 required check 全部通过，知识扩容后的全仓回归 **342 passed**。
+
+4. **最后用大语料和真实模型揭露效果，而不是用小样例宣布胜利。**
+
+   22 条业务知识足以证明合同，却不足以证明大规模检索质量。P2 后段因此接入独立 EnterpriseRAG-Bench profile：
+
+   - 36,417 篇企业风格文档被解析为 139,214 个稳定检索单元；
+   - 问题固定切成 **60 dev（诊断集）** 与 **120 held-out（保留集）**；
+   - 外部 profile 与业务 22 条 active release 隔离，避免实验污染运行默认。
+
+   在相同数据和 top-k 下做 A/B：
+
+   | 检索方式 | held-out @20 gold coverage / all-gold / MRR |
+   | --- | --- |
+   | lexical | **0.823125 / 0.775000 / 0.723134** |
+   | semantic candidate | **0.773958 / 0.741667 / 0.630477** |
+
+   > gold coverage = 标准答案文档的召回覆盖；all-gold = 全部标准文档都被覆盖；MRR = 平均倒数排名，衡量相关文档排得靠不靠前。
+
+   semantic 没赢，因此系统没有因为“向量检索更像 RAG”就切换默认。
+
+   真实 Qwen Answer Eval 又执行了 **180 次 AnswerFlow、180 次 provider request、0 retry、405,305 tokens**：
+
+   - 146/180 达到合同完整；
+   - gold document all-cited 只有 **80/180（44.44%）**；
+   - multi-document all-gold 只有 **2/38（5.26%）**。
+
+   **阶段最终结论**：`build→retrieve→answer→cite→score` 的工程闭环已经成立，但回答质量远未完成。
+
+   - `complete` 只说明结构和引用合同合法，不等于事实正确；
+   - 合成企业基准也不能替代真实租户 ACL、真实连接器和线上容量证据。
+
+   上半阶段最重要的价值，是把下一步问题从含糊的“RAG 效果不好”收敛成可定位的三类问题：**召回覆盖、多文档上下文、composer support**。
 
 ### 阶段主线图
 
@@ -2024,6 +2129,101 @@ python -m uvicorn app.main:app --reload
    五路径 rehearsal 对 SQL、RAG、Hybrid、澄清恢复和安全拒绝各执行一次，用同次 response/Trace 计算不可逆 `execution_identity`，检查四轴、EvidenceRef/citation、Graph 次数、thread lifecycle 与非泄露。P7 manifest 只接受 P1、P2 retrieval/answer、P3、P4 turn/follow-up、P5、M39 P6 verified `no_go`、P7 rehearsal 共九个 exact family；M27 历史数字和 M34 质量分数没有可填槽位。
 
    M40 聚焦最终 **7 passed**，M31–M39 回归 **208 passed**，全仓 deterministic pytest **447 passed、3 skipped、1 warning**。这证明当前五条 API/Trace 路径与九类技术证据能够闭合；它不等于用户人工验收、生产认证、真实 provider 质量，也没有把 P6 `no_go` 翻成 Subgraph 完成。
+
+### 这次做了什么（易读版）
+
+> 本小节是上方“这次做了什么”的同内容易读排版：只拆分长段落、加粗关键词并补充术语解释，事实与数字未改动。
+
+这一阶段面对的核心矛盾是：**底层 Tool 已经比较可靠，但系统还缺少一个不会越权、不隐藏调用、不把失败混成成功的上层控制面。**如果直接加入循环、长对话和多工具自动选择，底层已有的 ACL、Evidence、citation 与评测口径很容易被新的编排层绕开。M35–M40 因此沿着“先统一一次执行，再增加有限状态，再组合双证据，最后审计与收口”的主线推进。
+
+1. **先建立唯一 Harness，让路由、工具和结果只服从一个控制面。**
+
+   原来的 SQL 与 RAG 都能独立运行，但缺少统一入口时，API、Trace 和 Eval 可能各自理解“这次到底执行了什么”。某些系统会在路由不确定时默认同时查询数据库和知识库，这看似积极，实际会扩大成本、泄露面和错误来源。
+
+   这一阶段做了三件事：
+
+   - **顶层 LangGraph Harness（统一调度层）**：把一次执行固定为 `route → tool/terminal → controller`，Graph 只控制路线、预算和终止。
+   - **deep Tool（深工具）**：Text2SQL pipeline 与 `RAGAnswerFlow` 整体作为一个深 Tool 接入，内部 Schema Retrieval、SQL Guard、ACL、Composer 和 citation validator 不被拆成一堆浅节点。这样 Graph 不会和 Tool 抢控制权，Tool 的安全合同也不会因换了编排框架而失效。
+   - **保守 Router（路由器）**：先采用可注入的 deterministic/conservative 规则，未知问题和未登记 Hybrid 保守停止，而不是自动双后端兜底。
+
+   还有两个安全点：
+
+   - **Caller fail-closed（身份失败关闭）**：调用方不再由请求中的 `user_role` 自行授权，只有 `local/demo/test` 可以通过明确 fixture resolver 选择已解析角色；其他环境没有认证 resolver 时在 Tool 前失败关闭。
+   - **四轴各归各位**：SQL 的技术失败、输出合同拒绝和 SQL Guard 拦截分别落到 execution、answer、safety，避免所有错误都被写成 `blocked`。
+
+   **验证证据**：`phase4-harness-v1`、API/Trace 同轮投影，以及全仓 deterministic pytest **397 passed**。这些证据证明统一单轮控制面、Caller 失败关闭和深 Tool 边界成立；没有证明开放问法路由质量、生产认证或真实远程服务质量。
+
+2. **把单轮执行加深为有界 turn/thread，但拒绝把它包装成长对话记忆。**
+
+   单轮 Harness 遇到“这个怎么处理”或缺少分析时间范围时，只能拒绝或猜测。直接保存完整聊天历史又会带来权限继承、上下文膨胀、并发重放和服务重启语义等一整套问题。因此这一阶段只保存继续当前任务必需的最小状态。
+
+   **第一步：结构化澄清。**
+
+   - Router 只能签发 closed-world `ClarificationSpec`（闭集澄清规格），例如补 `subject` 或 `analytics_scope`，不能自由问任意问题；
+   - 应用持有 **versioned in-process checkpoint（应用级、进程内、带版本号的任务检查点）**，记录 owner、tenant/active role、TTL（过期时间）、state version 和最小 current task；不保存完整 MessagesState；
+   - **原子单 claim（领取执行权）**：claim 在慢 Tool 前完成，同一 version 最多一个请求获得执行权；
+   - 非法补充值在 claim 前拒绝，不消耗 version；一旦 claim 后 Graph 失败，不退回 pending、也不自动重试，避免同一 Tool 被重复调用。
+
+   **第二步：一次 follow-up（追问）。**
+
+   - 默认关闭、显式开启（`enable_bounded_follow_up=true`）才有；
+   - 可选动作由服务端签发，客户端不能自造控制指令；
+   - **Evidence validity（证据有效性）按来源分别处理**：
+     - SQL 没有可证明稳定的业务快照 → 每次追问都重查；
+     - external RAG → 每次重检索；
+     - 业务 22-entry release → 只有“解释同一 Evidence”动作，才允许按当前 authority/revision/content/anchor 重新加载、重新授权并签发新 run Evidence；requirement 或 identity 变化时，同一 RAG Tool 最多重检索一次；ACL/用途变化则零 retrieval 停止。
+
+   这里最关键的不是“记住了上一句话”，而是 **旧结果不能天然成为新一轮事实**。thread id 不是授权凭证，旧 answer、rows、正文和 citation 也不会写进 checkpoint 后直接复用。
+
+   **验证**：M36 的 `phase4-harness-turn-v1` 覆盖 8 组 sequence，全仓 **416 passed**；M37 的 follow-up Eval 覆盖 **10 sequences / 22 turn evidence / 50 required，50/50 通过**，全仓 **427 passed、3 skipped**。它们证明一次澄清恢复、一次追问、owner/version/TTL/concurrency 和 Evidence validity 合同成立；没有证明自由多轮、长上下文 compact、持久 checkpoint 或多 worker 会话。
+
+3. **在同一个 Harness 中组合 SQL 与 RAG，但只允许受控双证据结论。**
+
+   真正的业务问题常常同时需要“数据库里发生了什么”和“制度上应该怎么解释”。简单做法是分别生成 SQL 答案和 RAG 答案，再拼成一段文字；问题是两边可能冲突、某一支可能越权，而且最终结论很难证明用了哪些证据。
+
+   P5 因此加入 **薄 `HybridPlan`（混合计划）**：
+
+   - Router 只对两类 canonical operator 签发计划；
+   - Graph 按 `hybrid_sql_tool → hybrid_rag_tool → controller` 依次执行两支，各至多一次，总计至多两次；
+   - RAG branch 只运行 retrieval + Shared Gate，交付 `generation_visible` Document Evidence，不先生成一个自然语言子答案；SQL branch 交付经过 Guard 的 typed SQL Evidence；
+   - 完整 Evidence 只存在于 Harness 内部，API/Trace 不读取正文或完整 rows。
+
+   **唯一 `DeterministicHybridSynthesizer`（确定性合成器）**是正式默认和长期 fallback（回退方案），不是等待日后替换的临时桩。合成规则：
+
+   - 跨来源 claim 必须同时绑定 SQL 与 Document Evidence；
+   - 两支 required 才能标记 complete；
+   - 一支失败，只允许另一支事先声明可独立成立时返回 partial（部分结果）；
+   - SQL Guard 全局停止；
+   - Evidence 冲突时不静默选边；
+   - Synthesizer 失败也不重跑深 Tool。
+
+   **验证**：`phase4-harness-hybrid-v1` 用 5 个 Scenario、25 个 required assertion 覆盖 complete、两类 partial、SQL safety、conflict、双 citation 和篡改拒绝；全仓 deterministic pytest 为 **436 passed、3 skipped**。这证明两支预算、Evidence 绑定和安全失败策略，不证明开放 Hybrid 意图理解、远程综合质量或真实大语料收益。
+
+4. **用 go/no-go 审计决定是否进入 RAG Subgraph，而不是看到失败就添加循环。**
+
+   M34 已经暴露 lexical 漏召回、多文档 context packing、Composer support 拒绝和 provider unavailable。如果把这些失败全部归结为“需要 Agentic RAG”，系统可能增加搜索轮数和 token，却没有任何证据表明第二次动作能找到新材料。
+
+   P6 没有直接开发 Subgraph，而是只读核验六份冻结 M34 artifact：
+
+   - 输入必须同时匹配 SHA-256、dataset/question-set/split/profile、retrieval runtime 与 Composer identity；不一致就失败关闭，不能拿不可比数据凑结论；
+   - 审计只分类 60 dev，120 held-out 只校验身份和闭合，不读取逐题失败来反向设计动作。
+
+   **dev 失败分类**：retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`（审计规则下未能归入前四类失败层的样本，含证据链无缺口的成功样本）。
+
+   **go/no-go 结论**：现有证据确实包含可复现的非 provider 失败，也保持了 dev/held-out 隔离；但没有证明一种“由首次 Observation 选择的允许动作”能够新增有效 Evidence，也没有可比的额外预算，因此严格结论是 **`no_go`**。external lexical 默认不变，零 provider 调用，也没有预埋一个空壳 Subgraph。
+
+   **验证**：专项测试 **5 passed**，M31–M38 回归 **203 passed**，全仓 **441 passed、3 skipped**。`no_go` 既不代表 RAG 质量已经解决，也不代表 Subgraph 永久没有价值，它只说明当前证据不足以授权这次复杂度扩张。
+
+5. **最后用安全运行身份和 closed-world assurance，把各条路径收成同一份技术事实。**
+
+   随着 initial、resume、follow-up 和 Hybrid 都进入 `/api/query`，仅靠“每个模块各自测试通过”仍可能出现拼装缝隙：API 返回一种状态，Trace 记录另一种状态；某条路径缺 runtime identity，却被总分掩盖；历史质量数字甚至可能被误填进当前技术 Gate。
+
+   P7 做了两件事：
+
+   - **`phase4-trace-runtime-v1`（安全运行身份）**：从同一 `AgentTurnResult` 的安全投影构造。SQL 只读取 safe ledger runtime ref，RAG 只读取已有 diagnostics，Hybrid 只增加 thin plan、Synthesizer 和安全 branch 摘要。缺 identity 时 Trace 记 `unavailable`，不阻断正常 API；但 canonical assurance 会把它判为失败，从而同时保留 Trace 的旁路性质和验收的严格性。
+   - **五路径 rehearsal（演练）**：对 SQL、RAG、Hybrid、澄清恢复和安全拒绝各执行一次，用同次 response/Trace 计算不可逆 `execution_identity`（执行身份摘要），检查四轴、EvidenceRef/citation、Graph 次数、thread lifecycle 与非泄露。P7 manifest 只接受 P1、P2 retrieval/answer、P3、P4 turn/follow-up、P5、M39 P6 verified `no_go`、P7 rehearsal 共九个 exact family（精确家族清单）；M27 历史数字和 M34 质量分数没有可填槽位。
+
+   **验证**：M40 聚焦最终 **7 passed**，M31–M39 回归 **208 passed**，全仓 deterministic pytest **447 passed、3 skipped、1 warning**。这证明当前五条 API/Trace 路径与九类技术证据能够闭合；它不等于用户人工验收、生产认证、真实 provider 质量，也没有把 P6 `no_go` 翻成 Subgraph 完成。
 
 ### 阶段主线图
 

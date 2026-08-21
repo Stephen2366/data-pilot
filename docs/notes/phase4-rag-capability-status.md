@@ -28,6 +28,33 @@ Phase 4 roadmap 并没有要求所有设想都必须在阶段内实现，也不�
 
 因此，“Phase 4 已完成”应理解为：**既定主线已经按允许的最小切片、决策门与 P7 technical assurance 收口；后续 hardening 与能力泛化用于支撑更强 Agent，而不是重新判定 Phase 4 是否完成。**
 
+还未正式开发 phase 4 时，对于 roadmap 的预期如下表（仅供参考）：
+
+| 概念                  | 体现程度       | 当前方案中的体现                                             |
+| --------------------- | -------------- | ------------------------------------------------------------ |
+| Harness Engineering   | 核心主线       | LangGraph 统一管理状态、Tool 调度、预算、失败恢复、停止条件、Trace 和 Eval。 |
+| Agent Loop / 循环设计 | 核心主线       | `Action → Observation → Evidence Gate → Next Action`，循环有预算、reason code 和明确终止条件。 |
+| Tool Use / 工具调用   | 核心主线       | Text2SQL 和 Knowledge/RAG 作为两个独立 Tool，成功返回 typed Evidence，失败返回结构化错误。 |
+| 工具调用失败处理      | 核心主线       | 区分可恢复、不可恢复、权限拒绝和外部服务不可用；对应有限重试、澄清、partial 或停止。 |
+| Agent 编排            | 核心主线       | LangGraph 负责 SQL、RAG、Hybrid 路由、分支汇合、Evidence 检查和最终状态。 |
+| Agentic RAG           | 中等，条件增强 | RAG 首先使用确定性 Pipeline；中后期若 Eval 证明需要，再加入有界 LangGraph RAG Subgraph。 |
+| ReAct                 | 受控体现       | 采用“动作—观察—再决策”的思想，但不做开放式、无限自主研究。   |
+| Memory                | 有限体现       | 主要建设同一 thread 内的任务状态和短期记忆，不建设通用记忆平台。 |
+| 短期记忆机制          | 主线能力       | 保存已确认条件、指代关系、任务状态、安全摘要和有效 Evidence reference。 |
+| 长期记忆机制          | Phase 4 后考虑 | 不在主线建设跨会话用户画像、偏好和长期历史召回。             |
+| 长期对话记忆召回      | 暂不建设       | 需要额外处理过期、纠错、删除、权限变化和隐私问题，阶段四结束后再决定。 |
+| 多轮对话              | 有限支持       | 支持澄清后恢复任务，以及基于上一轮结果的有限追问；不是通用聊天机器人。 |
+| 上下文管理            | 核心主线       | State 保存运行事实，Context Builder 只向当前节点提供最小必要上下文。 |
+| Context Compact       | 基础版         | 首版主要裁剪无关历史、保留条件和 Evidence reference；复杂自动摘要和多层压缩后置。 |
+| 长上下文治理          | 部分体现       | 区分候选 Evidence、选中 Evidence、进入模型的 Evidence 和最终引用 Evidence；高级压缩后置。 |
+| 测评效果              | 核心主线       | 使用固定 corpus、Scenario、typed assertion 和同题一次执行，分别评 route、retrieval、citation、answer、Hybrid、安全和循环。 |
+
+总体上可以概括为：
+
+- **重点做深**：Harness、LangGraph 编排、有界循环、Tool Use、失败恢复、Evidence、上下文管理和 Eval。
+- **有限实现**：多轮对话、短期记忆、ReAct 和 Agentic RAG。
+- **后续补强**：长期记忆、跨会话召回、复杂 context compact、开放式 ReAct 和多 Agent。
+
 ### 1.2 M40 结束时的概念体现程度
 
 | 概念 | 体现程度 | 当前实现 | 明确边界 |
