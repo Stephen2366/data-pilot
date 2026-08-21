@@ -1279,45 +1279,58 @@ M34 大语料与真实 Eval
 
 M35 解决的是“系统已经有两支专业队伍，却没有统一调度台”的问题。Text2SQL 会查数据库，RAG AnswerFlow 会查文档、做权限检查和引用校验；但此前它们各自成立，普通 `/api/query` 还没有一个可信的总入口决定：**这题该交给谁、能不能执行、最后到底是答完了、需要澄清、技术不可用，还是被安全规则拦住**。
 
-这次加的 Harness 可以类比 SpringBoot 里的一个很薄的业务编排层：它不把 SQL 生成、知识检索重新实现一遍，只负责一次请求的路由、调用一个深 Tool、汇总最终状态并停止。请求进来后，先解析可信 caller，再由 Router 在 SQL、RAG 或不调用 Tool 之间做保守决定；Tool 返回结构化 Observation，最后由唯一 controller 生成结果。**API、JSONL Trace 和 Eval 都从同一个 `AgentRunResult` 投影**，因此不会再出现 API 说成功、Trace 说 blocked、Eval 又按另一套规则判卷的情况。
+这次的 Harness 可以类比一栋楼的**前台 + 固定排班**：你问“6 月 GMV 是多少”，前台把你引到数据库窗口；问“退款政策是什么”，引到文档窗口；问“帮我删掉订单表”，前台直接拒绝，连门都不让进。Router 就是那个前台，Harness 是那套排班规则——**一次请求只派一个专家、办完就收工**。它不把 SQL 生成、知识检索重新实现一遍，只负责路由、调用一个深 Tool、汇总状态并停止；**API、JSONL Trace 和 Eval 都从同一个 `AgentRunResult` 投影**，不会再出现 API 说成功、Trace 说 blocked、Eval 又按另一套规则判卷的情况。
 
-这个版本刻意只做**单轮、最多一个 Tool**。它不是完整自主 Agent：没有恢复循环、thread、Hybrid 双路汇合、远程 Router 或生产登录系统。M35 的价值是先把“调度一次并诚实结束”做成可靠地基，下一阶段才有资格讨论失败后要不要重试或补问。
+这个版本刻意只做**单轮、最多一个 Tool**：没有恢复循环、thread、Hybrid 双路汇合、远程 Router 或生产登录系统。M35 的价值是先把“调度一次并诚实结束”做成可靠地基，下一阶段才有资格讨论失败后要不要重试或补问。
 
 ### 这次做了什么
 
-这次工作的核心矛盾是：既要让 SQL 和 RAG 真正进入同一个用户入口，又不能因为引入 LangGraph 就拆坏已经验证过的 Text2SQL、ACL、Evidence、AnswerFlow 和 Citation Validator。最终采用了**浅编排、深 Tool、单一事实投影**的方案，并用 caller 篡改、Hybrid、SQL Guard、技术不可用和 Trace 一致性反例证明边界没有被接线工作冲掉。
+这一步的矛盾是：SQL 和 RAG 必须走进同一个用户入口，但引入 LangGraph 不能拆坏已经验证过的 Text2SQL、ACL、Evidence、AnswerFlow 和 Citation Validator。最终答案是**浅编排、深 Tool、单一事实投影**——Graph 只负责调度，两条专业链路原样保留，所有出口从同一份执行结果读数据。
 
 1. **建立唯一的单轮 Harness，而不是再写一套业务流水线**
 
-   **原来的问题**是 `/api/query` 主要围绕 SQL 组织，M33 的 `RAGAnswerFlow.run()` 虽然内部可信，却没有接到统一 Router、HTTP 响应和全局 Trace。若直接在 API 里继续堆 `if SQL / elif RAG`，路由、状态和失败话术会散落在不同层；若把 Text2SQL 和 AnswerFlow 的每个内部步骤都画成 Graph 节点，又会让顶层 Graph 与深模块争夺控制权。
+   M35 之前，`/api/query` 基本是 SQL 专属入口，M33 的 `RAGAnswerFlow.run()` 虽然内部可信，却没被接到统一 Router、HTTP 响应和全局 Trace。摆在面前的是两个坑：继续在 API 里堆 `if SQL / elif RAG`，路由、状态和失败话术会散落在不同层；反过来把 Text2SQL 和 AnswerFlow 的每个内部步骤都画成 Graph 节点，顶层图又会和深模块争夺控制权。
 
-   M35 引入 **Harness**——它不是“更聪明的模型”，而是一张受控执行地图。拓扑固定为 `START → route → (sql_tool | rag_tool | terminal) → controller → END`。Router 只选路径，Tool 只报告 Observation，controller 是唯一能写最终四轴和终止动作的地方。DB Session、Router 和 Tool adapter 通过 LangGraph runtime context 注入，不塞进可持久 state；`graph_steps` 使用显式 reducer，审计顺序不会被未来分支静默覆盖。
+   于是有了 **Harness**——一张受控执行地图，不是“更聪明的模型”。拓扑固定为 `START → route → (sql_tool | rag_tool | terminal) → controller → END`：Router 只选路径，Tool 只交回 Observation（工具执行回执），controller 是唯一能写最终四轴（route / execution / answer / safety）和终止动作的地方。DB Session、Router 和 Tool adapter 通过 LangGraph runtime context（每次执行注入的依赖容器）传入，不塞进要持久化的 state；`graph_steps` 用显式 reducer（只追加、不覆盖的合并规则），将来加分支也不会悄悄抹掉审计顺序。
 
-   没有引入 checkpoint、Store、interrupt 或循环，因为 M35 只证明一次执行；这些能力会带来 thread ownership、预算和恢复策略，属于 P4。**验证证据**包括拓扑、每轮最多一个 Tool、terminal 可终止、非法 caller fail closed，以及最终全仓 397 条测试通过。它仍**不能证明**系统已经能多轮恢复或长期记忆。
+   这张图刻意不做 checkpoint、Store、interrupt 或循环——那些是 P4 才处理的问题。测试覆盖了固定拓扑、每轮最多一个 Tool、terminal 可终止、非法 caller 失败关闭，全仓 397 条测试通过；但它只证明“调度一次并诚实结束”，不证明多轮恢复或长期记忆。
 
 2. **把 Text2SQL 与 RAG 保持为两个深 Tool，并让失败各归各位**
 
-   **原来的问题**是旧 SQL 链路常把 `blocked_reason` 当作万能错误字段：SQL Guard 拒绝、QueryPlan 语义不支持、LLM 解析失败、数据库 driver 错误可能都被压成 `safety_status=blocked`。这会误导用户和 Eval——“服务暂时不可用”并不等于“你触碰了安全规则”。RAG 侧若被 Graph 重新拼答案，也会绕过 M33 已验证的 Gate、Composer 和 Citation Validator。
+   旧 SQL 链路有个很坑的习惯：不管出了什么事，都往 `blocked_reason`（安全拦截原因）里塞。“数据库暂时不可用”和“你触碰了安全规则”天差地别，对外却长成一个样子——用户以为是自己违规，Eval 也把技术故障误判成安全拦截。RAG 那边还有一层隐患：如果为了接入 Graph 就让它重新拼答案，M33 做好的 Gate（证据门）、Composer（撰写器）、Citation Validator（引用校验器）就全被绕过了。
 
-   两个 adapter 因此只做**合同翻译**。Text2SQL 成功后才生成可复算 fingerprint、SQL Evidence 和 ledger；SQL Guard、确定性语义拒绝、output-projection 合同拒绝、provider unavailable 与 driver failure 分开映射。RAG adapter 每轮只调用一次 `RAGAnswerFlow.run()`，把已经闭合的四轴、validated citations、`docs_used` 和 EvidenceRef 安全投影交给 Graph，文档正文不进入顶层 Trace。
+   所以两个 adapter 的活儿压得很薄：**只做翻译，不重写逻辑**。SQL 侧只有真正执行成功，才生成 fingerprint（可复算的“结果指纹”）、SQL Evidence（结构化证据）和 ledger（记录本轮证据来源的账本）。失败则按性质分开出口：
 
-   用户确认的**方案 A**进一步规定：QueryPlan 多投影字段属于执行前确定性合同拒绝，保持 `completed / no_answer / blocked`；LLM 无法解析 JSON/SQL 属于 `external_unavailable / no_answer / passed`，且不写 `blocked_reason`。没有选择“两类都 blocked”的旧兼容方案，因为那会继续混淆安全与技术故障；也没有把 projection 拒绝降为普通技术错误，因为那会弱化 SQL fidelity。聚焦 7 条合同测试和全仓回归证明了这组映射；但它**没有运行真实 Text2SQL LLM Eval**，所以不代表远程模型稳定性已经提升。
+   - SQL Guard 拦截 → 安全 `blocked`；
+   - QueryPlan 输出投影不匹配 → 执行前确定性合同拒绝，`completed / no_answer / blocked`；
+   - 确定性语义拒绝（比如请求了不存在的字段）→ `completed / unsupported / blocked`；
+   - LLM 解析 JSON/SQL 失败 → `external_unavailable`（外部不可用）/ `no_answer` / `passed`，不写 `blocked_reason`；
+   - 其余 driver、pipeline 技术故障 → `failed`，safety 仍为 passed。
+
+   这是用户确认的**方案 A**。没有沿用“两类都 blocked”的旧兼容做法——那会让安全和故障继续混在一起；也没有把投影拒绝降级成普通技术错误——那会丢掉 SQL fidelity（SQL 与计划的输出一致性）这道保护。
+
+   RAG 侧同样克制：每轮只调用一次 `RAGAnswerFlow.run()`，把四轴、validated citations、`docs_used` 和 EvidenceRef 的安全投影交给 Graph，**文档正文从头到尾不进入顶层 Trace**。
+
+   这组映射有 7 条聚焦合同测试和全仓回归兜底，旧行为没有被接线冲掉；但本轮没跑真实 Text2SQL LLM Eval，证明的是“失败被正确分类”，而不是“远程模型更稳了”。
 
 3. **让 caller 先可信，再允许 Router 调 Tool**
 
-   **原来的问题**是请求体里的 `user_role` 本质上只是客户端自报字符串。如果把它直接传给 SQL RBAC 或文档 ACL，用户写个 `admin` 就可能获得更高权限。M31 虽然已经定义了 `TrustedCaller`，但普通 API 还缺少组装 seam。
+   请求体里的 `user_role` 本质上只是客户端自报的一行字符串：写什么就是什么。直接拿它去过 SQL RBAC 或文档 ACL，等于把权限判断交给用户自己——写个 `admin` 就可能提权。M31 虽然已经定义了 `TrustedCaller`（可信调用者），但普通 API 一直缺一个组装它的入口。
 
-   用户在 G-M35-1 选择**方案 A**：只有明确的 `local/demo/test` 环境由应用组装层注入 fixture resolver；resolver 先给出固定 caller 和完整 resolved roles，请求的 role 只能从中选择 active role，不能凭请求现场创建新身份。其他环境没有 authenticated resolver 时，在任何 SQL/RAG Tool 调用前以 `caller_untrusted` 停止。Trace 记录 caller safe ref 和 fixture 来源，但不把 demo 身份包装成 production auth。
+   用户确认的**方案 A**把这件事收窄成一个明确的 seam（接缝）：只有 `local/demo/test` 三个环境，由应用启动时注入 fixture resolver（测试夹具身份解析器）。它先给出一组固定的 caller 和完整角色集，请求里的 role 只能从中选一个 active role，不能现场造出新身份；其他环境没有 authenticated resolver，就在任何 SQL/RAG Tool 之前以 `caller_untrusted` 停下。Trace 会记 caller safe ref 和 fixture 来源，但不会把 demo 身份包装成生产认证。
 
-   没有采用“所有环境都必须手工注入 resolver”的方案 B，因为当前学习/demo 默认入口会全部失效，并可能诱使后续开发者为了跑起来又在 API 内直信 role；方案 A 的风险则是环境配置错误会让人误解信任等级，所以边界和测试必须一直保留。unknown role Tool 前失败的 API/Trace 反例已经通过；这只证明**本地 fixture 不越过其角色集合**，不证明 JWT/OAuth、企业目录或 tenant/thread owner 已实现。
+   方案 B 要求所有环境手工注入 resolver，被否了：本地学习/demo 的默认入口会全部失效，还容易逼着开发者为“跑起来”在 API 里重新直信 role。方案 A 的风险是环境配置错误会让人误解信任等级，所以边界和测试必须一直保留。unknown role 在 Tool 前失败的 API/Trace 反例已经通过——它证明的是**本地 fixture 不越过自己的角色集合**，不是 JWT/OAuth、企业目录或 tenant/thread owner 已经实现。
 
 4. **让 API、Trace 和 Eval 只读同一份执行事实**
 
-   **原来的问题**是一个系统最难排查的情况不是直接报错，而是三个出口各自“合理地”解释同一请求：API 根据异常拼话术，Trace 根据旧字段记录状态，Eval 再重跑或重新猜 route。这样即使测试全绿，也可能测的是不同执行。
+   最难排查的 bug 不是直接报错，而是三个出口各自“合理地”解释同一次请求：API 按异常拼话术，Trace 按旧字段记状态，Eval 再重跑一遍或重新猜 route。这样哪怕测试全绿，测的也可能是三次不同的执行。
 
-   M35 把 `AgentRunResult` 设为**单一事实源**。API projector 只负责保留旧 SQL/rows/chart/docs_used 兼容字段并增加 execution/answer/reason/citations；Trace 同时记录 route decision、graph steps、caller safe ref、Tool Observation、EvidenceRef 和 termination action；独立 `phase4-harness-v1` Eval 对 Scenario、execution 和 assertion identity 做 closed-world 校验，并断言一题只 invoke 一次 Graph。
+   M35 于是把 `AgentRunResult` 定为**单一事实源**，三个出口都只做投影、不许反写：
+   - **API projector**：保留旧 SQL/rows/chart/docs_used 兼容字段，另加 execution/answer/reason/citations；
+   - **Trace**：记录 route decision、graph steps、caller safe ref、Tool Observation、EvidenceRef 和 termination action；
+   - **Eval**：独立的 `phase4-harness-v1` 对 Scenario、execution 和 assertion 做 closed-world（封闭清单）校验，并断言一题只 invoke 一次 Graph。
 
-   没有让 Eval 为了评分重新调用 Tool，也没有把 M27、M31–M34 的历史 artifact 改写成新格式，因为那会破坏“一次执行、多处只读”的证据身份。**最终证据**是 `397 passed`、compileall 和 diff check 全部通过，且 RAG Trace 不含文档正文。尚未证明的边界是：真实远程 Router、Milvus、external Composer/Judge 和 LangFuse Cloud 都未在 M35 运行。
+   两个“不做”也一起写进了合同：Eval 不为评分重新调用 Tool；M27、M31–M34 的历史 artifact 一律不改写成新格式，否则“一次执行、多处只读”的证据身份就破了。全仓 397 passed、compileall 和 diff check 通过，且 RAG Trace 不含文档正文。真实远程 Router、Milvus、external Composer/Judge 和 LangFuse Cloud 都没在 M35 运行，所以这一节证明的是投影一致性，不是这些外部链路的质量。
 
 ### 新概念
 
@@ -1375,9 +1388,15 @@ M35 解决的是“系统已经有两支专业队伍，却没有统一调度台�
 - **一个 result，多种投影**：API、Trace、Eval 不重新判断 route/四轴，减少口径漂移和重复执行。
 - **当前边界**：没有 P4 loop/thread/context、P5 Hybrid、生产认证、远程 Router，也没有把 M34 external profile 接入默认 RAG。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在 DataPilot 的 Phase 4 P3 中实现了一个单轮 LangGraph Harness，把已有 Text2SQL pipeline 和可信 RAG AnswerFlow 接到同一个 `/api/query`。我没有把两个成熟流水线拆成大量 Graph 节点，而是把它们作为深 Tool，顶层只负责 caller 解析、保守路由、至多一次 Tool 调用和唯一 controller 收口。内部用 route、execution、answer、safety 四轴表达结果，例如 QueryPlan projection mismatch 是确定性 blocked，而 LLM 解析失败是 external unavailable、safety passed。local/demo/test 通过显式 fixture resolver 提供可信 caller，请求体 role 只能选择 resolved role，其他环境缺认证 resolver 时 Tool 前失败关闭。API、JSONL Trace 和独立 Harness Eval 都只从同一个 AgentRunResult 投影，一题只 invoke 一次 Graph。最终全仓 397 条确定性测试通过；同时我明确没有把它包装成完整自主 Agent，因为 P4 恢复循环、Hybrid、生产认证和远程 Router 仍未实现。
+1. **“接 LangGraph 最容易犯的错，就是把成熟流水线拆成一张大图”**：很多人一上 LangGraph 就把 Text2SQL 的 schema 检索、QueryPlan、SQL Guard 每一步都画成节点，图看着很完整，实际上顶层图和深模块开始抢控制权，安全步骤还可能被图跳过或重排。我反着来：Graph 固定成 `route → tool → controller`，两个成熟流水线整个包成深 Tool，顶层只管可信 caller、一次调用和唯一收口。一句话总结：**节点边界应该跟控制权一致，而不是跟函数数量一致**。
+
+2. **“四轴状态把‘没答上’和‘触红线’分家”**：旧系统把 LLM 解析失败、数据库不可用和 SQL Guard 拦截全写成 blocked，监控和 Eval 全乱套。我按 route / execution / answer / safety 四轴拆开：LLM 挂了是 `external_unavailable`（execution 轴），没拿到答案是 `no_answer`（answer 轴），只有 SQL Guard 拦截才写 `blocked_reason`（safety 轴）。核心逻辑一句话：“服务暂时不可用”不是“用户违规”。
+
+3. **“请求体里的角色，我只信一半”**：`user_role` 是客户端自报字符串，写个 `admin` 就能提权。我的做法是：local/demo/test 环境由 fixture resolver 注入固定身份，请求的 role 只能从解析出的角色里选一个，不能现场造；其他环境没有认证 resolver，就在任何 Tool 之前失败关闭。这是标准的 fail-closed：身份不明确时宁可停，也不猜一个默认权限。
+
+### 面试官追问
 
 1. **[基础追问] 为什么你把 Text2SQL 和 RAG 当成两个 Tool，而不是把内部每一步都做成 LangGraph 节点？**
 
@@ -1393,11 +1412,11 @@ M35 解决的是“系统已经有两支专业队伍，却没有统一调度台�
 
 4. **[压力追问] 你的 Router 只是关键词规则，这也能叫 Agent 吗？是不是为了用 LangGraph 而用 LangGraph？**
 
-   这个质疑对“通用智能路由”是成立的，M35 没有证明那项能力。模块目标是先建立可信的执行和停止合同：caller 必须可信、未知问题不能乱调用 Tool、每题最多一次执行、失败能按四轴归因。LangGraph 在这里提供显式状态迁移、conditional edge、runtime context 和后续 P4 的稳定 seam，而不是用来包装关键词。当前 Router 是可替换 baseline；只有 Trace/Eval 出现真实失败簇、远程出站得到授权后，才值得增加模型 fallback。
+   这个质疑对“通用智能路由”是成立的，M35 没有证明那项能力。模块目标是先建立可信的执行和停止合同：caller 必须可信、未知问题不能乱调用 Tool、每题最多一次执行、失败能按四轴归因。LangGraph 在这里提供显式状态迁移、conditional edge、runtime context 和后续 P4 的稳定 seam，而不是用来包装关键词。当前 Router 是可替换 baseline；只有 Trace/Eval 出现真实失败簇、远程出站得到授权后，才值得增加模型 fallback喵。
 
 5. **[压力追问] 你加了一层 Graph，却没有让答案质量变高，这是不是工程自嗨？**
 
-   如果目标是当场提高召回或生成质量，这个模块确实没有做到，也没有这样宣称。它解决的是原系统无法安全组合 SQL/RAG、状态口径会漂移、请求 role 不可信以及评测可能重复执行的问题。397 条回归、caller tamper、one-invoke、Trace 非泄露和错误分类证明这些工程合同成立。下一阶段的恢复或 Hybrid 如果没有这层预算、终止和证据 seam，很容易变成无界重试或双 Tool 乱跑；但是否进入 P4、先恢复哪类失败，仍要用真实失败数据决定。
+   如果目标是当场提高召回或生成质量，这个模块确实没有做到，也没有这样宣称。它解决的是原系统无法安全组合 SQL/RAG、状态口径会漂移、请求 role 不可信以及评测可能重复执行的问题。397 条回归、caller tamper、one-invoke、Trace 非泄露和错误分类证明这些工程合同成立。下一阶段的恢复或 Hybrid 如果没有这层预算、终止和证据 seam，很容易变成无界重试或双 Tool 乱跑；但是否进入 P4、先恢复哪类失败，仍要用真实失败数据决定喵。
 
 ### 验证与下一步
 
@@ -1434,55 +1453,51 @@ python -m uvicorn app.main:app --reload
 
 ### 先用大白话讲
 
-M35 已经像一个靠谱的调度台：每个问题只交给一个 SQL 或 RAG 专家，也知道什么时候应该停下。但它碰到“这个怎么处理？”或“退款情况怎么样？”时，只能告诉用户“信息不够”，下一次用户补充“退款政策”或“2026 年 6 月、按渠道统计”时，系统并不知道这句话是在补哪一个任务，只能把它当成全新问题。
+M35 已经像一个靠谱的调度台：每个问题只交给一个 SQL 或 RAG 专家，也知道什么时候该停。但它碰到“这个怎么处理？”或“退款情况怎么样？”时，只能告诉用户“信息不够”；下一次用户补充“退款政策”或“2026 年 6 月、按渠道统计”时，系统并不知道这句话是在补哪一个任务，只能当成全新问题。
 
-M36 给调度台加了一张有安全规则的**待办卡**。第一次发现条件不足时，系统把原任务、缺哪些结构化字段、任务属于谁、版本号和过期时间写进进程内 checkpoint；第二次补充时，只有原 owner、同 tenant、同 active role 且版本正确，才能原子地领取这张卡。领取成功后，系统把原问题和补充值合成一个最小当前任务，再走原来的 M35 Graph，最多调用一个深 Tool。错误身份、过期、重复、并发抢占或版本冲突都会在 Tool 前停止。
+M36 给调度台加了一张有安全规则的**待办卡**。比如你问“这个怎么处理？”，前台不再干巴巴回一句“信息不够”，而是给你一张表：“缺主体，请填，比如‘退款政策’”；你回来填“退款政策”，系统就把原问题和补充值合成同一个任务继续办。这张卡只认**你本人 + 你的租户 + 你当前角色 + 正确的版本号**，还有 15 分钟有效期：别人拿你的卡号续办会被拒，同一张卡交两次只办一次，卡过期了也作废；办完之后无论成败，卡都会被撕掉，不会自动“再来一次”。
 
 这不是通用聊天记忆，也不是完整的 LangGraph interrupt/resume。它只完成 **pre-Tool clarification（调用工具前澄清）**的一次恢复闭环：先把“暂停、补问、继续”最容易出安全问题的生命周期做扎实，再决定以后是否需要 Evidence 重取证、更多 Context 模板或持久化。
 
 ### 这次做了什么
 
-本模块处理的**核心矛盾**是：系统需要跨两个 HTTP turn 延续一个未完成任务，但又不能把 thread id 当权限、让重复请求多次调用 Tool、把任意聊天历史塞回 Prompt，或者为了一个小闭环提前建设整套会话平台。最终方案是把生命周期集中在一个轻量深模块中，让 Graph、API、Trace 和 Eval 只消费受控结果。
+这一步要解决的两难是：任务得跨两个 HTTP 请求活下去，但 thread id 不能当权限、重复请求不能重复调 Tool、聊天历史不能随便塞回 Prompt，也不能为了一个小闭环提前建一整套会话平台。答案是**把生命周期收进一个轻量深模块**，Graph、API、Trace 和 Eval 只消费它给出的受控结果。
 
 1. **把“不清楚”变成可填写、可校验的结构化任务**
 
-   **原来的问题**是 clarification 只有一句通用提示，没有说明具体缺什么，也没有机器可校验的恢复合同。用户下一次随便发一段文字，上层既无法确定字段是否补齐，也可能把额外内容误当系统控制信息。
+   以前系统说“信息不够”就完了——用户不知道到底缺什么，系统手里也没有一张可以核对的清单。更麻烦的是，用户下一轮随便发一段文字，上层既没法确认字段补齐了没有，还可能把用户的话误当成系统控制信息。
 
-   M36 新增 **`ClarificationSpec`（结构化澄清说明）**：它像一张 Pydantic 表单定义，明确字段 key、中文标签、值类型、允许枚举和最大长度。首版只冻结两个真实场景：`subject` 负责补“具体政策、规则、指标或业务对象”；`analytics_scope` 负责补时间范围和分组维度。`ClarificationContextBuilder` 先做 closed-world 校验——字段必须不多不少——再用固定模板生成最小 current task，而不是让 LLM 自由改写整段历史。
+   M36 于是新增 **`ClarificationSpec`（结构化澄清说明）**：它像一张 Pydantic 表单定义，写清楚字段 key、中文标签、值类型、允许枚举和最大长度。首版只冻结两个真实场景：`subject` 补“具体政策、规则、指标或业务对象”，`analytics_scope` 补时间范围和分组维度。`ClarificationContextBuilder` 先做 closed-world（封闭世界：只认已登记字段）校验——字段必须不多不少——再用固定模板拼出最小 current task，而不是让 LLM 自由改写整段历史。
 
-   没有做通用槽位抽取、长对话 summary 或远程 query rewrite，因为这些能力会引入新的准确率、Prompt Injection、token 和出站评测问题。**验证证据**覆盖缺字段、额外字段、非法枚举、主体恢复到 RAG、分析范围恢复到 SQL；非法补充值发生在 claim 前，不会消耗 checkpoint version。它证明两个冻结模板能保真恢复，**尚未证明**开放问法都能识别缺失条件。
+   没有做通用槽位抽取、长对话 summary 或远程 query rewrite，那些会带来新的准确率、Prompt Injection、token 和出站评测问题。缺字段、额外字段、非法枚举、主体恢复到 RAG、分析范围恢复到 SQL 都有测试兜底；非法补充值在 claim 之前就被拦下，不会消耗 checkpoint version。这些测试证明两个冻结模板能保真恢复，不代表开放问法都能自动识别缺失条件。
 
 2. **用 versioned checkpoint 保证只有正确的人能恢复一次**
 
-   **原来的问题**是如果只用一个 `dict[thread_id] = question`，任何拿到 id 的人都可能继续任务；两个并发请求也可能同时读到 pending，然后各自调用一次 SQL/RAG。服务端还无法区分状态已经变化、任务过期、被清理或服务重启后丢失。
+   如果只用一个 `dict[thread_id] = question` 存待办，麻烦会一个接一个：任何拿到 id 的人都能继续别人的任务；两个并发请求可能同时读到 pending，然后各自调一次 SQL/RAG；服务端也说不清任务到底是过期了、被清理了还是重启后丢了。
 
-   **`ThreadCheckpointManager`（线程检查点管理器）**把待办卡建模为 `pending → claimed → resolved/cleared` 的单调状态机，并为每次迁移递增 version。它在一个 `RLock` 内完成 owner、tenant、active role、TTL、state version、expected version 和补充值校验，再原子 claim；慢 Graph/Tool 在锁外执行，不会堵住其他 thread。这里可以类比 MySQL 的乐观锁：请求必须带自己看到的版本，只有一个竞争者能成功更新，其他人拿到稳定冲突结果。
+   **`ThreadCheckpointManager`（线程检查点管理器）**把待办卡建成一条单调状态机：`pending → claimed → resolved/cleared`，每次迁移都递增 version。领取动作叫 claim：在一个 `RLock` 里完成 owner、tenant、active role、TTL（有效期）、state version、expected version 和补充值校验，全部通过才原子领取；慢 Graph/Tool 在锁外执行，不会堵住其他 thread。这很像 MySQL 的乐观锁——请求必须带着自己看到的版本号，只有一个竞争者能更新成功，其他人拿到稳定的冲突结果。
 
-   安全审查还发现 `TrustedCaller.audit_ref` 不包含 tenant，因此不能单独当 owner。最终默认 owner 使用 `audit_ref + tenant_id` 的内部哈希，认证适配器若提供专门的 `thread_owner_ref` 则使用其作用域。错误 owner 与不存在 thread 对外统一为 `conversation_unavailable`，避免攻击者通过返回差异探测某个 thread 是否存在。
+   安全审查还揪出一个细节：`TrustedCaller.audit_ref` 不含 tenant，不能单独当 owner。最终默认 owner 是 `audit_ref + tenant_id` 的内部哈希，认证适配器如果提供了专门的 `thread_owner_ref` 就用它做作用域。错误 owner 和“thread 不存在”对外统一返回 `conversation_unavailable`，避免攻击者靠返回差异试探某个 thread 是否存在。
 
-   没有采用“Tool 失败后把状态退回 pending 再试一次”的宽松方案：claim 之后执行权已经被消费，自动回滚可能导致副作用重复。并发测试证明同一 expected version **恰好一个 claim 成功**，另一个在 Graph 前拒绝；跨 tenant、过期、clear、restart loss、状态版本不兼容和重复恢复也都有确定性反例。当前 checkpoint 仍是单进程内存，**不能证明**重启恢复、多 worker 共享或长期容量已经解决。
+   也没有采用“Tool 失败就把状态退回 pending 再试一次”的宽松做法：claim 之后执行权已经被消费，自动回滚可能让副作用重复执行。并发测试证明同一 expected version **恰好一个 claim 成功**，输家在 Graph 前就被拒绝；跨 tenant、过期、clear、重启丢失、状态版本不兼容、重复恢复都有确定性反例。当前 checkpoint 仍是单进程内存，所以这里不承诺重启恢复、多 worker 共享或长期容量。
 
 3. **在 M35 Graph 外增加 turn seam，不拆坏原来的深 Tool**
 
-   **原来的问题**是直接把暂停/恢复塞进 Router 或 SQL/RAG Tool，会让每个专业模块都开始认识 thread、version 和 HTTP 生命周期；直接把 M35 Graph 改成可中断 Graph，又会改变“一次 invoke → 一份结果”的稳定合同。
+   暂停/恢复这件事放错地方，代价会很大：塞进 Router 或 SQL/RAG Tool，每个专业模块都得开始认识 thread、version 和 HTTP 生命周期；把 M35 Graph 改成可中断 Graph，又会破坏“一次 invoke → 一份结果”的稳定合同。
 
-   M36 新增 **`run_turn()`（回合级入口）**：initial turn 先执行一次 M35 Graph，若结果是 clarification 才创建 pending checkpoint；resume turn 先 claim，再把 Context Builder 生成的当前任务交给同一个 M35 Graph，结束后推进 resolved。生命周期前置拒绝不调用 Graph；accepted turn 恰好调用一次 Graph，Graph 内仍至多一个 SQL/RAG 深 Tool。补充后如果仍然不清楚，则返回 `budget_exhausted` 并结束，不创建第二层 pending。
+   所以 M36 在 Graph 外面加了一层 **`run_turn()`（回合级入口）**：initial turn 先跑一次 M35 Graph，只有结果是 clarification 才创建 pending checkpoint；resume turn 先 claim，再把 Context Builder 拼好的当前任务交给同一个 M35 Graph，结束后推进 resolved。生命周期层面的拒绝不调用 Graph；accepted turn 恰好调用一次 Graph，Graph 内仍然至多一个 SQL/RAG 深 Tool。补充完还是不清楚，就返回 `budget_exhausted` 结束，不创建第二层 pending。
 
-   用户确认采用**方案 A：应用持有轻量进程内 checkpoint**。另一个方案是直接使用 LangGraph checkpointer + interrupt/resume，优点是未来可以恢复任意节点，代价是当前模块就要重写 Graph 生命周期、API、Trace 和异常关闭。选择 A 不是“先写一个假接口以后替换”，而是明确承认本模块只做 pre-Tool clarification；实现中没有预建 storage port 或伪装持久化。
-
-   M36/M35/config 聚焦回归为 **31 passed**，M31–M33 caller/ACL/outbound/Evidence/citation 安全回归为 **111 passed**。这些证据说明旧的单轮 SQL/RAG、可信 caller 和 Evidence 安全边界没有被恢复层绕过；它们**不代表**Tool retry、Evidence 跨轮复用或 Hybrid 已经完成。
+   用户确认的方案 A 是**应用持有轻量进程内 checkpoint**。另一个选项是用 LangGraph 自带的 checkpointer + interrupt/resume，好处是未来能恢复任意节点，代价是这个模块就得重写 Graph 生命周期、API、Trace 和异常关闭。选 A 不是“先写个假接口以后替换”，而是明确本模块只做 pre-Tool clarification；实现里没有预建 storage port，也没有伪装持久化。M36/M35/config 聚焦回归 31 passed、M31–M33 安全回归 111 passed，说明旧单轮 SQL/RAG、可信 caller 和 Evidence 边界没有被恢复层绕过——这不代表 Tool retry、Evidence 跨轮复用或 Hybrid 已经完成。
 
 4. **让 API、Trace 和 sequence Eval 能共同还原两轮过程**
 
-   **原来的问题**是 M35 的单题 Eval 只能证明系统正确停在 clarification，不能证明第二个 turn 的 owner、version、并发、过期和预算是否正确。若 API、Trace 和 Eval 各自拼 thread 状态，多轮事实还会再次出现口径漂移。
+   M35 的单题 Eval 只能证明系统“正确停在澄清”，证明不了第二个 turn 的 owner、version、并发、过期和预算对不对；如果 API、Trace、Eval 再各自拼 thread 状态，多轮事实又会开始各说各话。
 
-   `/api/query` 现在增量接受 `thread_id + expected_version + clarification_answers`，三者必须成组出现；首次 pending 响应返回可填写字段和合法 owner 可见的 thread 投影。JSONL Trace 只记录不可逆 `thread_safe_ref`、前后 version、action、`context_ref`、Graph 次数和 checkpoint runtime，不保存 raw thread id、补充值字典或完整 checkpoint。Streamlit 也能按服务端 spec 画最小补充表单，但本轮没有做浏览器人工体验检查。
+   所以这一轮把两个出口一起收紧。`/api/query` 增量接受 `thread_id + expected_version + clarification_answers`，三者必须成组出现；首次 pending 响应返回可填写字段和合法 owner 可见的 thread 投影。JSONL Trace 只记不可逆的 `thread_safe_ref`、前后 version、action、`context_ref`、Graph 次数和 checkpoint runtime，**不保存 raw thread id、补充值字典或完整 checkpoint**——排障再方便也不能把这两样写进日志，raw thread id 可能被拿去尝试恢复任务，用户补充的条件会扩大长期数据暴露面。Streamlit 能按服务端 spec 画最小补充表单，但本轮没做浏览器人工体验检查。
 
-   没有为了排障方便把完整 checkpoint 或补充值直接写入 Trace，因为日志中的 raw thread id 可能被拿去尝试恢复任务，用户条件也会扩大长期数据暴露面；也没有给 M35 的单轮 artifact 强行补 turn 字段，而是建立独立版本的 sequence family，避免历史分母和证据身份被改写。
+   Eval 这边升级成 **Sequence Eval（序列评测）**：不再把每个请求当孤立题目，而是把 initial、resume、clear 和 rejected attempt 组成同一条 sequence。`phase4-harness-turn-v1` 覆盖 8 组场景：主体到 RAG、分析范围到 SQL、错误 owner、过期版本、TTL、clear、并发单 claim、恢复预算。每个 accepted turn 一份 ExecutionEvidence，多条 assertion 只读同一份证据；artifact 会拒绝漏 turn、重复 execution、缺 assertion 或多次成功 resume。没有给 M35 的单轮 artifact 强行补 turn 字段，而是另立版本的 sequence family，避免历史分母和证据身份被改写。
 
-   新的 **Sequence Eval（序列评测）**不再把每个请求当孤立题目，而是把 initial、resume、clear 和 rejected attempt 组织成同一 sequence。`phase4-harness-turn-v1` 覆盖 8 组场景：主体到 RAG、分析范围到 SQL、错误 owner、过期版本、TTL、clear、并发单 claim 和恢复预算。每个 accepted turn 一份 ExecutionEvidence，多条 assertion 只读同一证据；artifact 会拒绝漏 turn、重复 execution、缺 assertion 或多次成功 resume。
-
-   最终全仓 deterministic pytest 为 **416 passed，1 个既有 warning**，compileall 和 diff check 通过。该结果证明确定性生命周期、API/Trace 投影和回归兼容；**尚未运行**真实 LLM Router/Text2SQL Eval、M34 external Answer Eval、Milvus/embedding、remote Composer/Judge 或 LangFuse Cloud，不能把它解释成真实开放对话能力提升。
+   全仓 deterministic pytest 416 passed、1 个既有 warning，compileall 和 diff check 通过。这一节证明的是确定性生命周期、API/Trace 投影和回归兼容；真实 LLM Router/Text2SQL Eval、M34 external Answer Eval、Milvus/embedding、remote Composer/Judge、LangFuse Cloud 都没有运行，不能把它读成开放对话能力提升。
 
 ### 新概念
 
@@ -1542,9 +1557,15 @@ M36 给调度台加了一张有安全规则的**待办卡**。第一次发现条
 - **确定性 Eval 不冒充开放智能**：416 条全仓测试和 8 组 sequence 证明生命周期合同与兼容性，不证明真实 LLM 能理解任意省略、指代或长对话。
 - **当前技术债**：checkpoint 不跨进程，resolved/cleared tombstone 暂不清扫，Streamlit 表单未做浏览器人工检查；下一轮需按真实失败和容量证据决定方向喵。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在 DataPilot 的单轮 LangGraph Harness 外实现了一次有界的结构化澄清恢复。首次问题缺主体或分析范围时，Router 返回 typed ClarificationSpec，应用创建带 owner、tenant、active role、TTL、state/version 的进程内 checkpoint；客户端补齐字段后，ThreadCheckpointManager 在锁内校验并原子 claim，再在锁外把最小 current task 交给原 M35 Graph，所以 accepted turn 恰好一次 Graph、至多一个深 Tool，错误 owner、过期、冲突和重复提交都在 Tool 前停止。claim 后失败不回 pending，避免重复执行。API、JSONL Trace 和 `phase4-harness-turn-v1` Eval 都从同一 turn/lifecycle fact 投影，Trace 不记录 raw thread id 或补充值。最终全仓 416 条确定性测试通过；我也明确限定它是单进程、一次恢复、两个 Context 模板，不代表持久会话、Tool retry 或开放多轮理解已经完成。
+1. **“一张只能领一次、还会过期的待办卡”**：澄清恢复最怕三件事：别人拿你的卡号、同一张卡重复办理、卡片永久有效。我把 checkpoint 做成 `pending → claimed → resolved/cleared` 的单调状态机，配 version 和 900 秒 TTL（有效期），在 `RLock` 里原子 claim（领取）——等价于 MySQL 乐观锁，两个线程同时抢，恰好一个成功。卡片还绑定 owner + tenant + active role：换个人、换个租户、换个角色都领不走。
+
+2. **“claim 之后不退票，哪怕 Tool 失败”**：很多人第一反应是“执行失败为什么不退回 pending 让用户重试”。因为 claim 意味着执行权已经消费，回滚会让 SQL 这类有成本、有副作用的操作重复执行。所以失败也推进 resolved，把技术原因如实记录，不自动重试。这是个刻意选择，面试时主动讲出来比被追问更好。
+
+3. **“不接 LangGraph 原生 checkpoint，是决策不是偷懒”**：LangGraph 自带 InMemorySaver + interrupt/resume，好处是能恢复任意节点；代价是要重写 M35“一次 invoke → 一份结果”的合同，而 M36 只需要 Tool 前澄清这一次恢复。我选应用持有的轻量内存 checkpoint：重启即失、绝不伪装持久化，换来不改写 M35 生命周期、不为还没出现的需求预建 storage port。把 trade-off 讲清楚本身就是亮点。
+
+### 面试官追问
 
 1. **[基础追问] 用户补充条件后，系统怎么保证继续的是原任务，而不是把补充文字当成新问题？**
 
@@ -1615,43 +1636,46 @@ python -m uvicorn app.main:app --reload
 
 M36 解决的是“问题缺条件，补一次再继续”，但回答成功后任务就结束了。如果用户接着说“改成 7 月、按商品看”或“把这条退款规则讲得通俗一点”，系统没有安全的继续方式。最偷懒的做法，是把上一轮问答整段重新塞给模型；问题在于上一轮 SQL 数据可能已经变了，文档可能更新或撤权，旧答案还可能把不该长期保存的 rows、正文和 citation 带进下一轮。
 
-M37 把一次追问做成一张**有使用次数、允许动作和证据检查规则的服务端票据**。客户端只有显式开启后才能拿到票据，而且只能按服务端给出的字段填写一次。SQL 像重新去数据库窗口取号，必须再查；外部大语料也必须再检索；业务文档只有在“还是解释同一条规则”时，才允许按当前原件重新核对版本和权限，再为本轮重新签发 Evidence。它不是自由聊天，而是一条能说清楚“为什么继续、凭什么继续、什么时候必须停”的工程闭环。
+M37 把一次追问做成一张**医院取号单式的服务端票据**：只有上一轮成功、且你主动勾选了“允许追问”，才会拿到这张号；号上印死了你只能办哪几件事、每件事能填哪几个字段，而且**只能办一次**。比如“改成 7 月、按商品看”——数据窗口会**重新查库**，因为没人能证明刚才的数据没变；“把这条退款规则讲得通俗一点”——文档窗口先核对当前原件版本和你的权限，才为本轮重新开一张“证据证明”，而不是把上一轮的旧证明改个日期拿出来用。票据过期、填错字段、别人拿你的号，全都不予办理。它不是自由聊天，而是一条能说清楚“为什么继续、凭什么继续、什么时候必须停”的工程闭环。
 
 ### 这次做了什么
 
-**核心矛盾**是：追问需要上一轮上下文，但安全回答又不能盲信上一轮结果。M37 没有用完整聊天历史解决这个矛盾，而是把“任务条件”“允许修改的字段”“旧 Evidence 的审计坐标”“本轮重新取证决定”拆开保存，并让 accepted follow-up 仍然只经过一次 M35 Graph 和至多一个深 Tool。
+这一步要解决的矛盾是：追问需要上一轮上下文，但安全回答不能盲信上一轮结果。M37 没有用完整聊天历史解决它，而是把“任务条件”“允许修改的字段”“旧 Evidence 的审计坐标”“本轮重新取证决定”拆开保存，并让 accepted follow-up 仍然只经过一次 M35 Graph 和至多一个深 Tool。
 
 1. **把成功回答变成一次可控、默认关闭的 follow-up-ready 状态**
 
-   **原来的问题**是成功 SQL/RAG turn 没有后续状态；如果直接让所有回答自动保存上下文，会改变旧接口行为，也会让普通请求无意间进入会话生命周期。M37 增加 `enable_bounded_follow_up`：只有客户端显式设置为 `true`，且本轮确实成功并产生 Evidence，服务端才创建 `follow_up_ready` checkpoint；旧请求继续得到 `thread=None`。
+   M36 的“补一次再继续”只在缺条件时生效，回答成功的任务还是就此结束。想让所有成功回答自动保存上下文，又会改变旧接口行为，让普通请求无意间进入会话生命周期。M37 的答案是 `enable_bounded_follow_up`：只有客户端显式置 `true`，且本轮确实成功并产生 Evidence，服务端才创建 `follow_up_ready` checkpoint；旧请求继续拿到 `thread=None`，行为完全不变。
 
-   这里的 **closed-world follow-up（闭世界追问）**，意思是服务端先签发动作和字段白名单，客户端只能从中选择。SQL 只有 `adjust_sql_scope`，可调整时间和分组；RAG 有“解释同一 Evidence”和“询问相关 Evidence”两类动作。额外字段、非法枚举、控制指令、错误 owner/version、过期和并发输家都在 Graph 前拒绝，不消耗业务 Tool。
+   这张“追问许可”是 **closed-world follow-up（闭世界追问）**：服务端先签发动作和字段白名单，客户端只能从中选。SQL 只有 `adjust_sql_scope`，可调整时间和分组；RAG 有“解释同一 Evidence”和“询问相关 Evidence”两类动作。额外字段、非法枚举、控制指令、错误 owner/version、过期和并发输家，全都在 Graph 前拒绝，不消耗业务 Tool。选显式 opt-in 而不是默认建 thread，是为了保留兼容性，也避免把短期任务票据误当成永久聊天会话。
 
-   选择显式 opt-in，而不是默认给每个结果建 thread，是为了保留兼容性，并避免把一个短期任务票据误解成永久聊天会话。**验证证据**覆盖默认 threadless、TTL、clear、重启丢失、错误 owner、非法 delta、预算重放和并发单赢家。它证明一次受控追问的生命周期成立，**没有证明**第二次追问、长历史或跨进程会话已经存在。
+   默认 threadless、TTL、clear、重启丢失、错误 owner、非法 delta、预算重放和并发单赢家都有测试。它证明一次受控追问的生命周期成立，不代表第二次追问、长历史或跨进程会话已经存在。
 
 2. **用 Evidence validity 决定“重新加载”还是“重新检索”**
 
-   **原来的问题**是旧 EvidenceRef 只能证明上一轮当时用了什么，不能自动证明当前文档仍 active、当前 caller 仍有权限，或新问题仍需要同一份证据。若直接复用旧正文，revision 变化和 ACL 撤销都会被绕过；若所有情况都无脑重检索，又浪费了业务文档已有的精确 identity，并掩盖了“同一证据仍有效”这一重要能力。
+   上一轮的 EvidenceRef 只能证明“当时用了什么”，证明不了现在：文档可能已经改版或撤权，caller 的权限可能变了，新问题也可能根本不想要同一份证据。直接复用旧正文，revision 变化和 ACL 撤销就被绕过了；但所有情况都无脑重检索，又浪费了业务文档已有的精确 identity，还掩盖了“同一证据仍有效”这个能力。
 
-   M37 实现用户确认的**窄 B**。只有 22-entry 业务 release 中的“同一 Evidence requirement 解释/改述”可以走 rehydrate：系统重新加载当前 active bundle，用 `authority_identity + revision + content_identity + anchor` 精确定位原件，再分别执行 pre-selection 和 pre-generation 授权。全部一致才重建本轮 Evidence；identity 变化或 requirement 不等价时，同一个 RAG Tool 最多重新检索一次；ACL/用途拒绝则零 retrieval 停止，不能靠重新搜索探测文档存在性。
+   用户确认的**窄 B**给了一个分界：只有 22-entry 业务 release 里的“同一 Evidence requirement 解释/改述”可以走 **rehydrate（重水化）**——拿旧审计坐标当索引，重新加载当前 active bundle，用 `authority_identity + revision + content_identity + anchor` 精确定位原件，再分别执行 pre-selection 和 pre-generation 授权；全部一致才为本轮重建 Evidence。identity 变化或 requirement 不等价时，同一个 RAG Tool 最多重新检索一次；ACL/用途拒绝则零 retrieval 停止，不能靠重新搜索去探测文档存不存在。
 
-   **Rehydrate（重水化）**不是复用旧 Evidence 对象，而是用旧审计坐标找到当前权威原件，再生成新的 run-scoped Evidence、ledger 和 citation。测试证明同一业务规则可以零 Knowledge retrieval 完成解释，但新旧 evidence/citation id 不相同；revision、requirement、ACL 和 external runtime 也都有反例。这个结论只适用于当前业务 release，**不能外推**为任意外部知识库都能安全缓存或复用。
+   注意 rehydrate 不是复用旧 Evidence 对象，而是生成新的 run-scoped（只属于本轮运行）Evidence、ledger（证据账本）和 citation。测试证明同一业务规则可以零 Knowledge retrieval 完成解释，但新旧 evidence/citation id 并不相同；revision、requirement、ACL 和 external runtime 也都有反例。这个结论只适用于当前业务 release，不能外推成“任意外部知识库都能安全缓存复用”。
 
 3. **SQL 和 external profile 坚持重新取证，不用“看起来一样”冒充新鲜**
 
-   **原来的问题**是 SQL Evidence 的 revision 实际接近查询时间，当前系统没有可靠的业务 snapshot identity。即使追问条件没变，也无法证明数据库数据没有变化。EnterpriseRAG-Bench external profile 虽然也有 Evidence identity，但本模块没有建立通用的 external locator、权限同步和复用合同。
+   对 SQL 和外部大语料，M37 的选择是**一律重新取证**。原因很实在：SQL Evidence 的 revision 接近查询时间，当前系统没有可靠的业务 snapshot identity，即使追问条件没变，也没法证明数据库数据没变；external profile 虽然也有 Evidence identity，但本模块没有建立通用的 external locator、权限同步和复用合同。所以 SQL follow-up 每次都重新走 Text2SQL、SQL Guard 和查询执行并签发新 SQL Evidence；external RAG 每次都重新检索。
 
-   因此 SQL follow-up 每次都重新经过 Text2SQL、SQL Guard 和查询执行，并签发新 SQL Evidence；external RAG 每次都调用检索。Trace 中会记录 `sql_has_no_snapshot`、`external_profile_always_retrieves`、`requirement_changed` 或 `document_identity_changed` 等 **reacquisition reason（重新取证原因）**，而不是只给一个模糊的“缓存未命中”。
-
-   这个边界比直接复用旧 rows 更贵，但它避免把“结果 fingerprint 一样”误写成“数据仍然新鲜”。M37 sequence Eval 对 SQL 强制重查、external 强制检索和新 run Evidence 做了确定性断言。它**没有测量**真实数据库高并发下的性能成本，也没有证明 external 复用永远不值得做；这里只证明在当前身份合同不足时必须保守重新取证。
+   Trace 里会记下具体原因——`sql_has_no_snapshot`、`external_profile_always_retrieves`、`requirement_changed` 或 `document_identity_changed` 这类 **reacquisition reason（重新取证原因）**，而不是一句模糊的“缓存未命中”。这个边界比直接复用旧 rows 更贵，但它避免了把“结果 fingerprint 一样”误写成“数据仍然新鲜”。M37 sequence Eval 对 SQL 强制重查、external 强制检索和新 run Evidence 做了确定性断言；没有测量真实数据库高并发下的性能成本，也没有证明 external 复用永远不值得做——这里只证明在当前身份合同不足时，保守重新取证是对的。
 
 4. **让 Router、API、Trace 和 Eval 都只看到自己该看的事实**
 
-   **原来的问题**是把旧 EvidenceRef 交给 Router，可能让控制层根据旧证据偷偷改 route；把旧 answer、rows、正文或 raw thread id 写进 checkpoint/Trace，又会扩大隐私、授权和重放风险。多轮 Eval 如果只看最终响应，也无法证明中间是否重复调用 Tool 或复用了旧 run id。
+   多轮之后最危险的是“越界分享”：把旧 EvidenceRef 交给 Router，控制层可能根据旧证据偷偷改 route；把旧 answer、rows、正文或 raw thread id 写进 checkpoint/Trace，隐私、授权和重放风险一起变大。所以 M37 给每个角色划了明确的视野：
 
-   M37 在进入 Router 前剥离 `follow_up_context`，Router 只根据当前结构化任务决定原 route；旧 Evidence 审计坐标只交给同 route 的深 Tool 做 validity。checkpoint 只保存最小 task snapshot、EvidenceRef、服务端 spec 和一次预算；Trace 只保存不可逆 thread/context ref、版本迁移、Graph/Tool 次数和安全 validity reason。API 的半截 follow-up 还暴露了一个 Pydantic v2 细节：`ctx.error` 中的 `ValueError` 不能直接 JSON 序列化，因此统一 422 handler 先经过 `jsonable_encoder`，非法请求才能稳定返回 422 而不是意外 500。
+   - **Router**：进入前剥离 `follow_up_context`，只根据当前结构化任务决定原 route；
+   - **同 route 深 Tool**：拿到旧 Evidence 审计坐标做 validity（有效性判断）；
+   - **checkpoint**：只存最小 task snapshot、EvidenceRef、服务端 spec 和一次预算；
+   - **Trace**：只存不可逆 thread/context ref、版本迁移、Graph/Tool 次数和安全 validity reason。
 
-   新增的 `phase4-harness-followup-v1` 使用 **Sequence Eval** 记录 10 组完整序列、22 份 turn execution evidence 和 50 条 required assertion，并拒绝漏 turn、重复执行、超预算和旧 Evidence id 注入。全仓 **427 passed、3 skipped、1 warning**，说明确定性合同和旧能力兼容；但本轮没有运行真实 LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测，所以不能把这些数字解释成开放问法质量或生产性能提升。
+   顺手还修了一个 API 细节：半截 follow-up 请求暴露了 Pydantic v2 的一个坑——`ctx.error` 里的 `ValueError` 不能直接 JSON 序列化，统一 422 handler 先过一遍 `jsonable_encoder`，非法请求才能稳定返回 422 而不是意外 500。
+
+   `phase4-harness-followup-v1` 用 Sequence Eval 记录 10 组完整序列、22 份 turn execution evidence 和 50 条 required assertion，拒绝漏 turn、重复执行、超预算和旧 Evidence id 注入。全仓 427 passed、3 skipped、1 warning，说明确定性合同和旧能力兼容；真实 LLM、远程 embedding/Milvus、LangFuse Cloud、M34 external 大评测都没跑，所以这些数字不能读成开放问法质量或生产性能提升。
 
 ### 新概念
 
@@ -1713,9 +1737,15 @@ M37 把一次追问做成一张**有使用次数、允许动作和证据检查�
 - **旧 Evidence 不进入 Router**：控制层不能用上一轮证据改 route，validity 只属于同 route 深 Tool。
 - **当前边界是真实合同的一部分**：一次追问、单进程 checkpoint、三个 action、业务 release 窄重水化；第二次追问、自由历史、external 复用、跨 route/Hybrid、持久化和生产认证仍未完成喵。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在 DataPilot 的 M37 中实现了成功 SQL/RAG 回答后的一次受控追问，但没有把上一轮聊天历史直接回灌模型。客户端必须显式 opt-in，服务端返回 closed-world action/field spec；后续请求先校验 owner、tenant、role、TTL、version 和一次预算，再原子 claim，accepted follow-up 仍恰好运行一次 M35 Graph、至多一个同 route 深 Tool。关键是我增加了 Evidence validity：SQL 因为没有可靠业务 snapshot 始终重查，EnterpriseRAG-Bench external 始终重检索；只有业务 22-entry release 的同 requirement 解释动作，才能根据 authority、revision、content identity 和 anchor 重新加载当前原件并重新授权，随后签发全新的 run Evidence、ledger 和 citation。identity 或 requirement 变化重检索一次，ACL 变化零 retrieval 停止。API、Trace 和 10 组 sequence Eval 都从同一 turn/lifecycle/validity 事实投影，最终 50/50 required assertions 和全仓 427 条测试通过。我同时明确它不是自由多轮或生产会话，第二次追问、持久化、Hybrid 和生产认证都不在本模块结论里。
+1. **“追问不是重新塞历史，而是重新判断证据”**：最偷懒的多轮是把上一轮问答整段回灌模型，我却把上下文拆成四样东西分开管：任务条件、允许修改的字段、旧 Evidence 的审计坐标、本轮重新取证的决定。SQL 永远重查——没有业务快照版本就不敢说“数据没变”；external 语料永远重检索；业务文档只有“还是解释同一条规则”才允许 rehydrate（重水化）——而且重水化也不是复用旧对象，是拿旧坐标重新加载原件、重新授权、签发新 id。
+
+2. **“结果一样 ≠ 数据新鲜”**：面试官常问“指纹相同为什么不能直接复用”。因为 fingerprint（结果指纹）只能证明两份结果长得一样，证明不了查询之前数据库没变。没有事务快照、CDC 或业务版本作为 freshness 依据时，复用就是拿运气当合同。我把“是否新鲜”和“是否碰巧相同”拆成两件事，并用 reacquisition reason 记进 Trace。
+
+3. **“ACL 拒绝时，零检索停止而不是换关键词再搜”**：被权限拒绝后继续搜“也许还有别的公开文档”，会把文档存在性、命中数从侧信道漏出去。所以该分支直接停；如果产品确实需要“无权看原文就换公开材料”，那是另一个 requirement 和另一个服务端 action，得另立合同，不能在被拒分支里偷偷改任务。
+
+### 面试官追问
 
 1. **[基础追问] 同一条政策只是换种说法，为什么还要生成新的 Evidence 和 citation id？**
 
@@ -1806,43 +1836,43 @@ python -m uvicorn app.main:app --reload
 
 以前系统面对“退款原因是什么，同时政策怎么规定”这类问题，会知道它同时需要 SQL 和文档，却只能保守说“不支持”。如果直接把两个 Tool 的自然语言答案拼起来，表面上很方便，实际上很危险：SQL 可能被 Guard 拦下，文档可能没权限，两个结论也可能互相冲突；更糟的是，系统会失去“这句话到底由哪份证据支持”的证明。
 
-M38 把 Hybrid 做成一张**双窗口办事单**。Router 只填写“要去 SQL 窗口和文档窗口，各问什么”，两个深 Tool 各跑一次；最后由一个 controller 统一检查两份 Evidence。两份都齐，才给完整的跨来源回答；只剩一份时，只讲那份可以独立成立的事实；SQL 安全拦截、证据冲突或合成失败时，也有固定的安全收口。这样它不是“更会聊天”，而是先把**双证据协作的责任边界**做清楚。
+M38 把 Hybrid 做成一张**双窗口办事单**。比如“6 月退款最多的原因是什么，按政策这些单该怎么处理？”——Router 在单子上写“去数据窗口查退款原因 Top1，去文档窗口取退款处理规则”，两个窗口各办一次。最后要说全这句话，必须**同时亮出两张回执**：数据窗口证明“退得最多的是质量问题”，文档窗口证明“质量问题的标准处理流程是这样”。只剩一张回执时，就只讲那张回执单独能成立的话（比如只报数据、不套政策）；两张回执打架、数据窗口亮红灯、或者最后合成环节出故障，都有固定的收口，绝不硬拼。这样它不是“更会聊天”，而是先把**双证据协作的责任边界**做清楚。
 
 ### 这次做了什么
 
-**核心问题**是：系统已有可信 SQL 和可信 RAG，但两条链路以前只能二选一；一旦问题同时需要数据事实与规则依据，就既拿不到完整证据，也没有统一的失败合同。M38 在不增加远程出站的前提下，把两条既有深链路放进同一个 Harness，并让 API、Trace 与 Eval 都从同一次运行事实投影。
+这一步要解决的问题是：系统已有可信 SQL 和可信 RAG，但两条链路以前只能二选一；一旦问题同时需要数据事实和规则依据，既拿不到完整证据，也没有统一的失败合同。M38 在不增加远程出站的前提下，把两条深链路放进同一个 Harness，并让 API、Trace 与 Eval 都从同一次运行事实投影。
 
 1. **用薄计划把“混合问题”变成两条受控分支**
 
-   **原来的问题**是 Router 对 Hybrid 只能返回 `hybrid_unsupported`。直接把 Router 改成能自由规划很多步骤，看上去能力更强，但会把 SQL QueryPlan、权限、Tool 执行和答案生成混在一起，后续很难检查预算和责任。
+   以前 Router 碰到“退款原因+政策规定”这类问题，只会回 `hybrid_unsupported`。把它改成能自由规划很多步骤，看起来能力强，实际是把 SQL QueryPlan、权限、Tool 执行和答案生成全搅在一起，预算和责任都查不清。M38 的解法是**让计划变薄**：
 
-   M38 新增 **HybridPlan（混合计划）**：它只包含受控 operator、SQL/RAG 各自的问题和 RAG 的 Evidence requirement，相当于一张“去哪两个窗口、各办什么事”的短表单。当前只登记两类 canonical 问法：退款原因+规则、GMV 值+口径；未登记的 Hybrid 仍安全停止。Graph 固定为 `route → hybrid_sql_tool → hybrid_rag_tool → controller`，SQL/RAG 各至多一次、总计至多两次。
+   **HybridPlan（混合计划）**只包含受控 operator、SQL/RAG 各自的问题和 RAG 的 Evidence requirement，相当于一张“去哪两个窗口、各办什么事”的短表单。当前只登记两类 canonical 问法：退款原因+规则、GMV 值+口径；没登记的 Hybrid 照样安全停止。Graph 固定为 `route → hybrid_sql_tool → hybrid_rag_tool → controller`，SQL/RAG 各至多一次、总计至多两次。
 
-   这里没有为了演示而接远程 Planner 或让 Router 看正文；**关键取舍**是宁可覆盖窄，也要保证 Router 只计划、不执行、不授权、不写答案。专项测试和 `phase4-harness-hybrid-v1` 都检查 branch budget 与单次 Graph。它证明的是这两类受控操作能稳定执行，**没有证明**系统能理解任意开放式跨来源研究问题。
+   这里没有为演示接远程 Planner，也没有让 Router 看正文——宁可覆盖窄，也要守住“Router 只计划、不执行、不授权、不写答案”。专项测试和 `phase4-harness-hybrid-v1` 都检查 branch budget 与单次 Graph，证明这两类受控操作能稳定执行，不代表系统能理解任意开放式跨来源研究问题。
 
 2. **让 Synthesizer 看 Evidence，而不是拼两个子答案**
 
-   **原来的问题**是 SQL adapter 虽然能构造 typed SQL Evidence，RAG AnswerFlow 也有完整 Document Evidence，但公开 `ToolObservation` 只保留安全投影。如果 Hybrid 只拿公开结果，只能拼两个自然语言子答案，既无法验证原始证据，也可能把 RAG 的 Composer 重复调用一次。
+   两条链路内部其实都有完整证据——SQL adapter 能构造 typed SQL Evidence，RAG AnswerFlow 有完整的 Document Evidence——但公开的 `ToolObservation` 只保留安全投影。如果 Hybrid 只拿公开结果，就只能拼两个自然语言子答案：既验证不了原始证据，还可能把 RAG 的 Composer 重复调用一次。
 
-   M38 在 Harness 内部增加 **private typed Evidence seam（私有类型证据接缝）**。SQL 分支继续走 SQL Guard 后构造 SQL Evidence；RAG 新增 `prepare_for_hybrid()`，复用 Knowledge Tool、active release、ACL 双检和 Shared Gate，却在 Composer 前停止。也就是说，RAG 分支只说“这些文档证据已经被允许给合成器看”，并不先写一段 RAG 答案。
+   M38 于是在 Harness 内部加了一条 **private typed Evidence seam（私有类型证据接缝）**：SQL 分支照旧在 SQL Guard 之后构造 SQL Evidence；RAG 新增 `prepare_for_hybrid()`，复用 Knowledge Tool、active release、ACL 双检和 Shared Gate，但在 Composer 之前停下。也就是说，RAG 分支只交付“这些文档证据已经被允许给合成器看”，**不先写一段 RAG 答案**。
 
-   这样 **唯一 Hybrid Synthesizer** 只消费同一 run、已到 `generation_visible` 阶段的 SQL/Document Evidence。跨来源 claim 必须同时绑定两种 evidence id；API 和 JSONL Trace 不读取完整 Evidence，因此不保存文档正文或 Hybrid SQL 的完整 rows。真实 API/Trace 测试验证了双 citation 和非泄露投影；这并不意味着任意文档组合都能自动形成高质量结论，检索质量仍由后续 P6 处理。
+   唯一的 **Hybrid Synthesizer** 只消费同一 run、已到 `generation_visible`（允许进入生成器）阶段的 SQL/Document Evidence，跨来源 claim 必须同时绑定两种 evidence id。API 和 JSONL Trace 不读取完整 Evidence，所以文档正文和 Hybrid SQL 的完整 rows 都不会落盘。真实 API/Trace 测试验证了双 citation 和非泄露投影——这不意味着任意文档组合都能自动拼出高质量结论，检索质量是后面 P6 的事。
 
 3. **把完整、partial、冲突和合成失败都交给唯一 controller**
 
-   **原来的问题**是“两个 Tool 都能跑”不等于“结果可以安全回答”。如果缺少 required 文档分支还输出完整结论，或遇到冲突时模型静默选边，用户看到的答案会比证据更自信。
+   “两个 Tool 都能跑”不等于“结果可以安全回答”。缺了必需文档分支还输出完整结论，或者遇到冲突时让模型静默选边，用户看到的答案会比证据更自信。所以 M38 把最终裁决权全部收进 controller：
 
-   M38 规定 SQL/RAG 默认都是 **required branch（必需分支）**。两支 Evidence 都可用，controller 才允许 `complete`；只有一支可用时，最多返回它独立成立的 `partial`，并明确不形成跨来源结论。SQL Guard 是全局停止，不能用文档规则把危险查询包装成建议；RAG ACL 被拒绝时，公开 branch 摘要不含真实原因或 EvidenceRef，避免侧信道。
+   SQL/RAG 默认都是 **required branch（必需分支）**——两支 Evidence 都可用，controller 才允许 `complete`；只有一支可用时，最多返回它独立成立的 `partial`（部分结果），并明确不形成跨来源结论。SQL Guard 是全局停止，不能用文档规则把危险查询包装成建议；RAG ACL 被拒绝时，公开 branch 摘要不含真实原因或 EvidenceRef，避免侧信道。
 
-   冲突由结构化 fact key 固定为 `hybrid_evidence_conflict`，不让模型选边；Synthesizer invalid/unavailable 时也不重跑 SQL/RAG，只由独立 fallback 输出单来源 partial 或停止。**验证证据**覆盖 complete、SQL/RAG partial、ACL 非披露、SQL Guard、conflict、Synthesizer failure 和 artifact 篡改。它没有证明自动冲突检测已经覆盖所有业务语义；目前冲突只在受控计划的结构化事实键上裁决。
+   冲突由结构化 fact key 固定为 `hybrid_evidence_conflict`，不让模型选边；Synthesizer invalid/unavailable 时也不重跑 SQL/RAG，只由独立 fallback 输出单来源 partial 或停止。complete、SQL/RAG partial、ACL 非披露、SQL Guard、conflict、Synthesizer failure 和 artifact 篡改都有测试。目前冲突只在受控计划的结构化事实键上裁决，不承诺自动冲突检测覆盖所有业务语义。
 
 4. **把同一事实投影到 API、Trace 和独立 Eval**
 
-   **原来的问题**是如果 API、Trace、Eval 各自重新猜一次 Hybrid 状态，很容易出现“用户看到 complete，Trace 显示 partial”的口径漂移；如果 Trace 为了调试直接落完整 Evidence，又会变成新的数据泄露面。
+   如果 API、Trace、Eval 各自重新猜一次 Hybrid 状态，很快就会出现“用户看到 complete、Trace 显示 partial”的口径漂移；反过来，Trace 为了调试直接落完整 Evidence，又等于新开一条数据泄露通道。
 
-   `AgentRunResult` 新增 Hybrid 私有事实，`/api/query` 只派生兼容 SQL 表格/图表视图、validated citation 和安全 branch summary；Trace 对 Hybrid 清空完整 SQL rows，不保存 Document body、private ledger 或被拒绝分支的真实原因。新的 **Hybrid sequence Eval** 采用“一题一次 Graph、多断言复用同一份 execution evidence”的协议，5 个 Scenario、25 条 required assertion，并拒绝缺断言或伪造两次 execution 的 artifact。
+   M38 的做法还是老规矩：**从同一份事实投影，各取所需**。`AgentRunResult` 新增 Hybrid 私有事实，`/api/query` 只派生兼容 SQL 表格/图表视图、validated citation 和安全 branch summary；Trace 对 Hybrid 清空完整 SQL rows，不保存 Document body、private ledger 或被拒绝分支的真实原因。新的 **Hybrid sequence Eval** 采用“一题一次 Graph、多断言复用同一份 execution evidence”的协议，5 个 Scenario、25 条 required assertion，拒绝缺断言或伪造两次 execution 的 artifact。
 
-   本模块最终全仓 **436 passed、3 skipped、1 warning**，compileall 与 diff check 通过。3 个 skip 是既有 Milvus/远端 embedding 条件用例，warning 是既有 TestClient/httpx deprecation；未运行真实 Hybrid LLM、远程 embedding/Milvus 或 LangFuse Cloud。因此这些结果证明**确定性控制与安全合同闭合**，不等价于真实线上质量、成本或开放问法效果提升。
+   全仓 436 passed、3 skipped、1 warning，compileall 与 diff check 通过（3 个 skip 是既有 Milvus/远端 embedding 条件用例，warning 是既有 TestClient/httpx deprecation）。真实 Hybrid LLM、远程 embedding/Milvus、LangFuse Cloud 都没运行，所以这个结果证明的是**确定性控制与安全合同闭合**，不等价于真实线上质量、成本或开放问法效果提升。
 
 ### 新概念
 
@@ -1899,9 +1929,15 @@ M38 把 Hybrid 做成一张**双窗口办事单**。Router 只填写“要去 SQ
 - **完整 Evidence 不公开**：Harness 内部需要它来验证，API/Trace 只需要最小安全投影；这和后端把 ORM 实体与 DTO 分开，是同一种边界控制。
 - **P5 已闭环但范围仍窄**：两类 canonical operator、串行两支、一次 initial Hybrid；开放 Router、optional branch、Hybrid follow-up、远程 adapter、生产认证和长会话都不是本模块结论喵。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在 DataPilot 的 M38 中实现了保守 Hybrid 编排，让一个问题能在同一次 Harness run 内同时获取 SQL 数据事实和 RAG 文档规则。我没有让模型自由决定 Tool 或拼接两个子答案，而是让 Router 只生成薄 `HybridPlan`，Graph 按固定顺序各调用 SQL/RAG 一次，两个分支默认 required。SQL 和 RAG 分别产出本轮 typed Evidence，其中 Hybrid RAG 只执行 retrieval+Gate，不提前生成自然语言答案。唯一 controller 再调用本地确定性 Synthesizer，跨来源 claim 必须同时绑定 SQL 和 Document Evidence；缺一支时只能输出独立 partial，SQL Guard、ACL 拒绝、冲突和 Synthesizer failure 都有固定安全收口，且不会重跑 Tool。API、Trace 和 5 Scenario/25 required 的 Hybrid Eval 都从同一个 `AgentRunResult` 投影。最终专项/API Trace 9 项通过、全仓 436 passed；我明确没有把这说成开放式 Hybrid Agent 或远程模型质量提升。
+1. **“让合成器吃证据，而不是吃两个答案”**：Hybrid 最省事的做法是把 SQL 和 RAG 的自然语言答案拼一段。我让 RAG 分支在 Composer 前就停——只交付“这批文档证据已经过 Gate、允许给合成器看”，最后唯一 Synthesizer 直接消费 typed Evidence，跨来源 claim 必须同时绑定 SQL 和 Document 两个 evidence id。效果是“这句话凭什么成立”可以回查，而不是文末摆两个 source 装样子。
+
+2. **“会签制：缺一支就 partial，冲突就停”**：SQL/RAG 默认 required（必需分支），像审批会签——少一个签字就不能标“已批准”。只剩一支时，输出它单独成立的 partial 并明说不能下跨来源结论；两支打架记 `hybrid_evidence_conflict`，不让模型选边；SQL Guard 拦截是全局停止，不能用文档规则把危险查询洗白。模型在这里没有自由裁量权，这是企业数据 Agent 和聊天机器人最大的区别。
+
+3. **“合成失败不重跑已经成功的那支”**：Synthesizer 挂了怎么办？重跑 SQL/RAG 会超出分支预算、重复查询还可能得到不同数据。所以 fallback 只消费已经到手的一支 Evidence，输出安全 partial 或停止。已成功的事实不因为展示层失败而被浪费，这个降级边界我可以用测试反例现场讲。
+
+### 面试官追问
 
 1. **[基础追问] 为什么 Hybrid 不能直接把 SQL 和 RAG 的两个答案拼起来？**
 
@@ -1968,45 +2004,39 @@ python -m uvicorn app.main:app --reload
 
 ### 先用大白话讲
 
-M34 发现了不少 RAG 问题：有些正确文档根本没被找到，有些找到了却没装进上下文，还有些是模型写出的内容过不了严格引用合同。它们都可能让最终回答不好，但不是同一种病。
+M34 发现了不少 RAG 问题：有些正确文档根本没被找到，有些找到了却没装进上下文，还有些是模型写出的内容过不了严格引用合同。它们都可能让最终回答不好，但**不是同一种病**——就像“片子没拍清、药没吃够、身体过敏”都会让人不舒服，治法却完全不同。
 
-如果看到“答案不够好”就立刻加一个会反复搜索的 Agent 子图，像是医院看到所有病人发烧就开同一种药：可能多花时间和成本，却治错位置。M39 做的是**先看片子再决定要不要动手术**。它只读已经冻结的 M34 结果，分清问题在哪一层，并检查是否真的存在“看完第一次结果，再决定下一步取什么证据”的收益证据。结果没有：因此 P6 的正确结论是 **no-go**，先不建 Subgraph。
+如果看到“答案不够好”就立刻加一个会反复搜索的 Agent 子图，等于医院看到所有病人发烧都开同一种药：多花钱多花时间，还治错位置。M39 做的是**先看片子再决定动不动手术**：只读已经冻结的 M34 结果，把 60 个病例分成“没找到文档 / 没装进上下文 / 引用合同没过 / 服务当时挂了 / 分不清”五类，再检查有没有证据证明“看完第一次结果再决定下一步取什么证据”真的能新增有效证据。结果没有：所以 P6 的正确结论是 **no-go**，先不建 Subgraph。这不是拒绝进步，而是拒绝没有依据的复杂化。
 
 ### 这次做了什么
 
-**核心矛盾**是：已有 retrieval 和 Answer/Citation 的失败数字，但它们不足以证明多轮 Agent 检索会带来净收益。M39 没有增加任何线上能力，而是把“是否值得增加复杂度”变成可复核的工程判断，避免把质量问题、外部不可用和架构选择混在一起。
+这一步不写任何线上代码，只回答一个问题：M34 留下的失败数字，够不够支撑建设多步 RAG Subgraph？M39 把“是否值得增加复杂度”变成可复核的工程判断，避免把质量问题、外部不可用和架构选择混在一起。
 
 1. **先把历史证据锁死，防止拿错材料做结论**
 
-   **原来的问题**是 M34 的 lexical、semantic、Answer Eval 都是不同运行产物；如果文件被替换、split 混了、adapter 或 Composer 不同，继续比较就像把不同班级的考试卷放在同一张排名表里。
+   M34 的 lexical、semantic、Answer Eval 是不同时间、不同配置的产物；文件被替换、split 混了、adapter 或 Composer 不一样，继续比较就像把不同班级的考试卷放进同一张排名表。所以审计的第一件事是**锁死输入**：`audit_paths()` 对六份指定 JSON 同时校验 SHA-256、dataset/question-set/split/profile identity、dev/held-out（开发集/保留决策集）、retrieval adapter+recipe 和 Composer identity。这叫 **closed-world（封闭输入）**——审计只承认这组冻结材料，缺文件或不一致就失败关闭，不会“凑一个 no-go”。
 
-   M39 的 `audit_paths()` 对六份指定 JSON 同时校验 **SHA-256、dataset/question-set/split/profile identity、dev/held-out、retrieval adapter+recipe 和 Composer identity**。这叫 **closed-world（封闭输入）**：审计只承认这组冻结材料，缺文件或不一致就失败关闭，不会“凑一个 no-go”。真实审计的报告身份为 `324ec7f8...b726c6`，而且 **零 provider 调用**。
-
-   这比“重新跑一次试试”更合适，因为本模块要判断的是已有证据能不能支持路线，而不是偷偷开一轮新的实验。它证明输入可追溯，**不证明**答案质量提升。
+   真实审计的报告身份是 `324ec7f8...b726c6`，全程零 provider 调用。选择“只读旧材料”而不是“重新跑一次试试”，因为本模块要判断的是已有证据能不能支持路线，不是偷偷开一轮新实验。它证明输入可追溯，不证明答案质量提升。
 
 2. **把失败按 Evidence 流转阶段分层，而不是把低分都叫检索差**
 
-   **原来的问题**是低 citation coverage 可能来自至少四个地方：top-20 根本没召回 gold、召回后没有进入 generation-visible、Composer 的 support 合同拒绝，或 provider 暂时不可用。把它们全部当成“应该循环检索”，会让未来实现针对错误层次优化。
+   低 citation coverage 的锅至少有四个候选：top-20 根本没召回 gold、召回了却没进入 generation-visible、Composer 的 support 合同拒绝、provider 暂时不可用。全当成“应该循环检索”，未来的实现就会针对错误层次优化。
 
-   `build_p6_readiness_audit()` 用同一次 lexical retrieval 的 @20 覆盖和 AnswerFlow 的 **candidate → selected → generation_visible → cited** ledger 分层。它把 60 个 dev Scenario 互斥归为：**retrieval 11**、**context/packing 13**、**Composer 10**、**provider unavailable 2**、**not classifiable 24**。`not_classifiable` 不是偷懒，而是承认阶段证据不足时不猜测。
-
-   这相当于后端排障时先分清是数据库没查到、DTO 丢字段、校验器拒绝还是外部服务超时；**关键取舍**是宁可保留“不知道”，也不把错误归因包装成一个看似更智能的 Graph。
+   `build_p6_readiness_audit()` 用同一次 lexical retrieval 的 @20 覆盖和 AnswerFlow 的 `candidate → selected → generation_visible → cited` ledger（证据流转账本）分层，把 60 个 dev Scenario 互斥归为五类：**retrieval 11、context/packing 13、Composer 10、provider unavailable 2、not classifiable 24**。`not_classifiable` 不是偷懒，是承认阶段证据不足时不硬猜。这就像后端排障先分清是数据库没查到、DTO 丢字段、校验器拒绝还是外部服务超时——宁可保留“不知道”，也不把错误归因包装成一个看似更智能的 Graph。
 
 3. **把 held-out 当期末卷，不拿来设计补救动作**
 
-   **原来的问题**是 120 条 held-out 已经跑过一次，里面当然也有逐题信息；如果开发时按这些失败挑 query rewrite、top-k 或 parent 扩展，后面的 A/B 就会变成“看过答案后的考试”。
+   120 条 held-out 已经跑过一次，里面当然也存着逐题信息。如果开发时按这些失败去挑 query rewrite、top-k 或 parent 扩展，后面的 A/B 就变成“看过答案后的考试”，分数再好看也不可信。所以 M39 只对 60 条 **dev** 逐题分类，held-out 只用于 split 和 identity 的闭合核验，给未来真正有候选动作时留一组没被调参污染的决策集。专项测试还守住两条线：provider failure 不得伪装成 retrieval gap；错误 runtime/split/hash 必须失败关闭。
 
-   M39 只对 60 条 **dev** 逐题分类，held-out 只用于 split 和 identity 的闭合核验。这让后续真的有候选动作时，仍保留一组没被调参污染的决策集。专项测试还覆盖 provider failure 不得伪装 retrieval gap、错误 runtime/split/hash 必须失败关闭。
-
-   所以这次不是拒绝改进 RAG，而是保护未来改进的**评测公信力**；当前不能证明的是任何一个特定的 query rewrite、parent/child 或 rerank 会有效。
+   这一点的立场要说清楚：不是拒绝改进 RAG，而是保护未来改进的评测公信力；当前没有证据证明的是任何一个具体的 query rewrite、parent/child 或 rerank 会有效。
 
 4. **用四项入场条件给出 no-go，而不是留下模糊“以后优化”**
 
-   **原来的问题**是参考项目确实有 RAG Graph，但“别人有 Graph”不构成 DataPilot 也应该加 Graph 的证据。真正的子图至少要说清楚：第一次 Observation 看到了什么、允许做哪一个下一步动作、能新增什么 Evidence、何时停止，以及增加的调用和延迟值不值得。
+   参考项目确实有 RAG Graph，但“别人有 Graph”不是 DataPilot 也加 Graph 的证据。真正的子图至少要能说清：第一次 Observation 看到了什么、允许做哪个下一步动作、能新增什么 Evidence、何时停止、增加的调用和延迟值不值得。
 
-   M39 的报告把四项条件逐项列出：**可复现非 provider 失败簇**和**dev/held-out 隔离**满足；但没有任何已验证的 **Observation 驱动新增 Evidence 动作**，也没有**可比额外预算**。任一条件缺失即为 `no_go`。因此没有实现 Subgraph、没有切 semantic、没有改 `enterprise-lexical` 默认，也没有用“先做简化版以后再换正式方案”绕过这条门槛。
+   M39 的报告把四项入场条件逐项列出：**可复现非 provider 失败簇**和**dev/held-out 隔离**满足；但没有任何已验证的 **Observation 驱动新增 Evidence 动作**，也没有**可比额外预算**。任一条件缺失即为 `no_go`。所以没有实现 Subgraph、没有切 semantic、没有改 `enterprise-lexical` 默认，也没有用“先做简化版以后再换正式方案”绕过门槛。
 
-   **验证证据**包括 5 项专项测试、203 项 M31–M38 相关回归，以及后台全仓 `441 passed, 3 skipped, 1 warning`。这证明审计和既有合同没有被破坏，**不证明**多轮 RAG 的质量、成本或生产价值已经被验证。
+   5 项专项测试、203 项 M31–M38 相关回归和后台全仓 441 passed、3 skipped、1 warning 都通过，说明审计和既有合同没有被破坏；这不证明多轮 RAG 的质量、成本或生产价值已经被验证。
 
 ### 新概念
 
@@ -2048,9 +2078,15 @@ M34 发现了不少 RAG 问题：有些正确文档根本没被找到，有些�
 - **不替代现有安全链路**：审计不改 Knowledge Tool、AnswerFlow、ACL、outbound、Harness 或 Hybrid；它只读历史 artifact。
 - **后续必须独立立项**：只有未污染 dev 证明具体允许动作可以新增 Evidence，并冻结 held-out 协议和可比预算，才可经用户确认另建 M40；否则按 P7 收口喵。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在 DataPilot 的 M39 没有为了用 LangGraph 而新增 RAG Agent，而是先为“是否值得做多步检索”建立了只读 readiness audit。它对冻结的 M34 retrieval/Answer artifact 做 hash、identity、split、runtime 闭合检查，只用 dev 的逐题 ledger 和 retrieval coverage 把失败分为候选召回、context packing、Composer support、provider unavailable 与不可分类五层，held-out 不参与动作设计。审计发现虽然有 24 个 retrieval/context 主层失败，但没有任何证据证明第一次 Observation 能指导一个允许动作新增 Evidence，也无法比较额外调用预算，所以严格 no-go，保持 lexical 默认。专项测试、203 项相关回归和 441 项全仓回归通过。这个模块的价值是把“质量不够好”与“应该加 Agent 循环”分开，避免没有收益证据的复杂化。
+1. **“先看片子，再决定动不动手术”**：M34 有一堆失败数字，最诱人的结论是“加一个会反复检索的 Agent 子图”。但失败至少有四层：没召回、没装进上下文、Composer 拒绝、provider 挂了——只有第一层才可能靠检索循环解决。我把 60 个 dev 题互斥归层（retrieval 11 / packing 13 / Composer 10 / unavailable 2 / 不可分类 24），结论是：没有任何证据证明“看完第一次结果再取证据”能新增有效 Evidence，所以严格 no-go。
+
+2. **“held-out 是期末卷，不是练习册”**：120 条 held-out 已经跑过，逐题信息就摆在那。拿它挑 query rewrite、top-k 或 parent 扩展，后面的 A/B 就变成“照着答案复习再考同一张卷”。我只核验它的身份和 split 闭合，不消费逐题结果，给未来候选留一组没被调参污染的决策集。
+
+3. **“no-go 是交付物，不是空白”**：有人觉得“没写代码就是没产出”。这个模块交付的是一条可复核的路线结论：四项入场条件逐项打勾，缺了“Observation 驱动新增 Evidence”和“可比额外预算”两条，所以不建 Subgraph、不切 semantic、不改 lexical 默认。它拦下的是“因为别人有 Graph 所以我也要 Graph”的从众工程——这一句放在面试里非常有记忆点。
+
+### 面试官追问
 
 1. **[基础追问] 既然检索和上下文有 24 个失败，为什么不直接做多轮 RAG？**
 
@@ -2093,35 +2129,33 @@ python scripts/audit_m39_p6_readiness.py --split eval/cases/enterprise-rag-bench
 
 之前 DataPilot 已经能处理 SQL、查规则、混合取证、澄清恢复和安全拒绝，也分别有很多测试。但如果有人看到一条 JSONL Trace，仍要自己猜：这次 SQL 用的是哪条 runtime、RAG 用的是哪套 release 和检索 recipe、Hybrid 的合成器是什么；而且单项测试全绿，也不保证没有漏掉某个阶段合同。
 
-M40 做的事像给快递包裹补一张**物流单**：不把包裹里的正文、SQL rows 或 thread 参数写上去，只写“这单走了哪条受控链路、用了哪个版本、有没有缺关键身份”。然后用五条固定故事把 response 和同一次 Trace 对起来，最后把 P1 到 P7 必须存在的证据逐格核对。这样系统不是“看起来测试很多”，而是能说明**这次结果从哪来、哪些合同已经验证、哪些仍然没有证明**。
+M40 做的事像给快递包裹补一张**物流单**：不把包裹里的正文、SQL rows 或 thread 参数写上去，只写“这单走了哪条受控链路、用了哪个版本、有没有缺关键身份”。然后它固定了**五条真实故事**——SQL 一题、RAG 一题、Hybrid 一题、澄清恢复一次、安全拒绝一次——每条只跑一遍，把 response 和同一次 Trace 的“身份证”对起来盖指纹。最后用一张**九格检查表**把 P1 到 P7 该有的证据逐格打勾：少一格、被换成历史报告、或者 no-go 结论被偷改，整张表都判失败。这样系统不是“看起来测试很多”，而是能说明**这次结果从哪来、哪些合同已经验证、哪些仍然没有证明**。
 
 ### 这次做了什么
 
-**核心问题**是：Trace、API 和各种 Eval 原本都从同一套业务能力派生，但运行身份分散在不同字段里，阶段收口很容易被“把几份旧报告摆在一起”替代。M40 没有新增 Tool、RAG Subgraph 或模型调用；它把已有的安全事实组织成可复核的证据链，并保留 M39 的严格 no-go。
+这一步不新增 Tool、Subgraph 或模型调用，只做收口：把散在各处的运行身份收成 Trace 上可复核的证据链，把 P1–P7 的合同收成一份不凑分的保证包，同时保留 M39 的严格 no-go。
 
 1. **给 Trace 增加最小 runtime identity，而不是再造一套运行状态**
 
-   **原来的问题**是 SQL 的 runtime 在 Evidence ledger，RAG 的 release、corpus、recipe 和 policy identity 在 diagnostics，Hybrid 又多了薄计划和 Synthesizer。Trace 消费者若自行拼字段，很容易因为某条 route 漏字段而误判，甚至为了“补齐”去读取 private Evidence、正文或完整 rows。
+   同一条 Trace，SQL 的运行身份在 Evidence ledger 里，RAG 的 release、corpus、recipe、policy identity 在 diagnostics 里，Hybrid 又多了薄计划和 Synthesizer。Trace 消费者自己拼字段，容易因为某条 route 漏字段而误判，甚至为了“补齐”去读 private Evidence、正文或完整 rows。
 
-   M40 新增 `phase4-trace-runtime-v1`。`engine/trace/runtime.py` 只从同一个 `AgentTurnResult` 已有的**安全投影**取值：SQL 读 safe ledger 的 `runtime_ref`；RAG 读已公开 diagnostics；Hybrid 记录 thin plan、Synthesizer identity 和每支的安全摘要。可以把它理解为后端 DTO：它只搬运允许长期保存的坐标，不把 ORM 内部对象整个塞到日志里。
+   M40 新增 `phase4-trace-runtime-v1`：`engine/trace/runtime.py` 只从同一个 `AgentTurnResult` 已有的**安全投影**取值——SQL 读 safe ledger 的 `runtime_ref`，RAG 读已公开 diagnostics，Hybrid 记录 thin plan、Synthesizer identity 和每支的安全摘要。可以把它理解为后端 DTO：只搬运允许长期保存的坐标，不把 ORM 内部对象整个塞进日志。
 
-   **关键机制**是缺字段时写 `status=unavailable` 和 missing path，但 Trace 仍是旁路，不能把一次本来完成的 API 请求打成失败。P7 的固定演练会把 canonical 成功路径的 `unavailable` 判失败，避免空字典伪装成身份。测试覆盖了 SQL 只读取 safe ledger、缺 identity 不影响结果，以及 SQL/RAG/Hybrid/拒绝路径的完整投影。它**尚未证明**任何新的模型、检索质量或生产 receiver 行为。
+   缺字段时写 `status=unavailable` 和 missing path，但 Trace 是旁路，不能把一次本来完成的 API 请求打成失败；P7 的固定演练会把 canonical 成功路径的 `unavailable` 判失败，防止空字典伪装成身份。测试覆盖 SQL 只读 safe ledger、缺 identity 不影响结果，以及 SQL/RAG/Hybrid/拒绝路径的完整投影。这里不证明任何新的模型、检索质量或生产 receiver 行为。
 
 2. **用五条真实 API 故事证明“response 和 Trace 是同一件事”**
 
-   **原来的问题**是分别测试 SQL、RAG 或 Hybrid 不足以证明整条用户路径没有在 Trace 侧重新判断状态，也不容易一次覆盖澄清恢复和安全拒绝。
+   分别测试 SQL、RAG、Hybrid，证明不了整条用户路径没有在 Trace 侧重新判断状态，也不容易一次覆盖澄清恢复和安全拒绝。M40 于是固定了五条真实 API 故事：`tests/test_m40_trace_rehearsal.py` 在隔离 SQLite、fixture caller 和临时 JSONL 中各执行一次 SQL、RAG、Hybrid、澄清→恢复、安全拒绝，每个 Scenario 都核对 trace id、route、四轴状态、Graph 次数、Evidence/citation 坐标、lifecycle 和 runtime envelope。随后把这些**同次安全投影**计算为 `execution_identity`，像给一张已核对的收据盖不可逆指纹；artifact 本身不含 answer 正文、rows、raw thread id 或结构化参数。
 
-   `tests/test_m40_trace_rehearsal.py` 在隔离 SQLite、fixture caller 和临时 JSONL 中各执行一次：SQL、RAG、Hybrid、澄清→恢复、安全拒绝。每个 Scenario 都核对 trace id、route、四轴状态、Graph 次数、Evidence/citation 坐标、lifecycle 和 runtime envelope。随后把这些**同次安全投影**计算为 `execution_identity`，像给一张已核对的收据盖不可逆指纹；artifact 本身不含 answer 正文、rows、raw thread id 或结构化参数。
-
-   实施中发现一个真实取舍：恢复 RAG 后，用户可见 answer 自然会提到用户补充的业务主题。如果把“Trace 不出现任何补充值”理解成任何同样的词都不能出现，就必须删掉既有 Trace answer，属于改变长期 Trace 合同。用户最终选择 **方案 A**：保留 answer 的既有可观测性，但禁止直接保存 raw `thread_id`、`clarification_answers` 和 `follow_up_fields` 结构或独立参数副本。这样区分了“答案正常谈业务”与“把 thread 请求参数当日志字段落盘”。
+   实施中发现一个真实的取舍：恢复 RAG 之后，用户可见的 answer 自然会提到用户补充的业务主题。如果把“Trace 不出现任何补充值”理解成任何相同的词都不能出现，就只能删掉既有 Trace answer，等于改变长期 Trace 合同。用户最终选的方案 A：保留 answer 的既有可观测性，但禁止直接保存 raw `thread_id`、`clarification_answers` 和 `follow_up_fields` 结构或独立参数副本——区分“答案正常谈业务”和“把 thread 请求参数当日志字段落盘”。
 
 3. **把 P1–P7 收成 closed-world assurance，而不是把分数平均成“总能力”**
 
-   **原来的问题**是安全发布、RAG retrieval、RAG answer、Harness、turn、follow-up、Hybrid 和 M39 no-go 各有自己的分母与 Gate。直接混入 M27 历史结果、M34 质量数字或人工说明，可能做出一个漂亮但不诚实的总分。
+   安全发布、RAG retrieval、RAG answer、Harness、turn、follow-up、Hybrid 和 M39 no-go，各有各的分母和 Gate。把它们和 M27 历史结果、M34 质量数字、人工说明直接混在一起，很容易拼出一个漂亮但不诚实的总分。
 
-   `eval/phase4_assurance.py` 用**closed-world（封闭清单）**限制 assurance 只能有九个 family：P1、P2 retrieval、P2 answer、P3、P4 turn、P4 follow-up、P5、P6 no-go、P7 rehearsal。每项都要有自己的 contract/artifact identity 且必须 passed；漏项、重复、顺序漂移、hash 被改、M39 不再是 verified no-go，都会失败关闭。CLI `scripts/run_m40_phase4_assurance.py` 只读取已验证 rehearsal 和冻结 M39 报告，输出 JSON 与 Markdown matrix。
+   `eval/phase4_assurance.py` 于是用 **closed-world（封闭清单）**把保证包锁死成九个 family：P1、P2 retrieval、P2 answer、P3、P4 turn、P4 follow-up、P5、P6 no-go、P7 rehearsal。每项都要有自己的 contract/artifact identity 且必须 passed；漏项、重复、顺序漂移、hash 被改、M39 不再是 verified no-go，都会失败关闭。CLI `scripts/run_m40_phase4_assurance.py` 只读已验证 rehearsal 和冻结 M39 报告，输出 JSON 与 Markdown matrix。
 
-   **重要取舍**是 P6 的 `no_go` 在这里也写成通过：意思是“路线决策被如实验证并纳入保证包”，不是“RAG Subgraph 质量通过”。M40 聚焦测试验证 family 篡改、缺路径、runtime 不可用和 CLI 输出；M31–M39 回归证明旧合同没有被破坏。它**不能证明**生产认证、真实外部服务质量、开放 Router、长期会话，更不能把 P7 technical Gate 说成 Phase 4 已结束。
+   这里有个微妙的点：P6 的 `no_go` 也写成“通过”——它通过的是“路线决策被如实验证并纳入保证包”，不是“RAG Subgraph 质量通过”。M40 聚焦测试验证了 family 篡改、缺路径、runtime 不可用和 CLI 输出；M31–M39 回归证明旧合同没被破坏。它不证明生产认证、真实外部服务质量、开放 Router、长期会话，更不能把 P7 technical Gate 说成 Phase 4 已经结束。
 
 ### 新概念
 
@@ -2164,9 +2198,15 @@ M40 做的事像给快递包裹补一张**物流单**：不把包裹里的正文
 - **no-go 也应被验证**：M39 的 no-go 是一项严格路线结论，不是“没做完”的空白；P7 负责保证它没有被悄悄翻转。
 - **不做阶段总分**：不同 family 的分母和含义不同，P7 只核验它们是否齐全可追溯；它不证明模型质量、生产授权或整个 Phase 4 已完成汪。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在 DataPilot 的 M40 做的是 Phase 4 的技术收口。前面 SQL、RAG、Hybrid 和多轮链路已有独立合同，但 Trace 的运行身份分散，阶段结论也容易被不同来源的报告拼凑。我给 `/api/query` 的 Trace 加了版本化 runtime identity，只从同一 `AgentTurnResult` 的 safe ledger、diagnostics 和 Hybrid 摘要读取身份；缺字段只标 unavailable，不阻断业务。然后用 SQL、RAG、Hybrid、澄清恢复、安全拒绝五条真实 API 路径，验证 response/Trace 的 id、四轴、Evidence/citation、预算和 lifecycle 同源，并生成安全 execution fingerprint。最后做 closed-world assurance，只允许 P1 到 P7 九个指定 family，M39 no-go 也必须原样验证，M27/M34 的历史或质量数字不能补洞。专项 7 项、M31–M39 的 208 项和全仓 447 项测试都通过。这个工作证明的是确定性控制和可追溯性闭合，不是把它包装成真实模型质量或 Phase 4 的最终验收。
+1. **“Trace 只贴物流单，不拆包裹”**：运行时身份散在三个地方——SQL 在 ledger、RAG 在 diagnostics、Hybrid 有 Synthesizer。我给每条 Trace 加最小 runtime identity，只搬运版本/配置坐标，不碰正文、rows 和 thread 参数，就像快递单写“哪条链路、哪个版本”，不写包裹内容。缺身份标 `unavailable`，但 Trace 是旁路，不能把成功的 API 打成失败；真正把它判失败的是固定演练层——这个“旁路不阻断业务、演练才收紧”的双层设计可以展开讲。
+
+2. **“五条故事证明 response 和 Trace 是同一件事”**：分开测 SQL、RAG、Hybrid，证明不了整条链没有在 Trace 侧重新判断状态。我固定五条真实 API 路径——SQL、RAG、Hybrid、澄清恢复、安全拒绝——每条只执行一次，把同次安全投影哈希成 `execution_identity`，像给收据盖不可逆指纹，事后换一份执行事实立刻现形。
+
+3. **“保证包是九格检查表，不是加权总分”**：P1–P7 各 contract 的分母不可比，加权平均会让一个高分掩盖一个安全空洞。assurance 只认九个 family 的身份和结果，漏项、篡改、顺序漂移都失败关闭；连 M39 的 no-go 也要原样验证写进“通过”——通过的是“路线决策被如实验证”，不是“Subgraph 质量好”。M27/M34 的历史质量数字在这里没有可填的槽位。
+
+### 面试官追问
 
 1. **[基础追问] 为什么 runtime identity 不直接从每个 Tool 的内部对象读取，拿到的信息不是更全吗？**
 
@@ -2384,12 +2424,15 @@ M40 P7 assurance：五路径 response/Trace 同源 → exact nine-family technic
 
 ### 有面试价值的亮点
 
-一句话总起：这一阶段我把已经独立的 SQL/RAG 能力升级成一个有界的 Agent 控制面，最有记忆点的是四件事。
+1. **“节点边界跟着控制权走，而不是跟着函数走。”** 接 LangGraph 最容易犯的错，是把 Text2SQL 的每一步都画成节点：图看着很完整，实际上顶层图和深模块开始抢控制权，安全步骤还可能被图跳过或重排。我反过来做——Graph 固定成 `route → tool → controller`，两条成熟流水线整个包成深 Tool，顶层只管可信调用者、一次调用、预算和收口。收尾时再用五条真实路径证明 API、Trace、Eval 记的是同一份执行事实：面试官问“你凭什么说它们不会各说各话”，我能拿 447 条回归和五路径排练现场讲。
 
-1. **用 LangGraph 建了统一控制面，但刻意不拆散深 Tool。**以前 API、Trace、Eval 对同一次执行可能各说各话；Harness 固定成 route→tool→controller，只管路由、预算、终止，Text2SQL 和 RAG 整体作为 deep Tool 接入。收口时用五路径 Trace 排练证明所有入口记的是同一份运行事实，全仓 447 passed。
-2. **多轮做了"够用就好"的版本。**要澄清就只问指定字段（分析对象、时间范围），checkpoint 是应用级、带版本和 TTL 的，claim 在慢 Tool 前原子完成——同一版本最多一次执行权。追问默认关闭、动作由服务端签发；SQL 永远重查、external 永远重检索，只有业务同 Evidence 解释能重水化。旧结果不会天然变成新事实。
-3. **Hybrid 做的是证据绑定，不是答案拼接。**SQL/RAG 各执行一次，唯一确定性 Synthesizer 要求跨来源 claim 同时绑两类 Evidence：缺一支给 partial、冲突不选边、SQL Guard 直接全局停，背后没有第二个模型"圆场"。
-4. **最有记忆点的其实是一个"不做"的决定。**M34 的失败数据出来后，我没有直接上 Agentic RAG 循环，而是冻结六份 artifact 做只读审计：dev 分层、held-out 只验身份。结论是没有证据证明"第二次 Observation 驱动的动作能新增 Evidence"，所以 strict no_go、零 provider 调用——用证据决定不做什么，比"我加了循环"更能打。
+2. **“多轮能力，我做的是‘够用就好’的版本。”** 澄清只问服务端登记过的字段，补完恢复一次；追问默认关闭，动作和字段由服务端签发，只有一次预算；checkpoint 是应用持有的、带版本和 TTL 的待办卡，领取动作在锁里原子完成——同一张卡只有一个赢家。更关键的是证据纪律：SQL 永远重查、外部语料永远重检索，业务文档只有“还在解释同一条规则”才允许重水化。旧答案不会因为“看起来一样”就变成新事实。
+
+3. **“Hybrid 做的是会签，不是拼作文。”** 两个深 Tool 各跑一次，唯一的确定性合成器直接消费证据：跨来源结论必须同时绑定 SQL 和文档两类 evidence id；缺一支只给 partial，并明说不能下跨来源结论；两支冲突就停，不让模型选边；SQL Guard 拦截是全局停。全程没有一个“第二模型”出来圆场——这是企业数据 Agent 和聊天机器人最本质的区别。
+
+4. **“整阶段最有记忆点的，是一个‘不做’的决定。”** M34 失败数据出来时，最诱人的动作是上 Agentic RAG 循环。我没有动工，而是把六份冻结结果做只读审计：60 条 dev 逐题归层，120 条 held-out 只验身份不消费。结论是没有证据证明“第二次观察驱动的动作真的能新增证据”，也没有可比预算，所以 strict no-go、零 provider 调用。面试时“用证据决定不做什么”，比“我加了个循环”更能打。
+
+5. **“企业数据 Agent 的默认值是‘不信’。”** 请求体里的角色字符串不能授权，只能从注入的固定身份里选一个；权限被拒的文档连“存在性”都不许从侧信道漏出去；Trace 只贴物流单——记链路、版本和身份坐标，不记正文、rows 和 thread 参数；出站默认拒绝。一句话：宁可不答、宁可少记，也不越权、不泄露。
 
 ### 面试官追问
 
