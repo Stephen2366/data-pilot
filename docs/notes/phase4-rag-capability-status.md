@@ -493,43 +493,98 @@ Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结
 >
 > **与前文及权威文档的关系**：本节是本文内部最新的候选建设方向，修订第 3 节、第 10 节关于 Subgraph、持久 checkpoint 与 Context Compact 的旧建议；旧段落保留用于解释方案演进。当前方案仍在审查，因此不覆盖现行 roadmap、`AI_CONTEXT.md` 的当前实现/默认事实或 M39 `no_go` 的历史结论。只有用户最终确认并写入 roadmap 后，才完成路线升格。
 
+### 北极星任务主线
+
+后续建设不采用“先造完 Agent 基础设施，再寻找展示场景”的方式，而是从第一片起由一条固定的复杂用户任务牵引：
+
+> **查询 7 月退款率 → 改成 8 月并查看退款金额 → 追问上涨原因 → 要求结合退款政策解释 → 从 SQL 受控转为 Hybrid → 纠正为按渠道维度分析。**
+
+这条 sequence 既是面试时能一眼看懂的用户故事，也是各能力切片共同服务的纵向主线：条件和指标修改牵引 TaskDelta、TaskState merge 与旧 SQL Evidence 失效；原因追问牵引顶层 Decision Loop；政策要求牵引新的文档 Evidence requirement 与 SQL → Hybrid；文档取证失败牵引 bounded Agentic RAG；纠正维度牵引 correction、重新取证与上下文更新；跨重启继续和长会话则牵引持久 checkpoint 与 Context Compact。
+
+北极星 sequence 不能成为唯一测试题，也不得把“退款、月份、渠道”等场景字段写入通用 TaskState / TaskDelta interface。除这条 canonical 展示主线外，还必须用任务切换、取消、ACL 拒绝、无进展停止、预算耗尽、重启恢复等配套 sequence 证明能力不是针对 happy path 的硬编码。
+
+#### 北极星落地前置合同
+
+当前 seed、身份和业务语料不能被默认视为已经支持上面的故事；正式建设第一片前必须显式完成并冻结下列前置：
+
+1. **可比较的月份数据**：当前 seed 只有 2026 年 5 月、6 月订单，不能支撑 7 月 → 8 月退款率上涨。后续应建立新的 versioned seed contract，确定性增加 7 月、8 月订单与退款，并设计可由真实 SQL Evidence 解释的上涨结构，例如 8 月特定商品质量问题与渠道差异。同步更新 `orders_wide` 的快照时间/批次 identity、`verify_business_facts()`、受影响的固定业务事实、Eval oracle 和 schema 描述；未受新月份影响的历史 6 月 oracle 不机械改写，历史 artifact 保持只读。`orders_wide.order_id` 当前唯一，因此“新批次”表示新 seed reset 后整套快照使用新 identity，不是在同表追加重复订单快照。
+2. **最小权限的演示 caller**：北极星明确运行在 local/demo fixture，而不是生产认证。演示 persona 只取得完成任务所需的最小 resolved role 集，例如 `{ops, customer_service}`，并以 `ops` 作为 active SQL role；不得继续用“拥有全部已知角色”的 fixture 证明真实身份自洽，也不得把本地 fixture 宣传成生产 RBAC。只有业务授权明确允许所有 `ops` 阅读退款政策时，才修改文档 `allowed_roles`，并走新的 Knowledge release identity 与 ACL 回归；不能为了 Demo 直接放宽政策权限。
+3. **真实业务 RAG 失败题**：优先复用现有 `refund_policy_basic` 与 `refund_policy_quality` 两篇原件，冻结一条需要二者共同支持的 Evidence requirement，例如“结合基础退款政策和质量问题专项规则，说明适用条件、申请材料及退款处理流程”。先验证首次检索是否稳定缺少其中一篇，再把 requirement 拆分或受控 rewrite 作为候选恢复动作；只有现有 corpus 无法形成真实、稳定、可解释的失败簇时，才通过正式发布流程增加语料并生成新 release identity，禁止先造语料再反向证明某个恢复动作有用。
+
+#### 北极星 turn 与建设切片映射
+
+| Turn / 验收变体 | 预期任务变化与取证行为 | 主要建设归属 |
+|---|---|---|
+| T1：查询 7 月退款率 | 建立新任务与时间/指标条件，route=SQL，取得 7 月 SQL Evidence | seed 前置；A1 |
+| T2：改成 8 月并查看退款金额 | 修改时间与指标，旧 SQL Evidence 失效并重新查询 | A1 |
+| T3：为什么上涨 | 增加原因分析 Evidence requirement，由 Observation 驱动允许的 SQL/全局补证据动作并正确停止 | A2 |
+| T4：结合基础退款政策和质量问题专项规则解释 | 增加 Document Evidence requirement，顶层从 SQL 受控转为 Hybrid；内部业务检索先暴露缺失 Evidence，再由 RAG 恢复动作补齐 | A2 负责全局 SQL→Hybrid；B1/B2 负责 RAG 内部取证 |
+| T5：不对，改成按渠道维度分析 | 纠正已确认维度，使受影响 SQL Evidence 失效；仍有效的政策 Evidence 只有重新核对 requirement、revision、freshness、用途与权限后才能复用 | A1 提供 correction/merge 语义；A2 在整合路径重新执行 |
+| 重启、多 worker、并发旧版本后继续 | 不恢复任意 Graph 执行栈，只从安全的任务边界状态继续 | A3 |
+| 长会话或低阈值 contract 触发 compact 后继续 | compact 前后 typed 任务行为等价，不要求自然语言答案逐字相同 | A4 |
+
+现有 M38 的 `refund_reason_and_policy` operator 只能作为起点：它目前仍是固定薄计划，不能自动继承北极星的 8 月条件和连续 TaskState。后续必须论证该问法仍属于其语义并做 versioned 泛化，或新增边界更准确的 canonical operator；不能仅因出现“退款 + 政策”关键词就宣称已有 Hybrid 合同完整覆盖。
+
 ### 最终能力目标
 
-1. **顶层 Agent Loop**：将当前固定的 `route → Tool → controller → END` 拓扑升级为受控的 `Action → Observation → Evidence/Progress Gate → Next Action/Stop`。Controller 必须能在同次任务运行中根据 Observation 选择允许的下一动作，并使用 first-class Action、Budget、EvidenceDelta、Progress 与 Termination 合同保证权限拒绝、不可恢复错误、无进展和预算耗尽时确定性停止。顶层只负责全局澄清、重新调用某类 Tool、跨 Tool 补 Evidence、Evidence 失效后的重新取证、partial/stop 与父预算，只表达“仍缺哪类 Evidence”，不指定 query rewrite、parent expansion 等 RAG 内部策略。
-2. **Bounded Agentic RAG**：实现真实的 RAG Subgraph，在首次检索后读取 Observation，并能在停止与多种边界清晰的恢复动作之间选择。正式恢复动作只包括需要读取 Observation 后才能决定是否执行、执行哪一种或是否继续的多步取证，例如 Evidence requirement 拆分/子问题检索、受控 query rewrite，以及基于检索进展决定的 parent/neighbor context 扩展；固定执行的一次 parent 补取、邻近扩展、rerank 或 hybrid retrieval 留在 Pipeline adapter 内做单变量实验。Subgraph 只在顶层分配的子预算内负责文档取证，不拥有全局 route、SQL、Hybrid、最终回答或产品状态控制权，也不复制 Gate、Composer、Citation Validator；顶层和子图不得对同一失败各循环一次。确定性 Pipeline 长期保留为 baseline/fallback。
-3. **任务级自然多轮**：建立 `Natural-language Turn → Typed TaskDelta → Controlled TaskState Merge → Evidence reuse/invalidation → Route/Action` 链路，支持连续修改条件、追问旧结果、补充证据需求、纠正理解、切换任务、取消，以及 SQL/RAG/Hybrid 之间的受控 route 变化。这不再只是“一次 clarification + 一次 signed follow-up”，而是可连续推进、可中止、可恢复的 bounded task-oriented Agent。
+1. **顶层 Agent Loop**：将当前固定的 `route → Tool → controller → END` 拓扑升级为受控的 `Action → Observation → Shared Answer Evidence Gate / Progress Policy → Next Action/Stop`。这里的 Agent Loop 是 **Decision Loop，不是 Thought Loop**：Shared Answer Evidence Gate 仍只判断 Evidence 是否足以支撑回答；Progress Policy 只是 Controller 内消费 typed Observation、EvidenceDelta 与 Budget ledger 的确定性控制逻辑，判断是否新增 Evidence、是否还有允许动作，不是新的回答充分性 Gate 或第三个最终裁决者。Observation 先形成 typed Evidence requirement / failure classification，再从已登记的 allowed action 中选择动作；不把自由文本思维链当作状态、进展或下一动作依据。Controller 必须能在同次任务运行中根据 Observation 选择允许的下一动作，并使用 first-class Action、Budget、EvidenceDelta、Progress 与 Termination 合同保证权限拒绝、不可恢复错误、无进展和预算耗尽时确定性停止。模型可以提出结构化候选决策，但确定性控制层仍须校验 allowlist、预算、权限、outbound、安全和 no-progress。顶层只负责全局澄清、重新调用某类 Tool、跨 Tool 补 Evidence、Evidence 失效后的重新取证、partial/stop 与父预算，只表达“仍缺哪类 Evidence”，不指定 query rewrite、parent expansion 等 RAG 内部策略。
+2. **Bounded Agentic RAG**：实现真实的 RAG Subgraph，在首次检索后读取 Observation，并能在停止与多种边界清晰的恢复动作之间选择。正式恢复动作只包括需要读取 Observation 后才能决定是否执行、执行哪一种或是否继续的多步取证，例如 Evidence requirement 拆分/子问题检索、受控 query rewrite，以及基于检索进展决定的 parent/neighbor context 扩展；固定执行的一次 parent 补取、邻近扩展、rerank 或 hybrid retrieval 留在 Pipeline adapter 内做单变量实验。Subgraph 的 Retrieval Progress Policy 与顶层同理，只判断文档取证是否前进，不生成答案、不复制 Shared Answer Evidence Gate。Subgraph 只在顶层分配的子预算内负责文档取证，不拥有全局 route、SQL、Hybrid、最终回答或产品状态控制权，也不复制 Composer、Citation Validator；顶层和子图不得对同一失败各循环一次。确定性 Pipeline 长期保留为 baseline/fallback。
+3. **任务级自然多轮**：建立 `Natural-language Turn → Typed TaskDelta → Controlled TaskState Merge → typed turn/event ledger → Evidence reuse/invalidation → Route/Action` 链路，支持连续修改条件、追问旧结果、补充证据需求、纠正理解、切换任务、取消，以及 SQL/RAG/Hybrid 之间的受控 route 变化。Loop 若发现必须由用户补充的信息，当前 invoke 必须以结构化 clarification 终止，并在既有 turn seam 保存任务边界状态；用户下一轮从 TaskState 重新进入 Decision Loop，不保存或恢复任意 Graph program counter、节点栈或模型思维过程。这不再只是“一次 clarification + 一次 signed follow-up”，而是可连续推进、可中止、可恢复的 bounded task-oriented Agent。
 4. **持久任务状态与上下文治理**：建立带 schema version、owner/tenant/role、TTL、显式删除、乐观版本/原子 claim 的持久 checkpoint，使同一任务可在进程重启和多 worker 下按安全合同恢复。同时建立 node-level Context Builder，为 Router、Turn Understanding、SQL、RAG、RAG Subgraph、Composer 和 Controller 提供各自的 typed 最小上下文、token/context budget 和可直接 Eval 的实际入模投影，不将完整 State 或历史无差别灌入 prompt。
-5. **Context Compact 基础版**：将 session 内的长历史收敛为结构化 `TaskCompact`，至少保留 current goal、confirmed/corrected constraints、pending questions、unresolved Evidence requirements、active EvidenceRef 及 validity、action/budget/termination 事实、高风险原始 reference，并与最近原始 turns 和当前 turn 共同组成节点上下文。Compact 必须具备来源 turn 范围、版本/fingerprint、失败降级、Evidence 失效复核和 compact 前后行为等价验证；不用不可验证摘要取代时间、金额、指标口径、否定、政策例外或 Evidence identity。
+5. **Context Compact 基础版**：将 session 内受 TTL 和最小化策略治理的 typed turn/event ledger 收敛为结构化 `TaskCompact`，至少保留 current goal、confirmed/corrected constraints、pending questions、unresolved Evidence requirements、active EvidenceRef 及 validity、action/budget/termination 事实、高风险原始 reference，并与少量最近原始 turns 和当前 turn 共同组成节点上下文。turn/event ledger 不保存完整 SQL rows、Document 正文、模型思维链或无限聊天历史；自然语言纠正/指代所需的少量近期原文可以保存原文或受控 reference。Compact 必须具备来源 turn 范围、版本/fingerprint、触发原因、失败降级、Evidence 失效复核和 compact 前后 typed 行为等价验证；不用不可验证摘要取代时间、金额、指标口径、否定、政策例外或 Evidence identity。
 
 ### 大致建设路线
 
-1. **先建立任务运行时合同**：完成 TaskState、TaskDelta、node-level Context、Action/Budget/Progress 的稳定语义，并立即接入一条真实自然语言多轮纵向场景，避免只造横向抽象。TaskDelta contract 保持 adapter-neutral，并提供确定性保守 fallback；若 Turn Understanding 使用模型，必须先独立登记 receiver、node purpose、data class 与字段，取得 `OutboundDecision`，并覆盖未授权、provider unavailable 和结构化解析失败的保守降级。首条场景锚建议使用“查询 7 月退款率 → 改成 8 月 → 不对，我要看退款金额”，先验证 `modify_constraint`、`correct_previous_understanding`、TaskState 受控合并和 SQL Evidence 失效重查。
+后续不是严格串行的“基础设施全部完成 → Agentic RAG → 最后才验证场景”，而是由北极星任务牵引两条主线交错建设；同一时间仍只为当前最小纵向切片建立一个 active module plan。持久 checkpoint 和 Compact 不阻塞首个可用多轮/Loop 演示，但它们是最终目标，在跨能力验收前必须完成，不能降级为模糊后续项。
 
-   **完成标志**：同一条自然语言 sequence 上 TaskState、TaskDelta、Action/Progress 均为 typed 事实，实际 node context 可被 Eval 直接检查；实现不能只依赖固定字符串模板，也不能在模型不可用时自由猜测 delta。
+#### 主线 A：任务级多轮与顶层 Decision Loop
 
-2. **形成真实顶层 Loop**：在不放宽现有 Evidence、ACL、outbound 和四轴状态合同的前提下，加入 Observation-driven next action、无进展停止、全局预算和跨 Tool 补 Evidence，使 Agent Loop 不再依赖固定 DAG 拓扑或用户再发一轮才能继续。顶层只选择全局恢复动作并分配父预算，RAG 内部再取证交给 Subgraph。
+1. **建立任务运行时合同并跑通自然多轮 v1**：先完成 TaskState、TaskDelta、最小 node-level Context 与 typed turn/event ledger 的稳定语义，并立即接入北极星 T1–T2，避免只造横向抽象；Action/Budget/Progress 等由 Loop 真正消费的合同随 A2 落地，不为名词提前建设。turn/event 至少表达 turn identity/order、TaskDelta、TaskState 前后 fingerprint、EvidenceRef/validity、route/action 与 status/termination；近期 user utterance 只按 TaskDelta/指代解析、审计和 compact 所需的最小范围、TTL 与安全 reference 保存，不保存旧回答、完整 SQL rows、Document 正文或无限聊天历史。TaskDelta contract 保持 adapter-neutral，并提供确定性保守 fallback；若 Turn Understanding 使用模型，必须先独立登记 receiver、node purpose、data class 与字段，取得 `OutboundDecision`，并覆盖未授权、provider unavailable 和结构化解析失败的保守降级。
 
-   **完成标志**：同次运行内存在由真实 Observation 触发的下一动作，recoverable、no-progress、budget exhausted 与 unsafe stop 均有 required 证据；移除控制回边后相关能力测试必须失败。
+   **完成标志**：新 seed identity 和最小权限 demo caller 下，北极星 T1–T2 能连续推进并正确使旧 SQL Evidence 失效；另用独立 correction contract 证明纠正语义，不跨过 T3–T4 假装北极星已走到 T5。TaskState、TaskDelta、turn/event 和实际 node context 均为可直接 Eval 的 typed 事实；实现不能只依赖固定字符串模板，也不能在模型不可用时自由猜测 delta。
 
-3. **完成持久任务多轮**：扩展 TaskDelta 类型、连续 TaskState merge、route 变化与 Evidence reuse/invalidation，接入带 schema version、owner/tenant/role、TTL、clear、乐观版本/原子 claim 的持久 checkpoint，覆盖进程重启、多 worker、重复请求和旧版本并发。
+2. **形成真实顶层 Decision Loop**：在不放宽现有 Evidence、ACL、outbound 和四轴状态合同的前提下，随消费方建立 Action、Budget ledger、EvidenceDelta、Progress/Termination，并加入 Observation-driven next action、无进展停止、全局预算和跨 Tool 补 Evidence，使 Agent Loop 不再依赖固定 DAG 拓扑或用户再发一轮才能继续。预算不折叠成一个不可解释的综合分：至少分别记录 action、Tool call、retrieval call/candidate/selected/context、model call/token，以及 timeout/latency；计数与资源上限承担确定性停止，latency/费用同时作为观测和 A/B 维度。顶层持有总账并分配子账，Subgraph 只能消费子账且消费必须回写总账。顶层只选择全局恢复动作并分配父预算，RAG 内部再取证交给 Subgraph。
 
-   **完成标志**：条件修改、纠正理解、追问和跨 route 推进在多轮中保持一致；重启、多 worker、TTL、clear 和 version conflict 都有可预测结果，旧 Evidence 复用前始终重新检查 freshness、revision、用途与权限。
+   若 decision proposal 使用模型，必须作为独立 outbound purpose 登记 receiver、data class 与最小字段；未授权、provider unavailable 或结构化解析失败时，只能执行触发条件可由确定性规则确认的动作，否则按 no-progress / insufficient evidence 停止，不能自由猜测。Loop 需要用户信息时按 turn boundary 结束为结构化 clarification，复用 thread pending seam；A2 不保存任意 in-run 执行栈。
 
-4. **完成 Context Engineering 与 Compact 基础版**：为 Router、Turn Understanding、SQL、RAG、RAG Subgraph、Composer 和 Controller 建立各自的 typed 最小投影及 context budget，并把长 session 收敛为结构化 `TaskCompact`。基础版以 typed TaskState 的确定性结构化投影和裁剪为正式能力，不依赖 LLM 自由摘要；LLM 叙述性摘要不属于基础版必需能力，若未来单独引入，必须作为不可信派生字段和独立模型用途重新评估。
+   **完成标志**：北极星 T3 能由真实 Observation 触发允许的原因分析/补证据动作；T4 能完成顶层 SQL→Hybrid 变化，即使此时 RAG 内部仍由 Pipeline/fallback 取证。recoverable、clarification、no-progress、budget exhausted 与 unsafe stop 均有 required 证据；移除控制回边后相关能力测试必须失败。
 
-   **完成标志**：每个节点只接收合同允许的最小上下文；compact 前后的任务目标、关键条件、Evidence validity、route/next action 等价，高风险原始 reference 可追溯，compact 失败时有保守降级。
+3. **完成持久任务多轮**：在 TaskState interface 稳定后建立新的 durable state family，并通过同一 checkpoint interface 同时保留 in-memory adapter 与真正的持久 adapter。新 family 从第一版携带 schema version、owner/tenant/role、TTL、clear、乐观版本；claim、version bump、clear 与 TTL 必须使用存储层条件更新，覆盖进程重启、多 worker、重复请求和旧版本并发。历史 `m37-thread-v2` artifact 与 in-memory adapter 保留用于 M36/M37 回归，不把本来从未持久化的旧进程状态伪装成在线迁移对象；持久存储若遇到不兼容 family/version 必须拒绝恢复。持久化不阻塞最早的进程内多轮切片，但必须在最终自然多轮验收前完成，且不能用另一种内存 saver 冒充持久升级。
 
-5. **用 RAG 失败漏斗指导恢复动作**：先分开度量 retrieved、selected、generation-visible、Composer/support、cited 和 answer correctness/completeness，再在 diagnostic/dev 上单变量比较不同恢复动作，避免把 packing、rewrite、parent expansion 与 Subgraph 一次性捆绑成不可归因的“高级 RAG”。
+   **完成标志**：北极星任务可在重启后继续；条件修改、纠正理解、追问和跨 route 推进保持一致；多 worker、TTL、clear 和 version conflict 都有可预测结果，旧 Evidence 复用前始终重新检查 freshness、revision、用途与权限。
+
+4. **完成 Context Engineering 与 Compact 基础版**：node-level Context Builder 从第一片起随调用节点建设，不能和 Compact 一起后置；待 TaskState、typed turn/event ledger 和实际入模投影稳定后，再把长 session 收敛为结构化 `TaskCompact`。正式配置按 turn 数与 context/token budget 触发；contract test 可以使用显式、带 identity 的低阈值或北极星 extended sequence 强制触发，但不能静默修改生产阈值。基础版以 typed TaskState 的确定性结构化投影和裁剪为正式能力，不依赖 LLM 自由摘要；LLM 叙述性摘要不属于基础版必需能力，若未来单独引入，必须作为不可信派生字段和独立模型用途重新评估。
+
+   **完成标志**：每个节点只接收合同允许的最小上下文；北极星 extended sequence 或低阈值 contract 跨 compact 后，TaskState 投影、关键条件、Evidence validity、route/action、最终状态与权限/预算行为等价，高风险原始 reference 可追溯，compact 失败时有保守降级；不要求自然语言答案逐字相同。
+
+#### 主线 B：RAG 动作证据与 bounded Agentic RAG
+
+1. **用 RAG 失败漏斗指导恢复动作**：与主线 A 的早期切片并行，先分开度量 retrieved、selected、generation-visible、Composer/support、cited 和 answer correctness/completeness，再在 diagnostic/dev 上单变量比较不同恢复动作，避免把 packing、rewrite、parent expansion 与 Subgraph 一次性捆绑成不可归因的“高级 RAG”。本步显式交付北极星业务取证 case：冻结 basic + quality 两篇原件共同组成的 gold Evidence requirement，记录首次检索实际取得/缺少的文档、失败阶段与 runtime identity，再比较 requirement 拆分、受控 rewrite 等候选动作；若首次已经稳定取全，不得伪造失败，改从其他真实失败簇选择业务案例。
 
    **完成标志**：能够把失败定位到 retrieval、selection、generation context、support、citation 或 answer；每个拟进入 Subgraph 的动作都有明确触发条件、预期/实际 EvidenceDelta、额外预算、延迟和安全失败边界。
 
-6. **完整交付 bounded Agentic RAG**：Subgraph 的 allowed action set 必须来自第 5 步识别出的稳定失败簇和 action-level diagnostic Evidence；未证明触发条件、Evidence 增量及安全/成本边界的动作不得进入实现。在同 Knowledge Tool/Evidence/AnswerFlow 合同内实现有父子预算、多种合格恢复动作、Evidence merge/deduplicate、progress/no-progress 判断和确定性停止的 Subgraph，并完成 Pipeline/Subgraph 的未污染 held-out A/B 与 DataPilot 业务演示。若动作证据尚不合格，应继续补 diagnostic Evidence，不得降低准入标准或把 Pipeline 机械拆成 Graph。**Subgraph 实现本身是本方案的明确交付目标；是否切换为默认仍由净收益证据决定。**
+2. **完整交付 bounded Agentic RAG**：Subgraph 的 allowed action set 必须来自前一步识别出的稳定失败簇和 action-level diagnostic Evidence；未证明触发条件、Evidence 增量及安全/成本边界的动作不得进入实现。在同 Knowledge Tool/Evidence/AnswerFlow 合同内实现有父子预算、多种合格恢复动作、Evidence merge/deduplicate、progress/no-progress 判断和确定性停止的 Subgraph，并用北极星任务中的政策取证片段完成业务演示，再完成 Pipeline/Subgraph 的未污染 held-out A/B。decision proposal、query rewrite、Evidence requirement split/subquestion 若使用模型，必须各自按真实用途登记 outbound receiver、data class、允许字段与保守降级，不能因 provider 相同继承授权；模型动作不可用时跳过该动作，仍有确定性安全动作则继续，否则停止，不能自由猜测。若动作证据尚不合格，应继续补 diagnostic Evidence，不得降低准入标准或把 Pipeline 机械拆成 Graph。**Subgraph 实现本身是本方案的明确交付目标；是否切换为默认仍由净收益证据决定。**
 
    **完成标志**：首次 Observation 能在至少两种不同的合格恢复动作与停止之间作出正确选择；Pipeline/Subgraph 在同合同、未污染 held-out 和可比预算下完成 A/B。即使不切默认，experimental adapter 也必须完整可运行、可回退、可追踪。
 
-7. **最后做跨能力整体验收**：使用北极星 sequence“查询退款表现 → 修改时间和指标 → 追问异常原因 → 增加政策 Evidence requirement → SQL 转 Hybrid → 纠正旧理解”，贯通 SQL、RAG 和 Hybrid，验证顶层 Loop 与 RAG Subgraph 不会对同一失败双重循环，并同时验证 Evidence invalidation、持久恢复、Context Compact、Trace、预算、权限和出站安全。
+#### 贯穿两条主线：Agent Scenario Eval
 
-   **完成标志**：一条连续自然多轮任务能安全贯通 TaskDelta、顶层 Loop、SQL/RAG/Hybrid、RAG Subgraph、持久恢复和 Compact；不存在权限绕过、无界调用、双循环或 compact 后任务语义漂移。
+从第一片开始建立独立、版本化的自然语言多轮 Agent Scenario family，复用“一次 sequence 执行、多条 typed assertion 共享同一 ExecutionEvidence、closed-world identity”的现有纪律，但不向冻结的 M27 Text2SQL artifact 补写新语义。每个 turn 的断言面向 Task Runtime 的可观察 interface，至少覆盖 seed/caller/release/runtime identity、TaskDelta、TaskState transition、typed turn/event、Evidence reuse/invalidation、route/action、Tool call、实际 node context、Budget/Progress/Termination、ACL/outbound；不得依赖内部字典、具体节点类名或仅检查最终回答。
+
+Scenario 按用途隔离：北极星 canonical sequence 负责稳定展示；required contract/security sequence 负责权限、预算、停止、并发与恢复；diagnostic/dev sequence 用于选择动作和调试；held-out decision sequence 只用于模型/策略和 Pipeline/Subgraph 的净收益判断，污染后必须退出保留集。
+
+**阶段完成标志**：每个纵向切片都能说明它让北极星任务新增跑通了哪一段，并在配套非 happy-path sequence 上留下 required 证据；最终同一条连续自然多轮任务能够安全贯通 TaskDelta、顶层 Loop、SQL/RAG/Hybrid、RAG Subgraph、持久恢复和 Compact，不存在权限绕过、无界调用、双循环或 compact 后任务语义漂移。
+
+### 明确不建设的能力
+
+以下边界用于防止后续为了堆叠 Agent 关键词扩大动作空间；它们不削弱本节已经承诺的最终目标：
+
+- 不在运行时自动生成、注册或执行新 Tool，也不允许未登记动作进入 allowlist；
+- 不允许无限 Agent Loop，所有循环必须受 Budget、Progress/no-progress、安全/权限/outbound policy 和确定性终止约束；
+- 不提供自动修改数据库、业务数据或其他高风险副作用 Tool；
+- 不建设能够自行创造任意目标、Tool 和无界子任务树的开放式通用自主规划器；仍保留合同内的 bounded planning、Evidence requirement 拆分和 allowed action selection；
+- 不建设开放领域 ChatGPT clone；DataPilot 仍是面向企业数据分析任务的 bounded Agent；
+- 不建设跨会话长期记忆、用户画像、开放研究型 ReAct 或多 Agent 系统。
 
 ### 历史结论与当前方案的关系
 
@@ -540,6 +595,10 @@ Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结
 ---
 
 ## 13. 修订记录
+
+2026-08-22：补齐北极星落地前置与 turn 映射：增加 versioned 7/8 月 seed 前置、最小多角色 demo caller、现有 basic + quality 政策多文档失败题及 M38 Hybrid operator 复核；把 Action/Budget/Progress 移到 A2 消费方并冻结多维父子预算、Progress Policy/唯一 Answer Gate、各模型动作 outbound 与保守降级；明确 Loop 只在 turn boundary 澄清、不恢复任意执行栈；补持久 state family/双 adapter/存储层条件更新，以及 typed turn/event ledger、Compact 触发和 typed 行为等价合同。
+
+2026-08-22：根据新一轮审查把北极星多轮 Scenario 从最终验收项提升为贯穿建设的用户故事；明确 Agent Loop 是 Evidence-driven Decision Loop 而非 Thought Loop；将路线改为任务级多轮/顶层 Loop 与 RAG 动作证据/Agentic RAG 两条交错主线，持久 checkpoint 与 Compact 不阻塞首个演示但仍为最终必交付；增加独立的多轮 Agent Scenario Eval 及开放工具、无界循环、数据库写入、通用自主规划器和 ChatGPT clone 等范围外边界。
 
 2026-08-22：根据后续审查收紧当前讨论稿：声明与旧章节、roadmap 和 `AI_CONTEXT` 的效力关系；补齐顶层 Loop / RAG Subgraph 的职责与父子预算边界；区分 Pipeline 单步增强和 Observation-driven 多步动作；增加 Turn Understanding outbound 前置、首条/北极星场景锚、动作 Evidence 准入；拆分持久多轮与 Context Compact，并为各建设步骤增加高层完成标志。
 
