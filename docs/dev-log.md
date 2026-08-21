@@ -12,9 +12,16 @@
 
 ### 先用大白话讲
 
-M29 像盖新楼前先做测绘和立施工红线。DataPilot 已有 `/api/query`、SQL 安全、Trace 和 Eval，但这些部件是为 Text2SQL 长出来的：客户端可以自己填 role，技术超时也会显示成“安全阻断”，数据库里的知识正文还可能被 SQL 路径看见。如果直接加一个向量库和问答 prompt，系统表面上会回答文档问题，却说不清**谁有权看、用了哪份证据、为什么拒答、外发了什么、失败算能力差还是服务不可用**。
+M29 像盖新楼前先做测绘、立施工红线：楼还没盖，先搞清楚地基上有哪些坑、红线画在哪里。
 
-所以本模块没有追求“马上能聊天”，而是先规定后续各部件共同遵守的语言：状态分开说、身份不能自报、证据要有生命周期、引用必须可校验、远程发送默认不继承旧授权。这样下一模块可以围绕一个明确问题完成闭环，而不是把 API、权限、语料、检索、生成和 Eval 一次性揉成失控的大改造。
+当时 DataPilot 已有的 `/api/query`、SQL 安全、Trace 和 Eval 都是为 Text2SQL 长出来的，直接加 RAG 会踩到四个坑：
+
+- 客户端可以自己填 role，没人验证身份；
+- 技术超时也会显示成“安全阻断”，用户以为自己越权了；
+- 数据库里的知识正文还可能被 SQL 路径看见；
+- 说不清谁有权看、用了哪份证据、为什么拒答、外发了什么。
+
+所以本模块没有追求“马上能聊天”，而是先立下后续各部件共同遵守的红线：状态分开说、身份不能自报、证据要有生命周期、引用必须可校验、远程发送默认不继承旧授权。这样下一模块才能围绕一个明确问题做闭环，而不是把 API、权限、语料、检索、生成和 Eval 揉成一场失控的大改造。
 
 ### 这次做了什么
 
@@ -22,21 +29,38 @@ M29 像盖新楼前先做测绘和立施工红线。DataPilot 已有 `/api/query
 
 1. **把“回答发生了什么”拆成四条互不冒充的状态轴**
 
-   原来的 `AgentResponse` 只有 route 和一组 safety/error 字段，Schema 没召回、模型超时、SQL 执行错误和 SQL Guard 拦截都可能被包装成 `safety_status=blocked`。这会误导用户，也会让 Eval 把“没观察到能力”判成“业务答错”。M29 将内部事实冻结为 **route / execution / answer / safety**：走哪条路、工具是否完成、答案是否完整、安全是否放行分别表达，并为澄清、不支持、无候选、证据不足、外部不可用、ACL 拒绝、引用非法等情况建立 reason registry。
+   原来的 `AgentResponse` 只有 route 和一组 safety/error 字段，Schema 没召回、模型超时、SQL 执行错误和 SQL Guard 拦截都可能被包装成 `safety_status=blocked`。这会误导用户，也会让 Eval 把“没观察到能力”判成“业务答错”。
+
+   M29 因此把内部事实冻结为 **route / execution / answer / safety 四轴**：走哪条路、工具是否完成、答案是否完整、安全是否放行分别表达；并为澄清、不支持、无候选、证据不足、外部不可用、ACL 拒绝、引用非法等情况建立 reason registry（原因码注册表，每种结局对应一个稳定代号）。
 
    没有直接修改 `/api/query` 或删除旧字段，因为 Streamlit、Trace、M27 adapter 和大量测试仍在消费它们。推荐方案是后续保留端点并做单向兼容投影：新内部合同产生旧字段，而不是旧字段反过来控制新流程。聚焦 **40 个回归测试**和消费者反向清单证明现有行为未被 M29 改动；但这还不能证明未来投影实现正确，那要由对应开发模块测试。
 
 2. **把身份、Evidence 和 citation 变成安全边界**
 
-   当前 `QueryRequest.user_role` 是客户端自己填写的字符串，能用于 demo fixture，却不能证明生产身份。M29 冻结 **trusted caller** 语义：只有认证、demo 或测试 adapter 能解析出可信 caller，未经验证的 role 声明默认拿不到文档 Evidence。Evidence 也不再是随手塞进 `docs_used` 的字典，而是带 authority、content identity、revision、allowed uses 和安全 reference 的 typed object，并区分 candidate、selected、generation-visible、cited 四个阶段。
+   当前 `QueryRequest.user_role` 是客户端自己填写的字符串，能用于 demo fixture（演示夹具），却不能证明生产身份。
 
-   这个阶段划分解决一个常见错觉：**“检索到过”不等于“模型看过”，更不等于“答案真的引用它”**。Citation 必须由代码检查 evidence id、revision、ACL、阶段和 anchor；模型不能自造一个看似正规的编号。没有把权限判断交给 prompt，也没有默认让 admin 看全部文档，因为这会把确定性安全规则交给概率模型。桌面反例覆盖 role 篡改、未授权高分候选、旧版本文档、文档 prompt injection 和伪造 citation；它证明合同能描述这些风险，不代表实现已经存在。
+   M29 因此冻结两项合同：
+
+   - **trusted caller（可信调用者）**：只有认证、demo 或测试 adapter 能解析出可信 caller；未经验证的 role 声明默认拿不到文档 Evidence。
+   - **typed Evidence（带类型的证据）**：不再随手塞进 `docs_used` 的字典，而是带 authority（权威来源）、content identity（内容身份）、revision（修订版本）、allowed uses（允许用途）和安全 reference 的对象，并区分 candidate、selected、generation-visible、cited 四个阶段。
+
+   这个阶段划分解决一个常见错觉：**“检索到过”不等于“模型看过”，更不等于“答案真的引用它”**。
+
+   - Citation 必须由代码检查 evidence id、revision、ACL、阶段和 anchor（原文定位坐标）；模型不能自造一个看似正规的编号。
+   - 没有把权限判断交给 prompt，也没有默认让 admin 看全部文档，因为这会把确定性安全规则交给概率模型。
+   - 桌面反例覆盖 role 篡改、未授权高分候选、旧版本文档、文档 prompt injection（提示注入）和伪造 citation；它证明合同能描述这些风险，不代表实现已经存在。
 
 3. **治理首批知识与 Eval 交接，但不提前替后续模块选技术参数**
 
-   反向盘点发现，10 条 `knowledge_docs` seed 不只是未来 RAG 语料：它还进入 ORM/Alembic、SQL RBAC、Domain Schema、Schema Retrieval、prompt 和旧 Eval。尤其 `sensitive_data_policy` 草稿容易暗示 admin 可看敏感明文，与现行“所有角色都禁止敏感字段”代码事实冲突。M29 为每条 seed 登记保留、改写、由 `metrics.yaml` 派生或淘汰的 disposition，并规定知识原件只讲政策规则，实时订单事实仍由 SQL Evidence 提供。
+   反向盘点发现，10 条 `knowledge_docs` seed 不只是未来 RAG 语料：它还进入 ORM/Alembic、SQL RBAC、Domain Schema、Schema Retrieval、prompt 和旧 Eval。尤其 `sensitive_data_policy` 草稿容易暗示 admin 可看敏感明文，与现行“所有角色都禁止敏感字段”代码事实冲突。
 
-   没有在本模块直接删表、改 seed 或发布 corpus，因为那会跨入 P1 实现并改变当前运行边界；也没有提前选择 chunk size、top-k、rerank、embedding 或 LangGraph。Phase 4 Eval 将使用独立 family，复用 M27 的“一题一次执行、多 assertion 共享 evidence”、required/advisory Gate 和 artifact 身份纪律，但不往只读的 `m27-v3` 塞大量 RAG optional 字段。全仓 **29 个测试文件、223 个 collected test 已分段执行覆盖且无失败**；这只能证明 M29 未破坏当前代码，不能说明 RAG 召回或答案质量已经提升。
+   M29 为每条 seed 登记保留、改写、由 `metrics.yaml` 派生或淘汰的 disposition（处置决定），并规定知识原件只讲政策规则，实时订单事实仍由 SQL Evidence 提供。
+
+   本模块没有直接删表、改 seed 或发布 corpus（正式语料），因为那会跨入 P1 实现并改变当前运行边界；也没有提前选择 chunk size（切块大小）、top-k、rerank、embedding 或 LangGraph 等参数。
+
+   Phase 4 Eval 将使用独立 family（合同家族），复用 M27 的“一题一次执行、多 assertion 共享 evidence”、required/advisory Gate 和 artifact 身份纪律，但不往只读的 `m27-v3` 塞大量 RAG optional 字段。
+
+   **验证**：全仓 **29 个测试文件、223 个 collected test** 已分段执行覆盖且无失败。这只能证明 M29 未破坏当前代码，不能说明 RAG 召回或答案质量已经提升。
 
 ### 新概念
 
@@ -76,9 +100,12 @@ M29 像盖新楼前先做测绘和立施工红线。DataPilot 已有 `/api/query
 - **滚动规划技术参数**：M29 冻结后续必须满足的语义和验收，不替尚未建立的 corpus 选择 chunk、top-k、rerank、图编排或向量后端。
 - **边界**：trusted caller、Evidence、ACL、citation 和新 Eval family 目前都是冻结合同，不是已上线代码；当前 `user_role` 和 `knowledge_docs` SQL 暴露仍是 P1 风险。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-我在 DataPilot 从 Text2SQL 进入 RAG 前做了一个入口合同模块。通过反向盘点 API、Streamlit、RBAC、Schema Retrieval、知识 seed、Trace、模型出站和 M27 Eval，我发现直接接向量检索会把客户端自报 role、技术失败与安全阻断混写、知识 SQL 旁路和远程 payload 授权等问题带进新链路。我没有马上堆 RAG 节点，而是冻结 route/execution/answer/safety 四轴状态、trusted caller、typed Evidence 生命周期、可验证 citation 和细粒度 outbound policy；同时治理 10 条首批知识的 authority/ACL/disposition，并决定 Phase 4 使用独立 Eval family、保持 M27 v3 只读。模块没有改运行行为，29 个测试文件、223 个测试项分段回归无失败；下一步会先完成可信知识原件和 Text2SQL 隔离，再安全发布给 RAG。
+1. **开工前先做“反向盘点”，再用四轴把“成功”拆开。**我逐个翻 API、RBAC、Schema Retrieval、知识 seed、Trace 和 M27 Eval，发现直接接 RAG 会带进客户端自报角色、技术超时被写成安全阻断、知识正文被 SQL 旁路读等一堆问题；于是把“这次请求发生了什么”冻结成 route/execution/answer/safety 四轴——技术超时是 execution failed，safety 照样 passed，Eval 也不会把“没观察到”误判成“答错了”。
+2. **刻意不写功能代码，先把“什么算完成”定死。**这轮交付的是合同和风险地图：身份、Evidence 四阶段、citation 代码校验、outbound 默认拒绝全部写成后续模块必须满足的验收项；29 个测试文件、223 项回归无失败，证明的是“没改坏”，不是“RAG 更好了”。
+
+### 面试官追问
 
 1. **[基础追问] 为什么技术超时和安全阻断必须分开？**
 
@@ -123,9 +150,14 @@ D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe -m pytest -p no:cachep
 
 ### 先用大白话讲
 
-M29 发现一个**危险的中间状态**：知识政策只是数据库 seed 里的几段字符串，同时又被 Text2SQL 当成普通表暴露。这样未来即使 RAG 做了 ACL，模型仍可能绕过 Knowledge Tool，直接生成 `SELECT content FROM knowledge_docs`。
+M29 发现了一个**危险的中间状态**：知识政策只是数据库 seed 里的几段字符串，同时又被 Text2SQL 当成普通表暴露。这就像公司制度只有贴在走廊里的几张传单，谁都能撕下来改几笔，SQL 部门还照着传单当业务数据用。
 
-M30 把这个问题完整关掉了。政策和规则现在有可审查的 **Markdown 权威原件**；指标说明不再手抄，而是从 `metrics.yaml` 自动生成；一个确定性的 builder 会校验完整 metadata、ACL、revision、anchor 和 identity，任何错误都整体失败。与此同时，`knowledge_docs` 从 Text2SQL 的 Schema、retrieval、prompt 和 SQL Guard 全部消失。数据库仍有 **14 张物理表**，但自然语言 SQL 只能看到 **13 张分析表**。
+M30 把这个问题完整关掉了：
+
+- 政策和规则有了可审查的 **Markdown 权威原件**，像把传单换成了盖过章的正式制度册；
+- 指标说明不再手抄，而是从 `metrics.yaml` 自动生成，公式只有一处；
+- 一个确定性的 builder 会校验完整 metadata、ACL、revision、anchor 和 identity，任何错误都整体失败，不会出现“前半本没问题、后半本缺页”的半成品；
+- `knowledge_docs` 从 Text2SQL 的 Schema、retrieval、prompt 和 SQL Guard 全部消失：数据库仍有 **14 张物理表**，但自然语言 SQL 只能看到 **13 张分析表**。
 
 ### 这次做了什么
 
@@ -133,13 +165,17 @@ M30 把这个问题完整关掉了。政策和规则现在有可审查的 **Mark
 
 1. **把“数据库里的草稿”升级为可信原件**
 
-   退款总则、质量问题、物流延迟、发票、VIP、敏感数据和 demo scope 被整理成 7 份 Markdown 原件。每份都带 document key、revision、anchor、status、data class、用途和 allowed roles。正文也做了业务纠偏：例如 admin 不能因为角色名就经自然语言 Text2SQL 查看敏感明文；VIP 文档只定义资格规则，不记录某个客户当前是否达标。
+   退款总则、质量问题、物流延迟、发票、VIP、敏感数据和 demo scope 被整理成 7 份 Markdown 原件。每份都带 document key、revision、anchor（定位坐标）、status、data class（数据分类）、用途和 allowed roles（允许角色）。
 
-   **原来的影响**是数据库草稿既不方便 code review，也无法表达稳定版本和访问用途；更宽松地继续使用旧表，会让手工编辑、ACL 丢失和版本漂移同时存在。现在每条旧 seed 都有 disposition 和 authority 映射，合同测试检查必需 metadata 与非法 ACL；这证明原件结构可审计，但**尚未证明这些政策已经通过业务法务审批**，它们仍是项目演示域内的受控语料。
+   正文也做了业务纠偏：例如 admin 不能因为角色名就经自然语言 Text2SQL 查看敏感明文；VIP 文档只定义资格规则，不记录某个客户当前是否达标。
+
+   **原来的影响**：数据库草稿既不方便 code review（代码审查），也无法表达稳定版本和访问用途；继续宽松使用旧表，会让手工编辑、ACL 丢失和版本漂移同时存在。
+
+   现在每条旧 seed 都有 disposition（处置决定）和 authority（权威来源）映射，合同测试检查必需 metadata 与非法 ACL；这证明原件结构可审计，但 **尚未证明这些政策已经通过业务法务审批**，它们仍是项目演示域内的受控语料。
 
 2. **让指标说明只有一个事实源**
 
-   GMV、优惠券和行为漏斗的公式已经在 `metrics.yaml`。如果再在知识文档里复制一遍，两个地方迟早会改得不一样。M30 的 projection 配置只声明 metric key 和展示/访问 metadata，正文在构建时由对应 metric 确定性生成。
+   GMV、优惠券和行为漏斗的公式已经在 `metrics.yaml`。如果再在知识文档里复制一遍，两个地方迟早会改得不一样。M30 的 projection 配置（派生投影）只声明 metric key（指标键）和展示/访问 metadata（元数据），正文在构建时由对应 metric 确定性生成。
 
    旧 `coupon_rule` 同时描述优惠券使用订单数和使用率，实际上对应两个不同指标。本次把它拆成 `coupon_order_count` 与 `coupon_usage_rate` 两个 entry，所以旧 10 条 seed 最终形成 11 个 catalog 条目。这不是多写了一份口径，而是把原来混在一起的两个概念分开。
 
@@ -147,23 +183,37 @@ M30 把这个问题完整关掉了。政策和规则现在有可审查的 **Mark
 
 3. **实现一个小入口、深实现的 staged catalog**
 
-   调用者只需要使用 `build_staged_catalog()`。文件发现、Markdown/YAML 解析、metric 派生、closed-world 校验、稳定排序、manifest 和 hash 都封装在内部。成功返回 immutable `StagedCatalog`；任何条目非法就抛出有限 reason code，不会返回“前 10 条成功、第 11 条失败”的半成品。
+   调用者只需要使用 `build_staged_catalog()`：文件发现、Markdown/YAML 解析、metric 派生、closed-world 校验、稳定排序、manifest（清单）和 hash 都封装在内部。
 
-   M30 特意区分两类身份：content identity 表达知识语义，用来发现换 key 后重复塞入同样内容；corpus identity 包含 document/revision/authority/anchor/ACL 等完整 manifest，用来判断整套 catalog 是否发生治理或内容变化。mtime、目录遍历顺序和 YAML key 顺序不会制造假漂移。
+   成功返回 immutable（不可变的）`StagedCatalog`；任何条目非法就抛出有限 reason code（原因码），不会返回“前 10 条成功、第 11 条失败”的半成品。
 
-   更简单的“发现几个文件就返回几个对象”无法阻止半成功和静默默认值。M30 用反例测试覆盖缺字段、未知 enum/role/purpose、重复 revision/anchor/content、未知 metric key、inactive 泄漏和 expected identity 漂移；同输入重建 identity 一致，正文变化会改变 identity。**这证明 staged 构建合同成立，不代表 active 发布、在线原子切换或回滚已经实现。**
+   M30 特意区分两类身份：content identity（内容身份）表达知识语义，用来发现换 key 后重复塞入同样内容；corpus identity（语料身份）包含 document/revision/authority/anchor/ACL 等完整 manifest，用来判断整套 catalog 是否发生治理或内容变化。mtime（文件修改时间）、目录遍历顺序和 YAML key 顺序不会制造假漂移。
+
+   更简单的“发现几个文件就返回几个对象”无法阻止半成功和静默默认值。
+
+   M30 用反例测试覆盖缺字段、未知 enum/role/purpose、重复 revision/anchor/content、未知 metric key、inactive 泄漏和 expected identity 漂移；同输入重建 identity 一致，正文变化会改变 identity。
+
+   **这证明 staged（分阶段）构建合同成立，不代表 active 发布、在线原子切换或回滚已经实现。**
 
 4. **封住 Text2SQL 知识旁路**
 
-   `schema_desc/knowledge_docs.md` 和 retrieval alias 被移除，四种角色的 SQL allowlist 都不再包含知识表。SQL Guard 的全部分析表集合从默认 Domain Schema 派生，减少 prompt 与权限名单各写一份造成的漂移。即使模型手工伪造 QueryPlan，planner 会因表不在局部 Schema 拒绝；即使跳过 planner 直接提交 SQL，SQL Guard 仍会拒绝。
+   `schema_desc/knowledge_docs.md` 和 retrieval alias（检索别名）被移除，四种角色的 SQL allowlist（允许名单）都不再包含知识表。SQL Guard 的全部分析表集合从默认 Domain Schema 派生，减少 prompt 与权限名单各写一份造成的漂移。
 
-   只在 prompt 里写“不要查”更省代码，但模型提示不是安全边界。测试同时验证 prompt 不可见、Schema Retrieval 无字段文档、伪造 planner 输出失败和四角色手工 SQL 被 Guard 拦截；M27 canonical 归因题仍返回 `unsupported_relation`。Schema corpus 因此从历史 195 docs 变为 **186 docs/new hash**；旧报告仍可追溯，但旧 Milvus collection 不能冒充当前索引。
+   即使模型手工伪造 QueryPlan，planner 会因表不在局部 Schema 拒绝；即使跳过 planner 直接提交 SQL，SQL Guard 仍会拒绝。
 
-5. **在证据出来后完成 G2，而不是提前拍脑袋选数据库结构**
+   只在 prompt 里写“不要查”更省代码，但模型提示不是安全边界。
 
-   prototype 证明当前没有 API、Tool、生成器、retriever 或 demo 读取 `KnowledgeDoc`。用户比较三种方案后选择 B：运行时从 authority source 构建 catalog，物理表暂留为 legacy 兼容存储。seed 删除手写 `_KB_CONTENTS`，改为从同一个 catalog 生成 11 行；没有新增 migration，也没有删表。
+   测试同时验证 prompt 不可见、Schema Retrieval 无字段文档、伪造 planner 输出失败和四角色手工 SQL 被 Guard 拦截；M27 canonical（规范）归因题仍返回 `unsupported_relation`。Schema corpus（语料）因此从历史 195 docs 变为 **186 docs/new hash**；旧报告仍可追溯，但旧 Milvus collection 不能冒充当前索引。
 
-   方案 A 会为尚不存在的多实例/运营后台提前冻结数据库 projection schema；方案 C 会立刻承担删表、外部消费者和回滚风险。方案 B 的代价是保留一个**有损 legacy 表**，因此代码和 state 明确禁止从它恢复正式 ACL。MySQL `datapilot_dev` 已 reset 验证 14 表计数、11 条知识投影和固定事实；这证明兼容 seed 可重建，**不能证明仓库外永远没有旧表消费者**，未来退役仍需重新审计。
+5. **在证据出来后完成 G2（Phase 4 第二个决策门），而不是提前拍脑袋选数据库结构**
+
+   prototype（原型）证明当前没有 API、Tool、生成器、retriever 或 demo 读取 `KnowledgeDoc`。
+
+   用户比较三种方案后选择 B：运行时从 authority source 构建 catalog，物理表暂留为 legacy（遗留）兼容存储。seed 删除手写 `_KB_CONTENTS`，改为从同一个 catalog 生成 11 行；没有新增 migration（迁移），也没有删表。
+
+   方案 A 会为尚不存在的多实例/运营后台提前冻结数据库 projection schema（投影结构）；方案 C 会立刻承担删表、外部消费者和回滚风险。
+
+   方案 B 的代价是保留一个 **有损 legacy 表**，因此代码和 state 明确禁止从它恢复正式 ACL。MySQL `datapilot_dev` 已 reset 验证 14 表计数、11 条知识投影和固定事实；这证明兼容 seed 可重建，**不能证明仓库外永远没有旧表消费者**，未来退役仍需重新审计。
 
 ### 新概念
 
@@ -207,9 +257,12 @@ Text2SQL 隔离链是：
 - **旧证据不改写**：历史 M27 的 195-doc hash 继续解释旧 artifact；当前 corpus 是 186 docs/new hash，不能复用不匹配的 Milvus collection。
 - **滚动规划**：短文尚未出现 chunk 失败，不引入 parent/child、embedding、rerank 或在线发布机制。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在接入 RAG 前先治理知识事实源和 SQL 旁路。原系统把政策写在数据库 seed 中，指标口径又与 `metrics.yaml` 重复，而且 `knowledge_docs` 被 NL2SQL Schema 与 RBAC 暴露。我的实现把政策迁到带 revision、anchor、ACL 和 data class 的 Markdown authority，指标正文从唯一 metric key 派生；再用一个失败关闭的纯函数 builder 生成 immutable staged catalog 和稳定 identity。安全上，我区分 14 张物理表与 13 张 Text2SQL queryable tables，并在 Schema/prompt/planner 与 SQL Guard 两层封住知识表。最后根据 consumer scan 让用户选择 source-backed catalog + legacy 表方案，避免为尚不存在的多实例和运营后台需求提前做数据库 migration。验证包括全仓 231 passed、MySQL seed/固定事实和 canonical `unsupported_relation`；边界是 catalog 仍为 staged，没有宣称 RAG 召回、citation 或 active 发布已经上线。
+1. **知识从“数据库里的几段字符串”升级成有权威原件和稳定身份的受治理资产。**政策迁到带 revision、anchor、ACL 的 Markdown 原件，指标正文从 `metrics.yaml` 生成而不是手抄；一个失败关闭的 builder 要么整体成功、要么整体拒绝，content/corpus 两层 identity 让重复内容和治理变化都能被发现。
+2. **封 SQL 旁路用了两道防线，宁可留 legacy 表也不乱迁移。**知识表从 Schema、prompt、retrieval 里消失，SQL Guard 仍按 allowlist 拦截伪造 QueryPlan 和手工 SQL；用户选了方案 B，旧表只做兼容投影且禁止恢复 ACL——技术债登记在案，而不是假装不存在。
+
+### 面试官追问
 
 1. **[基础追问] 为什么不直接把数据库表当知识库？**
 
@@ -269,21 +322,49 @@ M30 像把 11 份公司制度整理进了档案室，但门还没正式打开。
 
 1. **先把“用户自报角色”与可信身份彻底分开**
 
-   原来的 `QueryRequest.user_role` 是客户端传来的字符串。如果未来直接拿它做文档 ACL，攻击者只要把 role 改成 `admin` 就可能读到受限政策。M31 引入 **Trusted caller（可信调用者）**：它像 Spring Security 已完成认证后的 `Authentication`，业务层只接收解析好的 caller，不读取 token、cookie 或原始角色声明。production authenticated、demo fixture 和 test fixture 可以成为授权主体；请求体声明只能变成 `unverified_request_claim`，其 `resolved_roles` 固定为空。
+   原来的 `QueryRequest.user_role` 是客户端传来的字符串。如果未来直接拿它做文档 ACL，攻击者只要把 role 改成 `admin` 就可能读到受限政策。
 
-   文档授权再按 trust、active revision、purpose、`public/allowed_roles` 的固定顺序判断，admin 也没有隐式全读权。候选构造前做 `pre_selection` 检查，真正进入生成器前做 `pre_generation` 二次检查；拒绝投影统一显示 `not_authorized`，避免标题、文档 ID、revision、正文甚至“某文档是否存在”成为侧信道。没有采用“相信前端 role”或“让模型看 prompt 自己守规矩”的宽松方案，因为安全边界必须由确定性代码控制。11 entries × 角色 × 用途矩阵、role 篡改和 admin 非全读反例都已通过；但生产 JWT/OAuth 和 RAG API 尚未实现。
+   M31 引入 **Trusted caller（可信调用者）**：它像 Spring Security 已完成认证后的 `Authentication`，业务层只接收解析好的 caller，不读取 token、cookie 或原始角色声明。production authenticated、demo fixture 和 test fixture 可以成为授权主体；请求体声明只能变成 `unverified_request_claim`（未验证请求声明），其 `resolved_roles` 固定为空。
+
+   文档授权再按 trust、active revision、purpose、`public/allowed_roles` 的固定顺序判断，admin 也没有隐式全读权。
+
+   - 候选构造前做 `pre_selection` 检查，真正进入生成器前做 `pre_generation` 二次检查；
+   - 拒绝投影统一显示 `not_authorized`，避免标题、文档 ID、revision、正文甚至“某文档是否存在”成为侧信道（旁路泄露）。
+
+   没有采用“相信前端 role”或“让模型看 prompt 自己守规矩”的宽松方案，因为安全边界必须由确定性代码控制。
+
+   **验证**：11 entries × 角色 × 用途矩阵、role 篡改和 admin 非全读反例都已通过；但生产 JWT/OAuth 和 RAG API 尚未实现。
 
 2. **让 Evidence 和 citation 记录真实使用过程，而不是事后拼来源**
 
    “检索命中过”不等于“被选中”，更不等于“模型真正看过并用于回答”。M31 建立 **Typed Evidence（带类型证据）**：公共外壳保存 run、authority、revision、content identity、anchor 和用途，内部 payload 分为 Document 与 SQL；授权决策、runtime 和 outbound 仍是独立引用，不塞进万能大对象。Evidence 只能沿 `candidate → selected → generation_visible → cited` 同轮单步前进。
 
-   **Citation slot（引用槽位）**由代码按 run 和 claim 预分配，validator 再检查 slot、run、阶段、文档 safe-ref、revision/content identity、anchor、用途和入模前授权。模型自造 ID、引用只到 selected 的证据、跨轮引用、旧 revision、错误 anchor 或拿另一份文档的 allow decision 冒用，都会整体得到 `citation_invalid`；同一份真实 Evidence 可以支持多个 claim，但 ledger 只推进一次。没有采用“答案末尾拼文件名/sources”的简单方案，因为它证明不了生成器看过什么、也不能阻止越权引用。篡改和多 claim 复用测试已通过；开放语义上“这段证据是否真的支持这句话”仍要在 P2 用 gold/人工/advisory judge 验证。
+   **Citation slot（引用槽位）**由代码按 run 和 claim 预分配，validator（校验器）再检查 slot、run、阶段、文档 safe-ref、revision/content identity、anchor、用途和入模前授权。
+
+   - 模型自造 ID、引用只到 selected 的证据、跨轮引用、旧 revision、错误 anchor 或拿另一份文档的 allow decision 冒用，都会整体得到 `citation_invalid`；
+   - 同一份真实 Evidence 可以支持多个 claim，但 ledger 只推进一次。
+
+   没有采用“答案末尾拼文件名/sources”的简单方案，因为它证明不了生成器看过什么、也不能阻止越权引用。
+
+   **验证**：篡改和多 claim 复用测试已通过；开放语义上“这段证据是否真的支持这句话”仍要在 P2 用 gold/人工/advisory judge 验证。
 
 3. **用不可变 release 和独立 Phase 4 Gate 完成安全发布**
 
-   如果直接覆盖一个运行目录，写到一半崩溃时，服务可能看到新旧内容混合。M31 采用 **Immutable release bundle（不可变发布包）**：完整正文投影、corpus/build、policy 和 contract 一起计算 canonical hash；相同 identity 的文件不允许出现不同字节。新的 candidate 独立写入并重载成功后，才原子替换 `active.json`；pointer 记录 current/previous 和 G3 approval。即使故障注入先破坏目标 pointer 再报错，也恢复精确旧 pointer；启动发现 active 损坏会失败关闭，不自动复活可能已撤销的 previous。显式 rollback 也要重新对照当前 authority、revision、ACL 和 policy，而不是“旧文件还在就能回去”。
+   如果直接覆盖一个运行目录，写到一半崩溃时，服务可能看到新旧内容混合。
 
-   用户比较过方案 A“验证后激活”和方案 B“继续 staged”：A 能让 P2 开工，但派生 bundle 保存正文，未来真实敏感内容要补 retention/delete；B 更保守，却会暂停 RAG 主线。建议并最终选择 A。独立 **`phase4-v1` contract/security family** 用 8 个 Scenario、12 个 required assertion 检查 caller、ACL、outbound、Evidence、citation 和发布；每题只执行一次，artifact 对 caller/runtime/policy/corpus/release/Scenario/assertion 做 closed-world 对账。最终 Gate 为 `12/12 passed`，全仓为 `276 passed, 3 skipped`。这些证据证明确定性合同和兼容性，没有证明 retrieval、答案正确率或真实 LLM 效果。
+   M31 采用 **Immutable release bundle（不可变发布包）**：完整正文投影、corpus/build、policy 和 contract 一起计算 canonical hash（规范哈希）；相同 identity 的文件不允许出现不同字节。新的 candidate（候选包）独立写入并重载成功后，才原子替换 `active.json`；pointer 记录 current/previous 和 G3 approval（审批标记）。
+
+   故障语义也按安全优先设计：
+
+   - 即使故障注入先破坏目标 pointer 再报错，也恢复精确旧 pointer；
+   - 启动发现 active 损坏会失败关闭，不自动复活可能已撤销的 previous；
+   - 显式 rollback（回滚）也要重新对照当前 authority、revision、ACL 和 policy，而不是“旧文件还在就能回去”。
+
+   用户比较过方案 A“验证后激活”和方案 B“继续 staged（分阶段）”：A 能让 P2 开工，但派生 bundle 保存正文，未来真实敏感内容要补 retention/delete（保留/删除策略）；B 更保守，却会暂停 RAG 主线。建议并最终选择 A。
+
+   独立 **`phase4-v1` contract/security family（合同/安全家族）** 用 8 个 Scenario、12 个 required assertion 检查 caller、ACL、outbound、Evidence、citation 和发布；每题只执行一次，artifact 对 caller/runtime/policy/corpus/release/Scenario/assertion 做 closed-world（闭世界）对账。
+
+   **验证**：最终 Gate 为 `12/12 passed`，全仓为 `276 passed, 3 skipped`。这些证据证明确定性合同和兼容性，没有证明 retrieval、答案正确率或真实 LLM 效果。
 
 ### 新概念
 
@@ -328,9 +409,12 @@ M30 像把 11 份公司制度整理进了档案室，但门还没正式打开。
 - **第一次发布没有 rollback 神话**：`previous=null` 是真实状态；只有未来第二版且旧版重新通过当前 policy/authority 校验，才允许显式 rollback。
 - **能力边界不夸大**：`phase4-v1` 证明安全和发布合同，不是 RAG 召回率或答案质量分数。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在 RAG 检索之前先做了一层可信 Evidence 和安全发布地基。客户端自报 role 只会生成 unverified caller，文档按 trust、revision、purpose 和显式 role allowlist 在候选与入模前双检；现有 chat/schema embedding 远程调用也在 transport 前按 receiver、node purpose、data class 和 fields 精确授权，新 Knowledge 数据默认拒绝。Evidence 使用 Document/SQL typed payload 和四阶段不可变 ledger，citation slot 由代码分配并校验同轮、入模、ACL、revision 和 anchor。发布采用内容哈希的 immutable bundle，完整重载后才原子切 active pointer，故障会保留旧 pointer，rollback 重新验 authority/policy。用户批准后 11-entry release 已 active；`phase4-v1` 12 个 required assertion 全过，全仓 276 passed。这个模块只证明确定性安全与发布，不声称检索或真实答案质量已经完成。
+1. **前端自报角色彻底失效：TrustedCaller 像 Spring Security 的 Authentication。**业务层只消费服务端解析好的 caller，请求体 role 最多变成 unverified claim；文档授权按 trust、revision、purpose 和显式 allowlist 固定顺序判断，检索前和入模前各查一次，admin 也没有隐式全读权。
+2. **发布做成“先验货、再换门牌”。**immutable bundle 完整重载成功后才原子替换 active pointer；故障恢复精确旧版本，启动发现损坏就失败关闭，回滚还要重新过 authority/policy——不是“旧文件还在就能回去”。
+
+### 面试官追问
 
 1. **[基础追问] 为什么文档权限要检查两次，检索前检查一次不够吗？**
 
@@ -392,7 +476,13 @@ M31 建好了带门禁的档案室，M32 开始真正办理“查档”。用户
 
    原来系统没有 Knowledge retrieval seam，后续若直接在 Tool 里写死向量库或 Milvus，安全过滤、检索算法和运行配置会绑在一起。这里的 **Retrieval Adapter（检索适配器）**，可以理解成 Java 里的 repository interface：上层只认输入输出合同，不依赖词法、向量或混合检索的内部实现。
 
-   `engine/rag/retrieval.py` 冻结了 `RetrievalAdapter`、`RetrievalBatch`、`RetrievalMatch` 和有界 `RetrievalBudget`。首个本地 recipe 用 NFKC 规范化、英文词和中文 2–4 gram，按 title/key/content 加权，再用 `0.05` 门槛过滤只共享“平台”一类公共词的极低相关候选；固定输入按明确 identity 打破并列，保证结果可复现。没有先上 embedding/hybrid/rerank，因为当前只有 11 条短知识，尚无失败簇证明这些复杂度必要，而且 G4 默认 adapter 决策还没触发。
+   `engine/rag/retrieval.py` 冻结了 `RetrievalAdapter`、`RetrievalBatch`、`RetrievalMatch` 和有界 `RetrievalBudget`。首个本地 recipe（配方）的做法：
+
+   - 用 NFKC 规范化（Unicode 标准归一化）、英文词和中文 2–4 gram（n 元词片段）分词；
+   - 按 title/key/content 加权，再用 `0.05` 门槛过滤只共享“平台”一类公共词的极低相关候选；
+   - 固定输入按明确 identity 打破并列，保证结果可复现。
+
+   没有先上 embedding/hybrid/rerank，因为当前只有 11 条短知识，尚无失败簇证明这些复杂度必要，而且 G4（默认检索 adapter 的决策门）还没触发。
 
    **验证证据**包括相同输入重复结果一致、gold 命中、零候选、并列排序、重复输入、未知 entry、越预算、错误 query/runtime identity 和非法 rank/score。它证明本地 recipe 与 seam 的确定性，**尚未证明**长文、同义改写或真实语义召回质量。
 
@@ -400,9 +490,17 @@ M31 建好了带门禁的档案室，M32 开始真正办理“查档”。用户
 
    最大风险不是“搜得不准”，而是未授权正文先进入检索器。即使最后不返回，未来远端 adapter、日志、score 或命中数量也可能泄露“某份文档存在”。`engine/rag/knowledge_tool.py` 因此固定执行：active load → **pre-selection ACL（候选前授权）** → 一次 adapter → candidate Evidence → 选择 → **pre-generation recheck（入模前复核）**。
 
-   adapter 只看到已授权 entries；match 必须映射回同次 active bundle，才能构造 Document Evidence。通过第二次检查的证据只推进到 `selected`，因为 M32 还没有真的把正文交给 Composer，不能提前记成 `generation_visible`。内部 ledger 保留候选供审计，但 `safe_projection()` 只显示最终 selected Evidence；这条规则是在收工审查中补强的，避免 revision/content identity 形成存在性侧信道。
+   adapter 只看到已授权 entries；match 必须映射回同次 active bundle，才能构造 Document Evidence。
 
-   没有用“把所有失败都返回空列表”的宽松方案：`no_candidate`、`no_authorized_evidence`、`stale_revision`、active release 不可用和 adapter 不可用在内部保持不同原因，技术故障也不会伪装成“政策不存在”。同时，公开安全投影会让无候选与无权限收敛，防止反向探测知识库。投毒正文、角色篡改、两次 ACL 间 revision 失效和故障注入均有测试；**尚未完成**真实入模、答案、claim、citation 和公开四轴状态。
+   - 通过第二次检查的证据只推进到 `selected`，因为 M32 还没有真的把正文交给 Composer，不能提前记成 `generation_visible`；
+   - 内部 ledger（账本）保留候选供审计，但 `safe_projection()` 只显示最终 selected Evidence——这条规则是在收工审查中补强的，避免 revision/content identity 形成存在性侧信道。
+
+   没有用“把所有失败都返回空列表”的宽松方案：
+
+   - `no_candidate`、`no_authorized_evidence`、`stale_revision`、active release 不可用和 adapter 不可用在内部保持不同原因，技术故障也不会伪装成“政策不存在”；
+   - 公开安全投影会让无候选与无权限收敛，防止反向探测知识库。
+
+   **验证**：投毒正文、角色篡改、两次 ACL 间 revision 失效和故障注入均有测试；**尚未完成**真实入模、答案、claim、citation 和公开四轴状态。
 
 3. **建立一次执行、闭世界的 retrieval Eval**
 
@@ -410,7 +508,13 @@ M31 建好了带门禁的档案室，M32 开始真正办理“查档”。用户
 
    artifact 采用 **Closed-world validation（闭世界校验）**：不仅检查已有结果，还核对 Scenario、replicate、assertion、effect、caller/runtime/release/corpus/adapter/recipe identity 和 canonical hash 是否一个不少、一个不多。required Gate 与 retrieval-only advisory 分开；检索器技术不可用时，coverage 是 `not_observed`，不会记成业务错误，也不会靠 advisory 通过掩盖 required 失败。
 
-   最终 `phase4-rag-retrieval-v1` 有 **6 个 Scenario、20 条 required 全通过**，3 条 advisory 为 2 passed、1 technical-unavailable `not_observed`；M32 聚焦 28 passed，全仓 304 passed、3 skipped。开发中两轮失败也被保留并修正：先处理公共词低分与 stale fixture，再修正 Eval safe-ref 和 returned-evidence 口径。以上证明合同、ACL 和离线 baseline 可复现，**不能说明**真实 LLM 答案正确、citation 语义支持或 Milvus 更好。
+   **验证**：
+
+   - `phase4-rag-retrieval-v1` 有 **6 个 Scenario、20 条 required 全通过**，3 条 advisory 为 2 passed、1 technical-unavailable `not_observed`；
+   - M32 聚焦 28 passed，全仓 304 passed、3 skipped；
+   - 开发中两轮失败也被保留并修正：先处理公共词低分与 stale fixture，再修正 Eval safe-ref 和 returned-evidence 口径。
+
+   以上证明合同、ACL 和离线 baseline（基线）可复现，**不能说明**真实 LLM 答案正确、citation 语义支持或 Milvus 更好。
 
 ### 新概念
 
@@ -453,9 +557,12 @@ M31 建好了带门禁的档案室，M32 开始真正办理“查档”。用户
 - **业务零结果不等于技术失败**：结构化 reason 与 `not_observed` 让系统能分别处理知识缺失、权限收敛和后端不可用。
 - **G4 继续延后**：词法 adapter 是候选 baseline，不是 P3 默认；要等回答/citation 闭环和可比较证据成立后再决定。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在可信知识发布之后实现了一个确定性 Knowledge retrieval 垂直切片。检索层用可替换 adapter seam，本地基线通过中文 2–4 gram 和稳定 tie-break 保证固定输入可复现；Knowledge Tool 只从 active release 取数据，在未授权正文进入 adapter 前做 pre-selection ACL，选中后再做 pre-generation 复核，并把证据严格停在 selected 阶段。内部区分 no candidate、无授权证据、revision 失效、release 与 adapter 不可用，公开投影则避免泄露文档存在性。Eval 每题只执行一次 Tool，多条 typed assertion 共享同一 ExecutionEvidence，completed artifact 做 closed-world 对账。最终 20 条 required 全过、全仓 304 passed。这个模块证明的是离线取证合同与安全边界，不声称真实 LLM 回答或语义 citation 已完成。
+1. **检索器做成可替换 adapter，权限检查发生在它之前。**像 Repository 接口一样把“怎么搜”藏起来，本地实现用中文 2–4 gram 和稳定排序保证固定输入可复现；ACL 在 adapter 外集中做，未授权正文连检索器都进不去。
+2. **失败原因分开记，Eval 一次执行、多断言共享答卷。**no candidate、无授权证据、revision 失效、后端不可用各有代号，技术故障记 not_observed 而不是 0 分；每个 Scenario 只跑一次 Tool，20 条 required 断言从同一份 ExecutionEvidence 判卷。
+
+### 面试官追问
 
 1. **[基础追问] 为什么不让检索器自己做 ACL，反而先过滤再调用？**
 
@@ -517,15 +624,24 @@ M32 已经能从档案室里安全找出资料，但“找到资料”不等于�
 
    原来的 Evidence 最远只到 `selected`。如果下一层仅凭“检索选中了”就标记 `generation_visible`，citation validator 可能相信一份 Composer 根本没看过的文档。这里的 **Generation context（生成上下文）**，就是本轮 Composer 实际收到的 typed Evidence 集合，不是事后重新检索或从答案猜来源。
 
-   `engine/rag/answer_flow.py` 的 Gate 会检查 run/stage/purpose、当前 active revision、content/anchor identity、pre-generation authorization、结构化 Evidence requirement 和文档指令安全。只有检查通过且马上要交给 Composer 的那几份 Evidence 才推进 `generation_visible`；Gate deny 时 Composer 调用数固定为 0。没有采用“先全部推进、生成失败再回滚”的宽松方案，因为 ledger 应记录已经发生的事实，而不是未来意图。
+   `engine/rag/answer_flow.py` 的 Gate 会检查 run/stage/purpose、当前 active revision、content/anchor identity、pre-generation authorization、结构化 Evidence requirement 和文档指令安全。
+
+   - 只有检查通过且马上要交给 Composer 的那几份 Evidence 才推进 `generation_visible`；
+   - Gate deny 时 Composer 调用数固定为 0。
+
+   没有采用“先全部推进、生成失败再回滚”的宽松方案，因为 ledger 应记录已经发生的事实，而不是未来意图。
 
    测试覆盖 zero-hit、已有候选但缺少指定事实、ACL 拒绝、revision 中途失效、缺失 authorization 和 prompt injection。**验证证据**显示正常 context 与最终 cited Evidence 精确对应，拒绝路径不越过 selected；但这些是冻结短知识上的确定性规则，**尚未证明**开放语义充分性判断。
 
 2. **让 claim 与 citation 从同一份 Evidence 身份链产生**
 
-   过去常见的简单做法是生成完答案后，在末尾拼一个文件名或 `sources` 数组；它只能说明“可能检索过”，不能证明该来源真的支持某句话。M33 的 **Evidence-bound Composer（证据绑定生成器）** 首版采用离线 extractive 方式：从真实 generation context 中抽取有界正文，每条 `ClaimDraft` 都携带支持它的 Evidence ID 和 anchor，但无权自己创建最终 citation。
+   过去常见的简单做法是生成完答案后，在末尾拼一个文件名或 `sources` 数组；它只能说明“可能检索过”，不能证明该来源真的支持某句话。M33 的 **Evidence-bound Composer（证据绑定生成器）** 首版采用离线 extractive（抽取式）方式：从真实 generation context 中抽取有界正文，每条 `ClaimDraft` 都携带支持它的 Evidence ID 和 anchor，但无权自己创建最终 citation。
 
-   AnswerFlow 再按 run、claim 顺序和文本 hash 分配稳定 claim/citation slot，复用 M31 Citation Validator 校验同轮、阶段、revision、anchor、ACL 和 slot 完整性。只有全部引用通过，才构造 `ValidatedClaim`、用户 citation 和 answer，并把 ledger 推进 `cited`；`docs_used` 也只能从 validated citation 单向派生。空 claim、未知 Evidence、杜撰文本、越预算、错误 anchor 或缺一条 citation 都会整体失败，不返回“半份看起来可信”的答案。
+   AnswerFlow 再按 run、claim 顺序和文本 hash 分配稳定 claim/citation slot（槽位），复用 M31 Citation Validator 校验同轮、阶段、revision、anchor、ACL 和 slot 完整性。
+
+   - 只有全部引用通过，才构造 `ValidatedClaim`、用户 citation 和 answer，并把 ledger 推进 `cited`；
+   - `docs_used` 也只能从 validated citation 单向派生；
+   - 空 claim、未知 Evidence、杜撰文本、越预算、错误 anchor 或缺一条 citation 都会整体失败，不返回“半份看起来可信”的答案。
 
    没有直接接远程 LLM，因为当前 Knowledge generation/outbound 仍默认拒绝；伪造一个“以后可替换”的远程 adapter 反而会掩盖尚未授权的边界。**验证证据**包括 GMV 公式和质量退款正常回答、Composer 故障、杜撰 claim、partial citation 与篡改反例。它证明 citation integrity 和 extractive support，**不等于**自然语言回答质量已达到产品水平。
 
@@ -533,23 +649,39 @@ M32 已经能从档案室里安全找出资料，但“找到资料”不等于�
 
    如果所有失败都返回空字符串，上层无法区分业务证据不足、权限阻断和技术不可用。`RAGAnswerResult` 统一返回 **route / execution / answer / safety 四轴**：例如 retriever 故障是 `rag / external_unavailable / no_answer / passed`，citation 篡改是 `rag / completed / no_answer / blocked`，正常闭环才是 `rag / completed / complete / passed`。
 
-   一个容易忽略的安全点是：Composer 或 citation 失败后，内部 ledger 必须保留真实的 `generation_visible`，否则审计会撒谎；但公开 `safe_projection()` 不能把这些 Evidence identity 带出去，否则受限或投毒文档的存在性可能泄露。因此 M33 同时保留**内部真相**和**最小公开真相**，失败公开投影会清空 Evidence/context、answer、claims 和 citations。
+   一个容易忽略的安全点：Composer 或 citation 失败后，内部 ledger 必须保留真实的 `generation_visible`，否则审计会撒谎；但公开 `safe_projection()` 不能把这些 Evidence identity 带出去，否则受限或投毒文档的存在性可能泄露。
 
-   没有在本模块修改 `AgentResponse` 或 `/api/query`。直接接线虽然更容易演示，却会迫使 M33 提前决定 Router、可信 caller 和 HTTP 兼容合同，甚至可能误用请求体 `user_role`。用户确认 **G-M33 方案 A** 后，这些职责留给 P3 唯一顶层 Harness。全仓验证证明旧 API/Text2SQL 没被改坏；**尚未完成**的是公开 RAG、生产认证和全局 Trace。
+   因此 M33 同时保留 **内部真相** 和 **最小公开真相**：失败公开投影会清空 Evidence/context、answer、claims 和 citations。
+
+   没有在本模块修改 `AgentResponse` 或 `/api/query`。直接接线虽然更容易演示，却会迫使 M33 提前决定 Router、可信 caller 和 HTTP 兼容合同，甚至可能误用请求体 `user_role`。用户确认 **G-M33（本模块决策门）方案 A** 后，这些职责留给 P3 唯一顶层 Harness。
+
+   全仓验证证明旧 API/Text2SQL 没被改坏；**尚未完成**的是公开 RAG、生产认证和全局 Trace。
 
 4. **建立独立、一次执行的 Answer/Citation Eval**
 
    如果状态 scorer、citation scorer 和答案 scorer 各自重跑一次流程，它们看到的可能不是同一轮 Evidence。`eval/rag_answer_contracts.py` 因此为每个 Scenario 只运行一次 AnswerFlow，生成一份 **ExecutionEvidence（执行证据）**，再让所有 typed assertions 共享它。
 
-   `phase4-rag-answer-v1` 有 9 个 Scenario，覆盖质量退款、GMV、no candidate、语义不足、ACL、prompt injection、stale revision、retriever unavailable 和 citation invalid。completed artifact 对 Scenario、replicate、assertion/effect、execution evidence ref，以及 release/corpus/adapter/recipe/composer/flow/policy identity 做 **Closed-world validation（闭世界校验）**；缺失、多余、重复或篡改都整体验证失败。required Gate 与开放措辞 advisory 分开，技术不可用时答案质量记 `not_observed`，不会冒充 0 分或被忽略。
+   `phase4-rag-answer-v1` 有 9 个 Scenario，覆盖质量退款、GMV、no candidate、语义不足、ACL、prompt injection、stale revision、retriever unavailable 和 citation invalid。
 
-   最终 **60/60 required 全通过**；3 条 advisory 为 2 passed、1 retriever-unavailable `not_observed`。用户据此在 **G4 选择方案 A**，让 `knowledge-deterministic-lexical-v1` 成为 P3 首个默认 baseline。这个结论只说明当前链路足以做工程起点，**不能说明** embedding/hybrid 没价值；未来仍要用 held-out 失败簇和单变量 A/B 决定是否替换。
+   completed artifact 对 Scenario、replicate、assertion/effect、execution evidence ref，以及 release/corpus/adapter/recipe/composer/flow/policy identity 做 **Closed-world validation（闭世界校验）**；缺失、多余、重复或篡改都整体验证失败。required Gate 与开放措辞 advisory（建议性）分开，技术不可用时答案质量记 `not_observed`，不会冒充 0 分或被忽略。
+
+   **验证**：最终 **60/60 required 全通过**；3 条 advisory 为 2 passed、1 retriever-unavailable `not_observed`。
+
+   用户据此在 **G4（默认检索 adapter 决策门）选择方案 A**，让 `knowledge-deterministic-lexical-v1` 成为 P3 首个默认 baseline。这个结论只说明当前链路足以做工程起点，**不能说明** embedding/hybrid 没价值；未来仍要用 held-out 失败簇和单变量 A/B 决定是否替换。
 
 ### M33 的知识内容追加
 
 用户随后选择方案 A，把知识库从 11 条补到 22 条：增加 8 条直接由 `metrics.yaml` 派生的指标说明，以及 3 份只讲处理边界的文档。它们不会另造退款金额、处理时限、优惠门槛或用户资格；遇到实时订单事实、证据不足和优惠券实际适用性，仍要求查业务系统、专项规则或转人工。
 
-这次只扩内容，没有新开模块，也没有改 ACL、出站策略、词法检索默认值或 AnswerFlow 合同。新 release 保留旧 11 条版本作为 previous；三套 required Gate 仍为 12/12、20/20、60/60，全仓更新为 `342 passed, 3 skipped, 1 warning`。知识面更实用了，但仍只是短知识 baseline。
+这次只扩内容，没有新开模块，也没有改 ACL、出站策略、词法检索默认值或 AnswerFlow 合同。
+
+**验证**：
+
+- 新 release 保留旧 11 条版本作为 previous（上一版本）；
+- 三套 required Gate 仍为 12/12、20/20、60/60；
+- 全仓更新为 `342 passed, 3 skipped, 1 warning`。
+
+知识面更实用了，但仍只是短知识 baseline。
 
 ### 新概念
 
@@ -592,9 +724,12 @@ M32 已经能从档案室里安全找出资料，但“找到资料”不等于�
 - **G4=A 不是永久技术押注**：词法 adapter 只是 P3 首个可工作的默认值；长文、同义改写或跨文档失败出现后，才能用受控 A/B 讨论 embedding/hybrid/rerank。
 - **公开能力仍未完成**：`/api/query`、生产 caller、Router/LangGraph、Hybrid、全局 Trace 和真实 RAG 效果都属于后续边界。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我在安全 Knowledge Tool 之后实现了一个可信 RAG AnswerFlow。它先用 Shared Gate 检查 selected Evidence 的 run、阶段、用途、active revision、pre-generation ACL、结构化充分性和文档指令安全，只有实际交给 Composer 的证据才推进 generation-visible。首版 Composer 是离线 extractive baseline，每条 claim 绑定 Evidence/anchor，但 citation slot 由代码分配，再复用既有 validator 校验同轮、版本、ACL 和完整性；只有全量通过才公开答案并推进 cited。失败结果统一投影为 route/execution/answer/safety 四轴，内部 ledger 保留审计事实，公开投影避免文档存在性泄露。独立 Eval 每个 Scenario 只执行一次，9 个场景的 60 条 required 全过；同属 M33 的内容追加把短知识从 11 条补到 22 条，全仓 342 passed。用户据此选择确定性词法 adapter 作为 P3 首个 baseline，但我明确没有把这些结果包装成真实 LLM、长文或语义检索能力。
+1. **“检索到”和“模型真正看过”之间加了一道 Gate，citation 是身份链的终点。**只有通过版本、ACL、用途、指令检查且马上要进 Composer 的 Evidence 才推进 generation_visible；每条 claim 绑定 Evidence/anchor，槽位由代码分配、validator 验真，杜撰或缺引用整体失败。
+2. **失败分“内部真相”和“公开真相”，并刻意不接 API。**内部 ledger 保留真实阶段保证审计不撒谎，公开投影清空未验证引用防存在性泄露；Router 和 HTTP 合同留给唯一的顶层 Harness——60/60 required 全过证明的是合同闭环，不是语义回答质量。
+
+### 面试官追问
 
 1. **[基础追问] 你怎么证明 citation 指向的是生成器真正看过的资料，而不是检索命中过的资料？**
 
@@ -660,9 +795,18 @@ M34 就是把这个“小书架实验”升级成一次真正的仓库压力测�
 
    **原来的问题**是，外部数据即使已经下载，也不能直接等同于“可用知识库”。同一个 logical document ID 可能对应多份物理文件；题目里还存在重复 gold ID；如果读取时用 ID 覆盖写入，某些冲突信息题会在建库阶段就被悄悄改错。路径、文件数量或官方资产发生漂移，也会让两次评测看似使用同一数据，实际分母已经不同。
 
-   M34 建立了 **closed-world dataset scanner**。所谓 closed-world，可以理解为仓库入库前先封一张完整清单：只接受 Confluence、Google Drive、Jira 三种来源，逐个核对官方资产的大小和 hash，并区分 **logical document identity**（基准题怎样称呼一篇文档）与 **physical source-instance identity**（磁盘上这一份具体文件是谁）。发现冲突时保留，而不是覆盖；发现缺文件、未知来源、空题目或资产漂移时直接失败关闭。
+   M34 建立了 **closed-world dataset scanner（闭世界数据扫描器）**。所谓 closed-world，可以理解为仓库入库前先封一张完整清单：
 
-   全量审计得到 **Confluence 5,189、Google Drive 25,108、Jira 6,120，共 36,417 篇文档**；180 道题涉及 274 个唯一 gold document ID，0 个缺失，同时发现 3 个冲突 logical ID。`qst_0413` 的重复 gold 还被保留为 **multiset（多重集合）**，因为它要求找回同一 logical ID 对应的两份不同物理文档，不能偷懒去重。
+   - 只接受 Confluence、Google Drive、Jira 三种来源，逐个核对官方资产的大小和 hash；
+   - 区分 **logical document identity**（基准题怎样称呼一篇文档）与 **physical source-instance identity**（磁盘上这一份具体文件是谁）；
+   - 发现冲突时保留，而不是覆盖；发现缺文件、未知来源、空题目或资产漂移时直接失败关闭。
+
+   全量审计结果：
+
+   - Confluence 5,189、Google Drive 25,108、Jira 6,120，**共 36,417 篇文档**；
+   - 180 道题涉及 274 个唯一 gold document ID，0 个缺失，同时发现 3 个冲突 logical ID。
+
+   `qst_0413` 的重复 gold 还被保留为 **multiset（多重集合）**，因为它要求找回同一 logical ID 对应的两份不同物理文档，不能偷懒去重。
 
    没有采用“能读就行”的宽松方案，因为那样最危险的不是程序报错，而是程序正常运行、分数也正常输出，却已经换了语料或丢了冲突文档。这里的验证证明了**数据分母、身份和来源可复现**；但 EnterpriseRAG-Bench 是模拟企业环境的合成数据，它仍不能证明真实公司的连接器噪声、权限继承和历史脏数据已经被覆盖。
 
@@ -670,19 +814,34 @@ M34 就是把这个“小书架实验”升级成一次真正的仓库压力测�
 
    **原来的问题**是，整篇文档直接入库虽然简单，但有些正文超过两万字符：检索词容易被大段无关内容稀释，命中后也会给模型塞入过多上下文。反过来，如果切得太碎或大量 overlap，又会放大索引、延迟和费用，还可能让 citation 只能指向一段脱离上下文的碎片。
 
-   parser 先按三种来源的实际格式恢复正文中的结构性 `\\n`，但只处理明确的换行 token，不使用通用 `unicode_escape`，避免误改代码、JSON 或 Windows path。随后比较了 whole-document、paragraph-1200、paragraph-2400、paragraph-2400-overlap1 四种 **unit recipe**。这里的 unit recipe 就像切菜规格：它规定从哪里下刀、每块多大、是否重复搭边；一旦冻结，参数和 identity 必须一起版本化。
+   parser（解析器）先按三种来源的实际格式恢复正文中的结构性 `\\n`，但只处理明确的换行 token，不使用通用 `unicode_escape`，避免误改代码、JSON 或 Windows path。
 
-   在相同 corpus、parser 和 60 道 dev 题下，最终选择 **`enterprise-unit-paragraph-2400-v1`、无 overlap**：共 139,214 units。它的 lexical coverage@20 为 `0.810417`，高于 whole-document 的 `0.724306`、paragraph-1200 的 `0.793056` 和 overlap1 的 `0.793750`；overlap1 反而多出 21,301 个 units 和约 19% 索引字符，却没有带来稳定收益。
+   随后比较了 whole-document、paragraph-1200、paragraph-2400、paragraph-2400-overlap1 四种 **unit recipe（切分配方）**。这里的 unit recipe 就像切菜规格：它规定从哪里下刀、每块多大、是否重复搭边；一旦冻结，参数和 identity 必须一起版本化。
 
-   每个 unit 都绑定 normalized document revision、字符起止位置和正文 hash，citation 可以从 `normalized-char:<start>-<end>` 回切原文。没有用“先随便切，效果不好以后再换”的临时方案，因为切分会影响索引 identity、Evidence anchor 和 Eval 可比性。当前证据说明 2400/no-overlap 是这套 dev lexical 协议下较好的工程折中，**并不证明它对所有 embedding 模型、所有语言或生产文档都是全局最优**。
+   在相同 corpus、parser 和 60 道 dev 题下做对照，最终选择 **`enterprise-unit-paragraph-2400-v1`、无 overlap**（共 139,214 units）：
+
+   | recipe | lexical coverage@20 | 说明 |
+   | --- | --- | --- |
+   | whole-document | 0.724306 | 整篇入库，检索词被稀释 |
+   | paragraph-1200 | 0.793056 | 切得偏碎 |
+   | paragraph-2400-overlap1 | 0.793750 | 多出 21,301 个 units、约 19% 索引字符，却无稳定收益 |
+   | **paragraph-2400（选中）** | **0.810417** | coverage 最高、无 overlap |
+
+   > coverage@20 = 每道题取前 20 个候选时，标准答案文档被覆盖的比例。
+
+   每个 unit 都绑定 normalized document revision、字符起止位置和正文 hash，citation 可以从 `normalized-char:<start>-<end>` 回切原文。
+
+   没有用“先随便切，效果不好以后再换”的临时方案，因为切分会影响索引 identity、Evidence anchor 和 Eval 可比性。当前证据说明 2400/no-overlap 是这套 dev lexical 协议下较好的工程折中，**并不证明它对所有 embedding 模型、所有语言或生产文档都是全局最优**。
 
 3. **建立独立 external profile，同时复用原来的权限和 Evidence 链路**
 
    **原来的问题**是，M31 的业务 `ReleaseBundle` 为 22 条短知识设计，正文直接内嵌；若把 139,214 个 units 强塞进去，会形成约 2.62 亿字符的 JSON/内存放大，而且同一长文的多个切片会争用原来的 `(document_key, revision)` citation key。更严重的是，把 benchmark 与业务 release 合并，会让测试数据参与业务默认检索、权限发布和回滚。
 
-   因此 M34 建立了独立的 **external profile**：项目外的 immutable SQLite 保存 36,417 条 document metadata、139,214 条 unit metadata/context 和 FTS5 索引；构建完成前使用 `.building-*` 临时身份，经过 SQLite integrity、meta、数量、FTS、database hash 校验后，再原子 rename。benchmark 有自己的 active/previous pointer，业务 22 条 release 和 pointer 完全不动。
+   因此 M34 建立了独立的 **external profile**：项目外的 immutable SQLite 保存 36,417 条 document metadata、139,214 条 unit metadata/context 和 FTS5（SQLite 全文搜索扩展）索引；构建完成前使用 `.building-*` 临时身份，经过 SQLite integrity、meta、数量、FTS、database hash 校验后，再原子 rename。benchmark 有自己的 active/previous pointer，业务 22 条 release 和 pointer 完全不动。
 
-   运行时也没有重写第二套 RAG。`enterprise_runtime.py` 提供 metadata-only bundle、SQLite 检索 adapter 和命中后正文 loader；Knowledge Tool 仍先做 pre-selection ACL，只有选中的 units 才加载正文，再做 pre-generation authorization，随后进入 M33 的 AnswerFlow、Evidence ledger 和 citation validator。每个 unit 使用独立 `enterprise-unit:<identity>` document key，同时保留 logical/physical document 和 normalized offsets。
+   运行时也没有重写第二套 RAG。`enterprise_runtime.py` 提供 metadata-only bundle（仅元数据包）、SQLite 检索 adapter 和命中后正文 loader（加载器）。
+
+   Knowledge Tool 仍先做 pre-selection ACL，只有选中的 units 才加载正文，再做 pre-generation authorization，随后进入 M33 的 AnswerFlow、Evidence ledger 和 citation validator。每个 unit 使用独立 `enterprise-unit:<identity>` document key，同时保留 logical/physical document 和 normalized offsets（归一化偏移）。
 
    这相当于给原来的安全流水线换了一个“大仓库进料口”，但仓库里的门禁、验货和出库单没有被绕过。聚焦回归最终为 **158 passed**，说明 M30–M34 的 catalog、release、ACL、Evidence、AnswerFlow 和新 external runtime 合同能共同工作。它尚未证明公开 `/api/query`、生产认证、真实 Confluence/Drive/Jira connector ACL 或 Router 已经接好，因为这些明确不属于 M34。
 
@@ -690,9 +849,20 @@ M34 就是把这个“小书架实验”升级成一次真正的仓库压力测�
 
    **原来的问题**是，“企业 RAG 就应该上向量检索”听起来合理，但如果 lexical 与 semantic 使用不同切分、不同题集或不同 top-k，分数没有可比性；更不能因为 embedding 更先进，就静默替换已经工作的默认 adapter。
 
-   M34 先把 180 题按 `question_type × source signature × single/multi-document` 确定性分成 **60 dev + 120 held-out**。dev 用来调查和选择，held-out 只有候选冻结后才打开；gold document 不进入 runtime，只在检索返回后评分。两种 adapter 都固定 @20，并按 physical source identity 去重，评分同时计算 coverage、all-gold 和 MRR。
+   M34 先把 180 题按 `question_type × source signature × single/multi-document` 确定性分成 **60 dev + 120 held-out**。
 
-   lexical 在 dev 的 `coverage/all-gold/MRR` 为 **`0.810417 / 0.766667 / 0.645303`**，held-out 为 **`0.823125 / 0.775000 / 0.723134`**。semantic candidate 在 dev 为 `0.737500 / 0.700000 / 0.621421`，held-out 为 `0.773958 / 0.741667 / 0.630477`；两个 split 都没有胜出，所以 semantic collection 保留为 candidate，external 默认仍是 lexical。
+   - dev 用来调查和选择，held-out 只有候选冻结后才打开；
+   - gold document 不进入 runtime，只在检索返回后评分；
+   - 两种 adapter 都固定 @20，并按 physical source identity 去重，评分同时计算 coverage、all-gold 和 MRR。
+
+   两组 adapter 在同一把尺子下（coverage / all-gold / MRR）的结果：
+
+   | adapter | dev | held-out |
+   | --- | --- | --- |
+   | lexical | 0.810417 / 0.766667 / 0.645303 | **0.823125 / 0.775000 / 0.723134** |
+   | semantic candidate | 0.737500 / 0.700000 / 0.621421 | 0.773958 / 0.741667 / 0.630477 |
+
+   两个 split（数据切分）都没有胜出，所以 semantic collection 保留为 candidate，external 默认仍是 lexical。
 
    这个结果不是“向量检索没用”，而是说明**当前 embedding + unit recipe + 检索协议没有证明收益**。没有继续加入 Hybrid、rerank 或 query rewrite，因为那会一次改变多个变量，也超出 M34 范围。下一轮如果改进召回，应生成新 identity，并继续用同一 split 做单变量 A/B。
 
@@ -700,9 +870,20 @@ M34 就是把这个“小书架实验”升级成一次真正的仓库压力测�
 
    **原来的问题**有两层。第一，M33 的 extractive Composer 只能基本照抄原文，回答不自然；直接放开 LLM 改写后，又无法仅靠字符串证明改写内容真的受到 Evidence 支持。第二，早期 smoke 已经暴露：AnswerFlow 可以返回 complete 和 validated citation，但检索到的文档可能不是 gold，导致“流程完整、答案却错”。
 
-   用户最终选择了 **方案 B**：每条 `ClaimDraft` 同时包含自然语言 `text`、同一 Evidence 中逐字存在的 `support_text`、`evidence_id` 和 `anchor`。可以把它理解为“对外说人话，对内必须附原文凭据”。代码只做严格且可证明的事情：support_text 必须能在同一 Evidence 找到，Evidence/anchor/ACL/stage/citation slot 必须全部合法；它不假装字符串规则可以证明 paraphrase 与 support 之间的语义蕴含。为了减少 JSON 换行造成的假拒绝，只做 whitespace canonicalization，不做 fuzzy 或语义近似放行。
+   用户最终选择了 **方案 B**：每条 `ClaimDraft`（声明草稿）同时包含自然语言 `text`、同一 Evidence 中逐字存在的 `support_text`（支持原文）、`evidence_id` 和 `anchor`。可以把它理解为“对外说人话，对内必须附原文凭据”。
 
-   180 题 full Answer Eval 最终完成 **180 次 AnswerFlow、180 次 provider request、0 次自动 retry**，共使用 **405,305 tokens**。146/180 的 `answer_status=complete` 只表示回答合同完整走完；真正的 gold 对账显示，只有 **80/180（44.44%）**题引用齐全部 gold 文档，平均 gold-document coverage 为 **49.3981%**。其中 multi-document all-gold 只有 **2/38（5.26%）**，semantic 题只有 **15/52（28.85%）**；另有 10 次 Composer unavailable 和 24 次 support contract rejected。
+   代码只做严格且可证明的事情：
+
+   - support_text 必须能在同一 Evidence 找到，Evidence/anchor/ACL/stage/citation slot 必须全部合法；
+   - 它不假装字符串规则可以证明 paraphrase（改写）与 support 之间的语义蕴含；
+   - 为了减少 JSON 换行造成的假拒绝，只做 whitespace canonicalization（空白规范化），不做 fuzzy（模糊）或语义近似放行。
+
+   180 题 full Answer Eval 最终完成 **180 次 AnswerFlow、180 次 provider request、0 次自动 retry**，共使用 **405,305 tokens**。结果按“合同完整”和“真的答对”分开记：
+
+   - 146/180 的 `answer_status=complete` 只表示回答合同完整走完；
+   - 真正的 gold 对账显示，只有 **80/180（44.44%）** 题引用齐全部 gold 文档，平均 gold-document coverage 为 **49.3981%**；
+   - 其中 multi-document all-gold 只有 **2/38（5.26%）**，semantic 题只有 **15/52（28.85%）**；
+   - 另有 10 次 Composer unavailable 和 24 次 support contract rejected。
 
    因此 M34 最重要的结论不是“RAG 已经答得很好”，而是：**build → retrieve → authorize → answer → support → cite → score 已经成为可复现的真实链路，并且它可靠地暴露了系统还答不好的地方**。exact-fact 的逐字检查只有 1/180 全量命中，但这是保守字符串下限，也不能反向解释为开放语义正确率只有 0.69%；本模块没有引入 LLM Judge，不能给出尚未测量的语义正确率。
 
@@ -766,9 +947,13 @@ M34 就是把这个“小书架实验”升级成一次真正的仓库压力测�
 - **成本成为 artifact 的一部分**：full Eval 记录 prompt/completion/total tokens 和每题 attempt，取消 800-token 应用上限后不再宣称固定费用上界。
 - **明确没有做的事**：没有接 Router、Hybrid、UI、通用评测平台或 LLM Judge；没有提交 raw/extracted/SQLite/Milvus 大文件，也没有证明生产 connector ACL。
 
-### 面试怎么讲
+### 有面试价值的亮点
 
-**可直接复述**：我负责把 DataPilot 的 RAG 从 22 条短知识回归，扩展到 EnterpriseRAG-Bench 的 36,417 篇 Confluence、Google Drive 和 Jira 合成企业文档。为了不破坏既有权限和发布合同，我没有把外部语料塞进业务 release，而是建立独立 immutable external profile，把文档按 paragraph-2400 切成 139,214 个带稳定 offset 的 units，运行时通过 adapter 和 context loader 复用原来的 Knowledge Tool、ACL、Evidence ledger、AnswerFlow 和 Citation Validator。评测上固定了 60 dev + 120 held-out，gold 只在运行后用于评分。lexical 在 held-out 的 coverage@20/all-gold@20/MRR 为 0.823125/0.775/0.723134，semantic candidate 没有胜出，因此没有切默认。回答侧采用自然 text 加同 Evidence 逐字 support_text 的合同，180 题 full Eval 完成 180 次真实 provider 调用并记录 405,305 tokens。虽然 146 题走完整回答链，但只有 80 题引用齐全部 gold 文档，多文档 all-gold 只有 2/38。这说明我不仅打通了真实 build、retrieve、answer、cite、score 链路，也用可复现证据定位出下一步应优先解决召回与多文档 context packing，而没有把 complete 状态包装成正确率。
+1. **大语料只换“进料口”，门禁和验货流程一个没动。**36,417 篇文档独立建 external profile、原子切换；运行时仍走 Knowledge Tool 的 ACL、Evidence、AnswerFlow 和 citation validator——不是第二套 RAG。
+2. **semantic 用同一把尺子输了，就不切默认。**lexical 在 dev 和 held-out 都更高，embedding 的沉没成本不构成切换理由；保留 candidate 和新 identity，等真实失败簇和单变量 A/B。
+3. **“说人话”必须附原文凭据，最后诚实报告质量。**自然语言 text + 逐字 support_text 的合同让代码只证明字符串层面的事实；180 题真实 Eval 只有 44.44% all-gold、多文档 5.26%——链路通了，质量短板也诚实摆出来。
+
+### 面试官追问
 
 1. **[基础追问] 你怎么证明这不是“下载了数据，再写几个离线搜索脚本”？**
 

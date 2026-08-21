@@ -30,7 +30,7 @@ Phase 4 roadmap 并没有要求所有设想都必须在阶段内实现，也不�
 
 还未正式开发 phase 4 时，对于 roadmap 的预期如下表（仅供参考）：
 
-| 概念                  | 体现程度       | 当前方案中的体现                                             |
+| 概念                  | 预期体现程度   | roadmap 中的体现                                             |
 | --------------------- | -------------- | ------------------------------------------------------------ |
 | Harness Engineering   | 核心主线       | LangGraph 统一管理状态、Tool 调度、预算、失败恢复、停止条件、Trace 和 Eval。 |
 | Agent Loop / 循环设计 | 核心主线       | `Action → Observation → Evidence Gate → Next Action`，循环有预算、reason code 和明确终止条件。 |
