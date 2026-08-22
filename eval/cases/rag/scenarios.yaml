@@ -1,0 +1,66 @@
+contract_version: phase4-rag-e2e-v1
+scenarios:
+  - scenario_id: quality_refund_materials
+    classification: core
+    question: 质量问题退款规则要求提供哪些材料？
+    user_role: customer_service
+    expected_axes: [rag, completed, complete, passed]
+    expected_reason: answer_completed
+    expected_document_keys: [refund_policy_quality]
+    required_answer_terms: [订单号, 照片]
+    forbidden_public_terms: []
+    assertions:
+      required: [route_correct, axes_correct, reason_correct, graph_path_correct, rag_tool_once, retrieved_gold, selected_gold, generation_visible_gold, cited_gold, answer_present, required_answer_terms, response_trace_consistent, runtime_identity_complete, provider_observed]
+      advisory: []
+
+  - scenario_id: invoice_reissue_rule
+    classification: core
+    question: 发票红冲重开的规则是什么？
+    user_role: customer_service
+    expected_axes: [rag, completed, complete, passed]
+    expected_reason: answer_completed
+    expected_document_keys: [invoice_rule]
+    required_answer_terms: [7 天, 原订单]
+    forbidden_public_terms: []
+    assertions:
+      required: [route_correct, axes_correct, reason_correct, graph_path_correct, rag_tool_once, retrieved_gold, selected_gold, generation_visible_gold, cited_gold, answer_present, required_answer_terms, response_trace_consistent, runtime_identity_complete, provider_observed]
+      advisory: []
+
+  - scenario_id: average_price_definition
+    classification: core
+    question: 历史平均售价口径是什么？
+    user_role: ops
+    expected_axes: [rag, completed, complete, passed]
+    expected_reason: answer_completed
+    expected_document_keys: [avg_selling_price_note]
+    required_answer_terms: [AVG(product_price_history.price), 算术平均值]
+    forbidden_public_terms: []
+    assertions:
+      required: [route_correct, axes_correct, reason_correct, graph_path_correct, rag_tool_once, retrieved_gold, selected_gold, generation_visible_gold, cited_gold, answer_present, required_answer_terms, response_trace_consistent, runtime_identity_complete, provider_observed]
+      advisory: []
+
+  - scenario_id: refund_policy_multi_document
+    classification: diagnostic
+    question: 基础退款政策和质量问题专项规则分别是什么？
+    user_role: customer_service
+    expected_axes: [rag, completed, complete, passed]
+    expected_reason: answer_completed
+    expected_document_keys: [refund_policy_basic, refund_policy_quality]
+    required_answer_terms: [7 天, 照片]
+    forbidden_public_terms: []
+    assertions:
+      required: [route_correct, axes_correct, reason_correct, graph_path_correct, rag_tool_once, response_trace_consistent, runtime_identity_complete]
+      advisory: [retrieved_gold, selected_gold, generation_visible_gold, cited_gold, answer_present, required_answer_terms, provider_observed]
+
+  - scenario_id: unsupported_warranty_rule
+    classification: diagnostic
+    question: 平台的五年整机保修规则是什么？
+    user_role: customer_service
+    expected_axes: [rag, completed, insufficient_evidence, passed]
+    expected_reason: evidence_no_candidate
+    expected_document_keys: []
+    required_answer_terms: []
+    forbidden_public_terms: []
+    assertions:
+      required: [route_correct, axes_correct, reason_correct, graph_path_correct, rag_tool_once, safe_fallback_answer, no_generation, response_trace_consistent, runtime_identity_complete]
+      advisory: []

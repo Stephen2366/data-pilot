@@ -2,7 +2,7 @@
 
 > 本文是 DataPilot 的运行入口：只说明“怎么开启哪条链路、怎么跑命令、哪些默认不能随手改”。Trigger：只要要运行命令、切模型、开 LangFuse、跑 eval、改环境变量，必须先读本文。当前状态先读 `docs/state/AI_CONTEXT.md`，评测数字和错因追溯读 `docs/state/eval-baselines.md`，Milvus / embedding 细节读 `docs/state/schema-retrieval-milvus-embedding.md`。
 
-更新时间：2026-08-18
+更新时间：2026-08-22
 
 ## 模型链路
 
@@ -106,6 +106,37 @@ M27 artifact 默认写入 `eval/reports/m27-artifacts/`，短期 checkpoint 写�
 
 新 Text2SQL Eval 会在一个 EvalRun 开始时构建一次 Schema vector index，注入该 run 的全部 Scenario，并在环境关闭时释放；artifact 的 resolved runtime identity 记录 `schema_vector_index_reuse=run_scoped` 及可用的 Milvus row count。若观察到逐题重建/重复整批 embedding，应视为生命周期回归，而不是正常耗时。
 
+### Phase 4 business RAG 真实产品链路 Eval（M41）
+
+> 这是 `/api/query → caller → turn → Router → Harness → RAG Tool → business AnswerFlow → Qwen Composer → API/Trace` 的产品 E2E。每个 Scenario/replicate 恰好执行一次产品请求，scorer、report、triage、review、compare 都只读该请求形成的共享 Evidence。它不同于 M31–M40 deterministic contract，也不同于 M34 绕过产品 Harness 的 external benchmark，三者不得混算。
+
+真实命令使用独立 `phase4-rag-eval-business-generation-outbound-v1`：只在显式 M41 CLI 中允许已通过 caller/ACL/Gate 且属于 `role_restricted_policy_text` 或 `metric_definition` 的 generation context 发往 Qwen。`security_policy` 和未知类别在网络前失败关闭；普通 API 仍使用 deterministic Composer 和默认 `phase4-outbound-v1`。
+
+| 目标 | Scenario / 最大 Qwen 调用 | 命令骨架 | 边界 |
+|---|---:|---|---|
+| 查看参数 | 0 | `python -m eval.run_rag_eval --help` | 不调用 provider。 |
+| Smoke | 2 / 最多 1 | `python -m eval.run_rag_eval --selector smoke --run-id <run-id> --report eval/reports/<name>.md` | 一条需要 Qwen generation 的题 + 一条 no-candidate/no-generation 题；真实首次运行只授权这一档。 |
+| Core | 3 / 最多 3 | `python -m eval.run_rag_eval --suite core --run-id <run-id> --report eval/reports/<name>.md` | 退款、发票、指标口径；必须在 smoke 检查后另行授权。 |
+| Diagnostic | 2 / 最多 1 | `python -m eval.run_rag_eval --suite diagnostic --run-id <run-id> --report eval/reports/<name>.md` | 多文档为 advisory 诊断，另含 no-candidate。 |
+| Reliability | 1×3 / 最多 3 | `python -m eval.run_rag_eval --suite reliability --run-id <run-id> --report eval/reports/<name>.md` | 同题三次 replicate，只用于波动/可用性。 |
+| 精确单题 | N×replicate | `python -m eval.run_rag_eval --scenario <scenario-id> [--scenario <id>] --replicate-count <n> --run-id <run-id> --report eval/reports/<name>.md` | `--scenario` 与 selector/suite 互斥；题面仍只来自 canonical catalog。 |
+
+默认位置：manifest/checkpoint/每题安全 Trace 在 `.agent_work/temp/m41-rag-checkpoints/<run-id>/`；completed artifact 在 `eval/reports/m41-rag-artifacts/<run-id>.json`；report/triage 使用 CLI 给定路径。没有 completed artifact 时，不得把 report、部分 checkpoint 或 M34 历史结果登记成 M41 基线。
+
+RAG failure funnel 依次查看：产品 API/Harness/Trace → retrieved → selected → generation-visible → Composer/provider/support → cited → answer 自动下限与人工 correctness/completeness。上游不可用使下游 `not_observed`，不能批量伪造 semantic failed；`answer_status=complete`、命中 gold 或 citation 合法均不单独等于自然语言答案正确。
+
+以下 M41 命令全部离线，零 Tool/LLM 调用：
+
+| 目标 | 命令骨架 | 说明 |
+|---|---|---|
+| 生成 review bundle | `python -m eval.run_rag_review --artifact eval/reports/m41-rag-artifacts/<run-id>.json --checkpoint-dir .agent_work/temp/m41-rag-checkpoints --reviewer <name> --output eval/reports/<run-id>-review.json` | 每题保存 answer/citation/funnel/自动 assertions，并绑定 artifact 与 checkpoint SHA-256。 |
+| 校验 review 来源 | `python -m eval.run_rag_review --bundle eval/reports/<run-id>-review.json --verify-only --output eval/reports/<run-id>-review-verified.json` | 任一来源缺失或 hash 改变即拒绝。 |
+| 合并人工 verdict | `python -m eval.run_rag_review --bundle <bundle.json> --verdicts <verdicts.json> --output <reviewed.json>` | verdict key 为 `<scenario-id>:r<replicate>`，必须闭集覆盖；只与自动结果并列，不改 Gate。 |
+| 严格 compare | `python -m eval.run_rag_compare --left <left.json> --right <right.json> --output <compare.json>` | catalog/selector/runtime/policy/scorer 任一不同即拒绝直接升降比较。 |
+| M34 历史投影 | `python -m eval.run_rag_m34_history --source .agent_work/temp/m34-answer-eval-full-v4.json --output eval/reports/m34-answer-historical-view.json` | 校验 M34 artifact identity 后只读汇总；明确标记 external direct AnswerFlow，不冒充产品 E2E。 |
+
+人工 review 首版采用 deterministic oracle 下限 + 人工裁决，不调用 LLM Judge。应复核全部自动失败/`not_observed`、所有高风险与多文档题，并抽样自动通过题；没有答案或引用/context 不足时只能标 `insufficient_evidence`，不能猜成 pass/fail。
+
 ### 真实 Eval 生命周期：等待、终态与重跑
 
 一次用户授权只创建一个 `run_id`。前台工具等待超时不等于 Eval 已停止；使用同一个 `run_id` 检查下列位置，在 manifest 仍为 `running` 或 checkpoint 还在增加时只继续等待，不得换 ID 重跑。
@@ -116,6 +147,8 @@ M27 artifact 默认写入 `eval/reports/m27-artifacts/`，短期 checkpoint 写�
 | 单题 checkpoint | `.agent_work/temp/m27-checkpoints/<run-id>/checkpoints/` | 每完成一题写入一份证据；文件继续增加说明 run 仍在推进。 |
 | 长期 artifact | `eval/reports/m27-artifacts/<run-id>.json` | 只有 completed run 才生成；它是自动评测长期事实源。 |
 | Markdown report | 命令的 `--report` 路径 | 由 completed artifact 投影而来，供阅读 Gate 和统计。 |
+
+M41 RAG Eval 使用同一生命周期语义，但路径为 `.agent_work/temp/m41-rag-checkpoints/<run-id>/manifest.json`、同目录 `checkpoints/` 与 `traces/`、`eval/reports/m41-rag-artifacts/<run-id>.json`。如果进程在 Trace 已落盘、checkpoint 尚未提交时中断，runner 会以 `rag_execution_uncommitted_trace` 失败关闭，不能自动再次调用 provider；必须保留证据并由用户决定新 run。
 
 只有原进程已经退出、manifest 明确为 `interrupted` / `failed` 且不存在 completed artifact 时，才能在用户授权范围内决定是否新建 run；原因必须先记入模块 notes。真实 LLM Eval 不临时拼装 `.ps1`、隐藏 PowerShell、计划任务或其他后台执行器。
 

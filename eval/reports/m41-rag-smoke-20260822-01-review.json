@@ -1,0 +1,366 @@
+{
+  "format": "phase4-rag-e2e-review-v1",
+  "reviewer": "codex-m41-smoke-prep",
+  "source": {
+    "artifact_path": "eval\\reports\\m41-rag-artifacts\\m41-rag-smoke-20260822-01.json",
+    "artifact_sha256": "5fd72b24b5e82d916afcae4cf8fce05d975a34691f2493193c56709a0e8fba64",
+    "artifact_identity": "674de0f12ba74819e59645a3e33da16884e6348b2a07f92883b75d50409ba461",
+    "run_id": "m41-rag-smoke-20260822-01"
+  },
+  "records": [
+    {
+      "record_id": "quality_refund_materials:r1",
+      "scenario_id": "quality_refund_materials",
+      "replicate": 1,
+      "automatic_assertions": [
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "route_correct",
+          "effect": "required",
+          "status": "passed",
+          "reason": "route_correct=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "axes_correct",
+          "effect": "required",
+          "status": "passed",
+          "reason": "axes_correct=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "reason_correct",
+          "effect": "required",
+          "status": "passed",
+          "reason": "reason_correct=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "graph_path_correct",
+          "effect": "required",
+          "status": "passed",
+          "reason": "graph_path_correct=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "rag_tool_once",
+          "effect": "required",
+          "status": "passed",
+          "reason": "rag_tool_once=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "retrieved_gold",
+          "effect": "required",
+          "status": "passed",
+          "reason": "stage=candidate expected=['refund_policy_quality'] actual=['evidence_escalation_rule', 'refund_policy_basic', 'refund_policy_quality']",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "selected_gold",
+          "effect": "required",
+          "status": "passed",
+          "reason": "stage=selected expected=['refund_policy_quality'] actual=['evidence_escalation_rule', 'refund_policy_basic', 'refund_policy_quality']",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "generation_visible_gold",
+          "effect": "required",
+          "status": "passed",
+          "reason": "stage=generation_visible expected=['refund_policy_quality'] actual=['evidence_escalation_rule', 'refund_policy_basic', 'refund_policy_quality']",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "cited_gold",
+          "effect": "required",
+          "status": "passed",
+          "reason": "stage=cited expected=['refund_policy_quality'] actual=['refund_policy_quality']",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "answer_present",
+          "effect": "required",
+          "status": "passed",
+          "reason": "answer_present=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "required_answer_terms",
+          "effect": "required",
+          "status": "passed",
+          "reason": "required terms 全部出现",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "response_trace_consistent",
+          "effect": "required",
+          "status": "passed",
+          "reason": "response_trace_consistent=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "runtime_identity_complete",
+          "effect": "required",
+          "status": "passed",
+          "reason": "runtime_identity_complete=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        },
+        {
+          "scenario_id": "quality_refund_materials",
+          "replicate": 1,
+          "assertion_id": "provider_observed",
+          "effect": "required",
+          "status": "passed",
+          "reason": "provider_observed=True",
+          "evidence_ref": "execution:quality_refund_materials:1:a705ba47-19b6-42ab-8ab1-55aaabd352ab"
+        }
+      ],
+      "answer": "申请质量问题退款时，必须提供订单号。\n\n申请人需要提供能够说明问题的照片。\n\n仅在照片不足以确认问题时，才需要补充必要的视频。",
+      "citations": [
+        {
+          "citation_id": "citation-slot:63f814dd1cf5252bf4fd21dd7b406bbf4101a4ee98b43e61099def0082e4f874",
+          "claim_ref": "claim:a286d29159bfc326236e82cfd9b9db1a9ed138bae92177406f39134d2e7c5f0b",
+          "title": "质量问题退款规则",
+          "revision": "2026-08-13-r1",
+          "anchor": "refund-policy-quality",
+          "authority_ref": "domain_pack/kb_docs/refund-policy-quality.md#refund-policy-quality"
+        },
+        {
+          "citation_id": "citation-slot:4889ea1b0b19390babe3841dbd96689f01fcd16f4211455a56379d4644888e69",
+          "claim_ref": "claim:1120fe43e9e37c58aa9a672a26c749c429957121a39f78779f95e41f556b4f5e",
+          "title": "质量问题退款规则",
+          "revision": "2026-08-13-r1",
+          "anchor": "refund-policy-quality",
+          "authority_ref": "domain_pack/kb_docs/refund-policy-quality.md#refund-policy-quality"
+        },
+        {
+          "citation_id": "citation-slot:7109286af577bf6da437fddd4f2967a701e6562493c70301ffe310da18775c2b",
+          "claim_ref": "claim:10c2f2f3cd82c1f86a6f56a564959ff7e0d7e7a810a9ef5fb4b5d08a36e626ae",
+          "title": "质量问题退款规则",
+          "revision": "2026-08-13-r1",
+          "anchor": "refund-policy-quality",
+          "authority_ref": "domain_pack/kb_docs/refund-policy-quality.md#refund-policy-quality"
+        }
+      ],
+      "docs_used": [
+        {
+          "citation_id": "citation-slot:63f814dd1cf5252bf4fd21dd7b406bbf4101a4ee98b43e61099def0082e4f874",
+          "title": "质量问题退款规则",
+          "revision": "2026-08-13-r1",
+          "anchor": "refund-policy-quality"
+        },
+        {
+          "citation_id": "citation-slot:4889ea1b0b19390babe3841dbd96689f01fcd16f4211455a56379d4644888e69",
+          "title": "质量问题退款规则",
+          "revision": "2026-08-13-r1",
+          "anchor": "refund-policy-quality"
+        },
+        {
+          "citation_id": "citation-slot:7109286af577bf6da437fddd4f2967a701e6562493c70301ffe310da18775c2b",
+          "title": "质量问题退款规则",
+          "revision": "2026-08-13-r1",
+          "anchor": "refund-policy-quality"
+        }
+      ],
+      "funnel_document_keys": [
+        [
+          "candidate",
+          [
+            "refund_policy_quality",
+            "refund_policy_basic",
+            "evidence_escalation_rule"
+          ]
+        ],
+        [
+          "selected",
+          [
+            "refund_policy_quality",
+            "refund_policy_basic",
+            "evidence_escalation_rule"
+          ]
+        ],
+        [
+          "generation_visible",
+          [
+            "refund_policy_quality",
+            "refund_policy_basic",
+            "evidence_escalation_rule"
+          ]
+        ],
+        [
+          "cited",
+          [
+            "refund_policy_quality"
+          ]
+        ]
+      ],
+      "provider_attempts": [
+        {
+          "status": "succeeded",
+          "error_subtype": null,
+          "elapsed_ms": 6873.517,
+          "usage_delta": {
+            "request_count": 1,
+            "successful_response_count": 1,
+            "prompt_tokens": 660,
+            "completion_tokens": 352,
+            "total_tokens": 1012
+          },
+          "eval_outbound_policy_identity": "phase4-rag-eval-business-generation-outbound-v1",
+          "authorized_source_data_classes": [
+            "role_restricted_policy_text"
+          ],
+          "authorized_document_count": 3
+        }
+      ],
+      "review_policy": "自然语言 correctness/completeness 必须结合引用证据人工判断；自动 terms 只提供下限。",
+      "source_checkpoint": {
+        "path": ".agent_work\\temp\\m41-rag-checkpoints\\m41-rag-smoke-20260822-01\\checkpoints\\quality_refund_materials-r1.json",
+        "sha256": "b654034ddabfdef663c897ef1949214217387f8815eecbfc27ee4b4930b82324"
+      },
+      "verdict": null
+    },
+    {
+      "record_id": "unsupported_warranty_rule:r1",
+      "scenario_id": "unsupported_warranty_rule",
+      "replicate": 1,
+      "automatic_assertions": [
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "route_correct",
+          "effect": "required",
+          "status": "passed",
+          "reason": "route_correct=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        },
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "axes_correct",
+          "effect": "required",
+          "status": "passed",
+          "reason": "axes_correct=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        },
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "reason_correct",
+          "effect": "required",
+          "status": "passed",
+          "reason": "reason_correct=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        },
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "graph_path_correct",
+          "effect": "required",
+          "status": "passed",
+          "reason": "graph_path_correct=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        },
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "rag_tool_once",
+          "effect": "required",
+          "status": "passed",
+          "reason": "rag_tool_once=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        },
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "safe_fallback_answer",
+          "effect": "required",
+          "status": "passed",
+          "reason": "safe_fallback_answer=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        },
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "no_generation",
+          "effect": "required",
+          "status": "passed",
+          "reason": "no_generation=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        },
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "response_trace_consistent",
+          "effect": "required",
+          "status": "passed",
+          "reason": "response_trace_consistent=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        },
+        {
+          "scenario_id": "unsupported_warranty_rule",
+          "replicate": 1,
+          "assertion_id": "runtime_identity_complete",
+          "effect": "required",
+          "status": "passed",
+          "reason": "runtime_identity_complete=True",
+          "evidence_ref": "execution:unsupported_warranty_rule:1:acfcf103-93cf-40c3-9336-e673872058dd"
+        }
+      ],
+      "answer": "当前无法形成可公开的答案。",
+      "citations": [],
+      "docs_used": [],
+      "funnel_document_keys": [
+        [
+          "candidate",
+          []
+        ],
+        [
+          "selected",
+          []
+        ],
+        [
+          "generation_visible",
+          []
+        ],
+        [
+          "cited",
+          []
+        ]
+      ],
+      "provider_attempts": [],
+      "review_policy": "自然语言 correctness/completeness 必须结合引用证据人工判断；自动 terms 只提供下限。",
+      "source_checkpoint": {
+        "path": ".agent_work\\temp\\m41-rag-checkpoints\\m41-rag-smoke-20260822-01\\checkpoints\\unsupported_warranty_rule-r1.json",
+        "sha256": "f87cfff69b512796b1ae9b56f37e2c7454746ce99c8acac919c3b887561cb0b5"
+      },
+      "verdict": null
+    }
+  ],
+  "boundary": "旁路人工证据；不修改自动 artifact、assertion 分母或 Gate。"
+}

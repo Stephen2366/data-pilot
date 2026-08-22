@@ -59,6 +59,9 @@ def create_app() -> FastAPI:
     application.state.thread_checkpoint_manager = ThreadCheckpointManager(
         ttl_seconds=settings.thread_checkpoint_ttl_seconds
     )
+    # M41：普通请求保持 None，仍由 endpoint 构造 deterministic RAG Tool。只有受控 Eval
+    # 在进程内临时注入 factory；请求体没有字段可以选择 Composer 或提升运行权限。
+    application.state.rag_tool_factory = None
     register_request_logging_middleware(application)
     register_exception_handlers(application)
     application.include_router(resources_router)

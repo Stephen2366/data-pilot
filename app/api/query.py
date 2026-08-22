@@ -218,9 +218,11 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
     )
 
     # 步骤 2：DB Session、深 Tool 与可选 Schema index 仅属于本次 invoke 的 runtime context。
+    rag_tool_factory = getattr(request.app.state, "rag_tool_factory", None)
+    rag_tool = rag_tool_factory() if rag_tool_factory is not None else RAGToolAdapter()
     runtime = HarnessRuntime(
         sql_tool=Text2SQLToolAdapter(db=db, schema_vector_index=getattr(request.app.state, "schema_vector_index", None)),
-        rag_tool=RAGToolAdapter(),
+        rag_tool=rag_tool,
     )
     checkpoint_manager: ThreadCheckpointManager = request.app.state.thread_checkpoint_manager
     turn = run_turn(

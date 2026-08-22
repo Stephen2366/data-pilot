@@ -2,7 +2,7 @@
 
 > 本文是评测数字、分母、artifact、实验状态与可比性规则的唯一详细账本。`rag-current-state.md` 只保留 RAG 当前运行口径和结论摘要；两处出现同一 profile identity 时，以本文判断“能否比较”，以 `rag-current-state.md` 判断“当前运行使用什么”。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
-更新时间：2026-08-18
+更新时间：2026-08-22
 
 ## 当前状态
 
@@ -14,6 +14,7 @@
 - **M38 Hybrid 合同**：`phase4-harness-hybrid-v1` 是独立 deterministic 控制/安全 artifact（5 Scenario / 25 required），不与 M27 或 M34 的真实质量/长期数字混算；完整能力边界见 `rag-current-state.md` 和 Phase 4 changelog。
 - **M39 P6 readiness audit**：只读取六份冻结 M34 输入并校验 SHA-256 / identity / split / runtime；它不是新的 retrieval 或 Answer Eval，也不新增质量基线。audit `324ec7f8...b726c6` 的严格 `no_go`、dev 分层计数与重开缺口见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
 - **M40 P7 technical assurance**：`phase4-assurance-v1` 是九个现有 deterministic family 的 closed-world 技术 Gate，另以 `phase4-trace-rehearsal-v1` 关联 SQL、RAG、Hybrid、澄清恢复和安全拒绝的同次 API/Trace 安全投影。它只登记 contract/artifact identity 与 P6 verified `no_go`，不产生新的质量分数、不混入 M27/M34 数字，也不等于 Phase 4 人工验收或生产就绪。
+- **M41 business RAG 产品 Eval**：当前合同为 `phase4-rag-e2e-v1`，使用 business 22-entry release，经 `/api/query` 产品 Harness 一题一次执行，并提供 funnel/Gate/triage/review/compare。首次真实 Qwen Smoke `m41-rag-smoke-20260822-01` 已 completed，自动 Gate 与逐题人工 review 均通过；它是当前有效实验快照，不是正式长期基线，也不得拿 M34 external 或 M31–M40 deterministic artifact 与其混算。
 - **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
 ## 读数与分母
@@ -32,6 +33,8 @@
 
 Gate 也是独立视图：selector / suite policy 决定 assertion 为 `required`、`advisory` 或 `excluded`，projector 再推导 `passed`、`failed` 或 `inconclusive`。Reliability 的多个 replicate 会归约为同一个逻辑 Scenario / assertion，不扩大业务问题分母。
 
+上句是 M27 Text2SQL 的归约口径。M41 v1 的 report/Gate 保留每个 `<scenario-id>:r<replicate>` assertion cell，并显式展示 replicate；比较 M41 Reliability 时不得把物理 cell 分母与 M27 的逻辑 Scenario 分母混算。
+
 ## 可比性规则
 
 - 只比较相同的 `contract_version`、selected contract hash、suite policy hash、execution protocol、oracle fixture 和 resolved runtime identity 的 M27 EvalRun。
@@ -39,12 +42,15 @@ Gate 也是独立视图：selector / suite policy 决定 assertion 为 `required
 - retrieval-only benchmark 继续独立记录；它不调用 PipelinePort，不能证明端到端 Text2SQL 收益。
 - M34 RAG 只在 dataset / question set / split / profile / parser / unit recipe / top-k 与评分口径一致时比较；adapter、embedding、Composer、context budget 或 support/citation 合同变化必须以新 identity 形成候选，不得覆盖本基线。
 - M34 retrieval 与 Answer/Citation 是两层证据：retrieval gold coverage 不能冒充答案正确率；`answer_status=complete` 只表示回答及引用合同闭合，也不能冒充 correctness。M34 未启用 LLM Judge。
+- M41 completed run 只在 catalog/selector/replicate、assertion plan/scorer、business release/corpus、retrieval adapter/recipe、Composer/model/provider、release + generation outbound policy、caller fixture 与 timeout/retry 全部相同时严格 compare；当前 compare 拒绝任何 identity 漂移，不提供跨候选升降解释。
 
 ### 人工复核的边界
 
 M27 review bundle 是解释自动结果的旁路证据，不是第二套分数：它不改变 `eligible / observed / passed / failed / not_observed`、不改变 Gate，也不能与自动数字混算。Core / Stress 后复核全部自动失败、退款/SCD/金额/时间/递归等高风险合同，并抽样少量自动通过题。
 
 自 `m27-review-bundle-v2` 起，bundle 保存 artifact 与各 checkpoint 的 SHA-256，复核前可验证来源仍是原文件。普通业务题没有 candidate SQL 时只能记为 `insufficient_evidence`；安全或预期拒绝题可以凭明确拦截证据判通过。人工分类只服务于错误聚合，绝不成为新分母或 Gate 输入。早期 v1 review 是无哈希的历史旁路材料，不能直接和 v2 的来源校验混用。
+
+M41 `phase4-rag-e2e-review-v1` 同样绑定 artifact 与逐 execution checkpoint SHA-256，并以 `<scenario-id>:r<replicate>` 闭集接收 `pass/fail/insufficient_evidence`。它必须复核自动失败/`not_observed`、高风险/多文档题和通过抽样；deterministic required terms 只是 correctness/completeness 下限。M41 未启用 LLM Judge，人工 verdict 与自动 Gate 永远并列而不互改。
 
 ## 当前有效实验快照
 
@@ -75,6 +81,12 @@ M27 review bundle 是解释自动结果的旁路证据，不是第二套分数�
 | Answer / Citation full | 2026-08-16 | `enterprise-rag-answer-eval-v1`；lexical external 默认；Qwen Composer `rag-qwen-evidence-support-nonthinking-unbounded-v4`；180 题 | complete `146/180`；all-gold cited `80/180`；mean gold coverage `49.3981%`；multi-document all-gold `2/38`；semantic all-gold `15/52`；10 unavailable；24 support contract rejected；405,305 tokens | [完整 identity / SHA-256](../../eval/reports/m34-enterprise-rag-baseline-manifest.md) | completed 证明真实链路和账本可复现，不证明自然答案正确率或生产质量；本地大 artifact 不提交 Git。 |
 
 可提交的轻量证据清单为 [`eval/reports/m34-enterprise-rag-baseline-manifest.md`](../../eval/reports/m34-enterprise-rag-baseline-manifest.md)，保存五个 completed artifact 的完整 identity、文件 SHA-256、共同运行身份和关键结果。原始大 JSON 仍只保存在 `.agent_work/temp/`，不是唯一长期事实源；详细失败结构与运行边界见 `rag-current-state.md`。
+
+### RAG：M41 business product E2E
+
+| Run ID | 日期 | Selector / Scenario | Protocol / runtime | Assertion views / Gate | 解释边界 |
+|---|---|---|---|---|---|
+| [`m41-rag-smoke-20260822-01`](../../eval/reports/m41-rag-artifacts/m41-rag-smoke-20260822-01.json) | 2026-08-22 | Smoke；2 Scenario / 2 physical executions | `phase4-rag-e2e-v1`；business release `7d0d0937...409a`；lexical；Qwen `qwen3.7-plus`；eval-only outbound；60s/retry0 | [report](../../eval/reports/m41-rag-smoke-20260822-01.md)：required `23 passed / 0 failed / 0 not_observed`；Gate `passed`；人工 review `2 pass` | 当前有效首次 Smoke 快照，不是正式长期基线。唯一 generation 成功，usage `660 + 352 = 1012` tokens；no-candidate 题零 provider。只证明两个窄场景，不外推 Core、多文档或 Reliability。 |
 
 ### Text2SQL：M27
 

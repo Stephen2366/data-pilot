@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 import json
 from time import perf_counter
-from typing import Any, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,12 @@ from engine.nl2sql.generator import LLMGenerationError, generate_sql
 from engine.nl2sql.pipeline import Text2SQLPipelineResult, run_text2sql_pipeline
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.nl2sql.templates import match_template
-from engine.rag.answer_flow import AnswerEvidenceRequirement, RAGAnswerFlow, RAGAnswerRequest
+from engine.rag.answer_flow import (
+    AnswerEvidenceRequirement,
+    RAGAnswerFlow,
+    RAGAnswerRequest,
+    RAGAnswerResult,
+)
 from engine.rag.evidence import EvidenceLedger, make_sql_evidence
 from engine.sql_guard.guard import validate_readonly_sql
 from engine.sql_guard.precheck import looks_like_dangerous_sql
@@ -369,9 +374,13 @@ class RAGToolAdapter:
         *,
         answer_flow: RAGAnswerFlow | None = None,
         knowledge_runtime_kind: Literal["business_release", "external_profile"] = "business_release",
+        result_observer: Callable[[RAGAnswerResult], None] | None = None,
     ) -> None:
         self._answer_flow = answer_flow or RAGAnswerFlow()
         self._knowledge_runtime_kind = knowledge_runtime_kind
+        # M41：observer 只给同进程 Eval 保存一次执行的内部 typed Evidence；默认关闭，
+        # API/Trace 仍只消费下方 safe projection，绝不因此泄露 Document 正文。
+        self._result_observer = result_observer
 
     def run(self, request: HarnessRequest) -> ToolObservation:
         """把已经闭合的 AnswerFlow 四轴结果原样映射到 ToolObservation。"""
@@ -400,6 +409,8 @@ class RAGToolAdapter:
                 requirement_equivalent=follow_up.requirement_equivalent if follow_up is not None else False,
             )
         )
+        if self._result_observer is not None:
+            self._result_observer(result)
         safe = result.safe_projection()
         diagnostics = dict(safe["diagnostics"])
         diagnostics["knowledge_runtime_kind"] = self._knowledge_runtime_kind

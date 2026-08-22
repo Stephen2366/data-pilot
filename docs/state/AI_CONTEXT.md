@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | Phase 4 已完成；Phase 4B roadmap 已正式建立，M41 module plan 尚未立项（2026-08-22） |
-| 当前 plan    | —（下一步按 `docs/phase4b-roadmap.md` 的 B0 另立 module plan） |
-| 当前 notes   | —（Phase 4B 方案来源与调查材料 `docs/notes/phase4-rag-capability-status.md`) |
-| 待决事项     | B0 的 exact seed/caller/release/Hybrid operator/Eval catalog、legacy/agent runtime 与 API/state 兼容矩阵仍须在 module plan 中确认；B3 campaign 必须预注册预算/review point；M39 P6 历史 no-go、当前进程内 checkpoint、external lexical 默认与运行配置均未改变 |
+| 当前活动模块 | M41 Phase 4 RAG Eval 缺口已完成技术开发与 deterministic 收工；未执行 Phase 4B 能力（2026-08-22） |
+| 当前 plan    | `docs/notes/m41-plan.md`；首次 business RAG Qwen smoke 已完成，后续扩大运行仍需新授权 |
+| 当前 notes   | `docs/notes/m41-notes.md`                                    |
+| 待决事项     | M41 Smoke 是否登记正式长期基线、是否扩大 Core/Diagnostic/Reliability 尚未决定；若回到 Phase 4B，B0 exact seed/caller/release/Hybrid operator/Eval catalog 与兼容矩阵仍须另立 plan，B3 campaign 仍须预注册预算/review point |
 | 更新时间     | 2026-08-22                                                   |
 
 ## 必读规则
@@ -42,7 +42,7 @@
 - M34 external benchmark：项目外 EnterpriseRAG-Bench v1.0.0 独立 profile；当前 external adapter 保持 `enterprise-lexical`，`enterprise-unit-paragraph-2400-v1` 无 overlap；semantic candidate 不胜 lexical，未激活。业务 22 条 active release 不变。
 - LangFuse 默认关闭，JSONL trace 为主；SQL 安全为只读 AST + RBAC + 敏感字段策略。
 - Trace runtime identity：`/api/query` 的 SQL、RAG、Hybrid、澄清恢复和安全拒绝 Trace 均从同一 `AgentTurnResult` 投影 `phase4-trace-runtime-v1`。缺少安全 identity 只标 `unavailable`、不阻断业务；P7 canonical rehearsal 视其为失败。Trace 不保存 raw `thread_id` 或结构化 clarification/follow-up 参数副本，但沿用既有用户可见 `answer` 保存合同。
-- 现有 Text2SQL chat/schema embedding 出站在 transport 前按 `phase4-outbound-v1` 精确登记；所有新增 Knowledge/RAG 数据类别与节点用途继续默认拒绝，LangFuse Cloud 未获放行。
+- 现有 Text2SQL chat/schema embedding 出站在 transport 前按 `phase4-outbound-v1` 精确登记；普通 Knowledge/RAG 与 LangFuse Cloud 继续默认拒绝。唯一例外是用户确认的 M41 显式 Eval CLI：`phase4-rag-eval-business-generation-outbound-v1` 只允许已通过 active release、caller/ACL/Gate 的政策/指标 generation context 发往 Qwen，security/未知类别网络前拒绝；该 policy 不进入普通 API。
 
 ## 最近验证事实
 
@@ -50,7 +50,9 @@
 
 | 日期 | 事实 |
 |---|---|
-| 2026-08-22 | 按一次授权执行 M41 M27-v3 `smoke` 真实 Qwen Eval：run `m41-real-llm-smoke-20260822-01`，4 个 Scenario/physical attempts；`june_gmv`、`active_products_top10` 到达 LLM generation 但因 `network_error` 归为 `external_unavailable`，`unsafe_drop_orders`、`missing_product_supplier_rejection` 在确定性安全/计划合同处拒绝。run completed 但 Gate `inconclusive`（required passed=2、failed=0、not_observed=7），没有成功模型输出可作质量结论；不得未经新授权重跑。artifact/report 见 `eval/reports/m27-artifacts/m41-real-llm-smoke-20260822-01.json` 与 `eval/reports/m41-real-llm-smoke-20260822-01.md`。 |
+| 2026-08-22 | 用户授权并完成 M41 首次 business RAG Qwen Smoke `m41-rag-smoke-20260822-01`：2 Scenario / 2 executions，唯一 generation 成功、另一 no-candidate 零 provider；自动 required `23 passed / 0 failed / 0 not_observed`，Gate `passed`，人工 review `2/2 pass`。Qwen `qwen3.7-plus` usage 为 prompt 660、completion 352、total 1012 tokens；artifact identity `674de0f...a461`。本次已停门，未扩大 selector、未重跑、未调用 Judge；它是当前有效实验快照，不是正式长期基线。 |
+| 2026-08-22 | M41 完成 Phase 4 business RAG 产品 EvalOps 技术闭环：`phase4-rag-e2e-v1` 经 `/api/query → turn → Router → Harness → RAG Tool → AnswerFlow → API/Trace` 一题一次执行，提供 catalog/selectors、RunSpec/checkpoint/completed artifact、failure funnel、Gate、triage、SHA-256 review、strict compare 与 M34 historical importer；用户确认独立 eval-only business Qwen 出站 policy。M41 聚焦 11 passed、M27/M31–M40 受影响回归 205 passed、全仓 459 passed / 3 skipped / 1 warning。该条是开发收工时快照，当时尚未运行真实 business RAG；后续首次 Smoke 结果见上一条，Judge、remote embedding/Milvus 与 LangFuse 仍未运行。 |
+| 2026-08-22 | 本模块立项前曾按一次授权执行 M27-v3 Text2SQL `smoke`，其 run ID 恰以 `m41-` 开头：`m41-real-llm-smoke-20260822-01`。4 个 Scenario 中两个 generation 因 `network_error` 为 `external_unavailable`，两个确定性拒绝通过；Gate `inconclusive`。这不是 M41 business RAG smoke，不能满足 M41 G2 或形成 RAG 质量证据；不得未经新授权重跑。artifact/report 位于 `eval/reports/m27-artifacts/`。 |
 | 2026-08-22 | Phase 4B roadmap 审查确认旧 M35 `single_tool`、M36/M37 单 Graph/单深 Tool、M38 branch budget 与新 Loop 需要显式 runtime family 隔离；当前 Pydantic 请求只严格校验已知 thread/follow-up 组合，未知字段不是统一 `extra=forbid` 合同。一次本地 deterministic Knowledge retrieval 诊断使用当前 active business release、默认 budget 与 `customer_service` caller，直接点名“基础退款政策和质量问题专项规则”的 T4 问法一次选中 `refund_policy_basic`、`refund_policy_quality`、`evidence_escalation_rule`，因此该原句不能承担 RAG recovery 证明。未修改 release、retrieval、权限或任何运行默认。 |
 | 2026-08-17 | M40 完成 P7 技术收口：五条 deterministic API/Trace rehearsal（SQL、RAG、Hybrid、澄清恢复、安全拒绝）验证 response/Trace 同源、四轴、Evidence/citation、Graph/lifecycle 预算、安全 runtime identity 与非泄露；P7 closed-world manifest 只允许 P1、P2 retrieval/answer、P3、P4 turn/follow-up、P5、M39 P6 verified `no_go`、P7 rehearsal 九个 family，拒绝 M27 历史与 M34 质量数字填槽。M40 聚焦 6 passed、M31–M39 回归 208 passed、全仓 deterministic pytest 447 passed / 3 skipped / 1 warning；technical Gate 不等于人工验收、生产认证或 P6 Subgraph 完成。 |
 | 2026-08-17 | M39 完成 P6 只读 readiness audit：六份冻结 M34 输入须同时匹配 SHA-256、identity、split、retrieval runtime 与 Composer identity；只分类 60 dev，120 held-out 仅作闭合核验，零 provider 调用。结果为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；“Observation 驱动新增 Evidence 动作”与“可比额外预算”均未被既有证据证明，故严格 `no_go`，external lexical 默认不变。全仓 deterministic pytest `441 passed, 3 skipped, 1 warning in 517.57s`。 |
@@ -65,6 +67,7 @@
 
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
 
+- (2026-08-22) M41 是 Phase 4 RAG Eval 缺口补完，不是 Phase 4B Agent 能力实施。它建立了 business product E2E 的一次执行 Evidence、funnel/review/compare 和显式 eval-only Qwen 出站门；首次 Smoke 已通过并按门禁停止，后续 Core/Diagnostic/Reliability 或重跑仍需用户精确授权。该模块不改变 M39 P6 no-go、默认 lexical/release/Composer、现有 thread checkpoint 或 Phase 4B B0–B5 决策门。
 - (2026-08-22) 用户已确认 `phase4-rag-capability-status.md` 第 12 节进入正式路线，现由 `docs/phase4b-roadmap.md` 升格为 Phase 4B 推进事实源。Phase 4B 是已完成 Phase 4 之上的新能力阶段，最终硬交付包含 experimental bounded RAG Subgraph、任务级自然多轮、持久任务状态、node-level Context Builder、Context Compact 基础版和贯穿 Agent Scenario Eval；“实现 Subgraph”与“切换默认”继续分离。该路线升格不改变 M39 P6 当时冻结 Evidence 下的正确 `no_go`、当前进程内 checkpoint、external lexical 默认或任何运行配置。
 - (2026-08-22) Phase 4B 新增三项施工硬边界：旧 M31–M40 fixture 显式 pin legacy runtime、新 Agent Loop 使用独立 versioned family 且两类 Gate 同时通过；B1 新建 TaskState family/in-memory adapter，并以增量 API 投影兼容旧 thread payload；B3 使用预注册候选/预算/轮次/review point 的有界 campaign，动作不足时暂停重规划，no-go 不冒充能力完成。直接点名双政策的现有 T4 问法已证明会一次取全，B0 必须冻结真实非陷阱 business recovery case。
 

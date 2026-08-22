@@ -2,11 +2,11 @@
 
 > 本文是知识库的当前运行状态入口，作用类似 `database-current-state.md`：只记录续接开发需要立刻知道的语料、active identity、运行接线、当前结论和活跃风险。评测数字、分母、artifact 与可比性规则统一以 `eval-baselines.md` 为准；本文不建立第二份评测账本。涉及知识原件、active release、外部 corpus、Knowledge Tool 或 M34 运行状态时必须先读本文。
 
-**更新时间：2026-08-17**
+**更新时间：2026-08-22**
 
 ## 一句话结论
 
-DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知识 release** 继续作为原有回归与业务默认；EnterpriseRAG-Bench 的 **36,417 篇 Confluence / Google Drive / Jira 文档**已经通过独立 external profile 接入 KnowledgeTool → Evidence → AnswerFlow → citation 链路，并形成 60 dev + 120 held-out retrieval 和 180 题 Answer Eval 证据。external 默认保持 lexical；semantic 已完成候选构建，但两个 split 都未胜出。
+DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知识 release** 继续作为业务默认，M41 另提供显式、eval-only 的真实产品链路 Qwen 评测入口；EnterpriseRAG-Bench 的 **36,417 篇 Confluence / Google Drive / Jira 文档**通过独立 external profile 形成 M34 retrieval 与 Answer Eval 证据。external 默认保持 lexical；semantic 未胜出。M41 首次 business RAG Smoke 已通过，但只是当前有效窄快照，尚未登记正式长期基线。
 
 ## 当前两套知识运行口径
 
@@ -68,6 +68,8 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - M34 Composer identity 为 `rag-qwen-evidence-support-nonthinking-unbounded-v4`：`enable_thinking=false`，应用层不发送 `max_tokens`；provider 服务端限制仍在。该配置只属于 M34 external Answer Eval，不是业务默认 Composer。
 - M37 在成功 RAG turn 外增加一次显式 opt-in follow-up。只有 22 条业务 release 的同 requirement 解释动作，才可重新加载当前 active 原件并精确核对 authority/revision/content/anchor、重新执行 ACL/用途授权后重建本轮 Evidence；identity/requirement 变化走同一 Knowledge Tool 一次。external profile 每次 follow-up 都重新检索，不进入业务 rehydrate seam。
 - M38 的 Hybrid RAG branch 调用 `RAGAnswerFlow.prepare_for_hybrid()`：复用同一 Knowledge Tool、active release 与 Shared Gate，只交付本轮 `generation_visible` Document Evidence 给唯一 Hybrid Synthesizer，不运行 Composer/单路 citation validator，也不生成 RAG 子答案。
+- M41 `phase4-rag-e2e-v1` 通过 eval-only app-state factory 注入 Composer，但每题仍真实经过 `/api/query → caller → turn → Router → Harness → RAG Tool → business AnswerFlow → API/Trace`；退出后恢复 app state，普通 API 继续使用 deterministic Composer。一次 execution 形成共享 Evidence，scorer/report/triage/review/compare 不重跑 retrieval 或 provider。
+- 用户确认的 `phase4-rag-eval-business-generation-outbound-v1` 只允许显式 M41 CLI 把 active release 中已通过 caller/ACL/Gate、且 source class 为 `role_restricted_policy_text` / `metric_definition` 的 generation context 发给 Qwen；`security_policy`、未知类别或 identity 漂移在网络前失败关闭。它不是默认 `phase4-outbound-v1` 的扩权，也不得用于普通 API。
 
 ## 当前评测结论
 
@@ -78,6 +80,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - completed Answer/Citation Eval 证明真实 Tool → Evidence → AnswerFlow → citation 链路与账本可复现，但暴露出 lexical 漏召回、多文档 context packing 不足和 Composer support 合同拒绝三类主要缺口。
 - `answer_status=complete` 只表示回答、support 和 citation 合同闭合，不等于答案正确；M34 没有启用 LLM Judge。
 - M39 只读审计已将冻结 M34 的 60 dev 分为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；120 held-out 未逐题消费。现有材料没有“首次 Observation 选择允许动作后新增 Evidence”的证据，也没有可比额外预算，因此 P6 为严格 `no_go`，不接入 RAG Subgraph、不切 external lexical 默认。可复核报告见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
+- M41 首次真实 business Qwen Smoke `m41-rag-smoke-20260822-01` 已 completed：2 个 Scenario、自动 required `23/23`、Gate `passed`、人工 review `2/2 pass`。唯一 generation 调用成功并消耗 `1012` tokens，no-candidate 题零 provider；该单次窄结果不能外推 Core、多文档、Reliability 或整体业务 RAG 质量，也尚未登记正式长期基线。
 
 semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活候选：
 
@@ -97,6 +100,7 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 - M36 `phase4-harness-turn-v1`：8 组 sequence，证明 initial pending → 一次 resume/clear、owner/version/TTL/concurrency/budget stop 和安全 Trace；Graph 本身仍无 checkpoint。
 - M37 `phase4-harness-followup-v1`：10 组 sequence / 22 turn evidence / 50 required，证明 SQL 强制重查、业务 Evidence 重水化或变化后重检索、external 强制重检索、ACL 零 retrieval 拒绝，以及 owner/delta/budget/concurrency 的 pre-Graph stop。该确定性 contract 不属于长期真实 RAG 质量基线。
 - M38 `phase4-harness-hybrid-v1`：5 Scenario / 25 required，证明 canonical Hybrid 的两支 required、各一次预算、complete 的 SQL/Document 双绑定、单支 partial、SQL Guard stop 与 conflict；同样只是确定性控制/安全合同，不是开放 Hybrid 或真实 RAG 质量基线。
+- M41 `phase4-rag-e2e-v1`：canonical business RAG catalog + smoke/core/diagnostic/reliability selectors；冻结 product runtime、release/corpus/retrieval/Composer/policy/caller identity，建立 retrieved→selected→generation-visible→provider/support→cited→answer funnel、closed-world artifact、Gate、triage、review 和 compare。当前已有一次真实 completed Smoke，但尚未登记正式长期基线。
 
 ## 活跃风险与后续边界
 
@@ -105,6 +109,7 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
 - **能力范围**：M38 已把两类 canonical SQL + Document Hybrid 接入同一 Harness，但不是自由多轮或开放跨来源研究。第二次追问、Hybrid follow-up、optional branch、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
+- **M41 后续真实运行门**：首次 Smoke 已按用户授权完成并停门；Core、Diagnostic、Reliability 或任何重跑仍须新的精确授权。transport unavailable 记 `not_observed/inconclusive`，模型坏结构/support 记 observed failure；两者都不得用自动换 ID 重跑掩盖。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **默认切换**：semantic candidate、Hybrid、rerank 或新 recipe 必须产生新 identity，并以同 split 的单变量 A/B 和 held-out 证据经用户确认后才能切换。
 - **未接入候选**：WixQA 仍只是项目外候选，未索引、未评测、也不属于 active corpus；后续若重新考虑，需另开 corpus 调查和接入计划。

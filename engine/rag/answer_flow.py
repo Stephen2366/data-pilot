@@ -15,7 +15,7 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from time import perf_counter
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping, Protocol
 
 from engine.governance import (
     DOCUMENT_AUTHORIZATION_POLICY_IDENTITY,
@@ -437,6 +437,26 @@ def _strip_markdown_heading(content: str) -> str:
     return "\n\n".join(line.strip() for line in lines if line.strip())
 
 
+class EvidenceComposer(Protocol):
+    """Composer seam：本地 deterministic 与真实 provider 共用同一最小 interface。
+
+    ★ `RAGAnswerFlow` 只依赖“身份 + 结构化 claim 输出”，不应知道 Composer 是规则代码、
+    Qwen 还是测试 fake。Eval 可显式注入真实实现，普通业务默认仍保持确定性实现。
+    """
+
+    identity: str
+
+    def compose(
+        self,
+        *,
+        context: GenerationContext,
+        question: str,
+        confirmed_conditions: tuple[str, ...],
+        max_claims: int,
+    ) -> tuple[ClaimDraft, ...]:
+        """只根据本轮已授权 generation context 生成有界结构化 claims。"""
+
+
 class DeterministicEvidenceComposer:
     """首个本地 Composer implementation：每份 Evidence 形成一个原文绑定 claim。
 
@@ -497,7 +517,7 @@ class RAGAnswerFlow:
         self,
         *,
         knowledge_tool: KnowledgeTool | None = None,
-        composer: DeterministicEvidenceComposer | None = None,
+        composer: EvidenceComposer | None = None,
         active_loader: ActiveLoader = _default_active_loader,
     ) -> None:
         """注入本地依赖便于故障测试；外部调用者仍只使用 ``run`` interface。"""

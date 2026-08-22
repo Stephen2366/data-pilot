@@ -11,6 +11,7 @@ from typing import Any
 from engine.nl2sql.generator import QwenChatClient
 from engine.nl2sql.llm_call import LLMGenerationError
 from engine.rag.answer_flow import ClaimDraft, ComposerUnavailableError, GenerationContext
+from engine.governance import OutboundPolicy
 from engine.rag.enterprise_semantic import KNOWLEDGE_GENERATION_POLICY
 from engine.rag.evidence import DocumentEvidencePayload
 
@@ -171,19 +172,25 @@ class RemoteEvidenceComposer:
             raise ComposerUnavailableError("remote composer unavailable") from exc
 
 
-def make_qwen_evidence_composer(*, api_key: str, base_url: str, model: str, timeout: float = 60.0) -> RemoteEvidenceComposer:
-    """创建只供 M34 外部 benchmark 使用的非思考 Qwen Composer。"""
+def make_qwen_evidence_composer(
+    *, api_key: str, base_url: str, model: str, timeout: float = 60.0,
+    outbound_policy: OutboundPolicy = KNOWLEDGE_GENERATION_POLICY,
+    outbound_data_class: str = "public_benchmark_document",
+    identity: str = "rag-qwen-evidence-support-nonthinking-unbounded-v4",
+) -> RemoteEvidenceComposer:
+    """创建 Evidence-bound Qwen Composer；默认参数保持 M34 external 合同不变。"""
     return RemoteEvidenceComposer(
         client=QwenChatClient(
             api_key=api_key,
             base_url=base_url,
             model=model,
             timeout=timeout,
-            outbound_policy=KNOWLEDGE_GENERATION_POLICY,
-            outbound_data_class="public_benchmark_document",
+            outbound_policy=outbound_policy,
+            outbound_data_class=outbound_data_class,
             # 这是受控信息抽取，不需要默认开启的长思维链；不额外设置应用层输出上限，
             # 避免复杂多文档答案被 DataPilot 人为截断。provider 自身仍会执行服务端上限。
             enable_thinking=False,
             max_tokens=None,
-        )
+        ),
+        identity=identity,
     )
