@@ -26,6 +26,7 @@
 - **历史边界**：M39 P6 strict `no_go` 仍是当时冻结 Evidence 下的正确结论，不回写成开发失败。Phase 4B 先用新的 RAG funnel/action-level diagnostic Evidence 补齐其明确缺口，再实现 experimental Subgraph；当前 external lexical 默认、M37 进程内 checkpoint、M38 deterministic Hybrid 和全部 Phase 4 artifact 保持不变、不可混算。
 - **参考与验证**：按 `phase4-reference.md` 复核 agentic-rag-for-dummies 的 Graph/state/context/Tool action、Alibaba DataAgent 的固定 Graph 与持久 saver 接线、GustoBot 的多数据面汇合，以及 DB-GPT 的 retrieval/answer evaluator；roadmap 明确借鉴 seam 与不照搬边界。本文为文档/路线任务，仅执行完整回读、需求覆盖检查、路径/标题检索与 `git diff --check`，未运行 pytest、Eval、provider 或数据库命令。
 - **遗留 / Handoff**：下一步只能从 B0 另立 module plan，先确认 versioned 7/8 月 seed、最小 demo caller、业务双文档 RAG case、Hybrid operator 与 Agent Eval catalog；这些会改变长期事实或正式合同的精确选择仍需按 `AI_CONTEXT.md` 取得用户确认。
+- **2026-08-22 审查修订**：经最新版 roadmap/state/code 复核，补齐 legacy/agent runtime family、单端点 API 增量演进和独立 TaskState family 合同；B3 改为预注册候选/预算/轮次/review point 的有界 campaign，动作不足只算调查闭环并暂停重规划，不算 B3/B4/Phase 4B 完成；B0 增加 seed—政策可合成性、最小 `ops + customer_service` 候选 caller、非测试陷阱语料纪律，B1 增加 TaskDelta/自然语言 seam/模型 E2E 三层验收。一次当前默认 business retrieval 定点诊断确认直接点名双政策的 T4 原句会同时选中两篇目标文档，故不能承担 recovery 证明。roadmap 末尾已增加精简修订记录；未修改代码、seed、release、权限、默认 retrieval 或运行配置。
 
 ### [小修] Phase 4 后续 Agent / RAG 候选方案审查收口（2026-08-22）
 

@@ -23,7 +23,7 @@ Phase 4B 的目标，是把当前“固定 DAG + 一次结构化恢复/追问”
 
 阶段完成后的可展示故事是：
 
-> 用户从“查询 7 月退款率”开始，连续把月份和指标改为 8 月退款金额、追问上涨原因、要求结合基础退款政策与质量问题专项规则、再纠正为按渠道分析。DataPilot 能在同一任务中安全地合并条件、使旧 Evidence 失效、根据 Observation 补取 SQL/Document Evidence、必要时在 RAG 子图内恢复检索，并在重启和 context compact 后继续；每个结论、动作、预算与停止原因都可由 Trace 和 Eval 回查。
+> 用户从“查询 7 月退款率”开始，连续把月份和指标改为 8 月退款金额、追问上涨原因、要求结合公司的退款规则解释、再纠正为按渠道分析。DataPilot 能在同一任务中安全地合并条件、使旧 Evidence 失效、根据 Observation 补取 SQL/Document Evidence、必要时在 RAG 子图内恢复检索，并在重启和 context compact 后继续；每个结论、动作、预算与停止原因都可由 Trace 和 Eval 回查。
 
 这条故事同时服务项目展示和面试：它展示的不是“节点很多”，而是企业 Agent 的控制权、安全、状态、Evidence、上下文与评测如何形成闭环。
 
@@ -41,6 +41,8 @@ Phase 4B 的目标，是把当前“固定 DAG + 一次结构化恢复/追问”
 | `m37-thread-v2` 进程内 clarification/follow-up | 作为旧回归与持久状态语义的最小先例 | 它从未持久化；不得伪装成在线可迁移状态或多 worker 能力 |
 | M31–M40 deterministic contract 与 M34 external 基线 | 作为 Phase 4B 回归锚点和 RAG 失败证据输入 | 不补写、不混算、不重跑来制造 Phase 4B 新分数 |
 | M39 P6 strict `no_go` | 作为“为什么必须先产生 action-level Evidence”的历史证据 | 不回写成失败；也不扩大解释为永久禁止 Agentic RAG |
+
+Phase 4B 不用一套新语义覆盖这些历史合同。旧 M35–M38 fixture 必须显式固定 legacy bounded runtime family，继续验证“一次 Graph、单路至多一个深 Tool、Hybrid 每支至多一次”等原合同；北极星与新 Agent Scenario 使用独立的 versioned agent runtime family。二者可以共享深 Tool、Evidence、四轴和安全底座，但旧 family 不必伪造新 TaskState，也不得通过放宽旧 assertion 来兼容新 Loop。
 
 ### 2.2 Phase 4B 必须新增的能力
 
@@ -127,6 +129,14 @@ trigger / Evidence requirement
 - recoverable、需要用户信息、不可恢复、unsafe、no-progress、budget exhausted 与 external unavailable 都有稳定终止语义；重复动作没有新 Evidence 时必须停止。
 - Loop 是 Evidence-driven Decision Loop，不保存或依赖自由文本 Thought 来证明进展。
 
+#### Runtime family 兼容合同
+
+- Phase 4B Agent Loop 只在新的 versioned agent runtime family 中启用；同一 accepted turn 仍是一份统一 turn/result 事实，但一次 Graph invoke 内可以按预算执行多个已登记动作。
+- 历史 legacy bounded runtime family 保持原有 Tool/branch 预算、request shape、Trace/Eval 投影与 assertion；旧 Eval fixture 必须显式 pin 该 family，不能依赖“当前默认碰巧仍兼容”。
+- 新旧 family 共用安全深 Tool、Evidence/citation、四轴和 caller/ACL/outbound seam；是否具有 TaskState、Action ledger 和多动作预算由 family identity 明示，不能靠字段是否为空猜测。
+- `/api/query` 的产品默认何时从 legacy 切换到 agent runtime 必须单独经过兼容回归、演示与用户确认；内部兼容 family 不直接变成客户端可任意选择、可绕过安全门的公开开关。
+- Phase 4B Gate 同时要求旧 M31–M40 原合同通过和新 Agent family 通过；禁止改写旧 assertion、向旧 artifact 补字段或把旧 family 静默排除在回归之外。
+
 ### 4.4 State、Context 与 Compact
 
 - State 保存事实；Context Builder 决定节点此刻能看到什么；完整 State/历史不能无差别进入 prompt。
@@ -138,9 +148,10 @@ trigger / Evidence requirement
 
 ### 4.5 Durable checkpoint
 
+- B1 先建立独立于 `m37-thread-v2` 的 versioned TaskState family，并通过 task-boundary interface 接 in-memory adapter；B5 在该稳定任务边界上增加 durable adapter 和必要的 schema version 演进。
 - 新 durable state family 从第一版携带 schema version、owner/tenant/active role、TTL、显式 clear、乐观版本与原子 claim；claim、version bump、clear 和过期处理必须由存储层条件更新保证，而不是应用“先读后写”模拟。
-- 持久 adapter 与 in-memory adapter 通过同一任务边界语义对接；后者继续服务快速测试与 M36/M37 回归，不能冒充持久化。
-- 历史 `m37-thread-v2` 从未跨进程持久，不要求在线迁移；不兼容 family/version 必须拒绝恢复。
+- 新 TaskState 的持久 adapter 与 in-memory adapter 通过同一任务边界语义对接，in-memory 只服务快速测试、不能冒充持久化；历史 manager 独立服务 M36/M37 legacy 回归。
+- 历史 `m37-thread-v2` 从未跨进程持久，只服务 legacy clarification/follow-up 回归；禁止扩字段把它改造成新 TaskState，也不要求在线迁移。不兼容 family/version 必须拒绝恢复。
 - owner 不只绑定 raw thread id；恢复时重新验证 caller、tenant、active role、ACL、Evidence validity 与 outbound 条件。wrong owner/missing 继续保持不可区分的安全公开语义。
 - checkpoint 不成为长期记忆仓库；TTL、数据最小化、删除、tombstone/清扫、失败恢复和审计保留必须在存储决策时闭合。
 
@@ -152,6 +163,14 @@ trigger / Evidence requirement
 - Trace 记录 TaskDelta/State fingerprint、action、Observation、EvidenceDelta、父子预算、Context identity、checkpoint lifecycle、Compact identity 和 termination 的安全投影；不保存原始凭据、raw thread 参数副本、完整正文/rows 或模型 Thought。
 - Trace/API/Eval 继续从同一 task/turn/action 事实投影；不得为评分重跑一条不同 pipeline 来补证据。
 
+### 4.7 公开 turn seam 与 API 增量演进
+
+- `/api/query` 保持唯一业务端点；新自然多轮通过版本化 task-turn 请求/响应投影增量接入，不新建 Agent 或多轮旁路。
+- M36/M37 的 `thread_id + expected_version + clarification/follow-up payload` 继续由 legacy family 承载；新 task payload 与旧 payload 必须互斥，服务端不能猜测请求属于哪个 family。
+- Phase 4B 内不删除、不改名旧公开字段，也不把旧 `ThreadView`、一次 follow-up budget 或旧 `turn_action` 生硬扩成万能 TaskState。新 TaskState/version/termination 使用独立安全投影，具体字段名由 B1 module plan 冻结。
+- B1 必须给出 request/response/Trace/Eval compatibility matrix，明确 initial、legacy resume/follow-up、新 task continuation、switch/cancel 和错误组合分别解析到哪个 family、返回什么稳定错误，以及旧客户端的弃用但可用边界。
+- 当前 Pydantic 请求只对已知 thread/follow-up 组合做严格校验，未知字段并未形成统一的 `extra=forbid` 合同；B1 必须显式决定新 task payload 的 unknown-field 策略，不能把现状误写成既有保证。
+
 ## 5. 北极星 Scenario 与前置合同
 
 ### 5.1 Canonical sequence
@@ -161,7 +180,7 @@ trigger / Evidence requirement
 | T1：查询 7 月退款率 | 建立任务，route=SQL，取得 7 月 SQL Evidence | B1 |
 | T2：改成 8 月并查看退款金额 | 修改时间和指标，旧 SQL Evidence 失效并重查 | B1 |
 | T3：为什么上涨 | 增加原因分析 Evidence requirement，由 Observation 驱动允许的 SQL/全局补证据动作 | B2 |
-| T4：结合基础退款政策和质量问题专项规则解释 | 增加 Document Evidence requirement，SQL → Hybrid；业务检索若缺证据，由 RAG 子图恢复 | B2 顶层、B3/B4 RAG |
+| T4：结合公司的退款规则解释 | 增加需要基础政策与质量问题专项规则共同支撑的 Document Evidence requirement，SQL → Hybrid；业务检索若缺证据，由 RAG 子图恢复 | B2 顶层、B3/B4 RAG |
 | T5：不对，改成按渠道维度分析 | correction 受控修改维度，相关 SQL Evidence 失效；政策 Evidence 重新核验后才可复用 | B1/B2 |
 | 重启、多 worker、并发旧版本后继续 | 从安全任务边界恢复，不恢复 Graph 执行栈 | B5 |
 | extended sequence 触发 compact 后继续 | compact 前后 typed 任务行为等价 | B6 |
@@ -170,11 +189,12 @@ trigger / Evidence requirement
 
 ### 5.2 正式开工前置
 
-1. **versioned seed contract**：现有 seed 只有 2026 年 5/6 月，不能支持 7→8 月故事。B0 必须提出并经用户确认新的 deterministic seed identity，增加可由真实 SQL Evidence 解释的 7/8 月订单与退款结构，同步 `orders_wide` snapshot/batch、`verify_business_facts()`、数据库 state、受影响 oracle/schema；不机械改写不受影响的 6 月历史事实或 artifact。
-2. **最小权限 demo caller**：北极星只在 local/demo fixture 演示，不冒充生产认证。当前 fixture 拥有全部已知角色，B0 必须收敛为完成故事所需的最小 resolved role 集，并明确 active SQL role。若政策 ACL 需要调整，必须走正式 Knowledge release/identity 与 ACL 回归，不能为 demo 临时放宽。
-3. **业务 RAG failure case**：优先使用现有 `refund_policy_basic` 与 `refund_policy_quality` 两篇原件冻结双文档 gold Evidence requirement，先验证首轮是否稳定缺一；若首轮已经稳定取全，不伪造失败，应从其他真实失败簇选择业务案例。只有现有 corpus 无法形成真实案例时，才走正式发布流程增加语料和新 release identity。
+1. **versioned seed contract 与可合成叙事**：现有 seed 只有 2026 年 5/6 月，不能支持 7→8 月故事。B0 必须提出并经用户确认新的 deterministic seed identity，增加可由真实 SQL Evidence 解释的 7/8 月订单与退款结构，同步 `orders_wide` snapshot/batch、`verify_business_facts()`、数据库 state、受影响 oracle/schema；不机械改写不受影响的 6 月历史事实或 artifact。7/8 月结构还必须冻结可验证的原因/渠道/商品分解，使 SQL Evidence 的业务归因键能与政策的适用范围安全合成；只允许表达“观测到的驱动结构 + 对应处理规则”，不得把政策条款写成退款上涨的因果证明。
+2. **最小权限 demo caller**：北极星只在 local/demo fixture 演示，不冒充生产认证。当前 fixture 拥有全部已知角色，而两篇退款政策要求 `customer_service`、分析 SQL 通常需要 `ops`；B0 必须冻结完成故事所需的最小 resolved role 集、active SQL role 和跨 turn 权限复核。优先验证 `ops + customer_service` 的最小双角色 fixture、active SQL role=`ops` 是否足够；若政策 ACL 需要调整，必须走正式 Knowledge release/identity 与 ACL 回归，不能为 demo 临时放宽。
+3. **业务 RAG failure case 与非测试陷阱纪律**：现有默认 business retrieval 对直接点名“基础退款政策和质量问题专项规则”的 T4 问法会稳定选中 `refund_policy_basic`、`refund_policy_quality`，因此该原句不能直接承担 recovery 证明。B0 应在正式 case 冻结前改用真实用户会提出、但逻辑上确需双文档的自然问法，或选择其他已观察到的业务多文档失败簇；不能通过压低 top-k、测试专用 metadata 或反复改词制造漏召回。只有现有 corpus 无法形成真实案例时，才可基于独立业务理由自然补充语料，并在观察 retrieval 结果前完成内容合理性审查、gold requirement 与正式 release identity 冻结；新增文档不得以“必须挤掉某篇文档”为写作目标。
 4. **Hybrid operator 复核**：现有 `refund_reason_and_policy` 只是固定薄计划，不能自动继承 8 月 TaskState。B0/B2 必须决定对其做 versioned 语义泛化还是新增边界更准确的 operator；不能靠关键词命中宣称已覆盖北极星。
-5. **Agent Eval family skeleton**：在 B0 冻结 sequence identity、turn identity、seed/caller/release/runtime identity、ExecutionEvidence 和 closed-world 完整性规则；具体能力 assertion 随纵向切片递增。
+5. **Agent Eval family skeleton**：在 B0 冻结 sequence identity、turn identity、seed/caller/release/runtime family identity、ExecutionEvidence 和 closed-world 完整性规则；旧 M31–M40 fixture 显式 pin legacy family，新北极星显式使用 agent family，具体能力 assertion 随纵向切片递增。
+6. **API/state 兼容矩阵方向**：B0 先冻结“同一 `/api/query`、legacy request 保留、新 task-turn 增量投影、两类 payload 互斥”的路线边界；具体字段和弃用说明由 B1 module plan 完成，不能等施工时再临时决定。
 
 精确 seed 数字、role 集、知识 ACL、operator 语义和 Eval case 内容会改变长期默认或正式合同，必须在 B0 module plan 中给出选项、风险与建议，按 `AI_CONTEXT.md` 规则取得用户确认后实施；本文不替代该决策。
 
@@ -213,6 +233,7 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 - 北极星 canonical sequence、extended sequence 与配套非 happy-path catalog；
 - 经用户确认的 versioned seed、最小 demo caller、业务双文档 gold requirement 与 Hybrid operator 方向；
 - 独立版本化 Agent Scenario artifact skeleton、ExecutionEvidence、closed-world validator 与 runtime identity；
+- legacy/agent runtime、API request/response、TaskState family 的兼容矩阵初版；
 - Phase 4B capability matrix 初版，明确继承、待建和范围外；
 - B1/B3 首批 deterministic fixture 与不调用真实 provider 的合同测试边界。
 
@@ -220,14 +241,15 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 
 1. T1–T5 每一 turn 都能说明 TaskDelta、预期 Evidence、失效规则、route/action、required/advisory assertion 与安全身份；
 2. 7/8 月数据由真实 SQL 可验证，固定事实和历史不受影响项边界清楚；
-3. demo caller 不再依靠“拥有全部角色”证明任务可行；
-4. RAG case 的首次检索结果已实际观察，未为了 Subgraph 标签伪造失败；
-5. Agent Eval completed artifact 能拒绝缺 turn、额外 execution、重复 assertion、seed/caller/release/runtime identity 漂移；
-6. 未冻结模型、存储后端、预算数值或具体实现结构。
+3. 数据变化可分解到能与政策适用范围合成的业务键，且没有把政策冒充因果证据；
+4. demo caller 不再依靠“拥有全部角色”证明任务可行，跨 SQL/Document turn 的最小角色与 active role 已冻结；
+5. RAG case 的首次检索结果已实际观察；若新增语料，其业务合理性、正式发布和非测试陷阱审查已通过；
+6. Agent Eval completed artifact 能拒绝缺 turn、额外 execution、重复 assertion、seed/caller/release/runtime identity 漂移；
+7. legacy/agent family 与 API/state 演进方向闭合，且未冻结模型、存储后端、预算数值或具体实现结构。
 
 ### 决策门 G4B-0
 
-确认 exact seed/business facts、demo role 集、必要的 Knowledge release/ACL、Hybrid operator 语义和首版 Agent Eval catalog。未确认前可以做只读调查和 deterministic prototype，不能改变长期 seed、release、默认权限或正式 case。
+确认 exact seed/business facts 与数据—政策可合成关系、demo role 集、必要的 Knowledge release/ACL、真实 business RAG case、Hybrid operator 语义、runtime/API/state 兼容方向和首版 Agent Eval catalog。未确认前可以做只读调查和 deterministic prototype，不能改变长期 seed、release、默认权限或正式 case。
 
 ## 8. B1：Task Runtime、自然多轮 v1 与 node-level Context 起步
 
@@ -238,32 +260,36 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 ### 能力范围
 
 - 自然语言 turn 投影为 typed TaskDelta；确定性/保守 adapter 是必需 fallback，若使用模型需单独通过 outbound 门；
+- 建立新的 versioned TaskState family 和首版 in-memory task-boundary adapter；禁止扩展 `m37-thread-v2` 承载新字段，legacy manager 继续独立服务旧回归；
 - 受控 merge 生成新 TaskState，保留前后 fingerprint、字段级变化、pending question 与 Evidence invalidation reason；
 - 支持 continue、modify、ask existing result、add Evidence requirement、switch、correction、cancel 的合同语义，但首个纵向 slice 只需按真实 Scenario 逐步接入执行能力；
 - 建立 typed turn/event ledger 和 Task boundary；不再依赖一次 signed follow-up 的固定 action/field 模板表达所有多轮；
 - node-level Context Builder 从 Router/Turn Understanding/SQL/Controller 等本片实际调用节点开始建设，记录允许字段、来源、identity、预算与实际入模投影；
-- 继续继承 M37 Evidence reuse/invalidation，不用新 TaskDelta 绕过重查/重授权。
+- 继续继承 M37 Evidence reuse/invalidation，不用新 TaskDelta 绕过重查/重授权；
+- 在同一 `/api/query` 上增量接入新 task continuation，并按 §4.7 完成旧 clarification/follow-up 与新 task payload 的互斥、兼容和稳定错误投影。
 
 ### 主要交付物
 
 - Task runtime 合同及安全 merge/invalidator；
 - 可连续消费自然语言 turn 的统一 turn seam；
+- request/response/Trace/Eval compatibility matrix 与旧字段弃用但可用说明；
 - typed turn/event ledger 与首批 node context projection；
 - T1–T2 sequence、独立 correction/switch/cancel contract，以及 provider/outbound 保守降级 case；
 - Agent Eval 的 TaskDelta、State transition、Evidence validity 与 Context assertions。
 
 ### 完成标志
 
-1. T1→T2 连续推进并正确使旧 SQL Evidence 失效、重新取证；
+1. T1→T2 以自然语言 turn 连续推进并正确使旧 SQL Evidence 失效、重新取证；不得只用直接注入 TaskDelta 冒充自然语言 seam；
 2. correction 由独立 Scenario 证明，不通过预写北极星整句或关键词模板硬编码；
 3. TaskState、TaskDelta、turn/event 和实际 node context 都是 Eval 可直接读取的 typed 事实；
 4. 模型未授权、不可用或解析不确定时，不自由猜测 delta；
 5. switch/cancel 不继承旧任务的 pending action/Evidence；
 6. 仍不宣称同次运行 Observation-driven Loop、持久恢复或 Compact 已完成。
+7. 三层证据分账闭合：直接 TaskDelta 测试证明 merge/invalidation，确定性自然语言 fixture 或可控 adapter 证明 turn seam，若正式 adapter 使用模型则另有一次经授权的 real-provider T1→T2 E2E；三者不互相替代。
 
 ### 决策门 G4B-1
 
-若 Turn Understanding 需要模型，确认 receiver、purpose、data class、字段、fallback 和真实 E2E 授权；否则首版保持本地/确定性。该选择不能改变 TaskDelta 的 adapter-neutral 合同。
+若 Turn Understanding 需要模型，确认 receiver、purpose、data class、字段、fallback 和真实 E2E 授权；否则首版保持本地/确定性。无论选择哪种 adapter，B1 都必须真实消费自然语言 turn；模型方案的 real-provider showcase 与 deterministic required Gate 分账，但属于该方案的 E2E 交付证据。该选择不能改变 TaskDelta 的 adapter-neutral 合同。
 
 ## 9. B2：顶层 Evidence-driven Bounded Decision Loop
 
@@ -274,6 +300,7 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 ### 能力范围
 
 - 随真实消费方建立 first-class Action、Budget ledger、EvidenceDelta、Progress/Termination；
+- 在新的 agent runtime family 内加入 Loop；legacy M35–M38 runtime 保持原图与原 Tool/branch 预算，由旧 fixture 显式 pin，不通过修改旧断言适配新能力；
 - 加入受控回边和 allowed action catalog，覆盖至少一种 SQL/全局补 Evidence、跨 Tool 转换、clarification boundary、no-progress 与 budget stop；
 - T3 的“为什么上涨”必须由真实 Observation 触发原因分析/补证据动作；T4 顶层能从 SQL 任务受控增加 Document requirement 并转为 Hybrid，即使此时 RAG 内部仍走 Pipeline/fallback；
 - T5 correction 在整合路径使受影响 Evidence 失效并重新取证；
@@ -296,6 +323,7 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 4. 顶层只表达缺失 Evidence requirement，不指定 RAG 内部 rewrite/expansion；
 5. 不可恢复、ACL、outbound deny 和 no-progress 不产生重复 Tool call；
 6. Response/Trace/Eval 的四轴、action、Evidence 与预算来自同次运行。
+7. 新 Agent family 的多动作合同与旧 M31–M40 legacy 回归同时通过，旧 artifact 和 assertion 未被改写。
 
 ### 决策门 G4B-2
 
@@ -312,13 +340,16 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 - 分开记录 retrieved、selected、generation-visible、Composer/support、cited 和 answer correctness/completeness；support 是回答诊断，不新增第五个 Evidence stage；
 - 在 diagnostic/dev 上单变量比较候选：requirement split/subquestion、受控 rewrite、基于进展的 parent/neighbor expansion 等；固定一次的 parent 补取、rerank、hybrid retrieval 仍作为 Pipeline 单变量实验，不为使用 Subgraph 强行包装成 loop；
 - 每个候选动作必须冻结 trigger、expected/actual EvidenceDelta、预算、延迟、ACL/outbound、失败与停止边界；
+- 每轮 diagnostic campaign 必须在运行前冻结候选动作清单、单动作预算、总预算、最大诊断轮次和 review point；达到边界立即停止并出具结论，禁止以“继续找”为由无限延期；
 - 优先使用北极星双政策 business case，同时利用 M34 external dev 失败结构检验可迁移性；held-out 在动作与参数冻结前不得逐题消费；
-- 如果候选动作未形成合格 Evidence，继续补 diagnostic Evidence 或放弃该动作，不能降低准入标准。
+- 两种动作可以分别由 business 与 external 的不同真实失败簇证明，不要求每种动作在所有 corpus 都生效；每张 action card 必须声明适用 corpus/失败层/trigger，且至少一种动作必须支撑 business T4；
+- 如果候选动作未形成合格 Evidence，只能在已冻结 campaign 预算内补 diagnostic Evidence或放弃该动作，不能降低准入标准，也不能为凑动作数量制造 corpus failure。
 
 ### 主要交付物
 
 - multi-document/RAG funnel 与安全逐题失败分类；
 - 至少两种合格恢复动作的 action card 和单变量 diagnostic 报告；
+- 有界 diagnostic campaign protocol、预算消费和 review/no-go 记录；
 - business canonical recovery case 与 external diagnostic 对照；
 - 冻结的 Pipeline/Subgraph held-out decision protocol、可比预算与 runtime identity；
 - 项目外不可变大 artifact 的保存方案，以及仓库内 identity/SHA-256/汇总/安全失败切片。
@@ -331,10 +362,11 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 4. no-progress/duplicate/unsafe action 能被正确拒绝；
 5. held-out 未参与动作、Prompt、参数选择，污染规则明确；
 6. 未把 M39 `no_go` 改写为错误，而是用新实验补齐其明确缺口。
+7. diagnostic campaign 在冻结预算和 review point 内结束；不足两种动作时形成显式暂停/重规划结论，没有无限“继续寻找”。
 
 ### 决策门 G4B-3
 
-只有满足上述 action-level 准入的动作才能进入 B4 allowed action set。B3 是主线必做；某个动作被淘汰是合法结论，但不能因此取消 B4，必须继续寻找符合真实失败簇的动作，直到 Phase 4B 的 bounded Agentic RAG 目标具备合格输入。
+只有满足上述 action-level 准入的动作才能进入 B4 allowed action set。每次 campaign 到达冻结预算或 review point 后必须停止：两种动作合格则进入 B4；只有一种或零种合格则形成正式 review/no-go，暂停 B4 并由用户决定更换真实 Scenario/corpus、调整阶段排期或显式修改最终范围。该 review 是调查闭环，不等于 B3/B4 或 Phase 4B 能力完成；在用户未修改最终范围前，不能用“一种动作 + stop”替代既定两动作目标，也不能无界继续寻找。
 
 ## 11. B4：Bounded Agentic RAG
 
@@ -474,6 +506,7 @@ Phase 4B required assertions 至少覆盖：
 - durable owner/tenant/role、CAS claim、restart、multi-worker、TTL、clear、version conflict；
 - Compact provenance、关键事实保真、行为等价和失败降级；
 - SQL Guard、Document ACL、prompt injection、outbound 默认拒绝与非泄露；
+- legacy/agent runtime family 选择、旧/new payload 互斥、旧请求兼容和稳定错误；
 - API/Trace/Eval 同源、resolved runtime identity 和 closed-world 完整性。
 
 ### 14.4 质量与净收益视图
@@ -513,7 +546,7 @@ Phase 4B 只有在以下条件全部满足后才能收工：
 6. durable checkpoint 通过 owner/tenant/role、CAS、restart、多 worker、TTL、clear 和不兼容版本门；
 7. node Context 与 Compact 可直接 Eval，compact 前后关键 typed 行为等价；
 8. ACL、SQL Guard、outbound、Evidence/citation、四轴、非泄露与父子预算没有被新循环绕过；
-9. Agent Scenario required Gate 和现有 M31–M40 回归通过；真实 provider showcase 与 deterministic Gate 分账记录；
+9. Agent Scenario required Gate 和显式 pin legacy runtime 的现有 M31–M40 原合同回归同时通过；旧 assertion/artifact 未被改写，真实 provider showcase 与 deterministic Gate 分账记录；
 10. 每个纵向切片完成 `finish-module → finish-docs → 用户人工检查 → accept-module`，阶段末完成完整人工演示与文档收口。
 
 ## 16. 明确不做的范围
@@ -551,12 +584,15 @@ Phase 4B 参考顺序固定为：**本文合同 → 最新 state/代码/失败 E
 | 风险 | 早期信号 | 控制方式 |
 |---|---|---|
 | 把 Phase 4B 写成 Phase 4 返工 | 文档称 M39 no-go 为失败、称 M36/M37 未完成 | 明确历史基线；新能力使用新 family/里程碑，不改写旧 artifact |
+| 新 Loop 静默打破旧单 Tool 合同 | M35–M38 fixture 跟随默认 runtime 变红或被放宽 | legacy/agent runtime family 分离并显式 pin；旧原合同与新 Agent Gate 同时通过 |
+| API/state 演进靠字段猜测 | legacy follow-up 与新 task payload 同时出现或旧客户端语义漂移 | 单端点增量投影、payload 互斥、compatibility matrix、独立 TaskState family |
 | TaskState 变万能大对象 | 各节点直接读取完整 State/历史 | typed node Context allowlist、实际入模 Eval、State/Context 分权 |
 | TaskDelta 自由重写状态 | 模型一次返回整份 TaskState | delta closed-world、字段级 merge/invalidator、保守降级 |
 | 顶层与 RAG 双循环 | 同一失败被两层 rewrite/retry | Evidence requirement 边界、父子预算、action owner 与双循环 assertion |
 | Progress Policy 变第二个 Gate | 子图宣布“可回答”并生成答案 | Progress 只看 EvidenceDelta/可用动作；Shared Answer Gate 唯一 |
 | 循环只增加调用 | Evidence 不变仍继续 | Evidence gain/no-progress/duplicate 指标与确定性停止 |
 | 为 B4 伪造 RAG 失败 | 人工压低 top-k 或造语料证明 rewrite | B3 先观察真实 failure；单变量、business+external、held-out 隔离 |
+| B3 为凑两动作无限延期 | campaign 无候选边界、预算或 review 点 | 预注册候选与预算；到点停止并由用户显式重规划，no-go 不冒充能力完成 |
 | 实现 Subgraph 即宣称提升 | 只展示 Graph 图或 dev case | implementation/default 分离；未污染 held-out、成本/安全等价 A/B |
 | checkpoint 变长期隐私库 | 保存完整历史、rows、正文或 answer | task boundary 最小 schema、TTL/clear/retention、访问与清理门 |
 | 应用层伪 CAS | 多 worker 同时 claim 成功 | 存储层条件更新与并发/重复 Scenario |
@@ -576,3 +612,14 @@ Phase 4B 参考顺序固定为：**本文合同 → 最新 state/代码/失败 E
 7. **失败也是正确输出**：clarification、insufficient evidence、partial、blocked、external unavailable、no-progress 和 budget exhausted 都必须可解释、可评测。
 8. **保留实现空间**：roadmap 冻结 seam 和语义，不冻结类名、文件布局、框架 API、存储后端或参数；具体方案由当时代码、官方文档与 Eval 证据决定。
 9. **每片完成后滚动规划**：按 `finish-module → finish-docs → 用户人工检查 → accept-module` 收口，更新 `AI_CONTEXT`/专项 state/技术历史，再依据最新证据制定下一 module plan。
+
+## 20. 修订记录
+
+### 2026-08-22：新旧合同衔接与决策门有界化
+
+- 增加 legacy/agent runtime family 兼容合同：旧 M31–M40 原断言继续显式 pin，新 Loop 使用独立 versioned family，两类 Gate 同时通过。
+- 明确 `/api/query` 采用增量 task-turn 投影，旧 clarification/follow-up 保留且与新 payload 互斥；B1 必须交付 API/Trace/Eval 兼容矩阵。
+- 明确 B1 新建 TaskState family 和 in-memory adapter，B5 再接 durable adapter；禁止扩写 `m37-thread-v2`。
+- 将 B3 改为预注册候选、预算、轮次与 review point 的有界 campaign；动作不足时暂停并由用户重规划，no-go 不冒充能力完成。
+- 强化 B0 的 seed—政策可合成性、最小双角色 caller、真实 business RAG case 与非测试陷阱纪律；将 T4 改为自然业务问法，并记录当前直接点名双政策的原问法会一次取全。
+- 将 B1 验收拆为 TaskDelta、确定性自然语言 seam、模型方案 real-provider E2E 三层证据，三者分账且不互相替代。

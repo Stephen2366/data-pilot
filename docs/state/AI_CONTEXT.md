@@ -12,7 +12,7 @@
 | 当前 plan    | —（下一步按 `docs/phase4b-roadmap.md` 的 B0 另立 module plan） |
 | 当前 notes   | `docs/notes/phase4-rag-capability-status.md`（Phase 4B 方案来源与调查材料） |
 | 后续正式路线 | `docs/phase4b-roadmap.md`；最终硬交付包含 Evidence-driven Loop、bounded Agentic RAG、自然多轮、durable state、node Context、Compact 与贯穿 Agent Eval |
-| 待决事项     | B0 的 exact seed/caller/release/Hybrid operator/Eval catalog 仍须在 module plan 中确认；M39 P6 历史 no-go、当前进程内 checkpoint、external lexical 默认与运行配置均未改变 |
+| 待决事项     | B0 的 exact seed/caller/release/Hybrid operator/Eval catalog、legacy/agent runtime 与 API/state 兼容矩阵仍须在 module plan 中确认；B3 campaign 必须预注册预算/review point；M39 P6 历史 no-go、当前进程内 checkpoint、external lexical 默认与运行配置均未改变 |
 | 更新时间     | 2026-08-22                                                   |
 
 ## 必读规则
@@ -51,6 +51,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-22 | Phase 4B roadmap 审查确认旧 M35 `single_tool`、M36/M37 单 Graph/单深 Tool、M38 branch budget 与新 Loop 需要显式 runtime family 隔离；当前 Pydantic 请求只严格校验已知 thread/follow-up 组合，未知字段不是统一 `extra=forbid` 合同。一次本地 deterministic Knowledge retrieval 诊断使用当前 active business release、默认 budget 与 `customer_service` caller，直接点名“基础退款政策和质量问题专项规则”的 T4 问法一次选中 `refund_policy_basic`、`refund_policy_quality`、`evidence_escalation_rule`，因此该原句不能承担 RAG recovery 证明。未修改 release、retrieval、权限或任何运行默认。 |
 | 2026-08-17 | M40 完成 P7 技术收口：五条 deterministic API/Trace rehearsal（SQL、RAG、Hybrid、澄清恢复、安全拒绝）验证 response/Trace 同源、四轴、Evidence/citation、Graph/lifecycle 预算、安全 runtime identity 与非泄露；P7 closed-world manifest 只允许 P1、P2 retrieval/answer、P3、P4 turn/follow-up、P5、M39 P6 verified `no_go`、P7 rehearsal 九个 family，拒绝 M27 历史与 M34 质量数字填槽。M40 聚焦 6 passed、M31–M39 回归 208 passed、全仓 deterministic pytest 447 passed / 3 skipped / 1 warning；technical Gate 不等于人工验收、生产认证或 P6 Subgraph 完成。 |
 | 2026-08-17 | M39 完成 P6 只读 readiness audit：六份冻结 M34 输入须同时匹配 SHA-256、identity、split、retrieval runtime 与 Composer identity；只分类 60 dev，120 held-out 仅作闭合核验，零 provider 调用。结果为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；“Observation 驱动新增 Evidence 动作”与“可比额外预算”均未被既有证据证明，故严格 `no_go`，external lexical 默认不变。全仓 deterministic pytest `441 passed, 3 skipped, 1 warning in 517.57s`。 |
 | 2026-08-17 | M38 完成 P5 保守 Hybrid 双 Evidence 基线：本地确定性 Synthesizer、双 required branch、typed SQL/Document Evidence、safe partial/conflict/合成失败降级、API/Trace 投影和 `phase4-harness-hybrid-v1`（5 Scenario / 25 required）。全仓 deterministic pytest `436 passed, 3 skipped, 1 warning in 599.87s`，compileall/diff check 通过；未运行真实 Hybrid LLM、远程 embedding/Milvus、LangFuse Cloud 或 M34 external 大评测。 |
@@ -65,6 +66,7 @@
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
 
 - (2026-08-22) 用户已确认 `phase4-rag-capability-status.md` 第 12 节进入正式路线，现由 `docs/phase4b-roadmap.md` 升格为 Phase 4B 推进事实源。Phase 4B 是已完成 Phase 4 之上的新能力阶段，最终硬交付包含 experimental bounded RAG Subgraph、任务级自然多轮、持久任务状态、node-level Context Builder、Context Compact 基础版和贯穿 Agent Scenario Eval；“实现 Subgraph”与“切换默认”继续分离。该路线升格不改变 M39 P6 当时冻结 Evidence 下的正确 `no_go`、当前进程内 checkpoint、external lexical 默认或任何运行配置。
+- (2026-08-22) Phase 4B 新增三项施工硬边界：旧 M31–M40 fixture 显式 pin legacy runtime、新 Agent Loop 使用独立 versioned family 且两类 Gate 同时通过；B1 新建 TaskState family/in-memory adapter，并以增量 API 投影兼容旧 thread payload；B3 使用预注册候选/预算/轮次/review point 的有界 campaign，动作不足时暂停重规划，no-go 不冒充能力完成。直接点名双政策的现有 T4 问法已证明会一次取全，B0 必须冻结真实非陷阱 business recovery case。
 
 - (2026-08-17) M37 单独不等于 P4，但 M36 + M37 已共同完成 roadmap 定义的 P4 最小可验收基线；不宣称通用多轮。第二次追问、长历史 compact 和持久 checkpoint 不是当前 P4 硬门；跨 route/跨 Tool 补证据由 M38 的 P5 Hybrid 正式承接。M37“窄 B”仍是正式边界，不得退化为直接复用旧答案或默认扩到 external。
 - (2026-08-17) M38 已按 P5 口径完成保守 Hybrid 纵向基线：方案 A 的本地确定性 Synthesizer 是正式默认与长期 fallback；SQL/RAG 默认 required，不触发 G6 optional 放宽，不新增 Hybrid 数据出站。P5 不等于开放式跨来源研究 Agent。
@@ -78,7 +80,7 @@
 
 | 优先级 | 能力缺口 | 当前结论与硬性重开门 | 路线归属 |
 |---|---|---|---|
-| P0 | M34 已证实 lexical 漏召回、selected budget / multi-document context packing 和 Composer support 拒绝会严重限制答案质量 | M39 已以冻结 M34 证据完成 P6 strict no-go：没有 Observation 驱动新增 Evidence 的允许动作和可比额外预算。semantic candidate 已在同 split 输给 lexical，禁止直接切换；单变量 Pipeline 候选须独立计划，Subgraph 只有满足新 dev/held-out/budget 重开门后才可进入 M40 | P6 已闭环；质量候选 / P7 后续 |
+| P0 | M34 已证实 lexical 漏召回、selected budget / multi-document context packing 和 Composer support 拒绝会严重限制答案质量 | M39 已以冻结 M34 证据完成当时 P6 strict no-go：没有 Observation 驱动新增 Evidence 的允许动作和可比额外预算。Phase 4B B3 只能通过新的有界 diagnostic campaign 补齐 action-level Evidence，达到 review point 后必须停止；两种动作合格才进入 B4，动作不足则暂停重规划。semantic candidate 仍禁止直接切换 | Phase 4B B3/B4 |
 | P1 | M38 方案 A 只冻结正式本地确定性 Hybrid Synthesizer；远程方案 B 与双 adapter 方案 C 未实施 | B 的重开门：受控 operators 对真实开放 Hybrid 问法形成稳定失败簇，且用户明确批准 receiver、`hybrid_synthesis` 用途、question/conditions、SQL safe result、Document Evidence/identity 的数据类别与字段，并提供真实 provider 精确运行授权。C 的重开门：除上述授权外，还需有未污染 Hybrid held-out、多轮可比预算和明确 A/B 决策价值；禁止仅为“代码里有两个 adapter”扩大 M38。无稳定净收益时 A 继续作为默认与 fallback | P5 后续质量/出站条件项 |
 | P1 | 当前只有 demo/test caller resolver，生产认证尚未建设 | 出现非本地部署、真实用户/tenant、JWT/OAuth/SSO 或企业目录需求时，必须在现有 `CallerResolver` seam 接正式认证 adapter；“所有环境手工注入 resolver”不等于生产认证 | Phase 4 后续部署门 |
 | P2 | M35/M38 deterministic Router 只覆盖 closed-world SQL/RAG 和两类 canonical Hybrid operator | 先建立开放问法/混合意图 decision set 并形成稳定失败簇，再比较规则扩充、受控模型 fallback 或远程 Router；不得以“LLM 更完善”为由无 Eval 切换 | P3/P5 后续质量 |
@@ -95,7 +97,7 @@
 | 旧 Milvus collection `datapilot_schema_docs` 有重复灌入污染 | 历史 A/B 不可信 | 新 eval 用唯一/clean collection；校验 row count、dimension、schema docs hash。 |
 | QueryPlan 可能过宽，或 SQL 与计划不一致 | contract pass 不等于答案正确 | 保持保守 AST 边界，用 output/result/trace 共同定位。 |
 | 生产认证尚未建设；请求体 `user_role` 仍是客户端自报字符串 | 不能作为文档 ACL、生产身份或 thread owner 的独立信任来源 | M35–M37 让 `/api/query` 在 local/demo/test 通过显式 fixture resolver 解析 caller，role 只能选择 resolved role；thread 再绑定 owner+tenant/active role，其他环境缺 authenticated resolver 时 Tool 前失败关闭。 |
-| M37 checkpoint 仅在单进程内存，resolved/cleared tombstone 暂不清扫 | 重启或多 worker 时 pending/follow-up-ready 不可恢复；长时间大量创建 thread 会增长进程内容器 | 当前明确返回 `conversation_unavailable`，不伪装持久会话；只有重启恢复成为 required Scenario 才重开存储决策，清扫策略按真实容量证据另行规划。 |
+| M37 checkpoint 仅在单进程内存，resolved/cleared tombstone 暂不清扫 | 重启或多 worker 时 pending/follow-up-ready 不可恢复；长时间大量创建 thread 会增长进程内容器 | 当前仍明确返回 `conversation_unavailable`，不伪装持久会话；Phase 4B 已把 restart/multi-worker 提升为 required Scenario，B1 先建独立 TaskState family，B5 再完成 durable adapter、TTL/clear/tombstone/清扫与 CAS。 |
 | M35/M38 deterministic Router 对开放问法较窄 | 未登记 Hybrid、开放问法会保守停止；当前只证明两类 canonical operator，不代表通用意图理解 | 保持可注入 seam；只有真实失败簇、受控 Eval 和出站决策成立后，才规划规则扩张、远程 Router 或 Synthesizer。 |
 | `knowledge_docs` 物理表仍存在且是有损 legacy 投影 | 新调用者若绕过 source-backed catalog 读取旧表，会丢失 revision/authority/identity/完整 ACL，并重新制造旁路 | Text2SQL 已从 Schema/prompt/RBAC 双重隔离；seed 只从 staged catalog 派生，旧表不得作为 authority/runtime catalog。 |
 | M34 full Answer Eval 的 complete 不等于正确 | lexical 漏召回、semantic 与多文档题会产生“有 citation 但答非所问”；全题 all-gold cited 仅 44.44%，multi-document 5.26%，semantic 28.85% | 后续先按失败簇改善 gold coverage/context packing；不得用 complete rate 代替 correctness，也不得未经新计划重跑大规模 provider。 |
