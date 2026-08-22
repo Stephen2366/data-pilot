@@ -62,6 +62,8 @@ def create_app() -> FastAPI:
     # M41：普通请求保持 None，仍由 endpoint 构造 deterministic RAG Tool。只有受控 Eval
     # 在进程内临时注入 factory；请求体没有字段可以选择 Composer 或提升运行权限。
     application.state.rag_tool_factory = None
+    # 仅供显式 Eval 临时注入 Router seam；None 时普通 API 仍使用 Harness 的 deterministic 默认。
+    application.state.harness_router = None
     register_request_logging_middleware(application)
     register_exception_handlers(application)
     application.include_router(resources_router)

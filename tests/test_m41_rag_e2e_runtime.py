@@ -9,7 +9,7 @@ from app.main import app
 from engine.rag.answer_flow import ClaimDraft, GenerationContext
 from eval.rag_e2e_contracts import RAGScenario, load_rag_catalog
 from eval.rag_e2e_generation import BusinessEvalEvidenceComposer, RAG_EVAL_BUSINESS_OUTBOUND_IDENTITY
-from eval.rag_e2e_runtime import ComposerRuntimeMetadata, RAGProductExecutor
+from eval.rag_e2e_runtime import ComposerRuntimeMetadata, FixedRAGEvalRouter, RAGProductExecutor
 from eval.rag_e2e_scoring import project_gate, score_execution
 
 
@@ -54,6 +54,7 @@ def test_product_executor_runs_router_harness_rag_and_restores_default(tmp_path:
     scenario = catalog.by_id()["quality_refund_materials"]
     composer = RecordingComposer()
     previous_factory = app.state.rag_tool_factory
+    previous_router = app.state.harness_router
     executor = RAGProductExecutor(
         composer=composer,
         runtime_metadata=ComposerRuntimeMetadata(model="fake"),
@@ -72,6 +73,21 @@ def test_product_executor_runs_router_harness_rag_and_restores_default(tmp_path:
     assert len(evidence.provider_attempts) == 1
     assert evidence.response_trace_consistent is True
     assert app.state.rag_tool_factory is previous_factory
+    assert app.state.harness_router is previous_router
+
+
+def test_fixed_rag_eval_router_is_explicitly_injectable_and_restored(tmp_path: Path) -> None:
+    scenario = load_rag_catalog(CATALOG).by_id()["quality_refund_materials"]
+    executor = RAGProductExecutor(
+        composer=RecordingComposer(),
+        runtime_metadata=ComposerRuntimeMetadata(model="fake"),
+        trace_root=tmp_path / "traces",
+        router=FixedRAGEvalRouter(),
+    )
+    previous = app.state.harness_router
+    evidence = executor.execute(scenario=scenario, replicate=1)
+    assert evidence.route == "rag"
+    assert app.state.harness_router is previous
 
 
 def test_no_candidate_is_observed_without_calling_composer(tmp_path: Path) -> None:
@@ -157,3 +173,32 @@ def test_external_unavailable_is_inconclusive_but_observed_bad_schema_fails(tmp_
         provider_attempts=({"status": "failed", "error_subtype": "composer_response_invalid_json"},),
     )
     assert project_gate(score_execution(scenario, invalid)).status == "failed"
+
+
+def test_composer_contract_error_stays_in_rag_tool_instead_of_harness_failure(tmp_path: Path) -> None:
+    class InvalidSupportComposer(RecordingComposer):
+        def compose(self, *, context, question, confirmed_conditions, max_claims):
+            self._calls += 1
+            self.attempts.append({"status": "succeeded", "request": self._calls})
+            evidence = context.evidence[0]
+            return (
+                ClaimDraft(
+                    text="unsupported claim",
+                    support_text="not present in evidence",
+                    evidence_id=evidence.ref.evidence_id,
+                    anchor=evidence.ref.anchor,
+                ),
+            )
+
+    scenario = load_rag_catalog(CATALOG).by_id()["quality_refund_materials"]
+    evidence = RAGProductExecutor(
+        composer=InvalidSupportComposer(),
+        runtime_metadata=ComposerRuntimeMetadata(model="fake"),
+        trace_root=tmp_path / "traces",
+    ).execute(scenario=scenario, replicate=1)
+
+    assert (evidence.route, evidence.execution_status, evidence.reason_code) == (
+        "rag", "failed", "composer_output_invalid"
+    )
+    assert evidence.graph_steps == ("route", "rag_tool", "controller")
+    assert evidence.graph_invocation_count == evidence.rag_tool_calls == 1

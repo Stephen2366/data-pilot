@@ -88,6 +88,21 @@ def run_rag_eval(
             (scenario_id, catalog.by_id()[scenario_id].required_assertions, catalog.by_id()[scenario_id].advisory_assertions)
             for scenario_id in selector.selected_scenario_ids
         ),
+        scenario_metadata=tuple(
+            (
+                scenario_id,
+                {
+                    "classification": catalog.by_id()[scenario_id].classification,
+                    "question_type": catalog.by_id()[scenario_id].question_type,
+                    "source_types": list(catalog.by_id()[scenario_id].source_types),
+                    "document_cardinality": catalog.by_id()[scenario_id].document_cardinality,
+                    "gold_answer": catalog.by_id()[scenario_id].gold_answer,
+                    "answer_facts": list(catalog.by_id()[scenario_id].answer_facts),
+                    "expected_document_keys": list(catalog.by_id()[scenario_id].expected_document_keys),
+                },
+            )
+            for scenario_id in selector.selected_scenario_ids
+        ),
     )
     run_root = checkpoint_root / run_id
     manifest_path = run_root / "manifest.json"

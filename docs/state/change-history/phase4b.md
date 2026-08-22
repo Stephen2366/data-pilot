@@ -19,6 +19,15 @@
 
 ## 变更记录（新的在上）
 
+### [实验] M41 external 180 题分层接入与 60 dev 真实产品链路（2026-08-23）
+
+- 直接复用 M34 immutable 180 question set、gold、原生 `question_type × source_signature × document_cardinality` 与冻结 60 dev / 120 held-out split；不复制题面。旧 Answer + lexical retrieval artifacts 已零 Tool/LLM 投影为逐题分层历史报告，旧证据未保存的产品层与 selected/generation-visible 明示 `not_observed`。
+- 新增 external catalog、eval-only fixed-RAG Router、M34 profile AnswerFlow factory 和产品 E2E CLI；每题经过 `/api/query → Harness → RAG Tool → external AnswerFlow → Qwen`。fixed route 不评测自然 Router，business 与 external 结果分账，普通 API/Router/Composer、业务 release、external lexical 默认均未改变。
+- 用户授权后只运行冻结 dev 60：`m41-rag-external-dev-20260822-01` completed，60 requests / 137299 tokens；required `524 passed / 136 failed / 0 not_observed`，Gate `failed`；primary triage `24 passed / 20 retrieval / 7 product_runtime / 5 citation / 4 selection`。candidate/selected/generation-visible/cited gold 为 `35/30/30/24`。未运行 120 held-out、Judge 或重试。
+- 运行暴露 5 个 provider-success Composer 坏结构被适配器误记 `harness_contract_failure`。完成 artifact 保持不可变并标记 pre-fix candidate；后续代码已将其归为 Tool/Composer observed failure、新增 `composer_support_valid`，下游按证据标 `not_observed`。因协议 identity 已变化，禁止把未来 run 与本 run 伪装成严格同协议比较。
+- 验证：运行后修正 M41 聚焦 `14 passed, 1 warning`；M31–M41 受影响回归 `229 passed, 1 warning in 62.53s`；全仓 pytest exit `0`，`462 passed, 3 skipped, 1 warning in 517.37s`。warning 为既有 TestClient/httpx deprecation。
+- 证据：artifact/report/triage/review 位于 `eval/reports/m41-rag-external-*`，60 checkpoint/Trace 位于 `.agent_work/temp/m41-rag-external-checkpoints/`；闭集人工语义 verdict 已完成并通过 artifact + 60 checkpoint 哈希复验，结果 `18 pass / 26 fail / 16 insufficient_evidence`。自动分层结果与人工语义结果并列，互不改写。
+
 ### [实验] M41 business RAG 首次真实 Qwen Smoke（2026-08-22）
 
 - 用户明确授权 `smoke` 后只执行一次 `m41-rag-smoke-20260822-01`：2 个 Scenario / 2 次产品请求，最多 1 次 Qwen generation；未扩大 Core/Diagnostic/Reliability，未重跑、未调用 LLM Judge。

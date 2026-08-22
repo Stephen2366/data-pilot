@@ -10,13 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi.testclient import TestClient
 
 from app.main import app
 from engine.harness.adapters import RAGToolAdapter
 from engine.harness.caller import FixtureCallerResolver
+from engine.harness.router import Router
+from engine.harness.contracts import HarnessRequest, RouteDecision
 from engine.harness.thread import ThreadCheckpointManager
 from engine.rag.answer_flow import (
     ANSWER_FLOW_RUNTIME_IDENTITY,
@@ -24,6 +26,7 @@ from engine.rag.answer_flow import (
     RAGAnswerFlow,
     RAGAnswerResult,
 )
+from engine.rag.answer_flow import AnswerEvidenceRequirement
 from engine.rag.evidence import DocumentEvidencePayload, STAGE_ORDER
 from engine.rag.release import load_active_release
 from engine.rag.retrieval import DETERMINISTIC_RETRIEVAL_IDENTITY, DeterministicLexicalRetrievalAdapter
@@ -47,6 +50,22 @@ class ComposerRuntimeMetadata:
     generation_outbound_policy_identity: str = "not_applicable"
 
 
+class FixedRAGEvalRouter:
+    """external benchmark 已预选 RAG；该 seam 不宣称评测自然语言 Router 能力。"""
+
+    identity = "eval-fixed-rag-router-v1"
+
+    def decide(self, request: HarnessRequest) -> RouteDecision:
+        return RouteDecision(
+            "rag",
+            "eval_rag_route_preselected",
+            True,
+            "answer",
+            requirement=AnswerEvidenceRequirement(),
+            decision_source="deterministic",
+        )
+
+
 class RAGProductExecutor:
     """一次请求经过真实产品 seam，并返回安全且足够评分的共享 Evidence。"""
 
@@ -56,14 +75,24 @@ class RAGProductExecutor:
         composer: EvidenceComposer,
         runtime_metadata: ComposerRuntimeMetadata,
         trace_root: Path,
+        answer_flow_factory: Callable[[], RAGAnswerFlow] | None = None,
+        resolved_runtime_override: RAGResolvedRuntime | None = None,
+        router: Router | None = None,
+        knowledge_runtime_kind: str = "business_release",
     ) -> None:
         self._composer = composer
         self._metadata = runtime_metadata
         self._trace_root = trace_root
+        self._answer_flow_factory = answer_flow_factory
+        self._resolved_runtime_override = resolved_runtime_override
+        self._router = router
+        self._knowledge_runtime_kind = knowledge_runtime_kind
 
     def resolved_runtime(self) -> RAGResolvedRuntime:
         """从 active release 与实际 Composer 形成可比较身份。"""
 
+        if self._resolved_runtime_override is not None:
+            return self._resolved_runtime_override
         _pointer, bundle = load_active_release()
         return RAGResolvedRuntime(
             runtime_family=RAG_E2E_RUNTIME_FAMILY,
@@ -81,6 +110,7 @@ class RAGProductExecutor:
             release_outbound_policy_identity=bundle.outbound_policy_identity,
             generation_outbound_policy_identity=self._metadata.generation_outbound_policy_identity,
             caller_fixture_identity="phase4-rag-e2e-test-fixture-v1",
+            route_policy_identity="deterministic-router-v1",
         )
 
     def execute(self, *, scenario: RAGScenario, replicate: int) -> RAGExecutionEvidence:
@@ -96,19 +126,25 @@ class RAGProductExecutor:
         usage_before = dict(usage_fn()) if callable(usage_fn) else {}
 
         def tool_factory() -> RAGToolAdapter:
-            flow = RAGAnswerFlow(composer=self._composer)
-            return RAGToolAdapter(answer_flow=flow, result_observer=observed.append)
+            flow = self._answer_flow_factory() if self._answer_flow_factory is not None else RAGAnswerFlow(composer=self._composer)
+            return RAGToolAdapter(
+                answer_flow=flow,
+                knowledge_runtime_kind=self._knowledge_runtime_kind,  # type: ignore[arg-type]
+                result_observer=observed.append,
+            )
 
         previous = {
             "rag_tool_factory": getattr(app.state, "rag_tool_factory", None),
             "caller_resolver": getattr(app.state, "caller_resolver", None),
             "thread_checkpoint_manager": getattr(app.state, "thread_checkpoint_manager", None),
             "trace_path": getattr(app.state, "trace_path", None),
+            "harness_router": getattr(app.state, "harness_router", None),
         }
         app.state.rag_tool_factory = tool_factory
         app.state.caller_resolver = FixtureCallerResolver(fixture_kind="test")
         app.state.thread_checkpoint_manager = ThreadCheckpointManager()
         app.state.trace_path = trace_path
+        app.state.harness_router = self._router
         try:
             # raise_server_exceptions=False 很重要：真实产品 500 也必须成为 Eval Evidence，
             # 不能让 pytest/CLI 在保存 checkpoint 前丢掉本次付费尝试。
@@ -125,6 +161,7 @@ class RAGProductExecutor:
             app.state.rag_tool_factory = previous["rag_tool_factory"]
             app.state.caller_resolver = previous["caller_resolver"]
             app.state.thread_checkpoint_manager = previous["thread_checkpoint_manager"]
+            app.state.harness_router = previous["harness_router"]
             if previous["trace_path"] is None:
                 if hasattr(app.state, "trace_path"):
                     delattr(app.state, "trace_path")
@@ -136,7 +173,12 @@ class RAGProductExecutor:
         result = observed[0] if observed else None
         trace = _read_single_trace(trace_path)
         stage_keys, stage_counts, identities_redacted = _funnel_projection(result)
-        diagnostics = result.diagnostics.safe_projection() if result is not None else {}
+        trace_observation = trace.get("tool_observation") or {}
+        diagnostics = (
+            result.diagnostics.safe_projection()
+            if result is not None
+            else dict(trace_observation.get("diagnostics") or {})
+        )
         attempts = tuple(dict(item) for item in getattr(self._composer, "attempts", ())[attempts_before:])
         usage_after = dict(usage_fn()) if callable(usage_fn) else {}
         usage = {
@@ -156,7 +198,10 @@ class RAGProductExecutor:
             answer=body.get("answer") if isinstance(body.get("answer"), str) else None,
             graph_steps=tuple(str(item) for item in trace.get("graph_steps") or ()),
             graph_invocation_count=int(body.get("graph_invocation_count") or trace.get("graph_invocation_count") or 0),
-            rag_tool_calls=int(diagnostics.get("knowledge_tool_calls") or 0),
+            rag_tool_calls=(
+                int(diagnostics.get("knowledge_tool_calls") or 0)
+                or sum(item.get("tool_name") == "rag_answer_flow" for item in trace.get("tool_calls") or ())
+            ),
             stage_document_keys=stage_keys,
             stage_counts=stage_counts,
             identities_redacted=identities_redacted,
@@ -202,7 +247,8 @@ def _funnel_projection(
                 continue
             count += 1
             if not redact and isinstance(evidence.payload, DocumentEvidencePayload):
-                keys.append(evidence.payload.document_key)
+                coordinates = evidence.payload.context_coordinates
+                keys.append(coordinates.logical_document_id if coordinates is not None else evidence.payload.document_key)
         keys_by_threshold.append((threshold, tuple(keys)))
         counts.append((threshold, count))
     return tuple(keys_by_threshold), tuple(counts), redact

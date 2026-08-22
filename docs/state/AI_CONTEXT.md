@@ -8,16 +8,16 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M41 Phase 4 RAG Eval 缺口已完成技术开发与 deterministic 收工；未执行 Phase 4B 能力（2026-08-22） |
-| 当前 plan    | `docs/notes/m41-plan.md`；首次 business RAG Qwen smoke 已完成，后续扩大运行仍需新授权 |
+| 当前活动模块 | M41 RAG Eval 已接入 M34 external 180 题分层诊断；60 dev 真实产品链路已完成，120 held-out 保持锁定（2026-08-23） |
+| 当前 plan    | `docs/notes/m41-plan.md`；external 60 dev 已按用户授权运行，任何重跑或 120 held-out 仍需新授权 |
 | 当前 notes   | `docs/notes/m41-notes.md`                                    |
-| 待决事项     | M41 Smoke 是否登记正式长期基线、是否扩大 Core/Diagnostic/Reliability 尚未决定；若回到 Phase 4B，B0 exact seed/caller/release/Hybrid operator/Eval catalog 与兼容矩阵仍须另立 plan，B3 campaign 仍须预注册预算/review point |
-| 更新时间     | 2026-08-22                                                   |
+| 待决事项     | external dev artifact 是 Composer 误分类修正前的 pre-fix candidate，不可与修正后协议直接比较；120 held-out 未授权，任何重跑需新 run ID 与新授权 |
+| 更新时间     | 2026-08-23                                                   |
 
 ## 必读规则
 
 - 开始开发、排障或验证前先读本文。
-- 运行命令、模型、LangFuse 或 eval 前必须读 `docs/state/runbook.md`。
+- 运行任何项目命令前必须先读 `docs/state/runbook.md`；涉及 Text2SQL/Schema Retrieval/SQL Eval/数据库验证时继续读 `runbook-text2sql.md`，涉及业务 RAG/M34/external 180/RAG Eval 时继续读 `runbook-rag.md`。
 - 解释 eval 数字、模型 A/B、失败归因或分母时必须读 `docs/state/eval-baselines.md`。
 - 涉及 SQL/字段/指标/oracle 时读 `database-current-state.md`。
 - 涉及知识原件、active release、外部 corpus、Knowledge Tool、RAG Eval 或 M34 语料状态时读 `rag-current-state.md`。
@@ -50,6 +50,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-23 | M41 已把 M34 冻结 180 题直接接入分层诊断：保留原生 `question_type × source_signature × document_cardinality` 和 60 dev / 120 held-out split，不复制题面。旧 180 Answer + retrieval artifacts 已零调用投影为分层历史报告。用户授权的 external 60 dev 产品链路 run `m41-rag-external-dev-20260822-01` completed：60 requests / 137299 tokens，Gate failed，primary triage 为 `24 passed / 20 retrieval / 7 product_runtime / 5 citation / 4 selection`；人工语义 verdict `18 pass / 26 fail / 16 insufficient_evidence`；120 held-out 未运行。运行暴露 5 个 Composer 坏结构被误记 Harness failure，已修正未来分类并新增 `composer_support_valid`；原 artifact 不改签、不重跑，标记 pre-fix candidate。最新 M31–M41 回归 `229 passed, 1 warning`；全仓 `462 passed, 3 skipped, 1 warning`。 |
 | 2026-08-22 | 用户授权并完成 M41 首次 business RAG Qwen Smoke `m41-rag-smoke-20260822-01`：2 Scenario / 2 executions，唯一 generation 成功、另一 no-candidate 零 provider；自动 required `23 passed / 0 failed / 0 not_observed`，Gate `passed`，人工 review `2/2 pass`。Qwen `qwen3.7-plus` usage 为 prompt 660、completion 352、total 1012 tokens；artifact identity `674de0f...a461`。本次已停门，未扩大 selector、未重跑、未调用 Judge；它是当前有效实验快照，不是正式长期基线。 |
 | 2026-08-22 | M41 完成 Phase 4 business RAG 产品 EvalOps 技术闭环：`phase4-rag-e2e-v1` 经 `/api/query → turn → Router → Harness → RAG Tool → AnswerFlow → API/Trace` 一题一次执行，提供 catalog/selectors、RunSpec/checkpoint/completed artifact、failure funnel、Gate、triage、SHA-256 review、strict compare 与 M34 historical importer；用户确认独立 eval-only business Qwen 出站 policy。M41 聚焦 11 passed、M27/M31–M40 受影响回归 205 passed、全仓 459 passed / 3 skipped / 1 warning。该条是开发收工时快照，当时尚未运行真实 business RAG；后续首次 Smoke 结果见上一条，Judge、remote embedding/Milvus 与 LangFuse 仍未运行。 |
 | 2026-08-22 | 本模块立项前曾按一次授权执行 M27-v3 Text2SQL `smoke`，其 run ID 恰以 `m41-` 开头：`m41-real-llm-smoke-20260822-01`。4 个 Scenario 中两个 generation 因 `network_error` 为 `external_unavailable`，两个确定性拒绝通过；Gate `inconclusive`。这不是 M41 business RAG smoke，不能满足 M41 G2 或形成 RAG 质量证据；不得未经新授权重跑。artifact/report 位于 `eval/reports/m27-artifacts/`。 |
@@ -67,7 +68,7 @@
 
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
 
-- (2026-08-22) M41 是 Phase 4 RAG Eval 缺口补完，不是 Phase 4B Agent 能力实施。它建立了 business product E2E 的一次执行 Evidence、funnel/review/compare 和显式 eval-only Qwen 出站门；首次 Smoke 已通过并按门禁停止，后续 Core/Diagnostic/Reliability 或重跑仍需用户精确授权。该模块不改变 M39 P6 no-go、默认 lexical/release/Composer、现有 thread checkpoint 或 Phase 4B B0–B5 决策门。
+- (2026-08-23) M41 是 Phase 4 RAG Eval 缺口补完，不是 Phase 4B Agent 能力实施。business 小 catalog 负责 ACL/安全合同；M34 external 180 题负责大规模检索、选择、生成可见、Composer、引用与答案诊断，两者分账。60 dev 已真实运行，120 held-out 保持停门；这不改变 M39 P6 no-go、external lexical/业务 release/普通 Composer 或 Phase 4B B0–B5 决策门。
 - (2026-08-22) 用户已确认 `phase4-rag-capability-status.md` 第 12 节进入正式路线，现由 `docs/phase4b-roadmap.md` 升格为 Phase 4B 推进事实源。Phase 4B 是已完成 Phase 4 之上的新能力阶段，最终硬交付包含 experimental bounded RAG Subgraph、任务级自然多轮、持久任务状态、node-level Context Builder、Context Compact 基础版和贯穿 Agent Scenario Eval；“实现 Subgraph”与“切换默认”继续分离。该路线升格不改变 M39 P6 当时冻结 Evidence 下的正确 `no_go`、当前进程内 checkpoint、external lexical 默认或任何运行配置。
 - (2026-08-22) Phase 4B 新增三项施工硬边界：旧 M31–M40 fixture 显式 pin legacy runtime、新 Agent Loop 使用独立 versioned family 且两类 Gate 同时通过；B1 新建 TaskState family/in-memory adapter，并以增量 API 投影兼容旧 thread payload；B3 使用预注册候选/预算/轮次/review point 的有界 campaign，动作不足时暂停重规划，no-go 不冒充能力完成。直接点名双政策的现有 T4 问法已证明会一次取全，B0 必须冻结真实非陷阱 business recovery case。
 

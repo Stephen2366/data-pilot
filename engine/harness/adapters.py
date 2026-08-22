@@ -17,6 +17,7 @@ from engine.nl2sql.pipeline import Text2SQLPipelineResult, run_text2sql_pipeline
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.nl2sql.templates import match_template
 from engine.rag.answer_flow import (
+    AnswerFlowContractError,
     AnswerEvidenceRequirement,
     RAGAnswerFlow,
     RAGAnswerRequest,
@@ -398,17 +399,43 @@ class RAGToolAdapter:
             if follow_up is not None and follow_up.current_requirement is not None
             else AnswerEvidenceRequirement()
         )
-        result = self._answer_flow.run(
-            RAGAnswerRequest(
-                question=request.question,
-                caller=request.caller,
-                run_id=request.run_id,
-                requirement=requirement,
-                knowledge_runtime_kind=self._knowledge_runtime_kind,
-                prior_evidence_refs=follow_up.old_evidence_refs if follow_up is not None else (),
-                requirement_equivalent=follow_up.requirement_equivalent if follow_up is not None else False,
+        try:
+            result = self._answer_flow.run(
+                RAGAnswerRequest(
+                    question=request.question,
+                    caller=request.caller,
+                    run_id=request.run_id,
+                    requirement=requirement,
+                    knowledge_runtime_kind=self._knowledge_runtime_kind,
+                    prior_evidence_refs=follow_up.old_evidence_refs if follow_up is not None else (),
+                    requirement_equivalent=follow_up.requirement_equivalent if follow_up is not None else False,
+                )
             )
-        )
+        except AnswerFlowContractError as exc:
+            # ★ Composer/support 的确定性合同拒绝属于 RAG Tool 已观察失败，不能穿透 Graph 后
+            # 被 controller 误记成 harness_contract_failure。旧 M34 runner 也按同一异常分账。
+            return ToolObservation(
+                tool_name="rag_answer_flow",
+                route="rag",
+                execution_status="failed",
+                answer_status="no_answer",
+                safety_status="passed",
+                reason_code=exc.reason_code,
+                answer="当前无法形成可公开的答案。",
+                tool_calls=(
+                    ToolCallTrace(
+                        tool_name="rag_answer_flow",
+                        status="error",
+                        latency_ms=0.0,
+                        error_type=exc.reason_code,
+                    ),
+                ),
+                diagnostics={
+                    "knowledge_runtime_kind": self._knowledge_runtime_kind,
+                    "answer_flow_contract_error": exc.reason_code,
+                },
+                error_type=exc.reason_code,
+            )
         if self._result_observer is not None:
             self._result_observer(result)
         safe = result.safe_projection()

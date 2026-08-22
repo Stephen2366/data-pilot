@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict
 from typing import Callable
+import unicodedata
 
 from eval.rag_e2e_contracts import (
     AssertionEffect,
@@ -56,11 +57,20 @@ def _evaluate(
 
     axes = (evidence.route, evidence.execution_status, evidence.answer_status, evidence.safety_status)
     external_unavailable = _external_unavailable(evidence)
+    composer_contract_failed = evidence.reason_code in {
+        "composer_output_invalid", "composer_evidence_invalid", "composer_budget_invalid",
+        "citation_projection_invalid", "composer_unavailable",
+    }
     if external_unavailable and assertion_id in {
         "axes_correct", "reason_correct", "cited_gold", "answer_present",
         "required_answer_terms", "forbidden_terms_absent",
+        "answer_facts_exact_lower_bound",
     }:
         return "not_observed", "provider 外部不可用，不能判断下游语义结果"
+    if composer_contract_failed and assertion_id in {
+        "cited_gold", "answer_present", "required_answer_terms", "answer_facts_exact_lower_bound",
+    }:
+        return "not_observed", "Composer/support 已观察失败，下游答案与引用不可评分"
     simple: dict[str, Callable[[], bool]] = {
         "route_correct": lambda: evidence.route == scenario.expected_axes[0],
         "axes_correct": lambda: axes == scenario.expected_axes,
@@ -77,6 +87,7 @@ def _evaluate(
         "response_trace_consistent": lambda: evidence.response_trace_consistent,
         "runtime_identity_complete": lambda: evidence.trace_runtime_identity.get("status") == "complete",
         "provider_observed": lambda: bool(evidence.provider_attempts),
+        "composer_support_valid": lambda: not composer_contract_failed and evidence.answer_status == "complete",
         "forbidden_terms_absent": lambda: not any(
             term in ((evidence.answer or "") + str(evidence.citations) + str(evidence.docs_used))
             for term in scenario.forbidden_public_terms
@@ -92,6 +103,21 @@ def _evaluate(
         missing = [term for term in scenario.required_answer_terms if term not in evidence.answer]
         return ("failed", f"missing_terms={missing}") if missing else ("passed", "required terms 全部出现")
 
+    if assertion_id == "answer_facts_exact_lower_bound":
+        if not evidence.answer:
+            return "not_observed", "answer 不可用，无法计算 exact-fact 下限"
+        normalized = " ".join(
+            "".join(char if char.isalnum() else " " for char in unicodedata.normalize("NFKC", evidence.answer).casefold()).split()
+        )
+        checks = {
+            fact: bool(fact.strip()) and " ".join(
+                "".join(char if char.isalnum() else " " for char in unicodedata.normalize("NFKC", fact).casefold()).split()
+            ) in normalized
+            for fact in scenario.answer_facts
+        }
+        passed = bool(checks) and all(checks.values())
+        return ("passed" if passed else "failed", f"exact_fact_checks={checks}")
+
     stage_by_assertion = {
         "retrieved_gold": "candidate",
         "selected_gold": "selected",
@@ -103,10 +129,12 @@ def _evaluate(
         return "not_observed", "安全拒绝路径不持久化文档 identity"
     if evidence.execution_status == "external_unavailable":
         return "not_observed", "外部不可用导致该 funnel 层不可观察"
-    keys = set(dict(evidence.stage_document_keys).get(stage, ()))
-    expected = set(scenario.expected_document_keys)
-    passed = expected <= keys
-    return ("passed" if passed else "failed", f"stage={stage} expected={sorted(expected)} actual={sorted(keys)}")
+    if composer_contract_failed and not dict(evidence.stage_document_keys).get(stage):
+        return "not_observed", "合同拒绝前的该层 logical IDs 未进入安全 Evidence 投影"
+    keys = Counter(dict(evidence.stage_document_keys).get(stage, ()))
+    expected = Counter(scenario.expected_document_keys)
+    passed = all(keys[key] >= count for key, count in expected.items())
+    return ("passed" if passed else "failed", f"stage={stage} expected={dict(expected)} actual={dict(keys)}")
 
 
 def _external_unavailable(evidence: RAGExecutionEvidence) -> bool:
@@ -146,7 +174,7 @@ def triage_execution(
         ("retrieval", {"retrieved_gold"}),
         ("selection", {"selected_gold"}),
         ("generation_context", {"generation_visible_gold"}),
-        ("provider_or_support", {"provider_observed", "no_generation"}),
+        ("provider_or_support", {"provider_observed", "composer_support_valid", "no_generation"}),
         ("citation", {"cited_gold"}),
         ("answer", {"answer_present", "answer_absent", "safe_fallback_answer", "required_answer_terms", "forbidden_terms_absent"}),
     ]
@@ -213,6 +241,16 @@ def render_report(
         lines.append(
             f"| {effect} | {len(selected)} | {counts['passed']} | {counts['failed']} | {counts['not_observed']} |"
         )
+    external = [item for item in scenarios.values() if item.question_type != "business"]
+    if external:
+        lines.extend(["", "## External Strata", "", "| stratum | questions |", "|---|---:|"])
+        strata: Counter[str] = Counter()
+        for item in external:
+            strata[f"partition:{item.classification}"] += 1
+            strata[f"type:{item.question_type}"] += 1
+            strata[f"cardinality:{item.document_cardinality}"] += 1
+            strata[f"source:{'+'.join(item.source_types)}"] += 1
+        lines.extend(f"| {name} | {count} |" for name, count in sorted(strata.items()))
     lines.extend(
         [
             "",

@@ -2509,3 +2509,229 @@ M40 已经通过技术收口和用户验收，因此下一步不应机械地把�
 
 若未来重开 P6，硬门保持不变：未污染 dev 必须先证明一种由首次 Observation 选择的允许动作能新增有效 Evidence，再冻结 held-out decision protocol 和可比额外预算，并由用户确认独立计划。在这些证据出现前，**保持 external lexical 默认和 strict no-go，本身就是当前系统正确的下一步状态。**
 
+## ★ M41 RAG 真实产品链路 EvalOps 与 180 题分层诊断
+
+（2026-08-23）
+
+**简述**：M41 把 RAG 评测从“各模块单独测过”升级为“同一道题真实经过产品链路，并能逐层定位失败”；随后又把 M34 的 180 道 external（外部基准）题接入这套诊断体系，完成 60 道真实 dev（开发集）运行和人工复核。
+
+### 先用大白话讲
+
+可以把 RAG 想成一个企业资料室：**检索员**负责找材料，**选稿员**决定哪些材料交给模型，**撰稿人**负责写答案，**档案员**检查引用是否真的指向原件。
+
+以前我们分别检查过这些岗位，但存在一个明显空洞：M34 的真实大规模评测绕过了产品 Harness（顶层调度器），而产品 Harness 里的 RAG 又主要依赖确定性测试。就像“每个员工都通过了岗位考试”，却没有验证一位真实访客从前台进入后，整套办事流程是否闭合。
+
+M41 做了两件关键事：
+
+- **一题只办理一次**：真实请求只跑一次，检索、选择、生成、引用和回答评分都读取同一份证据，避免每个评分器重新问一遍模型；
+- **失败分楼层登记**：没有候选材料是检索问题，材料找到了却没交给模型是选择问题，模型输出坏结构是 Composer（答案编排器）问题，引用漏掉则是 citation（引用）问题。
+
+最后得到的价值不是一个漂亮总分，而是能回答：**这道题究竟坏在产品入口、检索、选材、生成、引用，还是答案语义本身。**
+
+### 这次做了什么
+
+M41 的核心矛盾是：**真实 RAG 质量证据与产品运行链路彼此断开**。本模块先建立 business RAG（业务知识 RAG）的产品端到端评测，再把 external 180 题接进同一套 Evidence（证据）和 Gate（门禁）体系，最后用真实 Qwen 运行暴露质量缺口与一个诊断误分类缺陷。
+
+1. **把“每个模块各测各的”改成“一道题贯穿整条产品链路”。**
+
+   每个 `Scenario`（评测场景）只发起一次 `/api/query` 请求，真实经过 Caller（可信调用者）、Turn（一次任务轮次）、Router（路由器）、Harness（顶层调度器）、RAG Tool（检索工具）、AnswerFlow（回答流程）、API（接口）和 Trace（运行轨迹）；随后所有评分、报告和人工复核都消费同一个 `RAGExecutionEvidence`（RAG 执行证据）。
+
+   - **原来的问题**：如果 retrieval scorer（检索评分器）、citation scorer（引用评分器）和 answer scorer（答案评分器）分别重跑 Pipeline（处理流水线），同一题可能得到三次不同模型输出，还会重复花费 token（模型计费文本单位），最后无法确认这些分数是否来自同一张答卷。
+   - **解决机制**：runner（执行器）先固化一次 execution evidence（执行证据），再由 scorer（评分器）、report（报告）、triage（失败归类）、review（人工复核）和 compare（对比器）只读投影。它类似 SpringBoot 中一次请求生成一份不可变业务结果，后续审计和报表都引用这份结果，而不是再次调用 Service（业务服务）。
+   - **重要取舍**：M41 没把 M34 的 direct AnswerFlow（直接回答流）冒充产品 E2E（端到端）；历史材料缺少 API、Router、Harness 或 selected 层时，明确记录 `not_observed`（没有观察到），不补造通过或失败。
+   - **验证证据**：business Smoke 的 2 个 Scenario 都真实经过产品 Harness，自动 required assertions（必须通过的断言）为 **23 passed / 0 failed / 0 not_observed**；其中无候选题没有调用 Qwen。
+   - **尚未证明**：这次 business Smoke 只有两个窄场景，不能外推整个业务知识库质量、开放问法 Router 能力或多轮 Agent 能力。
+
+2. **建立能追到具体责任层的 RAG failure funnel（失败漏斗）。**
+
+   评测不再只问“答案对不对”，而是按真实数据流逐层保存 document key（文档标识）和合同结果。
+
+   - **诊断顺序**：product runtime（产品运行层）→ retrieved（已召回）→ selected（已选中）→ generation-visible（模型可见）→ Composer/provider/support（编排器、模型服务商与支持原文）→ cited（已引用）→ answer correctness/completeness（答案正确性与完整性）。
+   - **失败语义**：上游服务没返回结果时，下游是 `not_observed`，不是批量判错；模型已经返回但 JSON 结构或 `support_text` 合同不合法，则属于已观察到的 Composer 失败。
+   - **人工语义复核**：`answer_status=complete` 只表示回答、support 和引用合同闭合；召回 gold（标准文档）、引用合法或字符串完全匹配，也都不能单独代表答案语义正确。因此人工 verdict（裁决）与自动 Gate 并列保存，不能互相覆盖。
+   - **防篡改来源**：review bundle（复核包）绑定 completed artifact（完整评测产物）和每题 checkpoint（任务检查点）的 SHA-256 文件摘要；来源文件被替换后，校验会失败。
+   - **尚未证明**：首版没有使用 LLM Judge（大模型裁判）。这是刻意选择，因为一个未冻结模型、Prompt 和 rubric（评分规则）的单一分数不能直接成为 required truth（硬性真值）。
+
+3. **把 M34 external 180 题接入产品 Harness，而不是重新造一套题库。**
+
+   external catalog（外部题目目录）直接读取 immutable dataset（不可变数据集）中的 question（问题）、gold（标准答案/文档）、题型、来源和单/多文档属性；M41 不复制 180 道题面，也不重新构建语料 profile（索引配置快照）。
+
+   - **旧证据再利用**：离线 importer（导入器）合并旧 Answer artifact（回答评测产物）、dev/held-out retrieval artifact（开发集/保留集检索产物）和冻结 split（切分清单），生成 180/180 的分层历史报告，全程零 Tool、零 LLM。旧材料没有保存的产品层和 selection（选择）层诚实标为 `not_observed`。
+   - **真实产品接线**：external Eval 使用已有 SQLite FTS5 lexical profile（SQLite 全文检索配置）只读查询，并通过 eval-only fixed-RAG Router 固定进入 RAG 分支，再走 Harness、RAG Tool 和 external AnswerFlow。
+   - **安全边界**：fixed-RAG 只用于评测产品 RAG 分支，**不代表自然 Router 分类正确**；普通 API、业务 22 条 release、默认 Composer 和 external lexical 默认均未改变。
+   - **真实 60 题结果**：60 道 dev 每题只请求一次 Qwen，共消耗 **137,299 tokens**。自动 Gate 为 failed，人工复核进一步证明“链路闭合”不能代替“答案正确”。
+
+   | 视图 | 结果 |
+   |---|---:|
+   | 自动 primary triage：全层通过 | 24 |
+   | 自动 primary triage：retrieval | 20 |
+   | 自动 primary triage：product runtime | 7 |
+   | 自动 primary triage：citation | 5 |
+   | 自动 primary triage：selection | 4 |
+   | 人工语义 verdict：pass | 18 |
+   | 人工语义 verdict：fail | 26 |
+   | 人工语义 verdict：insufficient evidence | 16 |
+
+   candidate / selected / generation-visible / cited 的 gold 命中分别为 **35 / 30 / 30 / 24**（分母均为 60）。`exact-fact=0/60` 只是严格字符串下限，不能解读成语义正确率为零。
+
+4. **真实运行不仅测出了质量问题，也测出了诊断系统自己的误报。**
+
+   5 道题的 provider 请求其实成功了，但 Composer 输出违反结构合同；旧 adapter 让 `AnswerFlowContractError` 逃逸，最终被顶层误记成 `harness_contract_failure`。
+
+   - **为什么严重**：如果错误层标错，后续团队可能去改 Harness，而真正需要处理的是 Composer 输出约束或解析策略。诊断体系一旦“把医生的问题当成前台问题”，比没有诊断更容易误导。
+   - **修正方式**：RAG Tool adapter 现在把该异常记录为已观察的 Tool/Composer 失败；没有 internal result 时从 Trace 恢复诊断；新增 `composer_support_valid` assertion，并把其后的 citation/answer 层按证据标为 `not_observed`。
+   - **证据纪律**：已经完成的 60 题 artifact 不改写、不重新签名、不偷偷重跑，而是明确标为 **pre-fix candidate（修复前候选快照）**。未来新 run 必须使用新 identity，不能伪装成严格同协议对比。
+   - **验证证据**：修正后 M41 聚焦测试 **14 passed**，M31–M41 受影响回归 **229 passed**，全仓 **462 passed、3 skipped、1 warning**。
+
+5. **当前还缺少真正面向使用者的 external 运行档位。**
+
+   180 题本身带有 question type、source 和 document cardinality，但这些属于题目属性；`diagnostic_dev/held_out` 属于实验切分。它们都不能替代 Text2SQL 那种直接可运行的能力层级。
+
+   - **当前缺口**：external CLI 目前主要暴露 60 dev / 120 held-out partition（分区），还没有完整的 `smoke/core/basic/hard/reliability/full` suite（运行套件）。
+   - **影响**：上次 60 题只能叫一次 dev 子集诊断，不能称为完整的 RAG 分层运行体系；也不能让使用者用低成本 Smoke 后逐级扩大到 Core、Hard 和 Full。
+   - **正确后续**：应另立计划，以完整 180 题 canonical catalog 为主体建立稳定运行档位；原生题型、来源、单/多文档继续作为报告维度，60/120 只作为可选实验过滤条件。该能力在 M41 当前代码中**尚未实现**。
+
+### 新概念
+
+- **共享执行证据（shared execution evidence）**：一题只运行一次，把请求、检索漏斗、provider 尝试、引用和运行身份固化成一张“原始答卷”。所有评分器只能批改这张答卷，不能重新让考生答题。
+
+- **失败漏斗（failure funnel）**：按照数据真正经过的顺序定位问题。检索没找到、找到但没选中、选中但模型不可见、模型输出坏结构、引用漏掉、答案语义错误，是六类不同问题，不能都压成一个 `failed`。
+
+- **`not_observed`**：不是“错了”，而是“上游没有产生足够证据，无法观察下游”。例如 provider 超时后，不能断言 citation 错误，因为压根没有生成可供引用的答案。
+
+- **closed-world（闭集）合同**：RunSpec、Scenario、assertion plan、runtime identity 和 checkpoint 顺序都必须来自预先登记的集合。它像后端枚举和数据库约束：未知字段或身份漂移直接拒绝，不能临时解释成“差不多”。
+
+- **pre-fix candidate（修复前候选快照）**：真实运行后发现评分协议有 bug，原 artifact 仍保留原样，只在档案中标明它属于修复前协议。这样既保留历史证据，也避免把重写旧结果伪装成原始事实。
+
+### 代码阅读路线
+
+1. **先看题目和运行合同**：`eval/cases/rag/`、`eval/rag_e2e_contracts.py`
+   `scenarios.yaml` 和 selectors 定义 business RAG 的 canonical catalog；`RAGScenario`、`RAGRunSpec`、`RAGExecutionEvidence` 冻结“一道题是什么、用什么 runtime 跑、要检查哪些层”。阅读重点是 **identity 如何进入 artifact**，不需要先抠每个序列化字段。
+
+2. **再看一题如何穿过真实产品链路**：`eval/rag_e2e_runtime.py`
+   主角是 `RAGProductExecutor`。它负责给 FastAPI app 注入 eval-only Composer/Router/runtime，发送一次真实请求，再从 API、Trace 和 RAG internal result 汇总 Evidence；退出后恢复 app state，避免评测配置污染普通 API。external 路径中的 `FixedRAGEvalRouter` 只固定选 RAG，不负责证明自然语言路由能力。
+
+3. **理解产品 seam 为什么能被评测而不改默认行为**：`app/main.py`、`app/api/query.py`、`engine/harness/adapters.py`
+   app state 只提供可选的 eval seam（接缝）；普通运行没有注入时继续使用原来的 Router 和 deterministic Composer。`RAGToolAdapter` 把 AnswerFlow 成功与失败翻译成 Harness 能理解的 observation，并在修正后正确接住 Composer 合同异常。
+
+4. **看一次执行怎样变成 checkpoint 和 completed artifact**：`eval/rag_e2e_runner.py`
+   runner 负责 once-only execution（只执行一次）、连续 checkpoint 前缀、resume、终态和 artifact 身份。重点看“Trace 已写但 checkpoint 未提交”为什么失败关闭：它避免不知道 provider 是否收费成功时再次请求。
+
+5. **沿失败漏斗看评分和报告**：`eval/rag_e2e_scoring.py`
+   scorer 从同一 Evidence 计算 route、retrieved、selected、generation-visible、Composer、citation 和 answer assertions。这里最重要的不是某个布尔判断，而是 **上游失败后下游何时应该 `not_observed`**。
+
+6. **看 external 180 题如何复用原始数据**：`eval/rag_external_catalog.py`、`eval/run_rag_external_eval.py`、`engine/rag/enterprise_runtime.py`
+   catalog 读取外部 immutable questions 和 60/120 split；CLI 组装 fixed-RAG 产品执行器；enterprise runtime 以 SQLite `mode=ro` 打开已有 lexical profile。因此真实 60 题 Eval 只查询，不会像历史 Text2SQL 问题那样反复往 collection 灌数据。
+
+7. **最后看离线复核和历史兼容**：`eval/rag_e2e_review.py`、`eval/rag_m34_history.py`
+   review 对 artifact/checkpoint 做 SHA-256 来源绑定并合并人工 verdict；history importer 只读旧 M34 artifact，缺什么层就写 `not_observed`。两者共同保证“复核旧答卷”不会变成“偷偷重考一次”。
+
+核心调用链：
+
+`External / Business Scenario`
+→ `RAGProductExecutor`
+→ `/api/query`
+→ `Harness + RAGToolAdapter`
+→ `RAGAnswerFlow`
+→ `RAGExecutionEvidence`
+→ `Scoring / Report / Triage / Review`
+
+**模块闭环**：M31–M33 建立 Knowledge、Evidence、Answer 和 Citation 合同，M35 把 RAG Tool 接入 Harness，M41 则让真实 Qwen 答卷也能沿同一产品路径被保存、分层诊断和人工复核。
+
+### 设计要点
+
+- **一次执行，多视图消费**：避免 scorer 重跑造成模型波动、重复费用和证据错位。
+- **自动合同与人工语义分账**：Gate 判断产品链路和确定性合同，人工 verdict 判断自然语言 correctness/completeness；任何一方都不能覆盖另一方。
+- **业务数据出站采用独立 eval-only policy**：只允许已通过 active release、Caller、ACL 和 Gate 的指定政策/指标材料进入 Qwen；普通 API 不继承这个权限。
+- **external fixed-RAG 不冒充 Router 能力**：它证明产品 RAG 分支，不证明开放英文问法会被默认 Router 正确分类。
+- **旧 artifact 不补造证据，新 bug 不回写历史**：缺失层标 `not_observed`，协议修复后旧 run 标 pre-fix candidate。
+- **明确未完成的运行体验**：external 180 已有数据属性和 dev/held-out 分区，但 `smoke/core/basic/hard/reliability/full` 运行档位仍需单独规划，不能把 60 题结果包装成完整体系，汪。
+
+### 有面试价值的亮点
+
+1. **“一张答卷，多个评分器。”** 我把真实 RAG Eval 设计成一题一次产品请求，检索、选择、生成、引用和答案评分都读取同一份 `RAGExecutionEvidence`。这样既避免重复调用大模型，也避免不同 scorer 拿到不同回答却被放进同一份报告。这个设计本质上是在 Eval 侧建立事件溯源式的事实中心。
+
+2. **“失败不是一个红灯，而是一张楼层图。”** 我没有只做最终 answer accuracy，而是记录 candidate、selected、generation-visible、Composer/support、citation 和人工语义 verdict。真实 60 题跑完后，可以明确看到主要问题集中在 retrieval，而不是笼统说“RAG 不行”；同时也发现自动链路通过的题仍可能语义答偏。
+
+3. **“评测系统也必须接受审计。”** 真实运行暴露 5 个 Composer 坏结构被误报为 Harness failure。我没有修改旧 artifact 或重跑覆盖，而是保留原答卷、标记 pre-fix protocol，再修正未来 assertion 和错误归层。这个处理能证明我关注的不只是模型效果，还关注评测数据的不可篡改和可比性。
+
+4. **“真实数据出站不是换个 API Key 就结束。”** business RAG 文档并非公开 benchmark 数据，所以我没有复用 M34 的 public policy，也没有直接扩宽普通 API。最终单独建立 eval-only outbound policy，把允许的数据类别、接收方、用途和运行 identity 写入合同；安全类和未知类别在网络请求前拒绝。
+
+5. **“敢把未完成写清楚。”** 180 题已经接入，60 题也真实跑完，但 external CLI 仍缺少 `smoke/core/basic/hard/full` 运行档位。我会把它定义为下一次明确的接口设计任务，而不是用 dev/held-out 分区偷换成完整分层能力。面试中能清楚区分“底层证据能力已完成”和“用户可操作的评测产品仍不完整”，比报一个大数字更可信。
+
+### 面试官追问
+
+1. **[基础追问] M41 相比以前的 RAG 测试，最关键的变化是什么？**
+
+   最关键的变化不是题更多，而是 **真实答卷与产品链路终于统一**。M34 以前有大规模真实 Qwen 结果，但绕过产品 Harness；M35–M40 的产品路径又主要是确定性合同。M41 让同一道题真实走 `/api/query → Harness → RAG Tool → AnswerFlow`，并把一次执行形成的证据交给全部评分器和人工 review。
+
+2. **[工程/深挖追问] 为什么不让每个 scorer 自己调用一次最擅长的评测入口？**
+
+   因为生成模型有随机性和外部失败，同一题重跑后可能得到不同候选、答案和引用。那样 retrieval score、citation score 和 answer score 并不属于同一张答卷，还会重复花费 token。M41 选择一次执行后保存共享 Evidence；scorer 只读，若需要新增指标就扩展 Evidence 或离线投影，而不是重新调用产品链路。
+
+3. **[工程/深挖追问] `not_observed` 和 `failed` 为什么一定要分开？**
+
+   `failed` 表示已经看到某个合同不满足，例如模型返回了坏结构；`not_observed` 表示上游没有产生足够材料，例如 provider 超时后根本没有 citation 可检查。如果把两者都记为失败，会把网络不可用、检索空结果和语义错误混成一个分数，团队无法判断应该修基础设施、检索还是答案生成。
+
+4. **[工程/深挖追问] fixed-RAG Router 会不会让产品 E2E 名不副实？**
+
+   它仍然真实经过 API、Harness、RAG Tool 和 AnswerFlow，所以能验证产品 RAG 分支；但它绕过了自然 Router 决策，因此不能声称验证开放问法路由。M41 把 `route_policy_identity` 写入 runtime，并在报告中明确这一边界。若要评测 Router，应建立独立 decision set，而不是为了让英文 benchmark 通过就改写问题或悄悄放宽规则。
+
+5. **[工程/深挖追问] 60 道真实 Eval 最有价值的发现是什么？**
+
+   第一，自动 primary triage 显示 **20/60** 主要失败在 retrieval，是最大的单一故障层；第二，人工复核只有 **18 pass**，证明链路通过、gold recalled 或 citation valid 都不能替代答案语义；第三，5 个 Composer 合同错误被误标为 Harness failure，说明诊断系统本身也需要真实流量审计。这三点分别指向质量优化、评测口径和可观测性修正。
+
+6. **[压力追问] 你花了很多精力做评测基础设施，最终人工只通过 18 道，这是不是工程自嗨？**
+
+   这个质疑有合理部分：M41 没有把 RAG 质量优化到可用水平，也没有完成 external 的 smoke/core/basic/hard/full 运行档位。它解决的是更前置的问题——以前我们甚至不能可靠判断失败发生在哪一层，模型坏结构还可能被错记为 Harness 故障。现在 60 道题能给出一次执行证据、分层漏斗、人工 verdict 和不可变 artifact，已经明确 retrieval 是最大失败层，也防止团队拿 complete rate 自我安慰。下一步必须以这些失败簇设计可比较的改进，而不是继续堆评测框架；所以它是诊断基础，不是质量胜利，喵。
+
+### 验证与下一步
+
+**验证结果：**
+
+- M41 修正后聚焦测试：**14 passed，1 warning**；
+- M31–M41 受影响回归：**229 passed，1 warning**；
+- 全仓 pytest：**462 passed，3 skipped，1 warning**；
+- business RAG Smoke：**2 Scenario，23 required 全通过，人工 2/2 pass**；
+- external 60 dev：**60/60 checkpoint 与 Trace 闭合，137,299 tokens，人工 18 pass / 26 fail / 16 insufficient evidence**。
+
+warning 是既有 Starlette TestClient/httpx deprecation，不影响当前合同。本轮没有运行 120 held-out、LLM Judge、remote embedding/Milvus、LangFuse Cloud 或真实 Hybrid LLM。
+
+**下一步**：先单独规划 external canonical suite。目标是提供 `smoke/core/basic/hard/reliability/full` 运行档位；180 题原生题型、来源和单/多文档作为报告维度，60/120 只作为实验过滤条件。计划确认前不运行 120 held-out，也不重跑已完成的 pre-fix 60 题。
+
+可复制验证命令：
+
+```powershell
+# 1. 聚焦合同测试：预计看到 M41 测试全部通过；不调用真实 LLM。
+python -m pytest tests/test_m41_rag_e2e_contracts.py tests/test_m41_rag_e2e_runtime.py tests/test_m41_rag_review_history.py -q --basetemp=.agent_work/temp/pytest-m41-doc-check
+
+# 2. 查看 business RAG Eval 参数：只显示帮助，不调用 provider。
+python -m eval.run_rag_eval --help
+
+# 3. 查看 external RAG Eval 参数：只显示帮助，不运行 60/120 题。
+python -m eval.run_rag_external_eval --help
+
+# 4. 校验既有 60 题人工复核来源：离线读取 artifact/checkpoint，不调用 Tool 或 LLM。
+python -m eval.run_rag_review --bundle eval/reports/m41-rag-external-dev-20260822-01-reviewed.json --verify-only --output .agent_work/temp/m41-rag-external-review-verified.json
+```
+
+真实 business/external Qwen Eval 会产生费用，而且每次授权只允许一个精确 run；不要把上面的帮助或离线校验命令替换成真实运行命令后直接执行。
+
+**本地启动体验：**
+
+```powershell
+# 前置：本地数据库和 seed 已准备好；默认 RAG 使用业务 release + deterministic Composer，不调用 Qwen。
+python -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs`，进入 `POST /api/query`，提交：
+
+```json
+{
+  "question": "质量问题退款规则需要准备哪些材料？",
+  "user_role": "customer_service"
+}
+```
+
+正常情况下可以看到 RAG 路由、回答、引用和 Trace 身份。这个本地体验验证业务默认链路，不等于运行 external 180 题或真实 Qwen Eval。
+

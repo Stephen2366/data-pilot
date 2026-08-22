@@ -223,6 +223,7 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
     runtime = HarnessRuntime(
         sql_tool=Text2SQLToolAdapter(db=db, schema_vector_index=getattr(request.app.state, "schema_vector_index", None)),
         rag_tool=rag_tool,
+        router=getattr(request.app.state, "harness_router", None),
     )
     checkpoint_manager: ThreadCheckpointManager = request.app.state.thread_checkpoint_manager
     turn = run_turn(

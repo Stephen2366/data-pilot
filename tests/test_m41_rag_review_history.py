@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from engine.rag.enterprise_answer_eval import finalize_answer_artifact
+from engine.rag.enterprise_dataset import canonical_identity
 from eval.rag_e2e_contracts import RAGEvalContractError, canonical_hash
 from eval.rag_e2e_review import build_review_bundle, compare_completed, verify_review_sources
 from eval.rag_m34_history import import_m34_answer_history
@@ -73,3 +74,56 @@ def test_m34_importer_is_offline_and_marks_missing_product_layers(tmp_path: Path
     view = import_m34_answer_history(path)
     assert view["is_product_harness_e2e"] is False
     assert {"api", "router", "harness"} <= set(view["not_observed_layers"])
+
+
+def test_m34_importer_projects_all_cases_with_retrieval_and_split_strata(tmp_path: Path) -> None:
+    execution = {
+        "question_id": "q1", "question_type": "semantic", "source_types": ["jira"],
+        "document_cardinality": "single_document", "expected_document_ids": ["d1"],
+        "gold_answer": "gold", "answer_facts": ["gold"], "outcome": "answer_result",
+        "internal_reason_code": "answer_completed",
+        "result": {"answer_status": "complete", "diagnostics": {"elapsed_ms": 1}},
+        "cited_logical_document_ids": ["d1"],
+        "document_coverage": {"covered": 1, "expected": 1, "coverage": 1.0, "all_gold": True},
+        "fact_checks": [{"fact": "gold", "exactly_supported": True}], "exact_fact_coverage": 1.0,
+        "provider_usage_delta": {"request_count": 1, "total_tokens": 10},
+        "composer_attempt": {"status": "succeeded"}, "answer_flow_calls": 1,
+    }
+    artifact = finalize_answer_artifact(
+        dataset_identity="dataset", question_set_identity="questions", split_identity="split",
+        profile_identity="profile", composer_identity="composer", question_ids=("q1",), executions=(execution,),
+    )
+    answer_path = tmp_path / "answer.json"
+    answer_path.write_text(json.dumps(artifact), encoding="utf-8")
+    retrieval_execution = {
+        "question_id": "q1", "adapter_calls": 1, "actual_matches": [{"logical_document_id": "d1"}],
+        "coverage": {"20": {"covered": 1, "expected": 1, "coverage": 1.0, "all_gold": True}},
+    }
+    retrieval_identity = {
+        "format": "enterprise-rag-retrieval-eval-v1", "dataset_identity": "dataset",
+        "question_set_identity": "questions", "split_identity": "split", "split_name": "diagnostic_dev",
+        "profile_identity": "profile", "adapter_identity": "adapter", "retrieval_recipe_identity": "recipe",
+        "executions": [retrieval_execution],
+    }
+    retrieval = {
+        **{key: value for key, value in retrieval_identity.items() if key != "executions"},
+        "status": "completed", "question_count": 1, "tool_call_count": 1,
+        "artifact_identity": canonical_identity(retrieval_identity), "executions": [retrieval_execution],
+    }
+    retrieval_path = tmp_path / "retrieval.json"
+    retrieval_path.write_text(json.dumps(retrieval), encoding="utf-8")
+    split = {
+        "question_set_identity": "questions", "split_identity": "split",
+        "diagnostic_dev_question_ids": ["q1"], "held_out_question_ids": [],
+    }
+    split_path = tmp_path / "split.json"
+    split_path.write_text(json.dumps(split), encoding="utf-8")
+
+    view = import_m34_answer_history(
+        answer_path, retrieval_paths=(retrieval_path,), split_manifest_path=split_path
+    )
+
+    assert view["format"] == "phase4-rag-m34-historical-view-v2"
+    assert view["cases"][0]["partition"] == "diagnostic_dev"
+    assert view["cases"][0]["layers"]["retrieval"]["status"] == "passed"
+    assert view["cases"][0]["layers"]["product_api_router_harness_trace"]["status"] == "not_observed"

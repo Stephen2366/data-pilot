@@ -88,6 +88,14 @@ M41 `phase4-rag-e2e-review-v1` 同样绑定 artifact 与逐 execution checkpoint
 |---|---|---|---|---|---|
 | [`m41-rag-smoke-20260822-01`](../../eval/reports/m41-rag-artifacts/m41-rag-smoke-20260822-01.json) | 2026-08-22 | Smoke；2 Scenario / 2 physical executions | `phase4-rag-e2e-v1`；business release `7d0d0937...409a`；lexical；Qwen `qwen3.7-plus`；eval-only outbound；60s/retry0 | [report](../../eval/reports/m41-rag-smoke-20260822-01.md)：required `23 passed / 0 failed / 0 not_observed`；Gate `passed`；人工 review `2 pass` | 当前有效首次 Smoke 快照，不是正式长期基线。唯一 generation 成功，usage `660 + 352 = 1012` tokens；no-candidate 题零 provider。只证明两个窄场景，不外推 Core、多文档或 Reliability。 |
 
+### RAG：M41 external 180 分层产品链路
+
+| Run ID | 日期 | Partition / 分层 | Protocol / runtime | Assertion views / Gate | 解释边界 |
+|---|---|---|---|---|---|
+| [`m41-rag-external-dev-20260822-01`](../../eval/reports/m41-rag-external-artifacts/m41-rag-external-dev-20260822-01.json) | 2026-08-23 | 冻结 dev 60；保留 question type / source / document cardinality | M41 external catalog + fixed-RAG eval route + 产品 Harness/RAG Tool + M34 lexical profile + Qwen `qwen3.7-plus`；60s/retry0 | [report](../../eval/reports/m41-rag-external-dev-20260822-01.md)：required `524 passed / 136 failed / 0 not_observed`，Gate `failed`；triage `24 passed / 20 retrieval / 7 product_runtime / 5 citation / 4 selection`；人工 review `18 pass / 26 fail / 16 insufficient_evidence`；usage `137299` tokens | **pre-fix candidate，不是正式长期基线**。运行后发现 5 个 Composer 坏结构被误分为 Harness failure；原 artifact 不改签、不重跑，当前代码已修正未来分类并新增 assertion，因此不能与未来新 run 直接作同协议比较。120 held-out 未运行；exact-fact `0/60` 只是字符串下限，不是语义正确率。 |
+
+M34 180 题旧 artifact 另有零调用分层投影 [`m41-m34-180-layered-history.md`](../../eval/reports/m41-m34-180-layered-history.md)：它能回看 retrieval / Composer support / citation / answer 字符串下限，但 API、Router、Harness 与 selected/generation-visible 因旧证据未保存而标 `not_observed`，不得冒充产品 E2E。
+
 ### Text2SQL：M27
 
 | Run ID | 日期 | Selector / Scenario | Protocol | Resolved runtime | Oracle / artifact | Assertion views | Gate | 解释边界 |

@@ -79,10 +79,14 @@ def _unit_identity(document_key: str) -> str:
     return identity
 
 
-def _open_read_only(database_path: Path) -> sqlite3.Connection:
-    """使用 SQLite URI 的只读模式，查询链路不能顺手改变已验证 candidate。"""
+def _open_read_only(database_path: Path, *, allow_cross_thread: bool = False) -> sqlite3.Connection:
+    """使用 SQLite URI 的只读模式；跨线程仅供显式 TestClient Eval runtime。"""
 
-    connection = sqlite3.connect(f"file:{database_path.as_posix()}?mode=ro", uri=True)
+    connection = sqlite3.connect(
+        f"file:{database_path.as_posix()}?mode=ro",
+        uri=True,
+        check_same_thread=not allow_cross_thread,
+    )
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -326,9 +330,9 @@ class EnterpriseProfileRuntime:
 
 
 def load_enterprise_profile_runtime(
-    *, root: Path, profile_identity: str | None = None
+    *, root: Path, profile_identity: str | None = None, allow_cross_thread: bool = False
 ) -> EnterpriseProfileRuntime:
-    """显式 identity 可验证 candidate；省略时才读取 benchmark 专属 active pointer。"""
+    """显式 identity 可验证 candidate；跨线程开关不改变只读与 identity 校验。"""
 
     pointer: ExternalProfilePointer | None
     if profile_identity is None:
@@ -345,7 +349,7 @@ def load_enterprise_profile_runtime(
             lifecycle_status="candidate",
         )
     database_path = root / manifest.profile_identity / manifest.database_file
-    connection = _open_read_only(database_path)
+    connection = _open_read_only(database_path, allow_cross_thread=allow_cross_thread)
     try:
         return EnterpriseProfileRuntime(
             connection=connection,

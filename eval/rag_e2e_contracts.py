@@ -23,7 +23,8 @@ RAG_ASSERTION_IDS = frozenset({
     "retrieved_gold", "selected_gold", "generation_visible_gold", "cited_gold",
     "answer_present", "answer_absent", "safe_fallback_answer", "required_answer_terms",
     "forbidden_terms_absent", "no_generation", "response_trace_consistent",
-    "runtime_identity_complete", "provider_observed",
+    "runtime_identity_complete", "provider_observed", "composer_support_valid",
+    "answer_facts_exact_lower_bound",
 })
 
 AssertionStatus = Literal["passed", "failed", "not_observed"]
@@ -51,7 +52,7 @@ class RAGScenario:
     """一条业务 RAG 题面的 gold、四轴和 assertion policy。"""
 
     scenario_id: str
-    classification: Literal["core", "diagnostic"]
+    classification: Literal["core", "diagnostic", "external_dev", "external_heldout"]
     question: str
     user_role: str
     expected_axes: tuple[str, str, str, str]
@@ -61,6 +62,11 @@ class RAGScenario:
     forbidden_public_terms: tuple[str, ...]
     required_assertions: tuple[str, ...]
     advisory_assertions: tuple[str, ...]
+    question_type: str = "business"
+    source_types: tuple[str, ...] = ()
+    document_cardinality: str = "not_applicable"
+    gold_answer: str = ""
+    answer_facts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         values = (self.scenario_id, self.question, self.user_role, self.expected_reason)
@@ -70,8 +76,8 @@ class RAGScenario:
             self.required_assertions + self.advisory_assertions
         ):
             raise RAGEvalContractError("rag_scenario_invalid", "assertion ID 重复或 effect 冲突")
-        if self.classification not in {"core", "diagnostic"}:
-            raise RAGEvalContractError("rag_scenario_invalid", "classification 只能是 core/diagnostic")
+        if self.classification not in {"core", "diagnostic", "external_dev", "external_heldout"}:
+            raise RAGEvalContractError("rag_scenario_invalid", "classification 未登记")
         if len(self.expected_axes) != 4:
             raise RAGEvalContractError("rag_scenario_invalid", "expected_axes 必须恰好包含四轴")
         if not self.required_assertions:
@@ -119,6 +125,7 @@ class RAGResolvedRuntime:
     release_outbound_policy_identity: str
     generation_outbound_policy_identity: str
     caller_fixture_identity: str
+    route_policy_identity: str = "deterministic-router-v1"
 
 
 @dataclass(frozen=True)
@@ -133,6 +140,7 @@ class RAGRunSpec:
     runtime: RAGResolvedRuntime
     assertion_plan: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
     scorer_identity: str = "phase4-rag-funnel-scorer-v1"
+    scenario_metadata: tuple[tuple[str, dict[str, Any]], ...] = ()
 
     @property
     def identity(self) -> str:
@@ -226,6 +234,11 @@ def load_rag_catalog(path: Path) -> RAGScenarioCatalog:
                 forbidden_public_terms=tuple(str(item) for item in raw.get("forbidden_public_terms") or ()),
                 required_assertions=tuple(str(item) for item in assertions.get("required") or ()),
                 advisory_assertions=tuple(str(item) for item in assertions.get("advisory") or ()),
+                question_type=str(raw.get("question_type") or "business"),
+                source_types=tuple(str(item) for item in raw.get("source_types") or ()),
+                document_cardinality=str(raw.get("document_cardinality") or "not_applicable"),
+                gold_answer=str(raw.get("gold_answer") or ""),
+                answer_facts=tuple(str(item) for item in raw.get("answer_facts") or ()),
             )
         )
     ids = [item.scenario_id for item in scenarios]

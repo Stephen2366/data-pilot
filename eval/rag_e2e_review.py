@@ -36,6 +36,7 @@ def build_review_bundle(*, artifact_path: Path, checkpoint_root: Path, reviewer:
     validate_completed_artifact(artifact)
     spec = artifact["run_spec"]
     run_id = str(spec["run_id"])
+    scenario_metadata = {str(key): dict(value) for key, value in spec.get("scenario_metadata") or ()}
     assertions: dict[tuple[str, int], list[dict[str, Any]]] = {}
     for item in artifact["assertions"]:
         assertions.setdefault((str(item["scenario_id"]), int(item["replicate"])), []).append(item)
@@ -51,6 +52,7 @@ def build_review_bundle(*, artifact_path: Path, checkpoint_root: Path, reviewer:
             "record_id": f"{scenario_id}:r{replicate}",
             "scenario_id": scenario_id,
             "replicate": replicate,
+            "reference": scenario_metadata.get(scenario_id, {}),
             "automatic_assertions": assertions[(scenario_id, replicate)],
             "answer": execution.get("answer"),
             "citations": execution.get("citations") or [],
