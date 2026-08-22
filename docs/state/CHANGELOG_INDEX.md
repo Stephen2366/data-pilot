@@ -11,15 +11,16 @@
 
 ## 当前写入目标
 
-- **Phase 4**：[`change-history/phase4.md`](change-history/phase4.md)
+- **Phase 4B**：[`change-history/phase4b.md`](change-history/phase4b.md)
 
-所有新的模块档案、真实 LLM Eval、A/B 实验、smoke、默认行为取舍和有技术含义的小修，当前都写入该文件。
+所有新的模块档案、真实 LLM Eval、A/B 实验、smoke、默认行为取舍和有技术含义的小修，当前都写入该文件；Phase 4 及更早阶段的历史记录仍按下方阶段索引进入对应文件。
 
 ## 阶段索引
 
 | 阶段 | 范围 | 文件 |
 | --- | --- | --- |
-| Phase 4 | M29 至当前 | [`change-history/phase4.md`](change-history/phase4.md) |
+| Phase 4B | M41 至当前 | [`change-history/phase4b.md`](change-history/phase4b.md) |
+| Phase 4 | M29–M40 | [`change-history/phase4.md`](change-history/phase4.md) |
 | Phase 3B | M15–M28 | [`change-history/phase3b.md`](change-history/phase3b.md) |
 | Phase 3A | M8–M14-lite，以及 Phase 3B 开始前的过渡记录 | [`change-history/phase3a.md`](change-history/phase3a.md) |
 | Phase 2 | M0–Phase 2.7.1 | [`change-history/phase2.md`](change-history/phase2.md) |

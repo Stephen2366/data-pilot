@@ -8,10 +8,9 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | Phase 4 已完成；Phase 4B roadmap 已正式建立，B0 module plan 尚未立项（2026-08-22） |
+| 当前活动模块 | Phase 4 已完成；Phase 4B roadmap 已正式建立，M41 module plan 尚未立项（2026-08-22） |
 | 当前 plan    | —（下一步按 `docs/phase4b-roadmap.md` 的 B0 另立 module plan） |
-| 当前 notes   | `docs/notes/phase4-rag-capability-status.md`（Phase 4B 方案来源与调查材料） |
-| 后续正式路线 | `docs/phase4b-roadmap.md`；最终硬交付包含 Evidence-driven Loop、bounded Agentic RAG、自然多轮、durable state、node Context、Compact 与贯穿 Agent Eval |
+| 当前 notes   | —（Phase 4B 方案来源与调查材料 `docs/notes/phase4-rag-capability-status.md`) |
 | 待决事项     | B0 的 exact seed/caller/release/Hybrid operator/Eval catalog、legacy/agent runtime 与 API/state 兼容矩阵仍须在 module plan 中确认；B3 campaign 必须预注册预算/review point；M39 P6 历史 no-go、当前进程内 checkpoint、external lexical 默认与运行配置均未改变 |
 | 更新时间     | 2026-08-22                                                   |
 
@@ -51,6 +50,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-22 | 按一次授权执行 M41 M27-v3 `smoke` 真实 Qwen Eval：run `m41-real-llm-smoke-20260822-01`，4 个 Scenario/physical attempts；`june_gmv`、`active_products_top10` 到达 LLM generation 但因 `network_error` 归为 `external_unavailable`，`unsafe_drop_orders`、`missing_product_supplier_rejection` 在确定性安全/计划合同处拒绝。run completed 但 Gate `inconclusive`（required passed=2、failed=0、not_observed=7），没有成功模型输出可作质量结论；不得未经新授权重跑。artifact/report 见 `eval/reports/m27-artifacts/m41-real-llm-smoke-20260822-01.json` 与 `eval/reports/m41-real-llm-smoke-20260822-01.md`。 |
 | 2026-08-22 | Phase 4B roadmap 审查确认旧 M35 `single_tool`、M36/M37 单 Graph/单深 Tool、M38 branch budget 与新 Loop 需要显式 runtime family 隔离；当前 Pydantic 请求只严格校验已知 thread/follow-up 组合，未知字段不是统一 `extra=forbid` 合同。一次本地 deterministic Knowledge retrieval 诊断使用当前 active business release、默认 budget 与 `customer_service` caller，直接点名“基础退款政策和质量问题专项规则”的 T4 问法一次选中 `refund_policy_basic`、`refund_policy_quality`、`evidence_escalation_rule`，因此该原句不能承担 RAG recovery 证明。未修改 release、retrieval、权限或任何运行默认。 |
 | 2026-08-17 | M40 完成 P7 技术收口：五条 deterministic API/Trace rehearsal（SQL、RAG、Hybrid、澄清恢复、安全拒绝）验证 response/Trace 同源、四轴、Evidence/citation、Graph/lifecycle 预算、安全 runtime identity 与非泄露；P7 closed-world manifest 只允许 P1、P2 retrieval/answer、P3、P4 turn/follow-up、P5、M39 P6 verified `no_go`、P7 rehearsal 九个 family，拒绝 M27 历史与 M34 质量数字填槽。M40 聚焦 6 passed、M31–M39 回归 208 passed、全仓 deterministic pytest 447 passed / 3 skipped / 1 warning；technical Gate 不等于人工验收、生产认证或 P6 Subgraph 完成。 |
 | 2026-08-17 | M39 完成 P6 只读 readiness audit：六份冻结 M34 输入须同时匹配 SHA-256、identity、split、retrieval runtime 与 Composer identity；只分类 60 dev，120 held-out 仅作闭合核验，零 provider 调用。结果为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；“Observation 驱动新增 Evidence 动作”与“可比额外预算”均未被既有证据证明，故严格 `no_go`，external lexical 默认不变。全仓 deterministic pytest `441 passed, 3 skipped, 1 warning in 517.57s`。 |
@@ -103,8 +103,3 @@
 | M34 full Answer Eval 的 complete 不等于正确 | lexical 漏召回、semantic 与多文档题会产生“有 citation 但答非所问”；全题 all-gold cited 仅 44.44%，multi-document 5.26%，semantic 28.85% | 后续先按失败簇改善 gold coverage/context packing；不得用 complete rate 代替 correctness，也不得未经新计划重跑大规模 provider。 |
 | Active Knowledge release 损坏时不会自动 fallback；当前虽有 previous，但旧 11-entry release 已不等于当前 authority | 自动复活旧正文可能绕过撤销/ACL，或丢失新增内容 | 启动失败关闭；显式 rollback 仍必须重新通过当前 authority/revision/policy 校验。 |
 | LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭且 M31 outbound 未放行 Cloud；重新启用前先做 allowlist/redaction 策略和用户决策。 |
-
-## 历史入口
-
-- 完整改动、实验记录、旧合同取舍入口：`docs/state/CHANGELOG_INDEX.md`。
-- 历史 eval 数字：`docs/archive-versions/eval-baselines-old.md`；M27 以后的长期账本：`docs/state/eval-baselines.md`。

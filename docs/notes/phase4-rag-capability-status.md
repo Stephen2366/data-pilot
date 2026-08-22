@@ -4,7 +4,7 @@
 >
 > **一句话结论**：DataPilot 已经完成 Phase 4 的主要工程闭环，并形成了可信 Tool、ACL、typed Evidence / citation、四轴状态、Trace、Eval、Hybrid 与受控 thread 等较强地基；P4 已通过最小 bounded recovery / thread state 切片达到阶段验收基线，但通用 Context Builder 与面向未来动态 Loop 的 Action / Budget / Progress 控制仍值得继续 hardening；P6 则按既定决策门合法得到 `no_go`，因此“没有 RAG Subgraph”不是 Phase 4 未完成。M40 之后应在**路线层面并行、施工层面交错切片**推进 **RAG 质量与动作证据**、**顶层 Agent foundation**，再基于证据决定是否实现 bounded Agentic RAG，并逐步升级到任务级自然多轮。
 
-> ⚠️ **最新讨论稿注（2026-08-22）**：上段和第 1–10 节主要记录 M40 收口后前两轮调查形成的能力分类与候选路线；第 12 节是当前最新的共同讨论稿，并修订了“Subgraph 是否实现、持久 checkpoint 与 Context Compact 是否只作为条件项”的旧建议。第 12 节可以更新本文内部的候选方向，但在用户完成后续审查并正式写入 roadmap 前，不覆盖现行 `phase4-roadmap.md`、`AI_CONTEXT.md` 当前运行事实或 M39 历史结论。
+> ⚠️ **状态注（2026-08-22）**：本文第 1–11 节记录 M40 收口后前两轮调查形成的能力分类与候选路线，现仅作演进记录与调查材料。第 12 节的方案已经用户确认并升格为正式路线 [`phase4b-roadmap.md`](../phase4b-roadmap.md)；后续建设目标、切片、依赖、决策门与验收语义以该 roadmap 为准，本文不再覆盖或修订路线。
 
 阅读本文时，必须先区分四个容易混淆的概念：
 
@@ -487,11 +487,11 @@ Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结
 
 ## 12. 当前商讨出的大致方案
 
-> **文档状态**：本节是用户与 AI 在当前能力调查基础上共同商讨出的后续建设方向，用于固定“最终想建成什么”和大致推进顺序。它还不是已确认的 roadmap，不冻结模块编号、文件结构、具体类名、模型、阈值或预算参数。后续将由其他会话继续审查和修正，待方案边界、依赖和验收语义成熟后，再写入 `phase4-roadmap.md`。
+> **文档状态**：本节已经用户确认并升格为正式路线 [`phase4b-roadmap.md`](../phase4b-roadmap.md)（2026-08-22）。本节原文保留，用于记录方案来源、演进过程与用户要求；后续边界、依赖和验收语义若与 roadmap 不一致，以 roadmap 为准。
 >
 > **用户要求：**本方案不把“更省事、更易实现或更容易验收”作为缩减能力的理由。若确实需要分阶段，可以通过纵向切片分阶段交付，但每个切片都必须服务于下列已明确的最终目标，不得把剩余工作模糊化为“以后按需优化”。
 >
-> **与前文及权威文档的关系**：本节是本文内部最新的候选建设方向，修订第 3 节、第 10 节关于 Subgraph、持久 checkpoint 与 Context Compact 的旧建议；旧段落保留用于解释方案演进。当前方案仍在审查，因此不覆盖现行 roadmap、`AI_CONTEXT.md` 的当前实现/默认事实或 M39 `no_go` 的历史结论。只有用户最终确认并写入 roadmap 后，才完成路线升格。
+> **与前文及权威文档的关系**：本节修订了第 3 节、第 10 节关于 Subgraph、持久 checkpoint 与 Context Compact 的旧建议，并已于 2026-08-22 经用户确认升格为 `docs/phase4b-roadmap.md`，路线决策权随之移交；M39 `no_go` 历史结论与 `AI_CONTEXT.md` 当前运行事实不受升格影响。第 3/10 节旧段落保留，仅用于解释方案演进。
 
 ### 北极星任务主线
 
@@ -599,6 +599,8 @@ Scenario 按用途隔离：北极星 canonical sequence 负责稳定展示；req
 ---
 
 ## 13. 修订记录
+
+2026-08-22：第 12 节方案经用户确认升格为正式路线 [`phase4b-roadmap.md`](../phase4b-roadmap.md)；本文第 1–11 节与第 12 节原文保留为演进记录与调查材料，路线决策权移交 roadmap。
 
 2026-08-22：简要补充 Eval 继承与缺口：保留 M31–M40/M34 为独立历史基线，不重建混算；Phase 4B 新增 action-level EvidenceDelta/父子预算、多轮/持久恢复/Compact 与语义正确完整性评测，并要求逐题大 artifact 在项目外耐久保存、仓库固化 identity/hash 和安全失败切片，避免临时目录成为唯一诊断事实源。
 

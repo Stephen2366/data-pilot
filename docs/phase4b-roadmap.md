@@ -15,7 +15,7 @@ Phase 4B 的目标，是把当前“固定 DAG + 一次结构化恢复/追问”
 阶段最终必须完整交付六项能力，任何一项都不能因为实现或验收更容易而降级为模糊后续项：
 
 1. **Evidence-driven bounded Agent Loop**：同次任务运行中读取 typed Observation，以 Evidence requirement、EvidenceDelta、Budget 与 Progress 为依据，从已登记动作中选择 Next Action 或确定性停止；它是 Decision Loop，不是自由 Thought Loop。
-2. **Bounded Agentic RAG**：Knowledge Tool 内存在真实、有父子预算的 RAG Subgraph，能够在首次检索后从至少两种经 Evidence 证明合格的恢复动作与停止之间作出选择；确定性 Pipeline 长期保留为 baseline/fallback。
+2. **Bounded Agentic RAG**：Knowledge Tool 内存在真实、有父子预算的 RAG Subgraph；全局 action catalog 至少包含两种经 Evidence 证明合格的恢复动作，每次运行依据 runtime/corpus、ACL 与首次 Observation 形成 eligible action set 并选择动作或停止，且至少一个 runtime/corpus 能在不同真实 Observation/Scenario 下分别触发两种动作；确定性 Pipeline 长期保留为 baseline/fallback。
 3. **任务级自然多轮**：自然语言 turn 经 Typed TaskDelta 受控合并到 TaskState，支持连续修改条件、解释旧结果、追加 Evidence requirement、纠正理解、切换任务、取消及 SQL/RAG/Hybrid 间的受控 route 变化。
 4. **持久任务状态与 node-level Context Builder**：任务可在进程重启和多 worker 下按 owner/tenant/role、TTL、版本与原子 claim 合同恢复；每个节点只接收自己需要的 typed 最小上下文，并留下实际入模投影。
 5. **Context Compact 基础版**：session 内 typed turn/event ledger 可收敛为可追溯、可验证的结构化 Task Compact；compact 前后关键任务行为等价，失败时保守降级。
@@ -23,7 +23,7 @@ Phase 4B 的目标，是把当前“固定 DAG + 一次结构化恢复/追问”
 
 阶段完成后的可展示故事是：
 
-> 用户从“查询 7 月退款率”开始，连续把月份和指标改为 8 月退款金额、追问上涨原因、要求结合公司的退款规则解释、再纠正为按渠道分析。DataPilot 能在同一任务中安全地合并条件、使旧 Evidence 失效、根据 Observation 补取 SQL/Document Evidence、必要时在 RAG 子图内恢复检索，并在重启和 context compact 后继续；每个结论、动作、预算与停止原因都可由 Trace 和 Eval 回查。
+> 用户从“查询 7 月实际净退款金额”开始，改为查询 8 月并与 7 月同口径比较，追问 8 月为何上涨、要求结合公司的退款规则解释、再纠正为按渠道分析。DataPilot 能在同一任务中安全地合并条件、使旧 Evidence 失效、根据 Observation 补取 SQL/Document Evidence、必要时在 RAG 子图内恢复检索，并在重启和 context compact 后继续；每个结论、动作、预算与停止原因都可由 Trace 和 Eval 回查。
 
 这条故事同时服务项目展示和面试：它展示的不是“节点很多”，而是企业 Agent 的控制权、安全、状态、Evidence、上下文与评测如何形成闭环。
 
@@ -55,7 +55,7 @@ Phase 4B 的增量因此不是“再加一个检索器”，而是同时建设�
 - 取证层：顶层全局动作与 RAG 内部恢复动作分权，父预算覆盖子预算；
 - 状态层：安全的 durable task boundary state，不恢复任意 Graph program counter；
 - 上下文层：node-level typed projection、token/context budget、实际入模证据与结构化 Compact；
-- 评测层：一次 sequence 执行、多 turn/multi-action typed assertions、closed-world identity 与 held-out 决策纪律。
+- 评测层：一次 sequence 执行、多 turn/multi-action typed assertions、closed-world identity、sealed decision reserve 与 historical regression 分账纪律。
 
 ## 3. 目标架构与控制权
 
@@ -177,9 +177,9 @@ trigger / Evidence requirement
 
 | Turn / 变体 | 任务变化与预期行为 | 主要能力锚点 |
 |---|---|---|
-| T1：查询 7 月退款率 | 建立任务，route=SQL，取得 7 月 SQL Evidence | B1 |
-| T2：改成 8 月并查看退款金额 | 修改时间和指标，旧 SQL Evidence 失效并重查 | B1 |
-| T3：为什么上涨 | 增加原因分析 Evidence requirement，由 Observation 驱动允许的 SQL/全局补证据动作 | B2 |
+| T1：查询 7 月实际净退款金额 | 建立任务，route=SQL，按 `refunds.processed_at` 取得 7 月 `net_refund_amount` SQL Evidence | B1 |
+| T2：改成 8 月，并与 7 月比较 | 只修改时间范围，重新取得同指标、同时间口径的 8 月 Evidence，并给出变化量/变化率；旧单月 SQL Evidence 失效 | B1 |
+| T3：为什么 8 月比 7 月上涨 | 增加原因分析 Evidence requirement，由 Observation 驱动允许的 SQL/全局补证据动作；输出限于证据支持的结构分解/归因，不冒充已证明的业务因果 | B2 |
 | T4：结合公司的退款规则解释 | 增加需要基础政策与质量问题专项规则共同支撑的 Document Evidence requirement，SQL → Hybrid；业务检索若缺证据，由 RAG 子图恢复 | B2 顶层、B3/B4 RAG |
 | T5：不对，改成按渠道维度分析 | correction 受控修改维度，相关 SQL Evidence 失效；政策 Evidence 重新核验后才可复用 | B1/B2 |
 | 重启、多 worker、并发旧版本后继续 | 从安全任务边界恢复，不恢复 Graph 执行栈 | B5 |
@@ -189,12 +189,14 @@ trigger / Evidence requirement
 
 ### 5.2 正式开工前置
 
-1. **versioned seed contract 与可合成叙事**：现有 seed 只有 2026 年 5/6 月，不能支持 7→8 月故事。B0 必须提出并经用户确认新的 deterministic seed identity，增加可由真实 SQL Evidence 解释的 7/8 月订单与退款结构，同步 `orders_wide` snapshot/batch、`verify_business_facts()`、数据库 state、受影响 oracle/schema；不机械改写不受影响的 6 月历史事实或 artifact。7/8 月结构还必须冻结可验证的原因/渠道/商品分解，使 SQL Evidence 的业务归因键能与政策的适用范围安全合成；只允许表达“观测到的驱动结构 + 对应处理规则”，不得把政策条款写成退款上涨的因果证明。
+1. **versioned seed/oracle profile 与可合成叙事**：现有订单支付月份只有 2026 年 5/6 月，退款请求/处理时间可延伸到 7 月，但仍不能支持同口径的 7→8 月故事。B0 必须建立独立 Phase 4B deterministic seed/oracle profile，旧 M27/M31–M40 fixture 显式 pin legacy profile；profile identity 必须绑定可复现的 seed recipe/content/config fingerprint，并在环境解析时 fail closed，不能只沿用或重命名 `sqlite_deterministic_seed` 标签。新 profile 按 `refunds.processed_at` 增加可比较的 7/8 月 `net_refund_amount` 结构，并同步 `orders_wide` snapshot/batch、`verify_business_facts()`、数据库 state、受影响 oracle/schema；旧 artifact 只读冻结，新旧结果禁止直接比较。若 B0 证据迫使修改 canonical seed，则必须显式升级 oracle fixture identity、run spec/hash、受影响 Scenario/oracle 与可比性说明，不得让数据变化而评测身份不变。7/8 月结构还必须冻结可验证的原因/渠道/商品分解，使 SQL Evidence 的业务归因键能与政策的适用范围安全合成；只允许表达“观测到的驱动结构 + 对应处理规则”，不得把政策条款写成退款上涨的因果证明。
 2. **最小权限 demo caller**：北极星只在 local/demo fixture 演示，不冒充生产认证。当前 fixture 拥有全部已知角色，而两篇退款政策要求 `customer_service`、分析 SQL 通常需要 `ops`；B0 必须冻结完成故事所需的最小 resolved role 集、active SQL role 和跨 turn 权限复核。优先验证 `ops + customer_service` 的最小双角色 fixture、active SQL role=`ops` 是否足够；若政策 ACL 需要调整，必须走正式 Knowledge release/identity 与 ACL 回归，不能为 demo 临时放宽。
 3. **业务 RAG failure case 与非测试陷阱纪律**：现有默认 business retrieval 对直接点名“基础退款政策和质量问题专项规则”的 T4 问法会稳定选中 `refund_policy_basic`、`refund_policy_quality`，因此该原句不能直接承担 recovery 证明。B0 应在正式 case 冻结前改用真实用户会提出、但逻辑上确需双文档的自然问法，或选择其他已观察到的业务多文档失败簇；不能通过压低 top-k、测试专用 metadata 或反复改词制造漏召回。只有现有 corpus 无法形成真实案例时，才可基于独立业务理由自然补充语料，并在观察 retrieval 结果前完成内容合理性审查、gold requirement 与正式 release identity 冻结；新增文档不得以“必须挤掉某篇文档”为写作目标。
 4. **Hybrid operator 复核**：现有 `refund_reason_and_policy` 只是固定薄计划，不能自动继承 8 月 TaskState。B0/B2 必须决定对其做 versioned 语义泛化还是新增边界更准确的 operator；不能靠关键词命中宣称已覆盖北极星。
 5. **Agent Eval family skeleton**：在 B0 冻结 sequence identity、turn identity、seed/caller/release/runtime family identity、ExecutionEvidence 和 closed-world 完整性规则；旧 M31–M40 fixture 显式 pin legacy family，新北极星显式使用 agent family，具体能力 assertion 随纵向切片递增。
 6. **API/state 兼容矩阵方向**：B0 先冻结“同一 `/api/query`、legacy request 保留、新 task-turn 增量投影、两类 payload 互斥”的路线边界；具体字段和弃用说明由 B1 module plan 完成，不能等施工时再临时决定。
+7. **sealed decision reserve**：M34 已运行并用于默认决策的 120 题 held-out 降级为 historical regression set，不再承担 Phase 4B 的“未污染”默认切换证明。B0 必须冻结新的 decision reserve identity、生成/抽样与 gold 规则、污染账本、允许用途和首次解封条件；优先采用同一冻结 corpus 上独立编写的新问题集或新的 corpus/question split。仅当访问审计能证明逐题结果从未被查看、子集选择完全盲化时，才可把旧集合的 nested reserve 作为较弱证据，且不得宣称恢复了最高等级的未污染性。
+8. **RAG action catalog 验收口径**：全局 catalog 至少两种合格动作；每张 action card 声明适用 runtime/corpus、trigger、预算、ACL/outbound、Evidence gain 与停止边界。单次运行的 eligible action set 可为零、一或多个，`stop` 始终可用；至少一个 runtime/corpus 必须在不同真实 Observation/Scenario 下分别证明两种动作的正确选择与错误动作排除，不要求同一道题同时暴露两种动作。
 
 精确 seed 数字、role 集、知识 ACL、operator 语义和 Eval case 内容会改变长期默认或正式合同，必须在 B0 module plan 中给出选项、风险与建议，按 `AI_CONTEXT.md` 规则取得用户确认后实施；本文不替代该决策。
 
@@ -231,8 +233,9 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 ### 主要交付物
 
 - 北极星 canonical sequence、extended sequence 与配套非 happy-path catalog；
-- 经用户确认的 versioned seed、最小 demo caller、业务双文档 gold requirement 与 Hybrid operator 方向；
+- 经用户确认且与 legacy 隔离的 versioned seed/oracle profile、最小 demo caller、业务双文档 gold requirement 与 Hybrid operator 方向；
 - 独立版本化 Agent Scenario artifact skeleton、ExecutionEvidence、closed-world validator 与 runtime identity；
+- 新 sealed decision reserve 及污染/解封账本；M34 historical regression set 的用途边界；
 - legacy/agent runtime、API request/response、TaskState family 的兼容矩阵初版；
 - Phase 4B capability matrix 初版，明确继承、待建和范围外；
 - B1/B3 首批 deterministic fixture 与不调用真实 provider 的合同测试边界。
@@ -240,16 +243,18 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 ### 完成标志
 
 1. T1–T5 每一 turn 都能说明 TaskDelta、预期 Evidence、失效规则、route/action、required/advisory assertion 与安全身份；
-2. 7/8 月数据由真实 SQL 可验证，固定事实和历史不受影响项边界清楚；
+2. Phase 4B seed/oracle profile identity 能校验到实际 recipe/content/config；7/8 月同口径净退款金额由真实 SQL 可验证，legacy profile、旧 artifact 与历史不受影响项边界清楚；
 3. 数据变化可分解到能与政策适用范围合成的业务键，且没有把政策冒充因果证据；
 4. demo caller 不再依靠“拥有全部角色”证明任务可行，跨 SQL/Document turn 的最小角色与 active role 已冻结；
 5. RAG case 的首次检索结果已实际观察；若新增语料，其业务合理性、正式发布和非测试陷阱审查已通过；
 6. Agent Eval completed artifact 能拒绝缺 turn、额外 execution、重复 assertion、seed/caller/release/runtime identity 漂移；
 7. legacy/agent family 与 API/state 演进方向闭合，且未冻结模型、存储后端、预算数值或具体实现结构。
+8. 新 decision reserve 在任何动作、Prompt 或参数选择前已密封，污染与退出规则可审计；当前 M34 120 题只按 historical regression set 使用。
+9. action catalog 的全局、runtime/corpus 适用和单次 eligible set 三层语义已冻结，不以跨 runtime 各有一个静态动作冒充 Observation-driven 选择。
 
 ### 决策门 G4B-0
 
-确认 exact seed/business facts 与数据—政策可合成关系、demo role 集、必要的 Knowledge release/ACL、真实 business RAG case、Hybrid operator 语义、runtime/API/state 兼容方向和首版 Agent Eval catalog。未确认前可以做只读调查和 deterministic prototype，不能改变长期 seed、release、默认权限或正式 case。
+确认 exact seed/business facts、seed/oracle profile identity 与数据—政策可合成关系、demo role 集、必要的 Knowledge release/ACL、真实 business RAG case、Hybrid operator 语义、runtime/API/state 兼容方向、sealed decision reserve 和首版 Agent Eval/action catalog。未确认前可以做只读调查和 deterministic prototype，不能改变长期 seed、release、默认权限、正式 case 或解封 decision reserve。
 
 ## 8. B1：Task Runtime、自然多轮 v1 与 node-level Context 起步
 
@@ -302,7 +307,7 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 - 随真实消费方建立 first-class Action、Budget ledger、EvidenceDelta、Progress/Termination；
 - 在新的 agent runtime family 内加入 Loop；legacy M35–M38 runtime 保持原图与原 Tool/branch 预算，由旧 fixture 显式 pin，不通过修改旧断言适配新能力；
 - 加入受控回边和 allowed action catalog，覆盖至少一种 SQL/全局补 Evidence、跨 Tool 转换、clarification boundary、no-progress 与 budget stop；
-- T3 的“为什么上涨”必须由真实 Observation 触发原因分析/补证据动作；T4 顶层能从 SQL 任务受控增加 Document requirement 并转为 Hybrid，即使此时 RAG 内部仍走 Pipeline/fallback；
+- T3 的“为什么 8 月比 7 月上涨”必须由同口径 SQL Observation 触发原因分析/补证据动作；T4 顶层能从 SQL 任务受控增加 Document requirement 并转为 Hybrid，即使此时 RAG 内部仍走 Pipeline/fallback；
 - T5 correction 在整合路径使受影响 Evidence 失效并重新取证；
 - clarification 在当前 invoke 结束，不保存执行栈；下一 turn 从 TaskState 重新进入 Decision Loop；
 - decision proposal 如使用模型，必须结构化、单独 outbound，并由确定性 Controller 审核。
@@ -341,8 +346,8 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 - 在 diagnostic/dev 上单变量比较候选：requirement split/subquestion、受控 rewrite、基于进展的 parent/neighbor expansion 等；固定一次的 parent 补取、rerank、hybrid retrieval 仍作为 Pipeline 单变量实验，不为使用 Subgraph 强行包装成 loop；
 - 每个候选动作必须冻结 trigger、expected/actual EvidenceDelta、预算、延迟、ACL/outbound、失败与停止边界；
 - 每轮 diagnostic campaign 必须在运行前冻结候选动作清单、单动作预算、总预算、最大诊断轮次和 review point；达到边界立即停止并出具结论，禁止以“继续找”为由无限延期；
-- 优先使用北极星双政策 business case，同时利用 M34 external dev 失败结构检验可迁移性；held-out 在动作与参数冻结前不得逐题消费；
-- 两种动作可以分别由 business 与 external 的不同真实失败簇证明，不要求每种动作在所有 corpus 都生效；每张 action card 必须声明适用 corpus/失败层/trigger，且至少一种动作必须支撑 business T4；
+- 优先使用北极星双政策 business case，同时利用 M34 external dev 失败结构检验可迁移性；M34 的 120 题 historical regression set 只承担历史回归，新 sealed decision reserve 在 action catalog、Prompt 与参数冻结前不得解封或逐题消费；
+- 全局至少两种动作不要求在所有 corpus 都生效，但不能仅由“business 固定动作 A + external 固定动作 B”凑数；每张 action card 必须声明适用 runtime/corpus、失败层和 trigger，且至少一个 runtime/corpus 要在不同真实 Observation/Scenario 下分别证明两种动作，至少一种动作必须支撑 business T4；
 - 如果候选动作未形成合格 Evidence，只能在已冻结 campaign 预算内补 diagnostic Evidence或放弃该动作，不能降低准入标准，也不能为凑动作数量制造 corpus failure。
 
 ### 主要交付物
@@ -351,22 +356,22 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 - 至少两种合格恢复动作的 action card 和单变量 diagnostic 报告；
 - 有界 diagnostic campaign protocol、预算消费和 review/no-go 记录；
 - business canonical recovery case 与 external diagnostic 对照；
-- 冻结的 Pipeline/Subgraph held-out decision protocol、可比预算与 runtime identity；
+- 冻结的 Pipeline/Subgraph sealed decision reserve protocol、污染账本、可比预算与 runtime identity；
 - 项目外不可变大 artifact 的保存方案，以及仓库内 identity/SHA-256/汇总/安全失败切片。
 
 ### 完成标志
 
 1. 失败可定位到 retrieval、selection、generation context、support、citation 或 answer；
-2. 至少两种不同动作各自有正确触发、实际 Evidence gain、额外成本和安全边界；
+2. 至少两种不同动作各自有正确触发、实际 Evidence gain、额外成本和安全边界；至少一个 runtime/corpus 能在不同真实 Observation/Scenario 下分别准入两者；
 3. 动作选择需要读取 Observation，移除该 Observation 后不能合法作出同一决定；
-4. no-progress/duplicate/unsafe action 能被正确拒绝；
-5. held-out 未参与动作、Prompt、参数选择，污染规则明确；
+4. 每次运行由 runtime/corpus、ACL 与 Observation 形成 eligible action set，错误、不适用、no-progress、duplicate、unsafe action 能被正确拒绝，`stop` 始终可用；
+5. 新 decision reserve 未参与动作、Prompt、参数选择，污染与退出规则明确；M34 120 题只作为 historical regression set；
 6. 未把 M39 `no_go` 改写为错误，而是用新实验补齐其明确缺口。
 7. diagnostic campaign 在冻结预算和 review point 内结束；不足两种动作时形成显式暂停/重规划结论，没有无限“继续寻找”。
 
 ### 决策门 G4B-3
 
-只有满足上述 action-level 准入的动作才能进入 B4 allowed action set。每次 campaign 到达冻结预算或 review point 后必须停止：两种动作合格则进入 B4；只有一种或零种合格则形成正式 review/no-go，暂停 B4 并由用户决定更换真实 Scenario/corpus、调整阶段排期或显式修改最终范围。该 review 是调查闭环，不等于 B3/B4 或 Phase 4B 能力完成；在用户未修改最终范围前，不能用“一种动作 + stop”替代既定两动作目标，也不能无界继续寻找。
+只有满足上述 action-level 准入的动作才能进入 B4 allowed action catalog。每次 campaign 到达冻结预算或 review point 后必须停止：两种动作合格，且至少一个 runtime/corpus 能用不同真实 Observation/Scenario 分别准入两者，才进入 B4；若只有一种/零种合格，或两种动作只能按 runtime 静态分摊，则形成正式 review/no-go，暂停 B4 并由用户决定更换真实 Scenario/corpus、调整阶段排期或显式修改最终范围。该 review 是调查闭环，不等于 B3/B4 或 Phase 4B 能力完成；在用户未修改最终范围前，不能用“一种动作 + stop”或“每个 runtime 各固定一种动作”替代既定目标，也不能无界继续寻找。
 
 ## 11. B4：Bounded Agentic RAG
 
@@ -376,33 +381,33 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 
 ### 能力范围
 
-- Subgraph 在首次 retrieval Observation 后，能在 B3 准入的至少两种恢复动作与停止之间选择；
+- Subgraph 在首次 retrieval Observation 后，按 runtime/corpus、ACL、Observation 与剩余预算形成 eligible action set，并从其中选择恢复动作或停止；全局 catalog 至少两种动作，至少一个 runtime/corpus 能在不同真实 Observation/Scenario 下分别选择两种动作，不要求单题同时暴露两者；
 - action set 只含 Observation-driven 多步取证；Evidence merge/deduplicate、Progress/no-progress、子预算消费与确定性终止闭合；
 - 顶层父预算覆盖所有子图 retrieval/model/context 动作，子消费回写总账；
 - Subgraph 不调用 SQL、不生成答案、不决定产品四轴、不放宽 ACL/outbound、不复制 Shared Gate/Composer/Citation Validator；
 - Pipeline 与 Subgraph 通过同一 Knowledge Tool/AnswerFlow 合同，Pipeline 长期保留 baseline/fallback；
-- business T4 演示与未污染 held-out A/B 都必须完成，不能只在 external benchmark 或只在 demo 成功。
+- business T4 演示与新 sealed decision reserve A/B 都必须完成，不能只在 external benchmark 或只在 demo 成功；M34 historical regression set 另行报告，不冒充新决策证据。
 
 ### 主要交付物
 
 - bounded RAG Subgraph experimental adapter；
-- Pipeline/Subgraph 同合同 dev、held-out、contract/security 视图；
+- Pipeline/Subgraph 同合同 dev、sealed decision reserve、historical regression、contract/security 视图；
 - business canonical Observation→Action→Evidence gain→Answer/Stop 证据；
 - 父子预算、无双循环、ACL/outbound/prompt injection、fallback 与 Trace/Eval 回归；
 - default/experimental/fallback 决策记录。
 
 ### 完成标志
 
-1. 首次 Observation 能在至少两种合格动作与停止之间正确选择；
+1. 全局 catalog 至少有两种合格动作；每次首次 Observation 能正确形成 eligible action set 并选择动作或停止，且至少一个 runtime/corpus 通过不同真实 Scenario 分别证明两种动作的 Observation-driven 选择、错误动作排除与 no-progress stop；
 2. 每次恢复可看到 EvidenceDelta、budget consumption、progress/no-progress 和终止；
 3. 顶层与子图不会对同一失败各循环一次；
-4. Pipeline/Subgraph 在同 corpus、合同、AnswerFlow、provider 条件和可比预算下完成未污染 held-out A/B；
+4. Pipeline/Subgraph 在同 corpus、合同、AnswerFlow、provider 条件和可比预算下完成新 sealed decision reserve A/B；reserve 的首次解封、访问和退出状态可审计；
 5. experimental adapter 即使不切默认也完整可运行、可回退、可追踪；
 6. 没有稳定净收益时 Pipeline 继续默认，不能把“实现 Subgraph”写成“效果提升”。
 
 ### 决策门 G4B-4
 
-**实现与默认化分离**：B4 实现是 Phase 4B 硬交付；是否切换默认由 held-out 的 Evidence/answer/citation/stop 净收益、额外调用、延迟、成本和安全等价性决定，并需用户确认。默认、experimental-only、fallback 三种结论都必须有正式记录。
+**实现与默认化分离**：B4 实现是 Phase 4B 硬交付；是否切换默认由新 sealed decision reserve 的 Evidence/answer/citation/stop 净收益、额外调用、延迟、成本和安全等价性决定，并需用户确认；M34 historical regression set 只提供历史连续性，不能单独切默认。默认、experimental-only、fallback 三种结论都必须有正式记录。
 
 ## 12. B5：Durable Task State
 
@@ -491,7 +496,8 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 | north-star canonical | 持续展示纵向能力增长 | 每片新增跑通一段，但不能单独承担泛化证明 |
 | required contract/security | 权限、预算、停止、Context、并发、恢复、Compact | 可重复运行，承担硬门 |
 | diagnostic/dev | 失败归因、动作选择、参数开发 | 可迭代；结果不能单独切默认 |
-| held-out decision | Pipeline/Subgraph、模型/策略默认决策 | 实验前冻结；污染后退出保留集 |
+| sealed decision reserve | Pipeline/Subgraph、模型/策略默认决策 | 使用新的 identity；实验前密封，记录首次解封与访问；一旦用于动作、Prompt 或参数选择即退出 decision set |
+| historical regression | M34 既有 120 题及其他已解封集合的历史连续性 | 可做回归和退化检测，不得再称未污染或单独承担默认切换证明 |
 | real-provider showcase | 少量真实自然语言交互与项目演示 | 与 deterministic Gate 分账；按 runbook 单次精确授权 |
 
 ### 14.3 Required Gate
@@ -526,11 +532,11 @@ RAG/Answer 继续分开报告 retrieval coverage、selected/generation-visible c
 ### 15.1 阶段级交付物
 
 - Evidence-driven top-level Decision Loop 与多维父子预算；
-- bounded RAG Subgraph experimental adapter、Pipeline fallback 和 held-out A/B；
+- bounded RAG Subgraph experimental adapter、Pipeline fallback、新 sealed decision reserve A/B 与 historical regression 视图；
 - TaskState/TaskDelta/turn-event 自然多轮 runtime；
 - durable checkpoint 与 in-memory compatibility adapter；
 - node-level Context Builder、实际入模投影与 Task Compact 基础版；
-- versioned seed、最小 demo caller、business RAG recovery case 与泛化后的 Hybrid operator；
+- 与 legacy 隔离且绑定实际 recipe/content/config 的 versioned seed/oracle profile、最小 demo caller、business RAG recovery case 与泛化后的 Hybrid operator；
 - Phase 4B Agent Scenario catalog、runner/artifact、required Gate、quality/net-benefit view 与 durable artifact manifest；
 - 北极星/非 happy-path 演示、Trace 回查链和 capability matrix。
 
@@ -541,7 +547,7 @@ Phase 4B 只有在以下条件全部满足后才能收工：
 1. 六项最终能力全部交付，不存在被改写成“未来按需优化”的持久状态、Compact 或 Subgraph；
 2. 北极星从 T1 连续执行到 T5，并分别通过 restart/multi-worker 与 compact extended variants；
 3. 顶层 Loop 由 Observation/EvidenceDelta 驱动，所有动作有预算、进展与确定性终止；
-4. RAG Subgraph 能在至少两种合格动作与停止之间选择，Pipeline 保留，默认决策有 held-out 证据；
+4. RAG Subgraph 的全局 catalog 至少有两种合格动作，每次运行按 runtime/corpus、ACL 与 Observation 形成 eligible action set 并选择动作或停止；至少一个 runtime/corpus 在不同真实 Scenario 下分别证明两种动作，Pipeline 保留，默认决策有新 sealed decision reserve 证据；
 5. 自然多轮支持任务修改、追问、补 Evidence、correction、switch、cancel 与受控 route 变化，不是固定字符串模板；
 6. durable checkpoint 通过 owner/tenant/role、CAS、restart、多 worker、TTL、clear 和不兼容版本门；
 7. node Context 与 Compact 可直接 Eval，compact 前后关键 typed 行为等价；
@@ -591,9 +597,11 @@ Phase 4B 参考顺序固定为：**本文合同 → 最新 state/代码/失败 E
 | 顶层与 RAG 双循环 | 同一失败被两层 rewrite/retry | Evidence requirement 边界、父子预算、action owner 与双循环 assertion |
 | Progress Policy 变第二个 Gate | 子图宣布“可回答”并生成答案 | Progress 只看 EvidenceDelta/可用动作；Shared Answer Gate 唯一 |
 | 循环只增加调用 | Evidence 不变仍继续 | Evidence gain/no-progress/duplicate 指标与确定性停止 |
-| 为 B4 伪造 RAG 失败 | 人工压低 top-k 或造语料证明 rewrite | B3 先观察真实 failure；单变量、business+external、held-out 隔离 |
+| 为 B4 伪造 RAG 失败 | 人工压低 top-k 或造语料证明 rewrite | B3 先观察真实 failure；单变量、business+external、sealed decision reserve 隔离 |
 | B3 为凑两动作无限延期 | campaign 无候选边界、预算或 review 点 | 预注册候选与预算；到点停止并由用户显式重规划，no-go 不冒充能力完成 |
-| 实现 Subgraph 即宣称提升 | 只展示 Graph 图或 dev case | implementation/default 分离；未污染 held-out、成本/安全等价 A/B |
+| 跨 runtime 各固定一个动作冒充选择 | action 只由 corpus identity 决定，不读取 Observation | 至少一个 runtime/corpus 用不同真实 Observation/Scenario 分别触发两种动作；验证错误动作排除与 stop |
+| 已解封集合冒充未污染决策集 | 继续用 M34 120 题调动作后又切默认 | historical regression 与新 sealed decision reserve 分账；记录 identity、首次解封、访问和退出状态 |
+| 实现 Subgraph 即宣称提升 | 只展示 Graph 图或 dev case | implementation/default 分离；新 sealed decision reserve、成本/安全等价 A/B |
 | checkpoint 变长期隐私库 | 保存完整历史、rows、正文或 answer | task boundary 最小 schema、TTL/clear/retention、访问与清理门 |
 | 应用层伪 CAS | 多 worker 同时 claim 成功 | 存储层条件更新与并发/重复 Scenario |
 | Compact 造成语义漂移 | 月份、否定、Evidence identity 丢失 | typed deterministic compact、high-risk refs、behavioral equivalence Gate |
@@ -607,7 +615,7 @@ Phase 4B 参考顺序固定为：**本文合同 → 最新 state/代码/失败 E
 2. **先真实 Observation，再允许动作**：Subgraph 是明确目标，但动作仍必须由失败 Evidence 准入；不把固定 Pipeline 机械拆成 Graph。
 3. **控制合同随消费方建设**：TaskState/Context 在 B1 落地，Action/Budget/Progress 在 B2 由真实 Loop 消费，Compact 在 typed ledger 稳定后落地，不预造无消费者抽象。
 4. **路线并行、施工交错**：Task/Loop 与 RAG Evidence 两条线逻辑并行；同一时间只维护一个 active module plan，完成并更新 state 后再选择下一片。
-5. **默认切换与能力实现分离**：Subgraph 必须实现；是否默认、是否启用远程模型或检索增强仍由 held-out、成本、安全和用户确认决定。
+5. **默认切换与能力实现分离**：Subgraph 必须实现；是否默认、是否启用远程模型或检索增强仍由新 sealed decision reserve、成本、安全和用户确认决定；已解封历史集只承担回归。
 6. **安全与 Eval 是能力组成**：ACL、outbound、Trace、Context、预算和 assertions 随每片进入，不留到 B6 补。
 7. **失败也是正确输出**：clarification、insufficient evidence、partial、blocked、external unavailable、no-progress 和 budget exhausted 都必须可解释、可评测。
 8. **保留实现空间**：roadmap 冻结 seam 和语义，不冻结类名、文件布局、框架 API、存储后端或参数；具体方案由当时代码、官方文档与 Eval 证据决定。
@@ -623,3 +631,10 @@ Phase 4B 参考顺序固定为：**本文合同 → 最新 state/代码/失败 E
 - 将 B3 改为预注册候选、预算、轮次与 review point 的有界 campaign；动作不足时暂停并由用户重规划，no-go 不冒充能力完成。
 - 强化 B0 的 seed—政策可合成性、最小双角色 caller、真实 business RAG case 与非测试陷阱纪律；将 T4 改为自然业务问法，并记录当前直接点名双政策的原问法会一次取全。
 - 将 B1 验收拆为 TaskDelta、确定性自然语言 seam、模型方案 real-provider E2E 三层证据，三者分账且不互相替代。
+
+### 2026-08-22：北极星、seed、reserve 与 RAG 动作语义闭合
+
+- 将 T1–T3 统一为按 `refunds.processed_at` 比较 7/8 月 `net_refund_amount`，并限制 T3 为证据支持的结构分解/归因。
+- 要求 Phase 4B 使用与 legacy 隔离、绑定实际 recipe/content/config fingerprint 的 seed/oracle profile；修正现有 seed 月份表述并禁止数据身份漂移。
+- 将 M34 已解封的 120 题改列 historical regression set，新增带污染、访问和首次解封账本的 sealed decision reserve。
+- 明确全局 action catalog、runtime/corpus 适用范围与单次 eligible action set；要求至少一个 runtime/corpus 在不同真实 Scenario 下分别证明两种 Observation-driven 动作，不以跨 runtime 静态分摊或单题强行同时暴露两种动作验收。

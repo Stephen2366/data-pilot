@@ -1,6 +1,6 @@
 # DataPilot AI Context Changelog — Phase 4
 
-> Phase 4 的新记录继续写入本文件头部；进入下一阶段后再将本文件转为历史档案。
+> 本文件已转为历史档案（Phase 4 收口于 M40）；Phase 4B 起的新记录写入 [`change-history/phase4b.md`](change-history/phase4b.md)，本文件不再承接新条目。
 >
 > 本文件保存 Phase 4 的完整模块档案、实验记录和历史取舍，按时间倒序排列。当前项目状态以 `docs/state/AI_CONTEXT.md` 为准；跨阶段索引见 `docs/state/CHANGELOG_INDEX.md`。
 >
