@@ -19,6 +19,14 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] Phase 4B Roadmap 正式立项（2026-08-22）
+
+- **改动范围**：用户确认 `docs/notes/phase4-rag-capability-status.md` 第 12 节可以升格为正式路线后，新建 `docs/phase4b-roadmap.md`，并同步 `AI_CONTEXT.md` 的阶段入口、当前状态、路线判断与 checkpoint 能力账本；未修改代码、测试、数据库/seed、Knowledge release、默认模型/embedding/retrieval、outbound policy、LangFuse 或任何运行配置。
+- **关键记录**：Phase 4B 被定义为已完成 Phase 4 之上的新能力阶段，不是原阶段返工。最终硬交付完整包含 Evidence-driven bounded Agent Loop、bounded Agentic RAG、任务级自然多轮、durable task state、node-level Context Builder、Context Compact 基础版，以及贯穿建设的北极星多轮 Scenario/Agent Scenario Eval。路线采用 B0–B6 纵向切片和 Task/Loop、RAG Evidence 两条交错主线；Subgraph 实现是硬交付，是否切默认继续由未污染 held-out 的净收益和用户确认裁决。
+- **历史边界**：M39 P6 strict `no_go` 仍是当时冻结 Evidence 下的正确结论，不回写成开发失败。Phase 4B 先用新的 RAG funnel/action-level diagnostic Evidence 补齐其明确缺口，再实现 experimental Subgraph；当前 external lexical 默认、M37 进程内 checkpoint、M38 deterministic Hybrid 和全部 Phase 4 artifact 保持不变、不可混算。
+- **参考与验证**：按 `phase4-reference.md` 复核 agentic-rag-for-dummies 的 Graph/state/context/Tool action、Alibaba DataAgent 的固定 Graph 与持久 saver 接线、GustoBot 的多数据面汇合，以及 DB-GPT 的 retrieval/answer evaluator；roadmap 明确借鉴 seam 与不照搬边界。本文为文档/路线任务，仅执行完整回读、需求覆盖检查、路径/标题检索与 `git diff --check`，未运行 pytest、Eval、provider 或数据库命令。
+- **遗留 / Handoff**：下一步只能从 B0 另立 module plan，先确认 versioned 7/8 月 seed、最小 demo caller、业务双文档 RAG case、Hybrid operator 与 Agent Eval catalog；这些会改变长期事实或正式合同的精确选择仍需按 `AI_CONTEXT.md` 取得用户确认。
+
 ### [小修] Phase 4 后续 Agent / RAG 候选方案审查收口（2026-08-22）
 
 - 根据后续独立审查修订 `phase4-rag-capability-status.md` 的共同讨论稿：声明其只更新调查报告内部候选方向、尚不覆盖 roadmap/M39/当前运行事实；补齐顶层 Loop 与 RAG Subgraph 的职责、父子预算和禁止双循环边界，区分 Pipeline 固定单步增强与 Observation-driven 多步动作，增加 Turn Understanding outbound 前置、动作 Evidence 准入、首条/北极星多轮场景以及逐步完成标志，并将持久多轮与 Context Compact 基础版拆开。`AI_CONTEXT.md` 仅增加候选方案入口和非生效提示，P6 `no_go`、进程内 checkpoint、external lexical 默认及所有运行配置保持不变；未修改 roadmap、代码、测试或 Eval 结果。

@@ -6,13 +6,13 @@
 
 | 项目         | 当前值                                                       |
 | ------------ | ------------------------------------------------------------ |
-| 阶段路线     | `docs/phase4-roadmap.md`                                     |
+| 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M40 P7 跨路径 Trace 运行身份与阶段保证包已验收通过（2026-08-18） |
-| 当前 plan    | `docs/notes/m40-plan.md`                                     |
-| 当前 notes   | `docs/notes/m40-notes.md`                                    |
-| 候选后续方案 | `docs/notes/phase4-rag-capability-status.md` 第 12 节“当前商讨出的大致方案”；用户与 AI 共同讨论稿，仍待其他会话审查，尚未写入 roadmap |
-| 待决事项     | P6 严格 no-go 仍固定；M40 P7 technical assurance 通过不等于 Phase 4 人工验收或生产认证 |
+| 当前活动模块 | Phase 4 已完成；Phase 4B roadmap 已正式建立，B0 module plan 尚未立项（2026-08-22） |
+| 当前 plan    | —（下一步按 `docs/phase4b-roadmap.md` 的 B0 另立 module plan） |
+| 当前 notes   | `docs/notes/phase4-rag-capability-status.md`（Phase 4B 方案来源与调查材料） |
+| 后续正式路线 | `docs/phase4b-roadmap.md`；最终硬交付包含 Evidence-driven Loop、bounded Agentic RAG、自然多轮、durable state、node Context、Compact 与贯穿 Agent Eval |
+| 待决事项     | B0 的 exact seed/caller/release/Hybrid operator/Eval catalog 仍须在 module plan 中确认；M39 P6 历史 no-go、当前进程内 checkpoint、external lexical 默认与运行配置均未改变 |
 | 更新时间     | 2026-08-22                                                   |
 
 ## 必读规则
@@ -64,7 +64,7 @@
 
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
 
-- (2026-08-22) `phase4-rag-capability-status.md` 第 12 节保存用户与 AI 当前共同讨论的候选后续方案：拟把 experimental bounded RAG Subgraph、持久任务状态、node-level Context Builder 与 session Context Compact 基础版列为后续明确交付目标，并把“是否实现 Subgraph”与“是否切默认”分开。该方案仍待其他会话审查，尚未写入 roadmap；因此不改变下述 P6 `no_go`、当前进程内 checkpoint、external lexical 默认或任何运行配置。
+- (2026-08-22) 用户已确认 `phase4-rag-capability-status.md` 第 12 节进入正式路线，现由 `docs/phase4b-roadmap.md` 升格为 Phase 4B 推进事实源。Phase 4B 是已完成 Phase 4 之上的新能力阶段，最终硬交付包含 experimental bounded RAG Subgraph、任务级自然多轮、持久任务状态、node-level Context Builder、Context Compact 基础版和贯穿 Agent Scenario Eval；“实现 Subgraph”与“切换默认”继续分离。该路线升格不改变 M39 P6 当时冻结 Evidence 下的正确 `no_go`、当前进程内 checkpoint、external lexical 默认或任何运行配置。
 
 - (2026-08-17) M37 单独不等于 P4，但 M36 + M37 已共同完成 roadmap 定义的 P4 最小可验收基线；不宣称通用多轮。第二次追问、长历史 compact 和持久 checkpoint 不是当前 P4 硬门；跨 route/跨 Tool 补证据由 M38 的 P5 Hybrid 正式承接。M37“窄 B”仍是正式边界，不得退化为直接复用旧答案或默认扩到 external。
 - (2026-08-17) M38 已按 P5 口径完成保守 Hybrid 纵向基线：方案 A 的本地确定性 Synthesizer 是正式默认与长期 fallback；SQL/RAG 默认 required，不触发 G6 optional 放宽，不新增 Hybrid 数据出站。P5 不等于开放式跨来源研究 Agent。
@@ -83,7 +83,7 @@
 | P1 | 当前只有 demo/test caller resolver，生产认证尚未建设 | 出现非本地部署、真实用户/tenant、JWT/OAuth/SSO 或企业目录需求时，必须在现有 `CallerResolver` seam 接正式认证 adapter；“所有环境手工注入 resolver”不等于生产认证 | Phase 4 后续部署门 |
 | P2 | M35/M38 deterministic Router 只覆盖 closed-world SQL/RAG 和两类 canonical Hybrid operator | 先建立开放问法/混合意图 decision set 并形成稳定失败簇，再比较规则扩充、受控模型 fallback 或远程 Router；不得以“LLM 更完善”为由无 Eval 切换 | P3/P5 后续质量 |
 | P3 | `knowledge_docs` 有损 legacy 表仍保留 | 出现新 runtime consumer、知识后台/多实例发布、从旧表恢复授权/catalog，或双事实源风险时，必须正式设计数据库 projection 或删除 legacy 表；禁止继续追加字段把它伪装成 authority | 数据治理条件项 |
-| 条件项 | M37 checkpoint 仍为进程内，重启/多 worker 不恢复且 tombstone 不清扫 | 只有重启恢复或多 worker 会话成为 required Scenario 时才设计持久 checkpoint；LangGraph `InMemorySaver` 仍是内存态，不得把更换框架内存实现冒充持久化升级。清扫策略按容量证据单独触发 | P4/部署条件项 |
+| P1 | M37 checkpoint 仍为进程内，重启/多 worker 不恢复且 tombstone 不清扫 | Phase 4B 已把 durable task state 提升为最终硬交付；须在 TaskState/turn-boundary 稳定后建立新 state family、真正持久 adapter 与存储层条件更新，并覆盖 TTL/clear/多 worker/版本冲突。LangGraph `InMemorySaver` 仍是内存态，不能冒充持久化升级 | Phase 4B B5 |
 
 ## 已知的坑（活跃列表）
 
