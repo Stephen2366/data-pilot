@@ -259,3 +259,84 @@
 - [x] 已完整回读 `dev-log.md` 本次新增 M41 章节，并以第一次阅读视角检查术语、段落和扫读性；据此补充了首次出现术语的解释与未实现分层边界。
 - [x] 本轮未修改 `AI_CONTEXT.md`、`CHANGELOG_INDEX.md`、`change-history/`、代码或其它文档。
 - [x] `git diff --check` 通过；仅有 LF→CRLF 行尾转换提示，无内容格式错误。
+
+## M41 补充：external 难度套件与候选对比（2026-08-23）
+
+### Implementation checklist
+
+- [x] 为冻结 180 题增加独立 `difficulty=basic/core/hard` 元数据；难度只由题目原生类型与单/多文档属性决定，不使用当前模型答对率，避免评测泄漏。
+- [x] 保持 `difficulty`、`partition=diagnostic_dev/held_out`、`suite=smoke/basic/core/hard/reliability/full` 三个维度分离；held-out 继续显式停门，不把 held-out 偷换成 hard。
+- [x] 建立完整 180 题 canonical external catalog，再由 suite 与 partition 交集生成 selector；selector 只引用冻结题目 ID，不复制题面。
+- [x] 提供稳定的 external `smoke/basic/core/hard/reliability/full` 运行入口；smoke/reliability 只允许 dev，held-out/all 必须显式指定 partition。
+- [x] external 报告按 difficulty 输出题数、primary failure、assertion 三态和 funnel 命中，不再只展示 strata 题数。
+- [x] 增加版本化候选对比合同：默认继续 strict compare；只有显式声明 allowed runtime differences 时才允许候选 A/B，且题集、协议、scorer、assertion plan 等共同条件仍必须一致。
+- [x] 候选对比输出逐题 win/loss/tie、primary failure 迁移、difficulty 分层 assertion 变化、provider usage 与可用 latency 变化；不把自动结果冒充人工语义 correctness。
+- [x] 补充难度计数、suite/partition 闭集、held-out 停门、compare 非法放宽、单变量候选对比与分层报告测试。
+- [x] 更新 RAG runbook 与 M41 notes 素材；本次不运行真实 Qwen、不重跑 pre-fix 60 dev、不运行 120 held-out、不切换默认 lexical/Composer/model。
+
+### 设计素材与边界
+
+- 冻结 180 题的推荐难度规则：`basic` 为单文档 `basic`；`hard` 为多文档，或题型属于 `completeness/conflicting_info/intra_document_reasoning/project_related`；其余单文档题为 `core`。按当前 immutable question set 计数为 basic `64`、core `74`、hard `42`；dev 为 `21/25/14`，held-out 为 `43/49/28`。
+- `source_types` 只用于 smoke 分层抽样和报告观察，不参与难度判定；Confluence/Jira/Google Drive 是来源差异，不天然代表难度。
+- candidate compare 的核心不是“忽略 runtime 不同”，而是把允许变化的字段写进实验合同。未声明的任何 runtime 漂移继续失败关闭；多变量虽可诚实比较总体候选，但不能宣称单一组件因果。
+- 已完成的 `m41-rag-external-dev-20260822-01` 是 pre-fix candidate，不能自动升级为当前协议 baseline。本补充只提供以后建立 post-fix baseline 与模块 A/B 的工具，不在没有新授权时创建真实基线。
+
+### 实施结果与验证素材
+
+- external catalog 升级为 `phase4-rag-external-product-v2`：catalog identity 绑定完整 180 题、split 与 `enterprise-rag-difficulty-v1`；partition/suite 只改变 selector，不再产生不同题库。
+- 固定 dev suites：Smoke `9×1`；Basic `21×1`；Core `25×1`；Hard `14×1`；Reliability `6×3=18`；Full `60×1`。Smoke 覆盖三种难度和三类单来源，并包含跨来源冲突、completeness 与 intra-document reasoning。
+- report 只统计 RunSpec 真正选中的题，按 difficulty/partition/type/cardinality/source 输出 execution 数、primary diagnosis、required 三态与 retrieved/selected/visible/cited gold；避免 canonical 180 catalog 把未运行题混进分母。
+- compare 升级为 `phase4-rag-e2e-compare-v2`：无声明时仍 strict repeat；候选模式只放行 `--allow-runtime-difference` 明确列出的 `RAGResolvedRuntime` 字段。输出 paired `win/loss/tie/mixed/insufficient`、首失败层迁移、difficulty assertion、usage 和 AnswerFlow latency；人工 correctness 仍独立。
+- 真实 immutable dataset 只读核验：catalog `180`，difficulty `64/74/42`；dev suites 数量与上方冻结值一致。旧 60 dev artifact 自比较通过 compare-v2，结果 `60 tie`、usage/latency delta 为零；旧 artifact 没有 difficulty 字段，因此诚实归入 `not_applicable`，未改签历史证据。
+- 聚焦验证：`19 passed, 1 warning in 1.68s`。M31–M41 受影响回归：`234 passed, 1 warning in 61.56s`。warning 均为既有 Starlette TestClient/httpx deprecation。
+- CLI help、旧 artifact 离线 self-compare 与 immutable catalog/suite 只读检查通过；全程零 Tool/LLM provider 调用，没有真实 Eval 授权扩张。
+
+### 全仓 pytest 启动前 checkpoint
+
+- 关键决策：难度、partition、suite 三轴分离；候选 compare 使用显式 allowlist，而不是无条件忽略 runtime 漂移；旧 pre-fix artifact 保持不可变。
+- 改动范围：RAG Scenario/RunSpec metadata、external canonical catalog/selectors/CLI、分层报告、compare-v2/CLI、M41 tests 与 RAG runbook；普通 API、Router、retrieval、Composer、active release 和 external profile 均未修改。
+- 已完成验证：M41 聚焦 `19 passed`；M31–M41 受影响回归 `234 passed`；真实 180 metadata 与 suite 数量只读闭合；CLI/self-compare/diff check 通过。
+- 已知风险：尚无当前 v2/post-fix 真实 external dev baseline；未来建立 baseline 仍需用户单独授权。自动 paired verdict 不代表自然语言 correctness，仍须并列人工 review。
+- 待完成：后台全仓 pytest；完成并检查退出码后，更新最终验证结论和当前 Phase 技术档案。后台任务完成前不宣称本补充最终完成。
+
+### 全仓 pytest 后台任务（已完成并检查）
+
+- 启动时间：2026-08-23；PID `50660`。
+- 执行脚本：`.agent_work/temp/run_m41_supplement_full_pytest_20260823.ps1`。
+- stdout：`.agent_work/temp/m41-supplement-full-pytest-20260823.out`。
+- stderr：`.agent_work/temp/m41-supplement-full-pytest-20260823.err`。
+- 退出码：`.agent_work/temp/m41-supplement-full-pytest-20260823.exit`。
+- 完成标记：`.agent_work/temp/m41-supplement-full-pytest-20260823.done`。
+- 完成时间：`2026-08-23T01:22:51.9579888+08:00`；进程已退出，退出码 `0`。
+- 最终结果：`467 passed, 3 skipped, 1 warning in 492.31s (0:08:12)`。
+- warning：既有 Starlette TestClient/httpx deprecation，不影响本次合同。
+
+### M41 补充最终结论
+
+- external 180 题已经具备稳定、互斥的 basic/core/hard 难度字段，以及与 partition 正交的 smoke/basic/core/hard/reliability/full 运行套件。
+- 后续模块可以在相同题集/协议/scorer 下，通过显式 runtime allowlist 比较候选；未声明漂移继续失败关闭。自动 paired 结果仍须与人工语义 review 并列。
+- 聚焦、M31–M41 受影响回归和全仓验证全部通过；本补充没有创建真实 post-fix baseline，没有运行 120 held-out，也没有改变任何产品默认。
+
+## M41 补充：RAG Eval 用户入口去歧义（2026-08-23）
+
+### Implementation checklist
+
+- [x] 将 business RAG 的 smoke/core/diagnostic/reliability 四个用户套件合并为唯一 `business` 套件，覆盖现有 5 个业务合同场景、每题执行 1 次。
+- [x] 保留 `--scenario` 精确诊断入口，但删除旧 business selector，避免 `core` 同时指 business 与 external。
+- [x] 将 external 的 `diagnostic_dev` 设为 CLI 安全默认值；裸 `smoke/basic/core/hard/reliability/full` 统一解释为 external dev 套件。
+- [x] 在 RAG runbook 写清自然语言授权映射，以及 dev（练习诊断集）与 held-out（封存终考集）的区别和使用纪律。
+- [x] 更新 M41 聚焦测试与长期状态文档；只运行本次改动直接相关的测试，不重复执行全仓 pytest，不运行真实 Tool/LLM Eval。
+
+### 设计判断
+
+- business catalog 只有 5 个场景，重点是 release、ACL、安全拒绝和业务合同，不需要再向用户暴露四档套件。合并后仍可用 `--scenario` 定位单题，诊断能力没有丢失。
+- `basic/core/hard` 是 external 180 题的难度；`smoke/reliability/full` 是 external 的运行规模或重复协议。它们都不再与 business 共用名称。
+- external 默认使用 `diagnostic_dev`，因此用户日常只说“执行 core RAG Eval”即可；只有准备进行最终封存验证时，才需要明确说 `held-out`。
+
+### 实施与验证结果
+
+- `eval.run_rag_eval` 现在只接受 `--suite business` 或精确 `--scenario`；不传 suite 时也默认 business。旧四个 selector 文件已删除，新增 `rag-business` 统一 selector。
+- `eval.run_rag_external_eval --partition` 不再 required，安全默认值为 `diagnostic_dev`；`held_out/all` 仍必须显式传入。
+- 两个 CLI help 检查通过；M41 business lifecycle、review/compare 和 external suite 聚焦测试为 `13 passed, 1 warning in 1.75s`。warning 是既有 Starlette TestClient/httpx deprecation。
+- 第一次 pytest 因项目既有共享 `.agent_work/temp/pytest-tmp` 被 Windows 锁定，9 项停在 fixture setup、4 项通过；改用新的专用 `--basetemp` 后 13 项全部通过。该问题不是代码测试失败，未删除或修改被锁目录。
+- `git diff --check` 通过，仅有既有 LF→CRLF 提示；本轮没有调用 Tool/LLM，没有真实 Eval 成本，也没有重复跑全仓测试。

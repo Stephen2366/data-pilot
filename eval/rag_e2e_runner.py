@@ -96,6 +96,7 @@ def run_rag_eval(
                     "question_type": catalog.by_id()[scenario_id].question_type,
                     "source_types": list(catalog.by_id()[scenario_id].source_types),
                     "document_cardinality": catalog.by_id()[scenario_id].document_cardinality,
+                    "difficulty": catalog.by_id()[scenario_id].difficulty,
                     "gold_answer": catalog.by_id()[scenario_id].gold_answer,
                     "answer_facts": list(catalog.by_id()[scenario_id].answer_facts),
                     "expected_document_keys": list(catalog.by_id()[scenario_id].expected_document_keys),

@@ -27,11 +27,10 @@
 | 目标 | 最大 Qwen 调用 | 命令 |
 |---|---:|---|
 | 查看 CLI | 0 | `python -m eval.run_rag_eval --help` |
-| Smoke | 最多 1 | `python -m eval.run_rag_eval --selector smoke --run-id <run-id> --report eval/reports/<run-id>.md` |
-| Core | 最多 3 | `python -m eval.run_rag_eval --suite core --run-id <run-id> --report eval/reports/<run-id>.md` |
-| Diagnostic | 最多 1 | `python -m eval.run_rag_eval --suite diagnostic --run-id <run-id> --report eval/reports/<run-id>.md` |
-| Reliability | 最多 3 | `python -m eval.run_rag_eval --suite reliability --run-id <run-id> --report eval/reports/<run-id>.md` |
+| Business（全部 5 题，各 1 次） | 最多 4 | `python -m eval.run_rag_eval --suite business --run-id <run-id> --report eval/reports/<run-id>.md` |
 | 精确单题 | N × replicate | `python -m eval.run_rag_eval --scenario <scenario-id> [--scenario <id>] --replicate-count <n> --run-id <run-id> --report eval/reports/<run-id>.md` |
+
+business catalog 很小，旧 `smoke/core/diagnostic/reliability` 用户套件已合并为唯一 `business`。省略 `--suite` 也默认运行这 5 题；场景内部仍保留分类元数据，供报告诊断，但不再作为可运行套件。历史 Smoke artifact 保持原样，不改名、不改签。
 
 产物：
 
@@ -59,18 +58,40 @@ python -m eval.run_rag_m34_history `
 
 先查看参数：`python -m eval.run_rag_external_eval --help`
 
+### 自然语言授权约定
+
+- “执行一次 **business RAG Eval**”：运行 business 全部 5 题，各 1 次。
+- “执行一次 **smoke/basic/core/hard/reliability/full RAG Eval**”：运行对应 external suite，默认使用 `diagnostic_dev`。
+- “执行一次 **held-out core RAG Eval**”：只有明确带 `held-out` 时，才运行封存集中的 core。
+
+因此裸 `core`、`basic` 等词在 RAG Eval 中不再有 business/external 歧义。AI 应按本表、当前 dataset/profile identity 和新的唯一 run ID 直接执行一次，不再追问 `dev`；但不能自动扩大到 held-out、all、其他 suite、重复运行或切换 runtime。
+
+`dev` 可以理解为“平时练习和调参用的 60 道公开答卷”：允许反复查看错因并改模块。`held_out` 是“封存的 120 道期末卷”：避免开发时看答案、针对题目调参后得到虚高成绩。日常不必说 `dev`，因为它已是安全默认；只有确实要做最终裁决时才明确说 `held-out`。难度、运行协议与数据分区是三个独立维度：
+
+| suite | dev 题数 / executions | 说明 |
+|---|---:|---|
+| `smoke` | 9 / 9 | basic/core/hard 各 3 题；只允许 `diagnostic_dev` |
+| `basic` | 21 / 21 | 单文档直接事实题；全 180 中共 64 题 |
+| `core` | 25 / 25 | 单文档 semantic/constrained/miscellaneous；全 180 中共 74 题 |
+| `hard` | 14 / 14 | 多文档或 completeness/conflict/reasoning/project；全 180 中共 42 题 |
+| `reliability` | 6 / 18 | basic/core/hard 各 2 题，每题 3 次；只允许 `diagnostic_dev` |
+| `full` | 60 / 60 | partition 内全部题 |
+
+`held_out` 中仍有 basic/core/hard；它表示最终未污染裁决，不表示难度。`smoke/reliability` 是冻结 dev selector，CLI 拒绝把它们重新指向 held-out。任何真实 suite 都仍须按公共 runbook 获得一次精确授权；增加 `--suite` 不等于自动授权运行。
+
 ```powershell
 python -m eval.run_rag_external_eval `
   --dataset-root <dataset-root> `
   --profile-root <profile-root> `
   --profile-identity <profile-identity> `
-  --partition diagnostic_dev `
+  --suite smoke `
   --run-id <run-id> `
   --report eval/reports/<run-id>.md
 ```
 
-- `diagnostic_dev`：60 题。
+- `diagnostic_dev --suite full`：60 题；它是默认 partition，日常可省略 `--partition`。
 - `held_out`：120 题，必须单独获得明确授权；不得因为 dev 运行完成而自动执行。
+- `all --suite full`：180 题里程碑运行，必须明确授权整个范围，不是日常回归入口。
 - manifest/checkpoint/Trace：`.agent_work/temp/m41-rag-external-checkpoints/<run-id>/`
 - completed artifact：`eval/reports/m41-rag-external-artifacts/<run-id>.json`
 
@@ -88,6 +109,22 @@ python -m eval.run_rag_external_eval `
 | 严格 compare | `python -m eval.run_rag_compare --left <left.json> --right <right.json> --output <compare.json>` |
 
 verdict 必须逐 execution 闭集覆盖，只与自动 Gate 并列，不修改自动 assertion。catalog、selector、runtime、policy 或 scorer identity 不同，strict compare 必须拒绝。
+
+### 候选 A/B compare
+
+默认 compare 仍要求 runtime 完全一致。若某次实验预先声明了允许变化的 runtime 字段，可重复传入
+`--allow-runtime-difference`；除此之外的任何漂移继续失败关闭：
+
+```powershell
+python -m eval.run_rag_compare `
+  --left <baseline-artifact.json> `
+  --right <candidate-artifact.json> `
+  --allow-runtime-difference retrieval_adapter_identity `
+  --allow-runtime-difference retrieval_recipe_identity `
+  --output <candidate-compare.json>
+```
+
+候选 compare 仍强制 catalog、selector、题序/replicate、assertion plan、scorer 和 Scenario metadata 相同；输出逐 execution `win/loss/tie/mixed/insufficient`、首失败层迁移、difficulty 分层 assertion、provider usage 与 AnswerFlow latency。它只描述自动 assertion 迁移，不能替代人工语义 verdict。同时允许多个字段只能证明“整体候选”变化，不能把收益因果归给其中某一个组件。
 
 ## 失败分层
 

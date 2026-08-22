@@ -65,6 +65,9 @@ class RAGScenario:
     question_type: str = "business"
     source_types: tuple[str, ...] = ()
     document_cardinality: str = "not_applicable"
+    # ★ difficulty 描述题目本身，classification 描述业务/数据分区；二者不能混用。
+    # 例如 held-out 里也同时存在 basic/core/hard，不能把“没看过”误叫成“困难”。
+    difficulty: Literal["basic", "core", "hard", "not_applicable"] = "not_applicable"
     gold_answer: str = ""
     answer_facts: tuple[str, ...] = ()
 
@@ -78,6 +81,8 @@ class RAGScenario:
             raise RAGEvalContractError("rag_scenario_invalid", "assertion ID 重复或 effect 冲突")
         if self.classification not in {"core", "diagnostic", "external_dev", "external_heldout"}:
             raise RAGEvalContractError("rag_scenario_invalid", "classification 未登记")
+        if self.difficulty not in {"basic", "core", "hard", "not_applicable"}:
+            raise RAGEvalContractError("rag_scenario_invalid", "difficulty 未登记")
         if len(self.expected_axes) != 4:
             raise RAGEvalContractError("rag_scenario_invalid", "expected_axes 必须恰好包含四轴")
         if not self.required_assertions:
@@ -237,6 +242,7 @@ def load_rag_catalog(path: Path) -> RAGScenarioCatalog:
                 question_type=str(raw.get("question_type") or "business"),
                 source_types=tuple(str(item) for item in raw.get("source_types") or ()),
                 document_cardinality=str(raw.get("document_cardinality") or "not_applicable"),
+                difficulty=str(raw.get("difficulty") or "not_applicable"),  # type: ignore[arg-type]
                 gold_answer=str(raw.get("gold_answer") or ""),
                 answer_facts=tuple(str(item) for item in raw.get("answer_facts") or ()),
             )

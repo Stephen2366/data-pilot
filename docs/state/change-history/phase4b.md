@@ -19,6 +19,21 @@
 
 ## 变更记录（新的在上）
 
+### [小修] M41 RAG Eval 用户入口去歧义（2026-08-23）
+
+- business catalog 只有 5 个业务合同场景，故将旧 smoke/core/diagnostic/reliability selectors 合并为唯一 `business`（5 题各 1 次）；保留 `--scenario` 单题入口和场景内部诊断分类，历史 Smoke artifact 不改名、不改签。
+- external `diagnostic_dev` 改为 CLI 安全默认。runbook 约定裸 smoke/basic/core/hard/reliability/full 均表示 external dev；只有明确说 `held-out` 才触碰 120 题封存集，从而消除 business core 与 external core 的歧义。
+- 本次只改评测入口、selector、测试与状态文档，未运行真实 Tool/LLM Eval，也未改变产品 RAG runtime、题目、评分器或既有基线。
+- 验证：两个 CLI help 通过；M41 聚焦 `13 passed, 1 warning in 1.75s`，warning 为既有 TestClient/httpx deprecation；未重复执行全仓 pytest。
+
+### [模块任务] M41 补充：external 难度套件与候选 A/B compare（2026-08-23）
+
+- external catalog 升级为 `phase4-rag-external-product-v2`：完整 180 题共享一个 identity，新增只由原生题型与单/多文档决定的 difficulty `basic/core/hard=64/74/42`；difficulty、60/120 partition 与 suite 三轴分离，题面/gold 仍只读 immutable dataset。
+- 冻结 dev suites：smoke `9`、basic `21`、core `25`、hard `14`、reliability `6×3`、full `60`。Smoke/Reliability 只允许 dev；held-out/all 必须显式选择且真实运行仍需独立授权。报告只统计 RunSpec 选中题，并按 difficulty/partition/type/cardinality/source 输出失败层、assertion 三态和 funnel gold。
+- compare 升级为 `phase4-rag-e2e-compare-v2`：默认 runtime 完全一致的 strict repeat；候选模式只允许 CLI 显式登记的 runtime 字段变化，其他协议/题集/scorer/metadata 漂移继续失败关闭。输出逐 execution `win/loss/tie/mixed/insufficient`、首失败层迁移、difficulty assertion、provider usage 和 AnswerFlow latency；自动结果不替代人工 correctness。
+- 旧 `m41-rag-external-dev-20260822-01` 保持不可变、仍为 pre-fix candidate，未补造 difficulty 或升级为基线。本次零 provider 调用，未运行 120 held-out、未切 lexical/Composer/model/普通 API 默认。
+- 验证：真实 immutable catalog/suite 只读闭合；旧 artifact compare-v2 self-check 为 `60 tie`；聚焦 `19 passed, 1 warning`，M31–M41 回归 `234 passed, 1 warning`，全仓 `467 passed, 3 skipped, 1 warning in 492.31s`。warning 为既有 TestClient/httpx deprecation。
+
 ### [实验] M41 external 180 题分层接入与 60 dev 真实产品链路（2026-08-23）
 
 - 直接复用 M34 immutable 180 question set、gold、原生 `question_type × source_signature × document_cardinality` 与冻结 60 dev / 120 held-out split；不复制题面。旧 Answer + lexical retrieval artifacts 已零 Tool/LLM 投影为逐题分层历史报告，旧证据未保存的产品层与 selected/generation-visible 明示 `not_observed`。

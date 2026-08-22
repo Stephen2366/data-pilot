@@ -70,7 +70,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - M38 的 Hybrid RAG branch 调用 `RAGAnswerFlow.prepare_for_hybrid()`：复用同一 Knowledge Tool、active release 与 Shared Gate，只交付本轮 `generation_visible` Document Evidence 给唯一 Hybrid Synthesizer，不运行 Composer/单路 citation validator，也不生成 RAG 子答案。
 - M41 `phase4-rag-e2e-v1` 通过 eval-only app-state factory 注入 Composer，但每题仍真实经过 `/api/query → caller → turn → Router → Harness → RAG Tool → business AnswerFlow → API/Trace`；退出后恢复 app state，普通 API 继续使用 deterministic Composer。一次 execution 形成共享 Evidence，scorer/report/triage/review/compare 不重跑 retrieval 或 provider。
 - 用户确认的 `phase4-rag-eval-business-generation-outbound-v1` 只允许显式 M41 CLI 把 active release 中已通过 caller/ACL/Gate、且 source class 为 `role_restricted_policy_text` / `metric_definition` 的 generation context 发给 Qwen；`security_policy`、未知类别或 identity 漂移在网络前失败关闭。它不是默认 `phase4-outbound-v1` 的扩权，也不得用于普通 API。
-- M41 external catalog 直接审计和读取 M34 immutable question set，保留 60 dev / 120 held-out 以及原生 question type、source type、single/multi-document 分层；不在项目内复制 180 道题形成第二事实源。eval-only fixed-RAG Router 只固定进入 RAG 分支，因此评测 Harness/RAG Tool/AnswerFlow，不声称验证自然语言 Router 分类。
+- M41 external `phase4-rag-external-product-v2` 直接审计完整 M34 immutable 180 question set；difficulty `basic/core/hard=64/74/42`、partition `60 dev/120 held-out` 与 suite `smoke/basic/core/hard/reliability/full` 三轴分离，不复制题面。eval-only fixed-RAG Router 只固定进入 RAG 分支，因此评测 Harness/RAG Tool/AnswerFlow，不声称验证自然语言 Router 分类。
 
 ## 当前评测结论
 
@@ -102,8 +102,8 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 - M36 `phase4-harness-turn-v1`：8 组 sequence，证明 initial pending → 一次 resume/clear、owner/version/TTL/concurrency/budget stop 和安全 Trace；Graph 本身仍无 checkpoint。
 - M37 `phase4-harness-followup-v1`：10 组 sequence / 22 turn evidence / 50 required，证明 SQL 强制重查、业务 Evidence 重水化或变化后重检索、external 强制重检索、ACL 零 retrieval 拒绝，以及 owner/delta/budget/concurrency 的 pre-Graph stop。该确定性 contract 不属于长期真实 RAG 质量基线。
 - M38 `phase4-harness-hybrid-v1`：5 Scenario / 25 required，证明 canonical Hybrid 的两支 required、各一次预算、complete 的 SQL/Document 双绑定、单支 partial、SQL Guard stop 与 conflict；同样只是确定性控制/安全合同，不是开放 Hybrid 或真实 RAG 质量基线。
-- M41 `phase4-rag-e2e-v1`：canonical business RAG catalog + smoke/core/diagnostic/reliability selectors；冻结 product runtime、release/corpus/retrieval/Composer/policy/caller identity，建立 retrieved→selected→generation-visible→provider/support→cited→answer funnel、closed-world artifact、Gate、triage、review 和 compare。当前已有一次真实 completed Smoke，但尚未登记正式长期基线。
-- M41 external-180：复用同一 Evidence/Gate/review 框架，另以 external catalog、fixed-RAG eval route、M34 profile 和 public benchmark outbound policy跑冻结 60/120；业务题与 external 题不得混成同一分数。
+- M41 `phase4-rag-e2e-v1`：canonical business RAG catalog 对外只保留唯一 `business` selector（5 题各 1 次）；场景内部分类只用于诊断。冻结 product runtime、release/corpus/retrieval/Composer/policy/caller identity，建立 retrieved→selected→generation-visible→provider/support→cited→answer funnel、closed-world artifact、Gate、triage、review。external 的裸 smoke/basic/core/hard/reliability/full 默认指向 dev；`phase4-rag-e2e-compare-v2` 默认 strict repeat，只有显式声明允许变化的 runtime 字段才进入候选 A/B。
+- M41 external-180：完整 180 catalog 复用同一 Evidence/Gate/review 框架，以 partition × suite 选择运行范围；dev 为 smoke 9、basic 21、core 25、hard 14、reliability 6×3、full 60。业务题与 external 题不得混成同一分数。
 
 ## 活跃风险与后续边界
 
@@ -112,7 +112,7 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
 - **能力范围**：M38 已把两类 canonical SQL + Document Hybrid 接入同一 Harness，但不是自由多轮或开放跨来源研究。第二次追问、Hybrid follow-up、optional branch、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
-- **M41 后续真实运行门**：business Smoke 与 external 60 dev 均已按用户授权完成；120 held-out、business Core/Diagnostic/Reliability 或任何重跑仍须新的精确授权。external dev artifact 是 Composer 误分类修正前的 pre-fix candidate；原件不得改签，未来新协议 run 不得伪装成直接复现。
+- **M41 后续真实运行门**：历史 business Smoke 与旧 external 60 dev 均已按用户授权完成；当前 business 入口已合并为 5 题全量。external 默认 dev，120 held-out/all 仍须明确说出；任何真实运行都只授权一次，不得自动重跑或扩大 suite。旧 external dev artifact 是 Composer 误分类修正前、且缺 difficulty 的 pre-fix candidate；原件不得改签，未来 v2/post-fix run 不得伪装成直接复现。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **默认切换**：semantic candidate、Hybrid、rerank 或新 recipe 必须产生新 identity，并以同 split 的单变量 A/B 和 held-out 证据经用户确认后才能切换。
 - **未接入候选**：WixQA 仍只是项目外候选，未索引、未评测、也不属于 active corpus；后续若重新考虑，需另开 corpus 调查和接入计划。

@@ -2,7 +2,7 @@
 
 > 本文是评测数字、分母、artifact、实验状态与可比性规则的唯一详细账本。`rag-current-state.md` 只保留 RAG 当前运行口径和结论摘要；两处出现同一 profile identity 时，以本文判断“能否比较”，以 `rag-current-state.md` 判断“当前运行使用什么”。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
-更新时间：2026-08-22
+更新时间：2026-08-23
 
 ## 当前状态
 
@@ -14,7 +14,8 @@
 - **M38 Hybrid 合同**：`phase4-harness-hybrid-v1` 是独立 deterministic 控制/安全 artifact（5 Scenario / 25 required），不与 M27 或 M34 的真实质量/长期数字混算；完整能力边界见 `rag-current-state.md` 和 Phase 4 changelog。
 - **M39 P6 readiness audit**：只读取六份冻结 M34 输入并校验 SHA-256 / identity / split / runtime；它不是新的 retrieval 或 Answer Eval，也不新增质量基线。audit `324ec7f8...b726c6` 的严格 `no_go`、dev 分层计数与重开缺口见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
 - **M40 P7 technical assurance**：`phase4-assurance-v1` 是九个现有 deterministic family 的 closed-world 技术 Gate，另以 `phase4-trace-rehearsal-v1` 关联 SQL、RAG、Hybrid、澄清恢复和安全拒绝的同次 API/Trace 安全投影。它只登记 contract/artifact identity 与 P6 verified `no_go`，不产生新的质量分数、不混入 M27/M34 数字，也不等于 Phase 4 人工验收或生产就绪。
-- **M41 business RAG 产品 Eval**：当前合同为 `phase4-rag-e2e-v1`，使用 business 22-entry release，经 `/api/query` 产品 Harness 一题一次执行，并提供 funnel/Gate/triage/review/compare。首次真实 Qwen Smoke `m41-rag-smoke-20260822-01` 已 completed，自动 Gate 与逐题人工 review 均通过；它是当前有效实验快照，不是正式长期基线，也不得拿 M34 external 或 M31–M40 deterministic artifact 与其混算。
+- **M41 business RAG 产品 Eval**：当前合同为 `phase4-rag-e2e-v1`，用户入口已合并为唯一 `business` selector（5 题各 1 次），并保留 `--scenario` 单题诊断。首次真实 Qwen Smoke `m41-rag-smoke-20260822-01` 是合并前的历史 2 题 artifact，已 completed 且 review 通过；原件不改签，也不能冒充当前 5 题 Business 结果。
+- **M41 external 套件与候选对比**：完整 180 catalog 的 difficulty 为 basic/core/hard `64/74/42`，与 dev/held-out partition、smoke/basic/core/hard/reliability/full suite 分离。compare-v2 默认只作同 runtime strict repeat；候选 A/B 必须显式声明允许变化的 runtime 字段，自动 paired 迁移仍不等于人工 correctness。当前没有 v2/post-fix 真实产品基线。
 - **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
 ## 读数与分母
@@ -42,7 +43,7 @@ Gate 也是独立视图：selector / suite policy 决定 assertion 为 `required
 - retrieval-only benchmark 继续独立记录；它不调用 PipelinePort，不能证明端到端 Text2SQL 收益。
 - M34 RAG 只在 dataset / question set / split / profile / parser / unit recipe / top-k 与评分口径一致时比较；adapter、embedding、Composer、context budget 或 support/citation 合同变化必须以新 identity 形成候选，不得覆盖本基线。
 - M34 retrieval 与 Answer/Citation 是两层证据：retrieval gold coverage 不能冒充答案正确率；`answer_status=complete` 只表示回答及引用合同闭合，也不能冒充 correctness。M34 未启用 LLM Judge。
-- M41 completed run 只在 catalog/selector/replicate、assertion plan/scorer、business release/corpus、retrieval adapter/recipe、Composer/model/provider、release + generation outbound policy、caller fixture 与 timeout/retry 全部相同时严格 compare；当前 compare 拒绝任何 identity 漂移，不提供跨候选升降解释。
+- M41 completed run 的 strict repeat 只在 catalog/selector/replicate、assertion plan/scorer、Scenario metadata 与完整 resolved runtime 相同时成立。compare-v2 的候选模式仍要求前述非 runtime 条件全部相同，并只放行 `--allow-runtime-difference` 预注册字段；未声明漂移失败关闭。多个允许字段只能解释整体候选，不能做单组件因果归因；paired assertion/失败层/usage/latency 与人工语义 verdict 并列，不互相替代。
 
 ### 人工复核的边界
 

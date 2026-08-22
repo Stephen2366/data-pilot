@@ -2515,6 +2515,8 @@ M40 已经通过技术收口和用户验收，因此下一步不应机械地把�
 
 **简述**：M41 把 RAG 评测从“各模块单独测过”升级为“同一道题真实经过产品链路，并能逐层定位失败”；随后又把 M34 的 180 道 external（外部基准）题接入这套诊断体系，完成 60 道真实 dev（开发集）运行和人工复核。
 
+> **后续入口简化（2026-08-23）**：business 的四个小套件已合并为唯一 `business`（5 题各 1 次）；裸 `smoke/basic/core/hard/reliability/full` 只表示 external，默认跑 dev。`held-out` 是封存终考集，只有明确说出才运行。下文 Smoke 数字是合并前历史实验，原 artifact 保持不变。
+
 ### 先用大白话讲
 
 可以把 RAG 想成一个企业资料室：**检索员**负责找材料，**选稿员**决定哪些材料交给模型，**撰稿人**负责写答案，**档案员**检查引用是否真的指向原件。
@@ -2583,13 +2585,13 @@ M41 的核心矛盾是：**真实 RAG 质量证据与产品运行链路彼此断
    - **证据纪律**：已经完成的 60 题 artifact 不改写、不重新签名、不偷偷重跑，而是明确标为 **pre-fix candidate（修复前候选快照）**。未来新 run 必须使用新 identity，不能伪装成严格同协议对比。
    - **验证证据**：修正后 M41 聚焦测试 **14 passed**，M31–M41 受影响回归 **229 passed**，全仓 **462 passed、3 skipped、1 warning**。
 
-5. **当前还缺少真正面向使用者的 external 运行档位。**
+5. **M41 收工时还缺少真正面向使用者的 external 运行档位。**
 
    180 题本身带有 question type、source 和 document cardinality，但这些属于题目属性；`diagnostic_dev/held_out` 属于实验切分。它们都不能替代 Text2SQL 那种直接可运行的能力层级。
 
-   - **当前缺口**：external CLI 目前主要暴露 60 dev / 120 held-out partition（分区），还没有完整的 `smoke/core/basic/hard/reliability/full` suite（运行套件）。
+   - **当时缺口**：external CLI 主要暴露 60 dev / 120 held-out partition（分区），还没有完整的 `smoke/core/basic/hard/reliability/full` suite（运行套件）。
    - **影响**：上次 60 题只能叫一次 dev 子集诊断，不能称为完整的 RAG 分层运行体系；也不能让使用者用低成本 Smoke 后逐级扩大到 Core、Hard 和 Full。
-   - **正确后续**：应另立计划，以完整 180 题 canonical catalog 为主体建立稳定运行档位；原生题型、来源、单/多文档继续作为报告维度，60/120 只作为可选实验过滤条件。该能力在 M41 当前代码中**尚未实现**。
+   - **后续补充（2026-08-23）**：该缺口现已完成。完整 180 catalog 新增 basic/core/hard `64/74/42`，并提供 smoke/basic/core/hard/reliability/full；difficulty、60/120 partition 与 suite 三轴分离。compare-v2 还允许通过显式 runtime allowlist 做候选 A/B，未声明漂移继续拒绝。旧 60 dev 仍是 pre-fix candidate，没有被改签成新基线。
 
 ### 新概念
 
@@ -2645,7 +2647,7 @@ M41 的核心矛盾是：**真实 RAG 质量证据与产品运行链路彼此断
 - **业务数据出站采用独立 eval-only policy**：只允许已通过 active release、Caller、ACL 和 Gate 的指定政策/指标材料进入 Qwen；普通 API 不继承这个权限。
 - **external fixed-RAG 不冒充 Router 能力**：它证明产品 RAG 分支，不证明开放英文问法会被默认 Router 正确分类。
 - **旧 artifact 不补造证据，新 bug 不回写历史**：缺失层标 `not_observed`，协议修复后旧 run 标 pre-fix candidate。
-- **明确未完成的运行体验**：external 180 已有数据属性和 dev/held-out 分区，但 `smoke/core/basic/hard/reliability/full` 运行档位仍需单独规划，不能把 60 题结果包装成完整体系，汪。
+- **运行体验补充已完成**：external 180 现有 basic/core/hard 难度与 smoke/basic/core/hard/reliability/full 套件；held-out 仍保持独立授权门，不能把开发套件完成偷换成最终质量通过，汪。
 
 ### 有面试价值的亮点
 
@@ -2697,7 +2699,7 @@ M41 的核心矛盾是：**真实 RAG 质量证据与产品运行链路彼此断
 
 warning 是既有 Starlette TestClient/httpx deprecation，不影响当前合同。本轮没有运行 120 held-out、LLM Judge、remote embedding/Milvus、LangFuse Cloud 或真实 Hybrid LLM。
 
-**下一步**：先单独规划 external canonical suite。目标是提供 `smoke/core/basic/hard/reliability/full` 运行档位；180 题原生题型、来源和单/多文档作为报告维度，60/120 只作为实验过滤条件。计划确认前不运行 120 held-out，也不重跑已完成的 pre-fix 60 题。
+**后续补充（2026-08-23）**：external canonical suite 与候选 compare 已实现；聚焦 `19 passed`、M31–M41 回归 `234 passed`、全仓 `467 passed / 3 skipped / 1 warning`。下一步不是继续搭评测框架，而是在用户单独授权后建立 v2/post-fix dev baseline；在此之前不运行 120 held-out，也不重跑或改签已完成的 pre-fix 60 题。
 
 可复制验证命令：
 

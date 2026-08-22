@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from hashlib import sha256
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from eval.rag_e2e_contracts import RAGEvalContractError, validate_completed_artifact
+from eval.rag_e2e_contracts import RAGEvalContractError, canonical_hash, validate_completed_artifact
 
 
 REVIEW_FORMAT = "phase4-rag-e2e-review-v1"
@@ -119,29 +120,192 @@ def apply_verdicts(bundle: Mapping[str, Any], verdicts: Mapping[str, Mapping[str
     return copied
 
 
-def compare_completed(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[str, Any]:
-    """只比较同 catalog/protocol/runtime/scorer；候选变量不同须另建显式实验合同。"""
+def _primary_stage(assertions: list[Mapping[str, Any]]) -> str:
+    """从 artifact 内已有 assertion 重建首个失败层，不重新执行 scorer。"""
+
+    priority = (
+        ("product_runtime", {"route_correct", "axes_correct", "reason_correct", "graph_path_correct", "rag_tool_once", "response_trace_consistent", "runtime_identity_complete"}),
+        ("retrieval", {"retrieved_gold"}),
+        ("selection", {"selected_gold"}),
+        ("generation_context", {"generation_visible_gold"}),
+        ("provider_or_support", {"provider_observed", "composer_support_valid", "no_generation"}),
+        ("citation", {"cited_gold"}),
+        ("answer", {"answer_present", "answer_absent", "safe_fallback_answer", "required_answer_terms", "forbidden_terms_absent"}),
+    )
+    failed_ids = {str(item["assertion_id"]) for item in assertions if item["status"] == "failed"}
+    for stage, ids in priority:
+        if failed_ids & ids:
+            return stage
+    return "not_observed" if any(item["status"] == "not_observed" for item in assertions) else "passed"
+
+
+def _latency_summary(payload: Mapping[str, Any]) -> dict[str, float | int | None]:
+    """比较已保存的 AnswerFlow elapsed_ms；缺字段时诚实返回 count=0。"""
+
+    values = sorted(
+        float(item.get("rag_diagnostics", {}).get("elapsed_ms"))
+        for item in payload["executions"]
+        if item.get("rag_diagnostics", {}).get("elapsed_ms") is not None
+    )
+    if not values:
+        return {"count": 0, "mean_ms": None, "p50_ms": None, "p95_ms": None}
+
+    def percentile(fraction: float) -> float:
+        index = min(len(values) - 1, max(0, int((len(values) - 1) * fraction + 0.5)))
+        return round(values[index], 3)
+
+    return {
+        "count": len(values),
+        "mean_ms": round(sum(values) / len(values), 3),
+        "p50_ms": percentile(0.50),
+        "p95_ms": percentile(0.95),
+    }
+
+
+def compare_completed(
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+    *,
+    allowed_runtime_differences: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """默认严格比较；显式声明 runtime 字段后才允许候选 A/B。"""
 
     # 步骤 1：先证明两边都是各自闭合的 completed artifact =============================
     validate_completed_artifact(left)
     validate_completed_artifact(right)
+    allowed_runtime_differences = tuple(sorted(set(allowed_runtime_differences)))
     left_spec, right_spec = left["run_spec"], right["run_spec"]
-    # 步骤 2：只忽略 run_id；所有影响实验语义的 identity 都必须相同 ---------------------
+    # 步骤 2：题集、协议和 scorer 永远相同；runtime 只允许预注册字段变化。--------------
     comparable_fields = (
         "catalog_identity", "selector_identity", "selected_scenario_ids", "replicate_count",
-        "runtime", "assertion_plan", "scorer_identity",
+        "assertion_plan", "scorer_identity", "scenario_metadata",
     )
     mismatches = [field for field in comparable_fields if left_spec.get(field) != right_spec.get(field)]
     if mismatches:
         raise RAGEvalContractError("rag_compare_not_comparable", f"identity 不同: {mismatches}")
-    # 步骤 3：严格可比后才允许计算右减左的 assertion 变化 -------------------------------
+    left_runtime, right_runtime = dict(left_spec.get("runtime") or {}), dict(right_spec.get("runtime") or {})
+    known_runtime_fields = set(left_runtime) & set(right_runtime)
+    unknown_allowed = set(allowed_runtime_differences) - known_runtime_fields
+    if unknown_allowed:
+        raise RAGEvalContractError(
+            "rag_compare_allowed_difference_unknown", f"未知 runtime 字段: {sorted(unknown_allowed)}"
+        )
+    runtime_differences = tuple(
+        sorted(key for key in set(left_runtime) | set(right_runtime) if left_runtime.get(key) != right_runtime.get(key))
+    )
+    undeclared = set(runtime_differences) - set(allowed_runtime_differences)
+    if undeclared:
+        raise RAGEvalContractError(
+            "rag_compare_not_comparable", f"未声明的 runtime 差异: {sorted(undeclared)}"
+        )
+
+    # 步骤 3：在相同 execution/assertion 闭集上做 paired compare。----------------------
     def status_counts(payload: Mapping[str, Any]) -> dict[str, int]:
         return {name: sum(item["status"] == name for item in payload["assertions"]) for name in ("passed", "failed", "not_observed")}
     l_counts, r_counts = status_counts(left), status_counts(right)
+    metadata = {str(key): dict(value) for key, value in right_spec.get("scenario_metadata") or ()}
+    left_assertions: dict[tuple[str, int], list[Mapping[str, Any]]] = {}
+    right_assertions: dict[tuple[str, int], list[Mapping[str, Any]]] = {}
+    for target, payload in ((left_assertions, left), (right_assertions, right)):
+        for item in payload["assertions"]:
+            target.setdefault((str(item["scenario_id"]), int(item["replicate"])), []).append(item)
+    paired: list[dict[str, Any]] = []
+    verdict_counts: Counter[str] = Counter()
+    primary_transitions: Counter[str] = Counter()
+    difficulty_assertions: dict[str, dict[str, Counter[str]]] = {}
+    for key in left_assertions:
+        before = {str(item["assertion_id"]): str(item["status"]) for item in left_assertions[key]}
+        after = {str(item["assertion_id"]): str(item["status"]) for item in right_assertions[key]}
+        if before.keys() != after.keys():
+            raise RAGEvalContractError("rag_compare_not_comparable", f"assertion 闭集漂移: {key}")
+        transitions = Counter(f"{before[name]}->{after[name]}" for name in before)
+        has_unknown_transition = any(
+            before[name] != after[name] and "not_observed" in {before[name], after[name]} for name in before
+        )
+        improved = transitions["failed->passed"]
+        regressed = transitions["passed->failed"]
+        if has_unknown_transition:
+            verdict = "insufficient"
+        elif improved and regressed:
+            verdict = "mixed"
+        elif improved:
+            verdict = "win"
+        elif regressed:
+            verdict = "loss"
+        else:
+            verdict = "tie"
+        verdict_counts[verdict] += 1
+        left_primary = _primary_stage(left_assertions[key])
+        right_primary = _primary_stage(right_assertions[key])
+        primary_transitions[f"{left_primary}->{right_primary}"] += 1
+        difficulty = str(metadata.get(key[0], {}).get("difficulty") or "not_applicable")
+        bucket = difficulty_assertions.setdefault(
+            difficulty, {"left": Counter(), "right": Counter(), "delta": Counter()}
+        )
+        for name in ("passed", "failed", "not_observed"):
+            left_value = sum(value == name for value in before.values())
+            right_value = sum(value == name for value in after.values())
+            bucket["left"][name] += left_value
+            bucket["right"][name] += right_value
+            bucket["delta"][name] += right_value - left_value
+        paired.append({
+            "record_id": f"{key[0]}:r{key[1]}",
+            "difficulty": difficulty,
+            "verdict": verdict,
+            "assertion_transitions": dict(sorted(transitions.items())),
+            "primary_transition": f"{left_primary}->{right_primary}",
+        })
+
+    def usage(payload: Mapping[str, Any]) -> dict[str, int]:
+        totals: Counter[str] = Counter()
+        for execution in payload["executions"]:
+            totals.update({str(key): int(value) for key, value in execution.get("provider_usage", {}).items()})
+        return dict(sorted(totals.items()))
+
+    left_usage, right_usage = usage(left), usage(right)
+    usage_keys = set(left_usage) | set(right_usage)
+    experiment = {
+        "allowed_runtime_differences": list(allowed_runtime_differences),
+        "actual_runtime_differences": list(runtime_differences),
+        "shared_catalog_identity": left_spec["catalog_identity"],
+        "shared_selector_identity": left_spec["selector_identity"],
+        "shared_scorer_identity": left_spec["scorer_identity"],
+    }
+    left_latency, right_latency = _latency_summary(left), _latency_summary(right)
+    latency_delta = {
+        key: (
+            None
+            if left_latency[key] is None or right_latency[key] is None
+            else round(float(right_latency[key]) - float(left_latency[key]), 3)
+        )
+        for key in ("mean_ms", "p50_ms", "p95_ms")
+    }
     return {
-        "format": "phase4-rag-e2e-compare-v1",
-        "strictly_comparable": True,
+        "format": "phase4-rag-e2e-compare-v2",
+        "comparison_mode": "candidate" if runtime_differences else "strict_repeat",
+        "strictly_comparable": not runtime_differences,
+        "experiment_contract": {**experiment, "identity": canonical_hash(experiment)},
         "left": {"run_id": left_spec["run_id"], "artifact_identity": left["artifact_identity"], "gate": left["gate"], "assertions": l_counts},
         "right": {"run_id": right_spec["run_id"], "artifact_identity": right["artifact_identity"], "gate": right["gate"], "assertions": r_counts},
         "delta": {key: r_counts[key] - l_counts[key] for key in l_counts},
+        "paired_summary": dict(sorted(verdict_counts.items())),
+        "paired_executions": paired,
+        "primary_failure_transitions": dict(sorted(primary_transitions.items())),
+        "difficulty_assertions": {
+            difficulty: {side: dict(counts) for side, counts in views.items()}
+            for difficulty, views in sorted(difficulty_assertions.items())
+        },
+        "provider_usage": {
+            "left": left_usage,
+            "right": right_usage,
+            "delta": {key: right_usage.get(key, 0) - left_usage.get(key, 0) for key in sorted(usage_keys)},
+        },
+        "answer_flow_latency": {
+            "left": left_latency,
+            "right": right_latency,
+            "delta": latency_delta,
+        },
+        "interpretation_boundary": (
+            "paired verdict 只描述自动 assertion 迁移；自然语言 correctness 仍需并列人工 review。"
+        ),
     }

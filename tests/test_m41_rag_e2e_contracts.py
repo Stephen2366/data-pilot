@@ -19,12 +19,12 @@ from tests.test_m41_rag_e2e_runtime import RecordingComposer
 
 
 CATALOG = Path("eval/cases/rag/scenarios.yaml")
-SMOKE = Path("eval/cases/rag/selectors/smoke.yaml")
+BUSINESS = Path("eval/cases/rag/selectors/business.yaml")
 
 
 def _run(tmp_path: Path) -> dict:
     catalog = load_rag_catalog(CATALOG)
-    selector = load_rag_selector(SMOKE, catalog)
+    selector = load_rag_selector(BUSINESS, catalog)
     executor = RAGProductExecutor(
         composer=RecordingComposer(),
         runtime_metadata=ComposerRuntimeMetadata(model="fake"),
@@ -33,7 +33,7 @@ def _run(tmp_path: Path) -> dict:
     return run_rag_eval(
         catalog=catalog,
         selector=selector,
-        run_id="m41-test-smoke",
+        run_id="m41-test-business",
         executor=executor,
         checkpoint_root=tmp_path / "checkpoints",
         artifact_path=tmp_path / "artifact.json",
@@ -42,16 +42,16 @@ def _run(tmp_path: Path) -> dict:
     )
 
 
-def test_smoke_lifecycle_builds_completed_artifact_report_and_triage(tmp_path: Path) -> None:
+def test_business_lifecycle_builds_completed_artifact_report_and_triage(tmp_path: Path) -> None:
     artifact = _run(tmp_path)
 
     validate_completed_artifact(artifact)
     assert artifact["gate"]["status"] == "passed"
-    assert len(artifact["executions"]) == 2
+    assert len(artifact["executions"]) == 5
     assert (tmp_path / "report.md").read_text(encoding="utf-8").startswith("# Phase 4 RAG E2E Eval Report")
     triage = json.loads((tmp_path / "triage.json").read_text(encoding="utf-8"))
-    assert [item["primary_stage"] for item in triage["cases"]] == ["passed", "passed"]
-    manifest = json.loads((tmp_path / "checkpoints/m41-test-smoke/manifest.json").read_text(encoding="utf-8"))
+    assert [item["primary_stage"] for item in triage["cases"]] == ["passed"] * 5
+    manifest = json.loads((tmp_path / "checkpoints/m41-test-business/manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
 
 
@@ -62,7 +62,7 @@ def test_completed_artifact_rejects_tamper_and_duplicate_run(tmp_path: Path) -> 
         validate_completed_artifact(artifact)
 
     catalog = load_rag_catalog(CATALOG)
-    selector = load_rag_selector(SMOKE, catalog)
+    selector = load_rag_selector(BUSINESS, catalog)
     executor = RAGProductExecutor(
         composer=RecordingComposer(),
         runtime_metadata=ComposerRuntimeMetadata(model="fake"),
@@ -72,7 +72,7 @@ def test_completed_artifact_rejects_tamper_and_duplicate_run(tmp_path: Path) -> 
         run_rag_eval(
             catalog=catalog,
             selector=selector,
-            run_id="m41-test-smoke",
+            run_id="m41-test-business",
             executor=executor,
             checkpoint_root=tmp_path / "checkpoints",
             artifact_path=tmp_path / "artifact.json",
@@ -83,8 +83,8 @@ def test_completed_artifact_rejects_tamper_and_duplicate_run(tmp_path: Path) -> 
 
 def test_selector_identity_is_stable_and_unknown_scenario_is_rejected(tmp_path: Path) -> None:
     catalog = load_rag_catalog(CATALOG)
-    first = load_rag_selector(SMOKE, catalog)
-    second = load_rag_selector(SMOKE, catalog)
+    first = load_rag_selector(BUSINESS, catalog)
+    second = load_rag_selector(BUSINESS, catalog)
     assert first == second
 
     invalid = tmp_path / "invalid.yaml"
@@ -95,7 +95,7 @@ def test_selector_identity_is_stable_and_unknown_scenario_is_rejected(tmp_path: 
 
 def test_failed_run_requires_explicit_resume_and_reuses_legal_prefix(tmp_path: Path) -> None:
     catalog = load_rag_catalog(CATALOG)
-    selector = load_rag_selector(SMOKE, catalog)
+    selector = load_rag_selector(BUSINESS, catalog)
     composer = RecordingComposer()
     product = RAGProductExecutor(
         composer=composer, runtime_metadata=ComposerRuntimeMetadata(model="fake"),
@@ -135,5 +135,5 @@ def test_failed_run_requires_explicit_resume_and_reuses_legal_prefix(tmp_path: P
         catalog=catalog, selector=selector, run_id="resume-run", executor=product, resume=True, **paths
     )
     assert resumed["status"] == "completed"
-    # 第一题来自 checkpoint；恢复阶段只执行第二题。
-    assert len(composer.attempts) == 1
+    # 第一题来自 checkpoint；恢复阶段执行剩余四题，其中三题需要 Composer。
+    assert len(composer.attempts) == 4

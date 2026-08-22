@@ -241,16 +241,54 @@ def render_report(
         lines.append(
             f"| {effect} | {len(selected)} | {counts['passed']} | {counts['failed']} | {counts['not_observed']} |"
         )
-    external = [item for item in scenarios.values() if item.question_type != "business"]
+    # ★ catalog 可以是 canonical 180，而本次只跑其中一个 suite；报告必须严格按
+    # RunSpec 选中题统计，不能把未运行题的数量混进本次分母。
+    selected_ids = tuple(artifact["run_spec"]["selected_scenario_ids"])  # type: ignore[index]
+    external = [scenarios[scenario_id] for scenario_id in selected_ids if scenarios[scenario_id].question_type != "business"]
     if external:
-        lines.extend(["", "## External Strata", "", "| stratum | questions |", "|---|---:|"])
-        strata: Counter[str] = Counter()
+        lines.extend([
+            "", "## External Strata Outcomes", "",
+            "| stratum | executions | primary diagnosis | required p/f/n | retrieved/selected/visible/cited gold |",
+            "|---|---:|---|---|---|",
+        ])
+        scenario_groups: dict[str, set[str]] = {}
         for item in external:
-            strata[f"partition:{item.classification}"] += 1
-            strata[f"type:{item.question_type}"] += 1
-            strata[f"cardinality:{item.document_cardinality}"] += 1
-            strata[f"source:{'+'.join(item.source_types)}"] += 1
-        lines.extend(f"| {name} | {count} |" for name, count in sorted(strata.items()))
+            names = (
+                f"difficulty:{item.difficulty}",
+                f"partition:{item.classification}",
+                f"type:{item.question_type}",
+                f"cardinality:{item.document_cardinality}",
+                f"source:{'+'.join(item.source_types)}",
+            )
+            for name in names:
+                scenario_groups.setdefault(name, set()).add(item.scenario_id)
+        artifact_assertions = artifact["assertions"]  # type: ignore[index]
+        artifact_executions = artifact["executions"]  # type: ignore[index]
+        funnel_ids = ("retrieved_gold", "selected_gold", "generation_visible_gold", "cited_gold")
+        for name, group_ids in sorted(scenario_groups.items()):
+            grouped_triage = [item for item in triage if item["scenario_id"] in group_ids]
+            primary = Counter(str(item["primary_stage"]) for item in grouped_triage)
+            required = [
+                item for item in artifact_assertions
+                if item["scenario_id"] in group_ids and item["effect"] == "required"
+            ]
+            status = Counter(str(item["status"]) for item in required)
+            funnel = {
+                assertion_id: sum(
+                    item["scenario_id"] in group_ids
+                    and item["assertion_id"] == assertion_id
+                    and item["status"] == "passed"
+                    for item in artifact_assertions
+                )
+                for assertion_id in funnel_ids
+            }
+            execution_count = sum(item["scenario_id"] in group_ids for item in artifact_executions)
+            primary_text = ", ".join(f"{key}={value}" for key, value in sorted(primary.items()))
+            funnel_text = "/".join(str(funnel[key]) for key in funnel_ids)
+            lines.append(
+                f"| {name} | {execution_count} | {primary_text} | "
+                f"{status['passed']}/{status['failed']}/{status['not_observed']} | {funnel_text} |"
+            )
     lines.extend(
         [
             "",

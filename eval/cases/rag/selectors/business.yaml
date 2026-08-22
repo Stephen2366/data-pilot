@@ -1,0 +1,8 @@
+selector_id: rag-business
+selected_scenario_ids:
+  - quality_refund_materials
+  - invoice_reissue_rule
+  - average_price_definition
+  - refund_policy_multi_document
+  - unsupported_warranty_rule
+replicate_count: 1

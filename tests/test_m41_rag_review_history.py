@@ -31,7 +31,7 @@ def test_review_bundle_verifies_hashes_and_detects_checkpoint_tamper(tmp_path: P
         checkpoint_root=tmp_path / "checkpoints",
         reviewer="test-reviewer",
     )
-    assert verify_review_sources(bundle) == {"artifact": 1, "checkpoints": 2}
+    assert verify_review_sources(bundle) == {"artifact": 1, "checkpoints": 5}
 
     checkpoint = Path(bundle["records"][0]["source_checkpoint"]["path"])
     checkpoint.write_text(checkpoint.read_text(encoding="utf-8") + " ", encoding="utf-8")
@@ -42,7 +42,7 @@ def test_review_bundle_verifies_hashes_and_detects_checkpoint_tamper(tmp_path: P
 def test_compare_accepts_only_identical_protocol_and_runtime(tmp_path: Path) -> None:
     left = _run(tmp_path)
     right = deepcopy(left)
-    right["run_spec"]["run_id"] = "m41-test-smoke-right"
+    right["run_spec"]["run_id"] = "m41-test-business-right"
     _resign(right)
     assert compare_completed(left, right)["strictly_comparable"] is True
 
@@ -50,6 +50,42 @@ def test_compare_accepts_only_identical_protocol_and_runtime(tmp_path: Path) -> 
     _resign(right)
     with pytest.raises(RAGEvalContractError, match="not_comparable|identity"):
         compare_completed(left, right)
+
+    candidate = compare_completed(left, right, allowed_runtime_differences=("model",))
+    assert candidate["comparison_mode"] == "candidate"
+    assert candidate["strictly_comparable"] is False
+    assert candidate["experiment_contract"]["actual_runtime_differences"] == ["model"]
+    assert candidate["paired_summary"] == {"tie": 5}
+    assert "provider_usage" in candidate and "answer_flow_latency" in candidate
+
+
+def test_candidate_compare_reports_paired_regression_and_rejects_unknown_allowlist(tmp_path: Path) -> None:
+    left = _run(tmp_path)
+    right = deepcopy(left)
+    right["run_spec"]["run_id"] = "m41-test-candidate"
+    right["run_spec"]["runtime"]["model"] = "candidate-model"
+    target = next(
+        item for item in right["assertions"]
+        if item["scenario_id"] == "quality_refund_materials"
+        and item["effect"] == "required"
+        and item["status"] == "passed"
+    )
+    target["status"] = "failed"
+    target["reason"] = "simulated regression"
+    required = [item["status"] for item in right["assertions"] if item["effect"] == "required"]
+    right["gate"] = {
+        "status": "failed",
+        "passed": required.count("passed"),
+        "failed": required.count("failed"),
+        "not_observed": required.count("not_observed"),
+    }
+    _resign(right)
+
+    result = compare_completed(left, right, allowed_runtime_differences=("model",))
+    assert result["paired_summary"] == {"loss": 1, "tie": 4}
+    assert any(item["verdict"] == "loss" for item in result["paired_executions"])
+    with pytest.raises(RAGEvalContractError, match="未知 runtime 字段"):
+        compare_completed(left, right, allowed_runtime_differences=("not_a_runtime_field",))
 
 
 def test_m34_importer_is_offline_and_marks_missing_product_layers(tmp_path: Path) -> None:

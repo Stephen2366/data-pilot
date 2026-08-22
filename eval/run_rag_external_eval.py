@@ -1,4 +1,4 @@
-"""运行 EnterpriseRAG-Bench 60/120 冻结分集的产品 Harness RAG Eval。"""
+"""按 difficulty suite × 冻结 partition 运行 EnterpriseRAG-Bench 产品 Harness RAG Eval。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,18 @@ def main() -> None:
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--profile-root", type=Path, required=True)
     parser.add_argument("--profile-identity", required=True)
-    parser.add_argument("--partition", choices=("diagnostic_dev", "held_out"), required=True)
+    parser.add_argument(
+        "--partition",
+        choices=("diagnostic_dev", "held_out", "all"),
+        default="diagnostic_dev",
+        help="默认 diagnostic_dev（日常诊断集）；held_out/all 必须显式指定。",
+    )
+    parser.add_argument(
+        "--suite",
+        choices=("smoke", "basic", "core", "hard", "reliability", "full"),
+        default="full",
+        help="难度/协议套件；与 partition 做交集。smoke/reliability 只允许 diagnostic_dev。",
+    )
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--triage", type=Path)
@@ -45,6 +56,7 @@ def main() -> None:
         dataset_recipe_path=PROJECT_ROOT / "eval/cases/enterprise-rag-bench-v1.0.0-dataset.json",
         split_path=PROJECT_ROOT / "eval/cases/enterprise-rag-bench-v1.0.0-split.json",
         partition=args.partition,
+        suite=args.suite,
     )
     composer = make_qwen_evidence_composer(
         api_key=settings.dashscope_api_key,

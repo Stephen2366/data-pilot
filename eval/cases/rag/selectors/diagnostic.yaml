@@ -1,4 +1,0 @@
-selector_id: rag-diagnostic
-selected_scenario_ids: [refund_policy_multi_document, unsupported_warranty_rule]
-replicate_count: 1
-

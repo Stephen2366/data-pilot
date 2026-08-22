@@ -23,8 +23,11 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__)
     choice = parser.add_mutually_exclusive_group()
-    choice.add_argument("--selector")
-    choice.add_argument("--suite", choices=("core", "diagnostic", "reliability"))
+    choice.add_argument(
+        "--suite",
+        choices=("business",),
+        help="业务 RAG 只有这一套；省略时也默认运行 business。",
+    )
     choice.add_argument("--scenario", action="append", help="精确 Scenario ID；可重复传入")
     parser.add_argument("--replicate-count", type=int, default=1, help="仅与 --scenario 一起使用")
     parser.add_argument("--run-id", required=True)
@@ -48,10 +51,8 @@ def main() -> None:
     else:
         if args.replicate_count != 1:
             parser.error("--replicate-count 只能与 --scenario 一起使用")
-        selector_name = args.suite or args.selector or "smoke"
-        selector_path = Path(selector_name)
-        if not selector_path.suffix:
-            selector_path = DEFAULT_SELECTOR_ROOT / f"{selector_name}.yaml"
+        selector_name = args.suite or "business"
+        selector_path = DEFAULT_SELECTOR_ROOT / f"{selector_name}.yaml"
         selector = load_rag_selector(selector_path, catalog)
     composer = make_business_qwen_eval_composer(
         api_key=settings.dashscope_api_key,
