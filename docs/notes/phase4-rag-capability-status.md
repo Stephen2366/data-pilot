@@ -573,6 +573,10 @@ Track B 基线完成后即可逐步推进，不必机械等待 Track C 全部结
 
 Scenario 按用途隔离：北极星 canonical sequence 负责稳定展示；required contract/security sequence 负责权限、预算、停止、并发与恢复；diagnostic/dev sequence 用于选择动作和调试；held-out decision sequence 只用于模型/策略和 Pipeline/Subgraph 的净收益判断，污染后必须退出保留集。
 
+现有 M31–M40 deterministic contracts 与 M34 external retrieval / Answer-Citation 长期基线继续作为 Phase 4B 的起点，不重建、混算或回写历史 artifact。它们已经较完整地记录 release/corpus/adapter/recipe/Composer/policy identity、逐题 retrieval/citation、provider usage 和失败层，但尚不能验收 Observation-driven action、EvidenceDelta、父子预算、自然多轮、持久恢复或 Compact；新 family 必须补齐每次动作的 trigger、Observation/action identity、预算前后、Evidence 增删/重复、progress/no-progress 与 termination，并把回答合同闭合和语义正确/完整性分开评价。
+
+详细逐题 artifact 不能长期只存在于 `.agent_work/temp/`：大文件继续不提交 Git，但应保存到项目外的不可变评测存储；仓库至少固化 identity、SHA-256、汇总、可安全提交的逐题失败分类/切片和解释边界，使临时文件清理后仍能复核路线判断。具体存储介质与保留周期留给 roadmap/module plan 决定。
+
 **阶段完成标志**：每个纵向切片都能说明它让北极星任务新增跑通了哪一段，并在配套非 happy-path sequence 上留下 required 证据；最终同一条连续自然多轮任务能够安全贯通 TaskDelta、顶层 Loop、SQL/RAG/Hybrid、RAG Subgraph、持久恢复和 Compact，不存在权限绕过、无界调用、双循环或 compact 后任务语义漂移。
 
 ### 明确不建设的能力
@@ -595,6 +599,8 @@ Scenario 按用途隔离：北极星 canonical sequence 负责稳定展示；req
 ---
 
 ## 13. 修订记录
+
+2026-08-22：简要补充 Eval 继承与缺口：保留 M31–M40/M34 为独立历史基线，不重建混算；Phase 4B 新增 action-level EvidenceDelta/父子预算、多轮/持久恢复/Compact 与语义正确完整性评测，并要求逐题大 artifact 在项目外耐久保存、仓库固化 identity/hash 和安全失败切片，避免临时目录成为唯一诊断事实源。
 
 2026-08-22：补齐北极星落地前置与 turn 映射：增加 versioned 7/8 月 seed 前置、最小多角色 demo caller、现有 basic + quality 政策多文档失败题及 M38 Hybrid operator 复核；把 Action/Budget/Progress 移到 A2 消费方并冻结多维父子预算、Progress Policy/唯一 Answer Gate、各模型动作 outbound 与保守降级；明确 Loop 只在 turn boundary 澄清、不恢复任意执行栈；补持久 state family/双 adapter/存储层条件更新，以及 typed turn/event ledger、Compact 触发和 typed 行为等价合同。
 
