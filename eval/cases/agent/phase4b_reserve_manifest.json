@@ -1,0 +1,31 @@
+{
+  "schema_version": "phase4b-agent-decision-reserve-v1",
+  "reserve_identity": "f70c5fcafa3d7601d2700a5d98dc2a2647532c236dd1a56e6a48008fa100e505",
+  "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+  "profile_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+  "question_count": 60,
+  "distribution": {
+    "basic": 20,
+    "core": 20,
+    "hard": 20
+  },
+  "multi_document_counts": {
+    "basic": 0,
+    "core": 8,
+    "hard": 20
+  },
+  "files": {
+    "reserve.jsonl": "aa90455a0863b08dc9479936632179db1a5303a880a80a16f1de0440e0c87249",
+    "gold_review.jsonl": "2225e10ca6b2ab3fb6a207f5ce039690b735a25adaec2f612bbdf1926bb9b429",
+    "access_ledger.jsonl": "94a211a44564cb53df612ecf2a700e63c4b60adb51691ced50c82bc00e1fcbea",
+    "source_pool.json": "2e4b8c91e63a45110413a99fb5497f1a71374640a75b8c8795c1967d464c5197"
+  },
+  "decision_status": "sealed",
+  "first_unseal_module": "M46",
+  "historical_regression_identity": "m34-180-historical-only",
+  "external_store": {
+    "asset_family": "phase4b-agent-eval",
+    "version": "v1.0.0",
+    "local_path_is_not_identity": true
+  }
+}

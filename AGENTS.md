@@ -33,6 +33,7 @@ alembic/                # 数据库迁移
 
 engine/                 # 通用引擎，换行业不用改
   harness/              # 顶层 LangGraph Harness 与有界 turn/thread 控制（M35–M37）
+  phase4b/              # Phase 4B 版本化前置合同、identity、seed profile 与最小 caller（M42+）
   router/               # 意图路由（SQL / RAG / 混合）（暂无此文件夹）
   nl2sql/               # NL2SQL 流水线
   sql_guard/            # SQL 沙箱安全
@@ -42,6 +43,7 @@ engine/                 # 通用引擎，换行业不用改
   schema_retrieval/     # Schema 检索
 
 domain_pack/            # 业务配置，换行业只换这里
+  phase4b/              # Phase 4B 北极星、兼容/action 语义和 seed recipe 的机器可读合同
   schema_desc/          # 表结构描述
   sql_examples/         # NL2SQL few-shot 示例
   kb_docs/              # RAG 语料（退款政策、客服规则…）
@@ -49,7 +51,10 @@ domain_pack/            # 业务配置，换行业只换这里
   chart_templates/      # 图表模板
 
 eval/                   # EvalOps-lite（评测前置），完整评测平台在独立项目 eval-bench
+  agent_scenario_contracts.py # Phase 4B 多 turn Agent Scenario artifact family（M42+）
+  agent_reserve_contracts.py  # sealed decision reserve、污染状态机与外部 artifact 对账
   cases/                # YAML 测试用例
+    agent/              # Phase 4B Agent Eval 的仓库安全 manifest；逐题 reserve 位于项目外
   run_eval.py           # 批量执行入口
   scorers/              # 评分器
   reports/              # Markdown / HTML 报告

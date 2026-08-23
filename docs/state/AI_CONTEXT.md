@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M41 RAG Eval 补充：business 单一入口 + external 难度套件与候选 A/B compare；120 held-out 保持锁定（2026-08-23） |
-| 当前 plan    | `docs/notes/m41-plan.md`；external 60 dev 已按用户授权运行，任何重跑或 120 held-out 仍需新授权 |
-| 当前 notes   | `docs/notes/m41-notes.md`                                    |
-| 待决事项     | 已有 post-fix dev smoke/basic/core 快照（均未登记正式基线）；登记正式长期基线或运行 120 held-out 仍需用户确认与新授权 |
+| 当前活动模块 | M42 / Phase 4B B0 前置包已验收通过（2026-08-23）；M43/B1 尚未立项 |
+| 当前 plan    | `docs/notes/m42-plan.md`；B0 冻结合同由 M43–M48 分模块消费，不得把 skeleton 当 runtime 完成 |
+| 当前 notes   | `docs/notes/m42-notes.md`                                    |
+| 待决事项     | 下一步为 M43/B1 独立 module plan；M46 前 60 题 decision reserve 保持 sealed，M41 的正式基线登记/held-out 授权仍是独立事项 |
 | 更新时间     | 2026-08-23                                                   |
 
 ## 必读规则
@@ -31,6 +31,7 @@
 
 - 后端：FastAPI + Pydantic；`/api/query` 统一调用 M37 turn seam。普通/accepted initial、resume 或 follow-up 恰好一次 M35 Graph，thread lifecycle 前置拒绝为零次；响应、JSONL Trace 与 Eval 都从同一 turn/result/lifecycle/validity 事实投影。
 - 数据库：MySQL `datapilot_dev` + SQLAlchemy/Alembic；SQLite 仅用于测试、smoke 与 M27 deterministic oracle。
+- Phase 4B seed：默认仍为 legacy `sqlite_deterministic_seed`；只有显式选择 `profile_alias="phase4b"` 才加载 content-bound B0 profile，生成 7/8 月 oracle。不得把两个 profile 的 artifact 混算。
 - NL2SQL：普通 API 默认走 Harness 内的 `new_text2sql` 深 Tool（Schema Retrieval → QueryPlan → SQL Guard）；显式 `force_new_pipeline=false` 只选择 adapter 内部 legacy baseline，不能绕过顶层 Harness。
 - 默认模型：Qwen `qwen3.7-plus`（`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`）；45s、retry0、backoff1。
 - Schema Retrieval 默认：inmemory + deterministic + weighted；Milvus / DashScope embedding 仅在显式实验中开启。
@@ -50,6 +51,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-23 | M42 完成 Phase 4B B0 前置包：B0 contract `6543883...aae6f`、seed profile `9c49407...00673`、SQL oracle `be813a8...57ef80`、Agent skeleton `b303d4d...52982`、sealed reserve `f70c5fc...e505`。首次 business retrieval 零 provider 且真实漏选 basic 政策，保留为 B3 输入；M43–M48 能力仍 unavailable。最终全仓 `487 passed, 3 skipped, 1 warning`，未改 legacy/active release/默认模型或任何长期基线。 |
 | 2026-08-23 | 用户授权 external dev Smoke + Basic 各一次并 completed：Smoke 9 题 Gate `failed`（required `96/12/0`），usage `20288 tokens`，triage `4 passed / 2 selection / 2 citation / 1 retrieval`，语义 verdict `3 pass / 6 fail`；Basic 21 题 Gate `failed`（required `215/25/12`），usage `47814 tokens`，triage `12 passed / 4 retrieval / 3 product_runtime / 1 selection / 1 citation`，语义 verdict `9 pass / 9 fail / 3 insufficient_evidence`。Basic 的 3 个无答案均为 provider 有响应但 Composer 结构合同失败；两套共 30 requests / 68102 tokens，无 transport unavailable。重叠 3 题 verdict 一致，但不构成 Reliability 证明；不登记基线、不改默认，120 held-out 未运行。 |
 | 2026-08-23 | 用户授权首条 v2/post-fix external dev core 真实运行 `m41-rag-external-core-20260823-151649` completed：25 题 / 25 执行，Gate `failed`（required `211 passed / 58 failed / 31 not_observed`），primary triage `9 retrieval / 7 product_runtime / 1 selection / 1 citation / 1 provider_or_support / 6 passed`，usage `53106 tokens`（24/25 provider 成功，latency p50 8.9s）。5 题 `composer_output_invalid` 被如实标记（归类修正生效）。AI reviewer 逐题语义 verdict `4 pass / 13 fail / 8 insufficient_evidence`：fail 主体为检索错文档→答偏与有引用仍拒答，4 例 pass 全部检索命中 gold；自动 Gate 通过的 6 题中 2 题 verdict 仍 fail，再次证明自动断言 ≠ 语义正确。结论强化 lexical 漏召回为首要瓶颈；不改变任何默认、不登记基线，120 held-out 未运行。 |
 | 2026-08-23 | M41 RAG Eval 用户入口去歧义：business 的旧 smoke/core/diagnostic/reliability 合并为唯一 `business`（5 题各 1 次），仍可 `--scenario` 精确诊断；external 的裸 smoke/basic/core/hard/reliability/full 默认使用 `diagnostic_dev`。因此日常说“执行 core RAG Eval”即 external dev core；只有明确说 `held-out` 才触碰封存集。历史 artifact 不改签，本次零 provider 调用。 |
@@ -72,6 +74,7 @@
 
 > 只保留仍然生效的路线和限制；已经完成的“下一步做……”必须删除或改写。
 
+- (2026-08-23) M42 已完成 B0 冻结与 rehearsal，不等于 Phase 4B Agent runtime 完成。M43/B1 必须消费独立 runtime family、TaskState 入口、最小 caller 与 Scenario catalog；M45/B3 只能用预注册动作/预算诊断首次漏选；M46/B4 前 reserve 必须 sealed，提前访问或调参即退休。M41 继续作为历史 RAG Eval/纪律来源，不被 M42 改签或替代。
 - (2026-08-23) M41 是 Phase 4 RAG Eval 缺口补完，不是 Phase 4B Agent 能力实施。business 小 catalog 负责 ACL/安全合同；M34 external 180 题负责大规模检索、选择、生成可见、Composer、引用与答案诊断，两者分账。60 dev 已真实运行，120 held-out 保持停门；这不改变 M39 P6 no-go、external lexical/业务 release/普通 Composer 或 Phase 4B B0–B5 决策门。
 - (2026-08-23) external 评测现以完整 180 catalog 为事实源，difficulty、partition、suite 三轴分离；候选 compare 只放行预注册 runtime 字段差异。旧 60 dev artifact 缺 difficulty 且属于 pre-fix 协议，只作历史候选；未来先经新授权建立 v2/post-fix dev baseline，再讨论模块收益或 held-out 最终裁决。
 - (2026-08-22) 用户已确认 `phase4-rag-capability-status.md` 第 12 节进入正式路线，现由 `docs/phase4b-roadmap.md` 升格为 Phase 4B 推进事实源。Phase 4B 是已完成 Phase 4 之上的新能力阶段，最终硬交付包含 experimental bounded RAG Subgraph、任务级自然多轮、持久任务状态、node-level Context Builder、Context Compact 基础版和贯穿 Agent Scenario Eval；“实现 Subgraph”与“切换默认”继续分离。该路线升格不改变 M39 P6 当时冻结 Evidence 下的正确 `no_go`、当前进程内 checkpoint、external lexical 默认或任何运行配置。

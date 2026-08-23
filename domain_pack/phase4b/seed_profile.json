@@ -1,0 +1,64 @@
+{
+  "profile_family": "datapilot-seed-profile-v1",
+  "profile_version": "phase4b-v1",
+  "profile_alias": "phase4b",
+  "recipe_identity": "phase4b-refund-margins-v1",
+  "snapshot_at": "2026-09-01T03:00:00",
+  "batch_id": "orders_wide_phase4b_20260901_0300",
+  "config_identity": {
+    "schema": "datapilot-14-table-v1",
+    "metric": "net_refund_amount-completed-processed_at-signed-v1",
+    "knowledge_release": "7d0d09378e6cf40ba4d77b5516614956ac8835189e15ef82214cd244618409a"
+  },
+  "months": {
+    "2026-07": {
+      "net_refund_amount": "120000.00",
+      "reasons": {
+        "quality_issue": "48000.00",
+        "late_delivery": "36000.00",
+        "wrong_item": "24000.00",
+        "changed_mind": "12000.00"
+      },
+      "channels": {
+        "Mobile App": "48000.00",
+        "Web Store": "24000.00",
+        "Tmall": "18000.00",
+        "JD": "12000.00",
+        "Douyin": "12000.00",
+        "Partner": "6000.00"
+      },
+      "products": {
+        "SKU-HIGH-REFUND-01": "30000.00",
+        "SKU-WL-EB-002": "24000.00",
+        "SKU-SD-LP-003": "24000.00",
+        "SKU-MK-K2-004": "24000.00",
+        "SKU-MS-PL-005": "18000.00"
+      }
+    },
+    "2026-08": {
+      "net_refund_amount": "180000.00",
+      "reasons": {
+        "quality_issue": "96000.00",
+        "late_delivery": "42000.00",
+        "wrong_item": "27000.00",
+        "changed_mind": "15000.00"
+      },
+      "channels": {
+        "Mobile App": "78000.00",
+        "Web Store": "36000.00",
+        "Tmall": "24000.00",
+        "JD": "18000.00",
+        "Douyin": "18000.00",
+        "Partner": "6000.00"
+      },
+      "products": {
+        "SKU-HIGH-REFUND-01": "54000.00",
+        "SKU-WL-EB-002": "42000.00",
+        "SKU-SD-LP-003": "30000.00",
+        "SKU-MK-K2-004": "30000.00",
+        "SKU-MS-PL-005": "24000.00"
+      }
+    }
+  },
+  "negative_correction": "-1000.00"
+}

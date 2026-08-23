@@ -85,6 +85,9 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - M41 external 60 dev `m41-rag-external-dev-20260822-01` 已 completed：primary triage `24 passed / 20 retrieval / 7 product_runtime / 5 citation / 4 selection`，candidate/selected/generation-visible/cited gold 为 `35/30/30/24`（分母均 60），usage `137299` tokens；人工语义 verdict `18 pass / 26 fail / 16 insufficient_evidence`。它证明 180 题可以像 Text2SQL 一样逐层定位，且自动链路通过不能代替语义正确。
 - M41 首条 post-fix dev core `m41-rag-external-core-20260823-151649` 已 completed：25 题，Gate `failed`（required 211/58/31），primary triage `9 retrieval / 7 product_runtime / 1 selection / 1 citation / 1 provider_or_support / 6 passed`，usage `53106` tokens；AI reviewer verdict `4 pass / 13 fail / 8 insufficient_evidence`。5 题 Composer 坏结构被如实标记（归类修正生效）；9 题 lexical 漏召回为最大失败层；verdict fail 主体是检索错文档→答偏与有引用仍拒答，4 例 pass 全部检索命中 gold——检索命中是语义正确的关键前提。未登记正式基线，120 held-out 未运行。
 - M41 post-fix dev Smoke/Basic `m41-rag-external-{smoke|basic}-20260823-154101` 已 completed：Smoke Gate `failed`（required 96/12/0）、语义 `3 pass / 6 fail`、20288 tokens；Basic Gate `failed`（215/25/12）、语义 `9 pass / 9 fail / 3 insufficient_evidence`、47814 tokens。Basic 的 3 个无答案都是 provider 有响应但 Composer 结构合同失败；30 requests 无 transport unavailable。Smoke/Basic 重叠 3 题 verdict 一致但不构成 Reliability；均未登记正式基线，held-out 未运行。
+- M42 B0 用最小 `ops + customer_service` caller 对冻结 gold-first 业务题执行一次默认 deterministic retrieval：期望 `refund_policy_basic + refund_policy_quality`，实际只选中 quality，Observation identity `e6bc5fa...aab99`，零 provider。该真实漏选是 Phase 4B B3 的诊断输入，不是新质量基线；M42 没有为通过而改变 active release、ACL、budget 或 lexical 默认。
+
+M42 另创建 60 题 Phase 4B decision reserve，identity `f70c5fc...e505`，使用 external corpus/profile 的 20 份未进入既有 180 gold 的冻结文档；分布 basic/core/hard `20/20/20`，core 8、hard 20 道多文档。逐题材料在项目外 immutable store，仓库只保存安全 manifest。它在 M46 前保持 sealed，未运行 candidate，也不改变 M34/M41 基线或 external lexical 默认。
 
 semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活候选：
 
@@ -106,6 +109,7 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 - M38 `phase4-harness-hybrid-v1`：5 Scenario / 25 required，证明 canonical Hybrid 的两支 required、各一次预算、complete 的 SQL/Document 双绑定、单支 partial、SQL Guard stop 与 conflict；同样只是确定性控制/安全合同，不是开放 Hybrid 或真实 RAG 质量基线。
 - M41 `phase4-rag-e2e-v1`：canonical business RAG catalog 对外只保留唯一 `business` selector（5 题各 1 次）；场景内部分类只用于诊断。冻结 product runtime、release/corpus/retrieval/Composer/policy/caller identity，建立 retrieved→selected→generation-visible→provider/support→cited→answer funnel、closed-world artifact、Gate、triage、review。external 的裸 smoke/basic/core/hard/reliability/full 默认指向 dev；`phase4-rag-e2e-compare-v2` 默认 strict repeat，只有显式声明允许变化的 runtime 字段才进入候选 A/B。
 - M41 external-180：完整 180 catalog 复用同一 Evidence/Gate/review 框架，以 partition × suite 选择运行范围；dev 为 smoke 9、basic 21、core 25、hard 14、reliability 6×3、full 60。业务题与 external 题不得混成同一分数。
+- M42 `phase4b-agent-scenario-v1`：sequence/turn/execution/assertion closed-world skeleton，安全投影只保存 evidence kind/ref 和三态结果；B0 capability matrix 明示 M43–M48 unavailable。它不替代 M41 单题 RAG Eval，也不证明 Agent runtime 或 RAG Subgraph 已可执行。
 
 ## 活跃风险与后续边界
 
@@ -116,6 +120,7 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
 - **M41 后续真实运行门**：历史 business Smoke 与旧 external 60 dev 均已按用户授权完成；当前 business 入口已合并为 5 题全量。external 默认 dev，120 held-out/all 仍须明确说出；任何真实运行都只授权一次，不得自动重跑或扩大 suite。旧 external dev artifact 是 Composer 误分类修正前、且缺 difficulty 的 pre-fix candidate；原件不得改签，未来 v2/post-fix run 不得伪装成直接复现。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
+- **Phase 4B reserve 污染门**：M46 前不得读取逐题 gold、运行 candidate 或用 reserve 调参；发生提前访问/调参时必须按访问状态机标记 retired，不能继续充当 decision set。M34/M41 现有 180 题只作 historical regression，不与该 60 题 reserve 合并。
 - **默认切换**：semantic candidate、Hybrid、rerank 或新 recipe 必须产生新 identity，并以同 split 的单变量 A/B 和 held-out 证据经用户确认后才能切换。
 - **未接入候选**：WixQA 仍只是项目外候选，未索引、未评测、也不属于 active corpus；后续若重新考虑，需另开 corpus 调查和接入计划。
 

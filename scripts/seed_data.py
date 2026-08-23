@@ -34,6 +34,12 @@ from app.models import (
     User,
     UserBehaviorLog,
 )
+from engine.phase4b.seed_profile import (
+    LEGACY_SEED_PROFILE,
+    append_phase4b_rows,
+    resolve_seed_profile,
+    verify_phase4b_business_facts,
+)
 from engine.rag import build_staged_catalog
 
 EXPECTED_SEED_COUNTS = {
@@ -65,13 +71,23 @@ def _money(value: Decimal | int | str) -> Decimal:
     return Decimal(value).quantize(MONEY, rounding=ROUND_HALF_UP)
 
 
-def seed_database(session: Session, reset_existing: bool = False) -> dict[str, Any]:
+def seed_database(
+    session: Session,
+    reset_existing: bool = False,
+    *,
+    profile_alias: str = LEGACY_SEED_PROFILE,
+) -> dict[str, Any]:
     """向已迁移完成的数据库中填充确定性模拟业务数据。
 
     参数说明：
     - session：外部传入事务会话，测试、eval 和命令行共用同一入口。
     - reset_existing：为 True 时按外键依赖顺序清空 14 张物理表；不重置自增 ID。
+    - profile_alias：默认 ``legacy`` 保持 M1/M27 历史世界；显式 ``phase4b`` 才追加
+      M42 的 7/8 月事实。未知 profile 在写入前失败关闭。
     """
+
+    # ★ profile 必须在任何 DELETE/INSERT 前解析。拼错 identity 时不能清空数据库后才报错。
+    phase4b_profile = resolve_seed_profile(profile_alias)
 
     if reset_existing:
         _delete_existing_rows(session)
@@ -103,13 +119,31 @@ def seed_database(session: Session, reset_existing: bool = False) -> dict[str, A
 
     orders_wide = _build_orders_wide(orders)
     session.add_all(orders_wide)
+
+    profile_extension_counts: dict[str, int] = {}
+    if phase4b_profile is not None:
+        profile_extension_counts = append_phase4b_rows(
+            session,
+            profile=phase4b_profile,
+            users=users,
+            products=products,
+            channels=channels,
+        )
     session.commit()
 
     summary = {
         "counts": _count_seed_tables(session),
         "roles": sorted({user.role for user in users}),
         "facts": verify_business_facts(session),
+        "seed_profile": {
+            "alias": profile_alias,
+            "profile_identity": phase4b_profile.profile_identity if phase4b_profile else "sqlite_deterministic_seed",
+            "content_identity": phase4b_profile.content_identity if phase4b_profile else None,
+            "extension_counts": profile_extension_counts,
+        },
     }
+    if phase4b_profile is not None:
+        summary["phase4b_facts"] = verify_phase4b_business_facts(session, profile=phase4b_profile)
     _write_seed_summary(summary)
     return summary
 

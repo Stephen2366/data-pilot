@@ -4,7 +4,7 @@
 >
 > **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍统一从 `docs/state/CHANGELOG_INDEX.md` 进入。
 
-更新时间：2026-08-17
+更新时间：2026-08-23
 
 ## 一句话结论
 
@@ -115,6 +115,17 @@ DataPilot 当前数据库有 **14 张物理表**；Text2SQL 只暴露其中 **13
 - 模拟金额不一致订单数：`5`
 
 这些事实由 `scripts/seed_data.py` 的 `verify_business_facts()` 用真实 SQL 查询得出。不要依赖自增 ID 从 1 开始定位这些事实，必须使用 `sku`、`coupon_code`、`channel_code`、`category.name`、`device_type` 等稳定业务键。
+
+### Phase 4B 显式 seed profile
+
+M42 新增与默认 legacy 隔离的 `phase4b` profile；它仍使用现有 14 表 schema，不涉及 ORM/Alembic 变化。只有调用 `seed_database(..., profile_alias="phase4b")` 才会在隔离副本内追加 23 条订单/明细/退款/宽表事实，并生成 content-bound identity；默认调用和命令行仍保持 legacy。
+
+- profile identity：`9c49407708bcc8c1ce8b9e990fbfbff8d9a75dc1cd0dee798fb165f93af00673`
+- oracle identity：`be813a868e7cb163807f3d9559121c11ef837b8960c2ef466e75b6dddd57ef80`
+- 2026-07 / 2026-08 `net_refund_amount`：`120000.00 / 180000.00`；原因、渠道、商品三种分解各自守恒；星型表与该 profile 的宽表总额一致；每月各保留 1 条负数冲销。
+- legacy 6 月末退款会自然滑入 7 月。显式 profile 为保持同一产品 SQL 口径，只在该隔离副本内把 103 条 spillover 固定到 6 月末；不会修改默认 legacy recipe 或历史 artifact。
+
+完整边际表和 recipe 以 `domain_pack/phase4b/seed_profile.json` 为事实源；本节只保存运行时需立即知道的 identity、总额和隔离边界。
 
 ## 数据质量与易错规则
 

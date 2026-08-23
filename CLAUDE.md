@@ -33,6 +33,7 @@ alembic/                # 数据库迁移
 
 engine/                 # 通用引擎，换行业不用改
   harness/              # 顶层 LangGraph Harness 与有界 turn/thread 控制（M35–M37）
+  phase4b/              # Phase 4B 版本化前置合同、identity、seed profile 与最小 caller（M42+）
   router/               # 意图路由（SQL / RAG / 混合）（暂无此文件夹）
   nl2sql/               # NL2SQL 流水线
   sql_guard/            # SQL 沙箱安全
@@ -42,6 +43,7 @@ engine/                 # 通用引擎，换行业不用改
   schema_retrieval/     # Schema 检索
 
 domain_pack/            # 业务配置，换行业只换这里
+  phase4b/              # Phase 4B 北极星、兼容/action 语义和 seed recipe 的机器可读合同
   schema_desc/          # 表结构描述
   sql_examples/         # NL2SQL few-shot 示例
   kb_docs/              # RAG 语料（退款政策、客服规则…）
@@ -49,7 +51,10 @@ domain_pack/            # 业务配置，换行业只换这里
   chart_templates/      # 图表模板
 
 eval/                   # EvalOps-lite（评测前置），完整评测平台在独立项目 eval-bench
+  agent_scenario_contracts.py # Phase 4B 多 turn Agent Scenario artifact family（M42+）
+  agent_reserve_contracts.py  # sealed decision reserve、污染状态机与外部 artifact 对账
   cases/                # YAML 测试用例
+    agent/              # Phase 4B Agent Eval 的仓库安全 manifest；逐题 reserve 位于项目外
   run_eval.py           # 批量执行入口
   scorers/              # 评分器
   reports/              # Markdown / HTML 报告
@@ -62,7 +67,9 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
     AI_CONTEXT.md       # 技术档案（AI 续接 / 查 bug 入口）
     CHANGELOG_INDEX.md # 技术历史唯一入口与跨阶段路由
     change-history/    # 按 Phase 拆分的模块档案、实验和取舍
-    runbook.md          # AI / 本地运行入口，模型、检索、LangFuse、eval 命令矩阵
+    runbook.md          # 公共运行入口、授权/Gate/长任务纪律与专项路由
+    runbook-text2sql.md # Text2SQL、Schema Retrieval、SQL Eval 与数据库检查
+    runbook-rag.md      # 业务 RAG、M34/external 180、RAG Eval 与 review
     eval-baselines.md   # 长期评测基线、A/B 结果、失败结构和错因账本
     database-current-state.md # 数据库 14 表现状、固定事实、指标口径速查
     rag-current-state.md # RAG 知识原件、运行基线、外部语料与评测证据边界速查

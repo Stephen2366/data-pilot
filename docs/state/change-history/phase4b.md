@@ -19,6 +19,16 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M42 Phase 4B B0 前置包与 sealed Agent Eval 决策集（2026-08-23）
+
+- **改动范围**：起始 commit 明确为 `f3cc1912a2ab1e9b87fbc3f57d4adb1cdf03df40`。新增 `engine/phase4b/`、`domain_pack/phase4b/`、Agent Scenario/reserve Eval 合同、安全 manifest、M42 rehearsal 报告、两个构建/复核脚本和 6 组测试；兼容性修改仅涉及 caller fixture 的可选 tenant、seed 的显式 profile 入口和 `AGENTS.md` 目录树。项目外另创建 `phase4b-agent-eval/v1.0.0` immutable asset；仓库不保存题面/gold/绝对路径。
+- **关键记录与用户决策**：用户确认 G1–G6 均采用方案 A：独立 additive seed profile、最小 `ops + customer_service` caller、gold-first 单次默认 business retrieval、新建 Hybrid operator 合同且不改 legacy、60 题双审 sealed reserve、项目外 versioned immutable store。这样比升级 canonical seed、扩角色、挑必过题、改写 M38、复用已看题或把 gold 入库更能保持历史可比性、授权边界和 decision set 未污染。M41 的一次执行、closed-world、三态、review hash 与安全投影纪律继续沿用，但 artifact/基线不原位修改；M42 新建 `phase4b-agent-scenario-v1`。
+- **实现与新发现**：`phase4b-b0-contracts-v1` identity 为 `6543883...aae6f`；显式 seed profile identity `9c49407...00673`，7/8 月真实 SQL 净退款为 `120000.00 / 180000.00`，oracle `be813a8...57ef80`，星型/宽表一致且保留 2 条负数冲销。首次构建发现 legacy 6 月 refund `processed_at` 尾巴会使 7 月多 `19920`；没有用 `REF-P4B-*` 过滤伪造产品口径，而只在新 profile 隔离副本内 retime 103 条 spillover，legacy 默认不变。business gold-first Observation `e6bc5fa...aab99` 如实记录默认 lexical 只取回 quality、漏掉 basic；零 provider、零参数/语料/ACL/release 修改。
+- **Eval 与 reserve**：Agent skeleton identity `b303d4d...52982`，能力矩阵把 M43–M48 均标 unavailable。60 题 reserve identity `f70c5fc...e505`，分布 `20/20/20`，core 8 道、hard 20 道多文档；首次解封 owner 为 M46，M34/M41 historical 只作排除/回归，不作 candidate。逐文件 hash 与 source pool 已只读复验；没有运行真实 LLM、remote embedding/Milvus、held-out 或 reserve candidate，因此没有新质量基线。
+- **参考资料**：按 `phase4-reference.md` 定点复核 Wren/DataAgent 的 source/index/state seam、ARAG 的 Graph/state/tools/Eval skeleton、GustoBot multi-tool/finalize 和 DB-GPT Tool/Resource/Eval 分层。借鉴内容身份、状态/执行闭集和一次执行后评分；不照搬 watcher 充当原子发布、参考项目 TaskState 字段、开放循环、notebook 简单平均或模型输出作为安全事实。具体 reference ID 与适配表见 `docs/notes/m42-plan.md`。
+- **验证快照**：M42 全聚焦 `19 passed`，注释修正合同子集 `12 passed`；M1/M27/M31–M34 `179 passed, 1 warning`，M35–M41 `82 passed, 1 warning`；最终沙箱外全仓 `487 passed, 3 skipped, 1 warning in 566.30s`。首次全仓在 sandbox basetemp 因 `WinError 5` exit 1，保留为环境故障并以同命令/新 basetemp 重跑，不改实现或缩范围。warning 是既有 Starlette/httpx deprecation；compileall、diff check 与 trailing-whitespace 检查通过。
+- **遗留/后续**：M42 只完成 B0，不实现 TaskState、Loop、Hybrid runtime、RAG Subgraph、durable state 或 Context Compact。M43/B1 应直接消费本模块合同/fixture；M45/B3 从真实漏选 Observation 开始且只能用预注册动作/预算；M46/B4 才能按污染账本解封 reserve。active business release、默认 lexical/Composer/model、legacy runtime 与 M34/M41 baseline 均未切换。
+
 ### [小修] Phase 4B 参考项目里程碑下沉与反走马观花门（2026-08-23）
 
 - 重读 `docs/phase4-reference.md`，并回到 WrenAI source/index/watch、DataAgent Graph/checkpointer/replacement、ARAG Graph/state/tools/chunk/compact、GustoBot multi-tool/finalize 与 DB-GPT Tool/Resource/Eval 实际源码核对输入、状态、输出、停止及保证边界。

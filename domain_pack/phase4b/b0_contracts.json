@@ -1,0 +1,218 @@
+{
+  "contract_version": "phase4b-b0-contracts-v1",
+  "runtime_families": [
+    {
+      "identity": "phase4-harness-legacy-v1",
+      "kind": "legacy",
+      "request_classes": ["initial", "resume", "follow_up"],
+      "budget_contract": "M35-M38-frozen",
+      "payload_rule": "existing_thread_payload_only"
+    },
+    {
+      "identity": "phase4b-agent-runtime-v1",
+      "kind": "agent",
+      "request_classes": ["task_initial", "task_continue", "task_switch", "task_cancel"],
+      "budget_contract": "unavailable_until_M44",
+      "payload_rule": "future_task_payload_mutually_exclusive"
+    }
+  ],
+  "caller_fixture": {
+    "identity": "phase4b-minimal-caller-v1",
+    "resolved_roles": ["customer_service", "ops"],
+    "active_sql_role": "ops",
+    "tenant_id": "phase4b-demo-tenant"
+  },
+  "hybrid_operator": {
+    "identity": "refund-change-and-policy-v1",
+    "operator": "refund_change_and_policy",
+    "sql_requirement": ["comparison_period", "metric", "breakdown_dimensions"],
+    "document_requirement": ["policy_scope", "required_materials", "processing_conditions"],
+    "required_evidence": ["sql", "document"],
+    "runtime_family": "phase4b-agent-runtime-v1",
+    "status": "contract_only"
+  },
+  "actions": [
+    {
+      "action_id": "stop",
+      "trigger": "always",
+      "scope": ["all"],
+      "budget": "zero",
+      "acl": "no_new_access",
+      "outbound": "none",
+      "evidence_gain": "none",
+      "admission_status": "always_eligible"
+    },
+    {
+      "action_id": "query_rewrite_candidate",
+      "trigger": "observation_required",
+      "scope": ["business_release", "external_profile"],
+      "budget": "unfrozen_until_M45",
+      "acl": "reauthorize_before_retrieval",
+      "outbound": "none_by_default",
+      "evidence_gain": "unproven",
+      "admission_status": "unproven"
+    },
+    {
+      "action_id": "context_expansion_candidate",
+      "trigger": "observation_required",
+      "scope": ["external_profile"],
+      "budget": "unfrozen_until_M45",
+      "acl": "reauthorize_before_context",
+      "outbound": "none_by_default",
+      "evidence_gain": "unproven",
+      "admission_status": "unproven"
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "T1",
+      "class": "canonical",
+      "purpose": "establish_refund_change",
+      "turns": [
+        {
+          "turn_id": "T1.1",
+          "question": "2026 年 8 月净退款额相比 7 月变化了多少？",
+          "delta_category": "new_metric_comparison",
+          "evidence_requirements": ["sql:net_refund_amount:2026-07", "sql:net_refund_amount:2026-08"],
+          "invalidates": [],
+          "route": "sql",
+          "action": "collect_sql_evidence",
+          "expected_axes": ["sql", "completed", "complete", "passed"],
+          "required_assertions": ["periods_correct", "metric_correct", "signed_amount_correct", "caller_authorized"],
+          "advisory_assertions": ["explanation_clear"],
+          "security_identity": ["phase4b-minimal-caller-v1", "phase4b-seed-v1"]
+        }
+      ]
+    },
+    {
+      "scenario_id": "T2",
+      "class": "canonical",
+      "purpose": "decompose_change_by_reason",
+      "turns": [
+        {
+          "turn_id": "T2.1",
+          "question": "把这 6 万元增量按退款原因拆开。",
+          "delta_category": "refine_breakdown",
+          "evidence_requirements": ["sql:refund_reason:2026-07", "sql:refund_reason:2026-08"],
+          "invalidates": ["sql_breakdown:any_previous_dimension"],
+          "route": "sql",
+          "action": "collect_sql_evidence",
+          "expected_axes": ["sql", "completed", "complete", "passed"],
+          "required_assertions": ["reason_margins_reconcile", "increment_reconciles", "negative_correction_preserved"],
+          "advisory_assertions": ["largest_contributor_explained"],
+          "security_identity": ["phase4b-minimal-caller-v1", "phase4b-seed-v1"]
+        }
+      ]
+    },
+    {
+      "scenario_id": "T3",
+      "class": "canonical",
+      "purpose": "identify_quality_driver",
+      "turns": [
+        {
+          "turn_id": "T3.1",
+          "question": "质量问题对净退款增长贡献了多少？哪些商品最突出？",
+          "delta_category": "add_breakdown_dimension",
+          "evidence_requirements": ["sql:refund_reason:quality_issue", "sql:product_sku"],
+          "invalidates": ["sql_breakdown:reason_only"],
+          "route": "sql",
+          "action": "collect_sql_evidence",
+          "expected_axes": ["sql", "completed", "complete", "passed"],
+          "required_assertions": ["quality_increment_is_48000", "product_margins_reconcile", "no_policy_causality_claim"],
+          "advisory_assertions": ["top_products_clear"],
+          "security_identity": ["phase4b-minimal-caller-v1", "phase4b-seed-v1"]
+        }
+      ]
+    },
+    {
+      "scenario_id": "T4",
+      "class": "canonical",
+      "purpose": "interpret_quality_refund_policy",
+      "turns": [
+        {
+          "turn_id": "T4.1",
+          "question": "如果最近质量问题退款明显增多，客服受理这类退款时可以直接按全额退款处理吗？需要哪些前提和材料？",
+          "delta_category": "add_document_requirement",
+          "evidence_requirements": ["document:refund_policy_basic", "document:refund_policy_quality"],
+          "invalidates": ["document_evidence:authority_or_acl_change"],
+          "route": "rag",
+          "action": "collect_document_evidence",
+          "expected_axes": ["rag", "completed", "complete_or_insufficient_evidence", "passed"],
+          "required_assertions": ["gold_frozen_before_observation", "default_budget", "caller_authorized", "observation_preserved"],
+          "advisory_assertions": ["all_gold_retrieved", "all_gold_selected"],
+          "security_identity": ["phase4b-minimal-caller-v1", "active-business-release"]
+        }
+      ]
+    },
+    {
+      "scenario_id": "T5",
+      "class": "canonical",
+      "purpose": "combine_channel_change_and_policy",
+      "turns": [
+        {
+          "turn_id": "T5.1",
+          "question": "再按渠道拆分退款变化，并结合质量退款规则给出客服处理提醒。",
+          "delta_category": "switch_breakdown_and_synthesize",
+          "evidence_requirements": ["sql:channel", "document:refund_policy_basic", "document:refund_policy_quality"],
+          "invalidates": ["sql_breakdown:product"],
+          "route": "hybrid",
+          "action": "refund_change_and_policy",
+          "expected_axes": ["hybrid", "unavailable_until_M44", "no_answer", "passed"],
+          "required_assertions": ["contract_only", "dual_evidence_required", "legacy_operator_unchanged"],
+          "advisory_assertions": [],
+          "security_identity": ["phase4b-agent-runtime-v1", "refund-change-and-policy-v1"]
+        }
+      ]
+    },
+    {
+      "scenario_id": "EXT-ROLE-DRIFT",
+      "class": "extended",
+      "purpose": "prove_turn_authorization",
+      "turns": [
+        {
+          "turn_id": "EXT-ROLE-DRIFT.1",
+          "question": "同一任务下一轮把 active SQL role 改成 customer_service。",
+          "delta_category": "security_identity_change",
+          "evidence_requirements": [],
+          "invalidates": ["all_prior_authorization"],
+          "route": "none",
+          "action": "stop",
+          "expected_axes": ["none", "not_started", "no_answer", "blocked"],
+          "required_assertions": ["wrong_active_role_rejected", "zero_tool_calls"],
+          "advisory_assertions": [],
+          "security_identity": ["phase4b-minimal-caller-v1"]
+        }
+      ]
+    },
+    {
+      "scenario_id": "NH-PAYLOAD-MIX",
+      "class": "non_happy_path",
+      "purpose": "prove_runtime_family_isolation",
+      "turns": [
+        {
+          "turn_id": "NH-PAYLOAD-MIX.1",
+          "question": "legacy resume payload 与 future task continuation 混用。",
+          "delta_category": "invalid_payload_family_mix",
+          "evidence_requirements": [],
+          "invalidates": ["request"],
+          "route": "none",
+          "action": "stop",
+          "expected_axes": ["none", "not_started", "no_answer", "blocked"],
+          "required_assertions": ["family_mix_rejected", "zero_graph_invocations"],
+          "advisory_assertions": [],
+          "security_identity": ["phase4-harness-legacy-v1", "phase4b-agent-runtime-v1"]
+        }
+      ]
+    }
+  ],
+  "capability_matrix": [
+    {"capability": "phase4b_seed_oracle", "status": "required_in_M42", "owner": "M42"},
+    {"capability": "agent_scenario_skeleton", "status": "required_in_M42", "owner": "M42"},
+    {"capability": "natural_task_state", "status": "unavailable", "owner": "M43"},
+    {"capability": "decision_loop", "status": "unavailable", "owner": "M44"},
+    {"capability": "rag_action_campaign", "status": "unavailable", "owner": "M45"},
+    {"capability": "rag_subgraph", "status": "unavailable", "owner": "M46"},
+    {"capability": "durable_task_state", "status": "unavailable", "owner": "M47"},
+    {"capability": "context_compact", "status": "unavailable", "owner": "M48"}
+  ]
+}

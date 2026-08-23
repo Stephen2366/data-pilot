@@ -120,16 +120,32 @@ def authenticated_caller(
     )
 
 
-def demo_caller(*, caller_id: str, roles: Iterable[str]) -> TrustedCaller:
+def demo_caller(
+    *, caller_id: str, roles: Iterable[str], tenant_id: str | None = None
+) -> TrustedCaller:
     """仅供明确 demo 入口使用，不能伪装成生产认证身份。"""
 
-    return _caller(caller_id=caller_id, roles=roles, trust_level="demo_fixture", identity_source="demo_fixture")
+    return _caller(
+        caller_id=caller_id,
+        roles=roles,
+        trust_level="demo_fixture",
+        identity_source="demo_fixture",
+        tenant_id=tenant_id,
+    )
 
 
-def test_caller(*, caller_id: str, roles: Iterable[str]) -> TrustedCaller:
+def test_caller(
+    *, caller_id: str, roles: Iterable[str], tenant_id: str | None = None
+) -> TrustedCaller:
     """确定性测试 fixture；生产入口不得调用。"""
 
-    return _caller(caller_id=caller_id, roles=roles, trust_level="test_fixture", identity_source="test_fixture")
+    return _caller(
+        caller_id=caller_id,
+        roles=roles,
+        trust_level="test_fixture",
+        identity_source="test_fixture",
+        tenant_id=tenant_id,
+    )
 
 
 def unverified_request_caller(*, caller_id: str, claimed_roles: Iterable[str]) -> TrustedCaller:

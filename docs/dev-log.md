@@ -2737,3 +2737,192 @@ python -m uvicorn app.main:app --reload
 
 正常情况下可以看到 RAG 路由、回答、引用和 Trace 身份。这个本地体验验证业务默认链路，不等于运行 external 180 题或真实 Qwen Eval。
 
+## ★ M42 Phase 4B B0：先把 Agent 的考场、账本和边界建好
+
+（2026-08-23）
+
+**简述**：M42 没有提前实现 Agent Loop（智能体循环），而是先冻结 Phase 4B 的业务数据、场景合同、兼容边界、首次失败证据和未污染决策题集，让 M43–M48 能在同一套可审计前提上继续开发。
+
+### 先用大白话讲
+
+可以把 Phase 4B 想成要训练一名会持续办事的“分析专员”。如果一上来就教它查 SQL、找政策、追问和重试，却没有固定客户身份、业务账本、考试题和停止规则，最后很容易变成：**功能看起来越来越多，但每次演示都在换题、换数据、换标准**。
+
+M42 先搭了这套“入职与考试基础设施”：
+
+- **业务账本**：专门准备一份 7 月、8 月退款数据，能够用真实 SQL 对账；旧账本继续原样保留。
+- **工作说明书**：冻结 T1–T5 等任务故事、旧/新 runtime（运行时家族）、最小 caller（可信调用者）和哪些恢复动作目前还不能执行。
+- **第一张真实错题**：先写标准答案，再让现有检索器答一次。它确实漏掉了一份基础政策，没有为了“绿灯”临时改参数。
+- **密封试卷**：另做 60 道后续决策题，放在项目外并封存；到 M46 前不能拿它调参，否则整套试卷作废。
+
+所以 M42 的价值不是“Agent 已经会做更多事”，而是 **后续每一步终于有固定起跑线、真实失败样本和防作弊规则**。
+
+### 这次做了什么
+
+M42 处理的核心矛盾是：Phase 4 已有 SQL、RAG（检索增强生成）、Hybrid（SQL 与文档混合）和单次 Eval（评测）能力，但 Phase 4B 要做跨 turn（轮次）的 Agent 时，旧数据、旧请求和旧评测合同都不能直接冒充新能力。最终方案是 **新增独立 B0 family，同时保持 legacy（历史兼容运行时）只读兼容**。
+
+1. **先冻结机器可读合同，防止后续模块各说各话。**
+
+   `phase4b-b0-contracts-v1` 把北极星场景、非 happy-path（非理想路径）、caller、runtime family、Hybrid operator（混合算子）、action catalog（动作目录）和 capability matrix（能力矩阵）放进一份带内容身份的合同。
+
+   - **原来的风险**：M35–M38 的请求预算和字段属于单轮 legacy runtime；如果 B1 直接在旧请求上加字段，代码可能靠“哪个字段为空”猜运行时，历史测试也可能被静默改义。
+   - **解决方式**：loader（加载器）执行 closed-world（闭集）校验。缺字段、多字段、列表项不是 object（对象）、identity（身份）漂移或 Scenario 顺序变化都失败关闭。
+   - **动作边界**：区分 global（全局登记）、applicable（本次场景适用）和 eligible（当前已准入执行）。M42 中除了 `stop`，恢复动作都只是 `unproven`，不能因为出现在目录里就自动执行。
+   - **验证证据**：合同篡改、重复 turn、重复 assertion（断言）、执行缺失和 hash（摘要）篡改均有反例测试；Agent skeleton（骨架产物）仍明确标记 M43–M48 unavailable（不可用）。
+
+2. **新增独立 seed profile，让 7→8 月退款故事有真实 SQL oracle。**
+
+   seed profile（种子数据配置）可以理解成一张“可重复生成的业务账本配方”；oracle（判定标准）不是把期望数字抄回来，而是数据库建好后再用真实 SQL 算一遍。
+
+   - **冻结事实**：7 月净退款 `120000.00`，8 月 `180000.00`；原因、渠道、商品三种分解都分别守恒，宽表与星型表总额一致，每月保留一条负数冲销。
+   - **真实踩坑**：第一次查询得到 7 月 `139920`。原因不是新数据算错，而是 legacy 6 月末订单的 completed refund（已完成退款）按处理时间自然滑进 7 月，多出 `19920`。
+   - **关键取舍**：没有只筛 `REF-P4B-*` 来让测试通过，因为产品 SQL 不会认识测试编号。最终只在显式 `phase4b` 隔离副本内，把 103 条 legacy 时间尾巴固定回 6 月末；默认 seed 和历史 artifact（产物）完全不变。
+   - **身份保证**：profile identity 同时绑定 recipe（生成配方）、content（内容）和 config（配置）；拼错 profile 会在任何删除或写入前失败，避免先清库再报错。
+
+3. **用最小双角色 caller 生成一张不能美化的真实错题。**
+
+   退款变化分析需要 `ops` 的 SQL 权限，政策解释又需要 `customer_service` 的文档权限。M42 没有扩张成全角色或生产认证，而是建立最小 fixture（测试身份）：resolved roles（已解析角色）为两者，active SQL role（本轮 SQL 角色）仍只有 `ops`。
+
+   - **gold-first（先冻结标准答案）**：先冻结应当取回 `refund_policy_basic` 和 `refund_policy_quality`，再按当前默认 budget（预算）执行一次 deterministic lexical retrieval（确定性词法检索）。
+   - **实际结果**：只选中 quality，漏掉 basic，`all_gold_selected=false`；provider（模型服务）调用为 0。
+   - **为什么不修**：M42 的任务是建立可信起点，不是优化检索。为了通过而改 query（查询问法）、预算、ACL（访问控制列表）、语料或 active release（当前知识发布），会污染 M45/B3 要诊断的失败。
+   - **兼容边界**：新 `refund_change_and_policy` Hybrid operator 只冻结语义方向；M38 的 `refund_reason_and_policy` 继续原样运行，M42 不提前实现新 operator。
+
+4. **建立独立 Agent Scenario artifact，但不冒充 Agent runtime。**
+
+   M41 已证明“一次执行后再评分、失败不可观察时写 `not_observed`、review（复核）绑定来源 hash”是可靠纪律，但它只处理单题或 replicate（重复运行），不能表达多轮任务。
+
+   - **如何沿用 M41**：保留一次执行、resolved runtime identity（实际运行身份）、安全投影和闭集验证思想。
+   - **如何保持历史**：新建 `phase4b-agent-scenario-v1`，不修改 M41 artifact、签名、基线或 scorer（评分器）。
+   - **安全投影**：skeleton 只保存 turn ID、执行状态、Evidence kind/ref（证据类型与安全引用）和三态断言，不保存答案正文、SQL rows（查询结果行）或模型 Thought（思维过程）。
+   - **真实边界**：B0 的 `passed` 只证明合同输入已经冻结；Hybrid、Loop、持久状态等执行能力仍由 capability matrix 标成 unavailable。
+
+5. **密封 60 题 decision reserve，给未来动作决策留一套未污染试卷。**
+
+   decision reserve（决策保留集）不是日常回归题，而是未来判断“某个恢复动作是否真的带来净收益”的裁决试卷。试卷如果在开发时被看过或用于调参，就不能再当公正裁判。
+
+   | 难度 | 题数 | 多文档题数 |
+   |---|---:|---:|
+   | basic | 20 | 0 |
+   | core | 20 | 8 |
+   | hard | 20 | 20 |
+
+   - **来源隔离**：从 20 份未进入既有 180 gold 的冻结 external 文档编写，不复用 M34/M41 已消费题目或 gold 文档。
+   - **双重审核**：一遍核对 source coordinate/hash（来源坐标与摘要），另一遍核对 gold answer 与 answer facts（标准答案与事实）一致性；两个 reviewer 身份必须不同。
+   - **存储边界**：逐题正文、gold、source pool 和访问账本放在项目外 versioned immutable store（版本化不可变存储）；仓库只提交不含绝对路径的安全 manifest（清单）。
+   - **污染状态机**：M46 才允许首次解封；提前访问 gold、查看 candidate result（候选结果）或用于调参都会变成 `retired`，不能继续作为 decision set。
+   - **验证边界**：本模块只创建、双审、密封和 hash 对账，没有运行候选，因此没有产生新的 RAG 质量分数或正式基线。
+
+### 新概念
+
+- **Content identity（内容身份）**：对规范化内容计算 SHA-256 摘要。它回答“这份内容到底是不是原来那份”，而不是“文件还在不在原路径”。路径移动不应改变语义身份，正文、配方或配置变化必须改变身份。
+
+- **Seed profile（种子数据配置）**：同一数据库 schema（结构）下的一套独立数据世界。它类似 Spring Boot 的 profile，但这里不只是切环境变量，还绑定了生成配方、业务事实和 oracle，防止不同数据世界的评测结果混算。
+
+- **Closed-world contract（闭集合同）**：只接受预先声明的字段、枚举、顺序和执行集合。它类似 Java 枚举加数据库约束的组合：未知内容不会被“宽容解析”，而是在消费前明确拒绝。
+
+- **Decision reserve（决策保留集）**：专门留到模型或动作方案需要最终裁决时才解封的题集。它和训练集、日常开发集的区别，类似考试前密封的期末卷与平时练习册。
+
+- **Global / applicable / eligible action**：global 表示动作在系统目录中存在，applicable 表示与当前语料和失败有关，eligible 才表示已经通过证据门、允许本次执行。三者分开能防止“代码里写了这个动作”被误解成“Agent 可以随便调用”。
+
+### 代码阅读路线
+
+1. **先读总合同和内容身份**：`domain_pack/phase4b/b0_contracts.json`、`engine/phase4b/identity.py`、`engine/phase4b/contracts.py`
+   先看 T1–T5 和 capability matrix 定义了什么，再看 `load_b0_contract_bundle()` 如何校验 manifest、字段闭集和顺序。重点理解 **identity 是所有后续消费者共同的防漂移锚点**，不用先背每个 assertion 名字。
+
+2. **再读 Phase 4B 业务账本怎么构建**：`domain_pack/phase4b/seed_profile.json`、`engine/phase4b/seed_profile.py`、`scripts/seed_data.py`
+   `resolve_seed_profile()` 先在写库前解析 closed-world alias；`build_refund_fact_rows()` 用累计区间交集让原因、渠道、商品三种边际同时守恒；`append_phase4b_rows()` 隔离 legacy 时间尾巴并追加 23 组事实；最后 `verify_phase4b_business_facts()` 用真实 SQL 生成 oracle。
+
+3. **看最小 caller 如何跨 SQL 与文档权限**：`engine/phase4b/caller.py`、`engine/governance.py`
+   `Phase4BFixtureCallerResolver` 只接受 active role `ops`，但返回 `ops + customer_service` 两个 resolved roles 和固定 tenant（租户）。这说明 **本轮激活哪个 SQL 角色** 与 **caller 拥有哪些可信文档角色** 是两件事。
+
+4. **沿 Agent Eval skeleton 看闭集证据**：`eval/agent_scenario_contracts.py`
+   先看 `build_b0_fixture_evidence()` 如何把 catalog 投影成 sequence/turn evidence，再看 `build_completed_artifact()` 和 `validate_completed_artifact()` 如何逐层核对 execution、turn、assertion 与 identity。JSON round-trip（JSON 往返转换）用于避免 Python tuple（元组）与落盘 array（数组）形状不同。
+
+5. **最后看 reserve 如何构建和封存**：`scripts/build_m42_decision_reserve.py`、`eval/agent_reserve_contracts.py`
+   构建脚本定义 source pool、60 题和两类 reviewer；`seal_reserve()` 再检查数量、难度、多文档比例、历史排除、source hash、gold hash、访问账本和逐文件摘要。`apply_access_event()` 则表达解封与污染后的状态迁移。
+
+6. **用固化报告把所有输入串起来**：`scripts/rehearse_m42_b0.py`、`eval/reports/m42/`
+   rehearsal（演练）在内存 SQLite 中建 Phase 4B profile、执行一次默认业务检索、生成 Agent skeleton 并只读对账外部 reserve。首次报告不可覆盖，所以阅读现有 JSON/Markdown 即可，不要把重复运行伪装成第一次 Observation。
+
+核心数据流：
+
+`B0 contract + Phase 4B seed profile`
+→ `最小 caller + 一次默认 business retrieval`
+→ `Business Observation`
+→ `Agent Scenario skeleton`
+→ `Capability matrix + sealed reserve manifest`
+→ `M43/B1、M45/B3、M46/B4 分别消费`
+
+### 设计要点
+
+- **新旧 runtime 分家**：共享 canonical hash（规范摘要）实现，但不把 seed、Scenario、reserve 合成一个万能合同；legacy 与 agent family 分别过 Gate。
+- **真实失败比漂亮绿灯重要**：先冻 gold 再运行，漏选就保存漏选，不改问题、参数和语料来美化 B0。
+- **产品 SQL 与测试 SQL 同口径**：不靠 `REF-P4B-*` 测试编号过滤数据，只在显式 profile 内修复时间世界边界。
+- **存在不等于可执行**：action catalog 登记动作，eligible set 才能授权执行；M42 只有 `stop` 已准入。
+- **未污染证据比更多题更重要**：60 题放在项目外并带访问状态机，M46 前禁止 candidate；M34/M41 继续只作历史回归。
+- **刻意不做能力冒领**：M42 没有 TaskState、Loop、RAG Subgraph、durable checkpoint 或 Context Compact，报告和 state 都明确把它们留给 M43–M48，汪。
+
+### 有面试价值的亮点
+
+1. **“我先解决评测可信度，再扩 Agent 能力。”** 我没有直接往旧 Harness 里堆循环，而是建立独立 runtime family、内容身份、Scenario 闭集和 capability matrix。这样后续每个模块都必须在同一数据、身份和验收边界上增量开发，旧回归也不会被新字段静默改义。
+
+2. **“测试失败时，我没有改 oracle，而是找到了时间口径污染。”** Phase 4B 7 月多出 `19920`，根因是 legacy 退款按 `processed_at` 滑月。我拒绝用测试编号过滤来凑答案，改为只在新 profile 隔离副本内封住时间尾巴，并用真实 SQL 对账三种边际和宽表。这个案例能体现数据工程、业务口径和兼容性判断。
+
+3. **“我把负结果固化成后续研发资产。”** gold-first 检索真实漏掉基础政策后，我没有调参重跑，而是把首次 Observation 签名、固化并禁止覆盖。后续 B3 可以围绕这张真实错题验证动作是否新增 Evidence，而不是重新挑一题讲故事。
+
+4. **“我的保留集有污染退出机制。”** 60 题不只是藏在另一个文件夹，而是绑定 source/gold/file hash、双 reviewer、首次解封模块和访问状态机。提前看 gold 或拿 candidate 调参后，系统会把它标为 retired；这比口头说“我们没偷看测试集”更可审计。
+
+### 面试官追问
+
+1. **[基础追问] M42 没有实现 Agent Loop，那它对项目的实际贡献是什么？**
+
+   它把 Phase 4B 的起跑线变成了可执行合同：固定业务数据与 SQL oracle、可信 caller、任务 Scenario、旧/新 runtime 边界、首次真实失败和未污染 reserve。没有这些前置，后续 Loop 即使能跑，也无法证明是同一问题、同一预算和同一身份下的能力提升。
+
+2. **[工程/深挖追问] 为什么 profile 里要 retime 103 条 legacy 退款，而不是直接让查询只统计新数据？**
+
+   指标合同是 completed refund 按 `processed_at` 聚合，产品查询并不知道哪些行是“测试新增”。如果按 `REF-P4B-*` 过滤，测试通过但真实 Agent 生成的 SQL 会得到另一个结果。新 profile 本来就是隔离的数据世界，所以在这个副本内封住 legacy 时间尾巴，既保持产品 SQL 口径，也不改变 legacy 默认和历史 artifact。
+
+3. **[工程/深挖追问] 60 题 reserve 怎么证明没有被污染？**
+
+   我能证明的是工程过程，而不是绝对心理状态：source pool 排除既有 180 gold 文档，题目 ID 和文档 ID 做闭集排除；逐题 gold 经过两个不同 reviewer 的 source/gold hash 审核；项目外文件有逐文件摘要；access ledger（访问账本）只允许 M42 created→sealed，M46 前若发生 gold 或 candidate 访问就转 retired。这使污染有可检查的状态和后果。
+
+4. **[压力追问] 你做了很多合同和哈希，但业务检索还是漏了一份政策，这是不是说明模块没有带来能力提升？**
+
+   这个质疑是成立一半的：M42 确实没有提升检索质量，也没有宣称提升。它解决的是此前无法公正判断“哪个恢复动作真的有效”的问题，并交付了一张不可覆盖的真实错题、固定预算、动作准入边界和未污染裁决集。全仓 487 个测试证明兼容与合同闭合，但不能证明 RAG 更聪明；质量提升必须由后续模块在这些固定证据上做可比验证，而不是由 M42 抢跑宣称，喵。
+
+### 验证与下一步
+
+**验证结果：**
+
+| 范围 | 真实结果 | 说明 |
+|---|---:|---|
+| 首轮 M42 聚焦 | 19 passed | 覆盖 profile、caller、Scenario、reserve 和固化 artifact；后续新增畸形输入反例由合同子集和全仓覆盖 |
+| 注释修正合同子集 | 12 passed | 覆盖畸形 catalog 和 closed-world 篡改 |
+| M1/M27/M31–M34 | 179 passed，1 warning | 验证 legacy seed 与 RAG/Evidence 兼容 |
+| M35–M41 | 82 passed，1 warning | 验证 Harness、Hybrid、assurance 和 M41 Eval 兼容 |
+| 全仓 pytest | 487 passed，3 skipped，1 warning | 用沙箱外同命令避开 Windows basetemp 权限故障 |
+
+warning（警告）是既有 Starlette TestClient/httpx deprecation；3 个 skip（跳过）是既有 Milvus 专项环境跳过。`compileall`（字节码编译检查）、`git diff --check`、关键路径和外部 manifest 检查也都通过。本模块没有运行真实 LLM、remote embedding（远程向量嵌入）/Milvus、120 held-out（保留集）或 reserve candidate。
+
+**下一步**：按 Phase 4B roadmap 为 M43/B1 单独制定 module plan，从 `phase4b-b0-contracts-v1`、TaskState family 和 turn boundary 开始。M45/B3 才消费首次漏选 Observation；M46/B4 才允许按污染门解封 reserve。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录，已激活项目 Python 环境；以下命令不调用真实 LLM，也不解封 reserve。
+
+# 1. 检查 B0 合同、Scenario skeleton 和 reserve 状态机；预计全部通过。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m42-devlog-contracts tests/test_m42_phase4b_contracts.py tests/test_m42_agent_scenario_contracts.py tests/test_m42_agent_reserve_contracts.py
+
+# 2. 检查显式 Phase 4B profile 与 legacy 默认隔离；只使用内存 SQLite，不重置本机 MySQL。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m42-devlog-seed tests/test_m42_phase4b_seed_profile.py
+
+# 3. 阅读已经固化的首次报告；不要重跑 rehearsal 覆盖 Observation。
+Get-Content eval/reports/m42/m42-b0-deterministic-report.md
+Get-Content eval/reports/m42/m42-capability-matrix.md
+```
+
+环境未激活时，把 `python` 替换成 `AGENTS.md` 中项目学习环境的完整 Python 路径。
+
+**本地启动体验：** M42 暂无独立 API 或页面，因为它只交付 B0 数据/合同/Eval 前置，不把 M43 的 Agent runtime 提前塞进 `/api/query`。当前最合适的体验方式是运行上面的确定性测试，并阅读首次 deterministic report（确定性演练报告）和 capability matrix；它们会展示 7/8 月 oracle、最小 caller、真实漏选、Agent skeleton 与 M43–M48 未开放边界。
+
