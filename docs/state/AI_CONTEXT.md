@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M42 / Phase 4B B0 前置包已验收通过（2026-08-23）；M43/B1 尚未立项 |
-| 当前 plan    | `docs/notes/m42-plan.md`；B0 冻结合同由 M43–M48 分模块消费，不得把 skeleton 当 runtime 完成 |
-| 当前 notes   | `docs/notes/m42-notes.md`                                    |
-| 待决事项     | 下一步为 M43/B1 独立 module plan；M46 前 60 题 decision reserve 保持 sealed |
+| 当前活动模块 | M43 / Phase 4B B1 Task runtime 与自然多轮 v1 技术收工完成（2026-08-23） |
+| 当前 plan    | `docs/notes/m43-plan.md`；B1 只允许一次深 Harness，不得冒充 B2 Agent Loop |
+| 当前 notes   | `docs/notes/m43-notes.md`                                    |
+| 待决事项     | 下一步为 M44/B2 独立 module plan；M46 前 60 题 decision reserve 保持 sealed |
 | 更新时间     | 2026-08-23                                                   |
 
 ## 必读规则
@@ -29,7 +29,7 @@
 
 ## 当前默认值
 
-- 后端：FastAPI + Pydantic；`/api/query` 统一调用 M37 turn seam。普通/accepted initial、resume 或 follow-up 恰好一次 M35 Graph，thread lifecycle 前置拒绝为零次；响应、JSONL Trace 与 Eval 都从同一 turn/result/lifecycle/validity 事实投影。
+- 后端：FastAPI + Pydantic；`/api/query` 无 `task` 时保持 M37 legacy turn seam；只有严格 nested task envelope 才进入 M43 agent task family。accepted task turn 为零或一次 M35 深 Graph，clarification/cancel/clear/pre-rejection 为零次；响应、JSONL Trace 与 Eval 从同一 delta/state transition/Evidence validity/lifecycle 事实投影。
 - 数据库：MySQL `datapilot_dev` + SQLAlchemy/Alembic；SQLite 仅用于测试、smoke 与 M27 deterministic oracle。
 - Phase 4B seed：默认仍为 legacy `sqlite_deterministic_seed`；只有显式选择 `profile_alias="phase4b"` 才加载 content-bound B0 profile，生成 7/8 月 oracle。不得把两个 profile 的 artifact 混算。
 - NL2SQL：普通 API 默认走 Harness 内的 `new_text2sql` 深 Tool（Schema Retrieval → QueryPlan → SQL Guard）；显式 `force_new_pipeline=false` 只选择 adapter 内部 legacy baseline，不能绕过顶层 Harness。
@@ -38,11 +38,12 @@
 - 业务 Knowledge Retrieval 默认：`knowledge-deterministic-lexical-v1`。它与 Text2SQL Schema Retrieval 是两套独立检索链路；这不代表语义最优，未来替换仍需独立候选 identity、held-out 失败证据、A/B 与用户确认。
 - Harness：LangGraph `>=1.1.2,<2`；SQL/RAG 单路仍为 `route → tool → controller`、各至多一个深 Tool。M38 canonical Hybrid 为 `route → hybrid_sql_tool → hybrid_rag_tool → controller`，SQL/RAG 都 required、各至多一次、总计至多两个深 Tool；Router 只签发薄计划，RAG branch 只执行 retrieval + Gate，不生成子答案。未知 Hybrid 继续保守停止；M37 follow-up 仍只覆盖 SQL/RAG。
 - Thread checkpoint：方案 A，应用持有 `inprocess-bounded-thread-v2`，state `m37-thread-v2`，默认 TTL `900s`（`THREAD_CHECKPOINT_TTL_SECONDS`）。除 M36 一次结构化恢复外，成功 SQL/RAG 可在显式开启后签发一次 closed-world follow-up；owner 绑定 trusted caller + tenant/active role，同 version 原子单 claim，重启/多 worker 不恢复或共享。checkpoint 不保存旧 answer/rows/正文/citation。
+- Agent task boundary：应用另持有 `phase4b-in-memory-task-boundary-v1`，复用默认 TTL 900s，但与 thread checkpoint/state family 分离。它绑定 trusted caller+tenant、执行 version/TTL/原子 claim/commit/switch/cancel/clear；错 owner 与未知 task 统一失败。只保存通用 TaskState 与安全 EvidenceRef validity，不保存 rows/正文/完整历史答案；明确为 process-local non-durable，B5 前不得宣称跨进程恢复。
 - Evidence follow-up：SQL 没有可靠业务 snapshot，永远重查；EnterpriseRAG-Bench external 永远重检索；只有业务 22-entry release 的同 requirement 解释动作可按当前 active authority/revision/content/anchor 重新加载并重新授权，随后签发新 run Evidence/ledger/citation。requirement/identity 变化重检索一次，ACL/用途拒绝零 retrieval 停止。
 - Caller：`local/demo/test` 使用明确标记的 fixture resolver，请求 `user_role` 只能选择 resolver 已解析的 role；其他环境没有 authenticated resolver 时在 Tool 前失败关闭。生产认证尚未建设。
 - M34 external benchmark：项目外 EnterpriseRAG-Bench v1.0.0 独立 profile；当前 external adapter 保持 `enterprise-lexical`，`enterprise-unit-paragraph-2400-v1` 无 overlap；semantic candidate 不胜 lexical，未激活。业务 22 条 active release 不变。
 - LangFuse 默认关闭，JSONL trace 为主；SQL 安全为只读 AST + RBAC + 敏感字段策略。
-- Trace runtime identity：`/api/query` 的 SQL、RAG、Hybrid、澄清恢复和安全拒绝 Trace 均从同一 `AgentTurnResult` 投影 `phase4-trace-runtime-v1`。缺少安全 identity 只标 `unavailable`、不阻断业务；P7 canonical rehearsal 视其为失败。Trace 不保存 raw `thread_id` 或结构化 clarification/follow-up 参数副本，但沿用既有用户可见 `answer` 保存合同。
+- Trace runtime identity：legacy SQL/RAG/Hybrid/澄清恢复/安全拒绝继续投影 `phase4-trace-runtime-v1`；task family 外层投影 `phase4b-agent-task-runtime-v1` 并内嵌深 Harness identity。缺少安全 identity 只标 `unavailable`、不阻断业务。Trace 不保存 raw `thread_id`/raw `task_id`、结构化控制参数副本、rows 或文档正文，但沿用既有用户可见 `answer` 保存合同。
 - 现有 Text2SQL chat/schema embedding 出站在 transport 前按 `phase4-outbound-v1` 精确登记；普通 Knowledge/RAG 与 LangFuse Cloud 继续默认拒绝。唯一例外是用户确认的 M41 显式 Eval CLI：`phase4-rag-eval-business-generation-outbound-v1` 只允许已通过 active release、caller/ACL/Gate 的政策/指标 generation context 发往 Qwen，security/未知类别网络前拒绝；该 policy 不进入普通 API。
 
 ## 最近验证事实
@@ -51,6 +52,7 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-23 | M43 完成 B1：B1 contract `383fbf5...e9d32`、Scenario v2 artifact `cc9f696...b27c92`，deterministic rehearsal 8/8、external calls=0；canonical T2 会使旧 SQL Evidence invalidated 后重查，得到 7 月 120000、8 月 180000、差额 60000、增幅 50%。最终全仓 `500 passed, 3 skipped, 1 warning`。legacy/M42 v1、模型、RAG release、数据库 schema 均未改变。 |
 | 2026-08-23 | M42 完成 Phase 4B B0 前置包：B0 contract `6543883...aae6f`、seed profile `9c49407...00673`、SQL oracle `be813a8...57ef80`、Agent skeleton `b303d4d...52982`、sealed reserve `f70c5fc...e505`。首次 business retrieval 零 provider 且真实漏选 basic 政策，保留为 B3 输入；M43–M48 能力仍 unavailable。最终全仓 `487 passed, 3 skipped, 1 warning`，未改 legacy/active release/默认模型或任何长期基线。 |
 | 2026-08-23 | M41 post-fix external dev Smoke / Basic / Core 均已 completed，但 Gate 和人工语义 review 显示 lexical 漏召回仍是主要瓶颈；这些快照未登记正式基线，120 held-out 未运行。business 与 external 分账、一次精确授权、三态 Gate、review hash 和安全出站纪律继续生效；完整运行身份、数字与失败分层只在 `eval-baselines.md` 保存。 |
 
@@ -58,7 +60,7 @@
 
 > 只保留仍然生效的路线和限制；已经完成的必须删除或改写。
 
-- (2026-08-23) M42 已完成 B0 冻结与 rehearsal，不等于 Phase 4B Agent runtime 完成。M43/B1 必须消费独立 runtime family、TaskState 入口、最小 caller 与 Scenario catalog；M45/B3 只能用预注册动作/预算诊断首次漏选；M46/B4 前 reserve 必须 sealed，提前访问或调参即退休。M41 继续作为历史 RAG Eval/纪律来源，不被 M42 改签或替代。
+- (2026-08-23) M43 已完成 B1 的独立 task runtime、自然多轮 v1、Evidence invalidation 和 node Context，但每个 turn 仍最多一次既有深 Harness，不等于 B2 Agent Loop 或完整 Phase 4B Agent。M44/B2 必须另立 plan 冻结 Decision Loop/多动作预算；M45/B3 只能用预注册动作诊断首次漏选；M46/B4 前 reserve 必须 sealed，提前访问或调参即退休。
 - (2026-08-23) M41 是 Phase 4 RAG Eval 补完而非 Phase 4B 能力实施；business 小 catalog 与 M34 external 180 题继续分账，120 held-out 保持停门。external 的 difficulty、partition、suite 三轴以及候选 compare allowlist 仍按 `eval-baselines.md` 和 runbook 执行，不改变 external lexical、业务 active release 或普通 Composer 默认。
 
 ## 防遗忘能力账本

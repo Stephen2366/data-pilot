@@ -93,6 +93,15 @@ class TraceRecord(BaseModel):
     checkpoint_runtime: dict[str, Any] | None = None
     # M40：跨 SQL/RAG/Hybrid 的最小 runtime identity，不替代 Evidence 或详细 diagnostics。
     runtime_identity: dict[str, Any] | None = None
+    # M43：Agent task family 的同源事实；legacy trace 保持空值和零次数。
+    runtime_family: Literal["legacy", "agent_task"] = "legacy"
+    task_action: str | None = None
+    task_runtime_invocation_count: int = Field(default=0, ge=0, le=1)
+    task_lifecycle: dict[str, Any] | None = None
+    task_state: dict[str, Any] | None = None
+    task_delta: dict[str, Any] | None = None
+    task_transition: dict[str, Any] | None = None
+    node_contexts: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TraceBackend(Protocol):

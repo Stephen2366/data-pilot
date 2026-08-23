@@ -19,6 +19,16 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M43 Phase 4B B1 Task runtime 与自然多轮 v1（2026-08-23）
+
+- **改动范围**：起始 commit `8ae217c8904dfe808c32b346028bff251bbf2f7d`。新增 additive B1 contract/manifest、通用 `TaskDelta → TaskState` 状态机、Evidence invalidator、进程内 task boundary、deterministic Turn Understanding、四类 node Context、安全 task turn、Scenario artifact v2、rehearsal/report 与 4 组 13 项测试；同一 `/api/query` 只在 nested `task` envelope 存在时进入 agent task family，并增加独立 task clear。M42 v1 与 legacy 请求不改签、不切默认。
+- **用户决策与核心合同**：用户确认 G43-1～G43-3 均选方案 A：M42 v1 只读并新增 v2；task envelope 对新 family 严格 closed-world，legacy 顶层继续兼容；首版理解只用本地确定性规则和保守澄清，零新增模型/provider/outbound。每个 accepted task turn 只允许 0 或 1 次既有安全深 Harness；clarification/cancel/clear/pre-rejection 为零 Graph，M44 的 Observation-driven 多动作 Loop 未提前实现。
+- **关键实现与修正**：B1 contract identity `383fbf5...e9d32`。TaskState 顶层只含 goal/constraints/questions/requirements/route/Evidence/termination 等通用字段，不把退款/月/channel 做成业务专用 state；canonical T2 的省略年份只从已确认 prior state 继承。约束修正会让旧 SQL Evidence 显式 invalidated 后重查；cancel/clear/switch 同样失效旧 Evidence。switch 在 manager 同一把锁内退休旧 task 并签发 generation=1 新 task，禁止旧约束/Evidence 串线。owner+tenant、TTL、version、claim/commit 与错 owner/未知 task 不可区分的失败都收敛在独立 `phase4b-in-memory-task-boundary-v1`，并明确不是 durable。
+- **Context/Trace/Eval**：Turn Understanding Context 记录 prior state；route/SQL 使用执行前 fingerprint；controller 才接触本轮新 EvidenceRef，均有 allowlist/source identity/field budget/input fingerprint，且不保存 rows、文档正文或完整历史答案。API、JSONL Trace 和 `phase4b-agent-scenario-artifact-v2` 从同一 task delta/state transition/evidence validity/lifecycle/invocation 事实投影；deterministic artifact `cc9f696...b27c92` 的 8 项检查全部通过，external calls=0。冻结 SQL oracle仍为 July `120000`、August `180000`、delta `60000`、rate `0.5`，不是新质量基线。
+- **参考资料与适配**：按 roadmap/reference 定点复核 ARAG GraphState/Graph/summary-rewrite 节点以及 DataAgent KeyStrategy/Graph 接线。借鉴显式 state merge、节点最小输入和主状态/执行状态分权；不照搬 MessagesState 全历史、LLM 自由 rewrite/summary、扁平大 state、开放循环或 `InMemorySaver` 冒充 durable。精确源码坐标和适配表见 `docs/notes/m43-plan.md`。
+- **验证快照**：M43 聚焦 `13 passed, 1 warning`；M35–M43 受影响回归 `117 passed, 1 warning in 109.43s`；rehearsal 8/8、零外部调用；最终全仓 `500 passed, 3 skipped, 1 warning in 584.22s`，exit 0。compileall、`git diff --check` 通过；warning 为既有 Starlette TestClient/httpx deprecation。首次 sandbox 聚焦命令因 pytest basetemp `WinError 5` 未形成代码结论，获批沙箱外重跑后闭合。
+- **边界与后续**：M43 只完成 B1 的单次深执行自然多轮底座，不代表 B2 Loop、B3 recovery、B4 RAG Subgraph、B5 durable state 或 B6 Context Compact 完成；M46 reserve 继续 sealed。active RAG release/retrieval/Composer、默认模型/embedding、数据库 schema、legacy seed/runtime 均未改变。下一步须为 M44/B2 独立调查并制定 module plan，不能把当前 single-call task runtime 宣称为完整 Agent Loop。
+
 ### [模块任务] M42 Phase 4B B0 前置包与 sealed Agent Eval 决策集（2026-08-23）
 
 - **改动范围**：起始 commit 明确为 `f3cc1912a2ab1e9b87fbc3f57d4adb1cdf03df40`。新增 `engine/phase4b/`、`domain_pack/phase4b/`、Agent Scenario/reserve Eval 合同、安全 manifest、M42 rehearsal 报告、两个构建/复核脚本和 6 组测试；兼容性修改仅涉及 caller fixture 的可选 tenant、seed 的显式 profile 入口和 `AGENTS.md` 目录树。项目外另创建 `phase4b-agent-eval/v1.0.0` immutable asset；仓库不保存题面/gold/绝对路径。

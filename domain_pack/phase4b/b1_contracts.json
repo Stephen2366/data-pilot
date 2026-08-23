@@ -1,0 +1,38 @@
+{
+  "contract_version": "phase4b-b1-contracts-v1",
+  "predecessor_contract_identity": "6543883bb7c82bbaf2052d20631f26c023fb757d0c73e667e6899fd8883c56f2",
+  "runtime_identity": "phase4b-task-runtime-v1",
+  "task_state_version": "phase4b-task-state-v1",
+  "understanding_identity": "phase4b-deterministic-turn-understanding-v1",
+  "api": {
+    "path": "/api/query",
+    "envelope": "task",
+    "actions": ["start", "continue", "switch", "cancel"],
+    "legacy_default_unchanged": true
+  },
+  "vocabulary": {
+    "metric_aliases": {
+      "net_refund_amount": ["净退款额", "实际净退款金额"]
+    },
+    "comparison_aliases": ["相比", "比较", "对比"],
+    "cancel_aliases": ["取消任务", "停止这个任务"],
+    "switch_aliases": ["换个问题", "切换任务"],
+    "correction_aliases": ["更正", "纠正", "不是"]
+  },
+  "scenarios": [
+    {
+      "scenario_id": "B1_CANONICAL",
+      "turns": [
+        {"turn_id": "T1", "question": "查询 2026 年 7 月实际净退款金额。", "delta": "start_task", "periods": ["2026-07"], "route": "sql", "expected_value": 120000},
+        {"turn_id": "T2", "question": "改成 8 月，并和 7 月比较。", "delta": "modify_constraint", "periods": ["2026-07", "2026-08"], "route": "sql", "invalidates_previous_sql": true, "expected_value": {"july": 120000, "august": 180000, "delta": 60000, "rate": 0.5}}
+      ]
+    },
+    {"scenario_id": "B1_CORRECTION", "turns": [{"turn_id": "C1", "question": "更正为 2026 年 8 月实际净退款金额。", "delta": "correct_previous_understanding", "periods": ["2026-08"], "route": "sql"}]},
+    {"scenario_id": "B1_SWITCH_CANCEL", "turns": [{"turn_id": "S1", "question": "换个问题，查询 2026 年 8 月实际净退款金额。", "delta": "switch_task", "periods": ["2026-08"], "route": "sql"}, {"turn_id": "S2", "question": "取消任务。", "delta": "cancel", "periods": [], "route": "none"}]},
+    {"scenario_id": "B1_CLARIFY", "turns": [{"turn_id": "N1", "question": "改成另一个月。", "delta": "modify_constraint", "periods": [], "route": "none", "clarification_required": true}]}
+  ],
+  "capability_matrix": {
+    "implemented": ["task_delta", "task_state", "evidence_invalidation", "task_boundary", "turn_understanding", "context_projection", "task_api", "trace", "scenario_v2"],
+    "reserved": ["multi_action_loop_M44", "recovery_policy_M45", "durable_checkpoint_M47", "compact_long_context_M48"]
+  }
+}

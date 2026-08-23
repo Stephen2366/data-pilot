@@ -11,6 +11,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, register_request_logging_middleware
 from engine.harness.caller import build_default_caller_resolver
 from engine.harness.thread import ThreadCheckpointManager
+from engine.phase4b.task_boundary import TaskBoundary
 
 
 def redact_database_url(database_url: str) -> str:
@@ -59,9 +60,12 @@ def create_app() -> FastAPI:
     application.state.thread_checkpoint_manager = ThreadCheckpointManager(
         ttl_seconds=settings.thread_checkpoint_ttl_seconds
     )
+    application.state.task_boundary = TaskBoundary(ttl_seconds=settings.thread_checkpoint_ttl_seconds)
     # M41：普通请求保持 None，仍由 endpoint 构造 deterministic RAG Tool。只有受控 Eval
     # 在进程内临时注入 factory；请求体没有字段可以选择 Composer 或提升运行权限。
     application.state.rag_tool_factory = None
+    # M43 deterministic rehearsal seam；请求体不能选择或替换 Tool。
+    application.state.sql_tool_factory = None
     # 仅供显式 Eval 临时注入 Router seam；None 时普通 API 仍使用 Harness 的 deterministic 默认。
     application.state.harness_router = None
     register_request_logging_middleware(application)

@@ -17,6 +17,7 @@
 - **M41 business RAG 产品 Eval**：当前合同为 `phase4-rag-e2e-v1`，用户入口已合并为唯一 `business` selector（5 题各 1 次），并保留 `--scenario` 单题诊断。首次真实 Qwen Smoke `m41-rag-smoke-20260822-01` 是合并前的历史 2 题 artifact，已 completed 且 review 通过；原件不改签，也不能冒充当前 5 题 Business 结果。
 - **M41 external 套件与候选对比**：完整 180 catalog 的 difficulty 为 basic/core/hard `64/74/42`，与 dev/held-out partition、smoke/basic/core/hard/reliability/full suite 分离。compare-v2 默认只作同 runtime strict repeat；候选 A/B 必须显式声明允许变化的 runtime 字段，自动 paired 迁移仍不等于人工 correctness。现有 v2/post-fix dev smoke/basic/core 快照见下方，正式长期基线尚未登记。
 - **M42 Phase 4B B0 Eval 前置**：`phase4b-agent-scenario-v1` 只冻结 sequence/turn/execution/assertion closed-world skeleton 和 capability handoff；deterministic rehearsal 的 Agent artifact `b303d4d...52982`、business Observation `e6bc5fa...aab99` 与 sealed reserve `f70c5fc...e505` 都不是新的质量分数或正式长期基线。reserve 为 60 题 `20/20/20`，M46 前不可运行 candidate；M41/M34 artifact 不改签。
+- **M43 Phase 4B B1 deterministic artifact**：新增 additive `phase4b-agent-scenario-artifact-v2`，只记录 TaskDelta、state transition、Evidence validity、node Context、task lifecycle 与 0/1 invocation 事实；M42 v1 未改签。当前 rehearsal artifact `cc9f696...b27c92` 绑定 B1 contract `383fbf5...e9d32`，8 项 deterministic checks 通过、external calls 为 0。它证明 B1 技术合同和冻结 oracle，不是 LLM/Agent 质量分数或正式长期基线；M46 reserve 仍 sealed。
 - **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
 ## 读数与分母

@@ -30,11 +30,14 @@
 - follow-up 必须先在 initial 中显式设置 `enable_bounded_follow_up=true`，再严格提交响应声明的 action/fields。
 - clear：`DELETE /api/query/threads/{thread_id}?user_role=<role>&expected_version=<version>`。
 - 进程内 thread checkpoint 默认 TTL：`THREAD_CHECKPOINT_TTL_SECONDS=900`；重启或多 worker 不恢复、不共享。
+- M43 Agent task family 仍走同一 `POST /api/query`，只有请求携带严格 nested envelope 才启用：start 为 `"task":{"action":"start"}`；continue/switch/cancel 必须同时提交服务端上一响应的 `task_id` 与 `expected_version`。task envelope 与 legacy thread/follow-up payload 互斥，客户端不得提交 delta/state/route/Evidence/runtime 字段。
+- task clear：`DELETE /api/query/tasks/{task_id}?user_role=<role>&expected_version=<version>`。M43 task boundary 与 thread checkpoint 分离，但同样是进程内、默认 TTL 900s、重启/多 worker 不恢复；真正 durable task state 属于 B5，不得把当前 adapter 作为持久化能力。
+- B1 零 provider rehearsal：`python -m scripts.rehearse_m43_b1`。它只复核 B1 contract、TaskState/Evidence invalidation、node Context、Scenario v2 和冻结 SQL oracle，输出到 `eval/reports/m43/`；不运行真实 LLM、embedding、数据库或 sealed reserve。
 
 ## Trace / LangFuse
 
 - 本地 JSONL Trace 默认写入 `eval/traces/`；`/api/query` 主 Trace 为 `eval/traces/traces.jsonl`。
-- Trace 不保存 Document 正文、完整 SQL rows、private Evidence、raw thread id 或结构化 thread 参数副本。
+- Trace 不保存 Document 正文、完整 SQL rows、private Evidence、raw thread id/raw task id 或结构化 thread/task 参数副本；Agent task Trace 只增加安全 task lifecycle/state/delta/transition/node-context 投影。
 - LangFuse 默认关闭。只有显式任务才设置 `LANGFUSE_ENABLED=true`；Cloud 只是旁路增强，不能影响本地 EvalRun。
 - LangFuse 专项排障不放在本 runbook；需要时按 `AI_CONTEXT.md` 和历史索引进入对应资料。
 

@@ -7,7 +7,28 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class TaskRequestEnvelope(BaseModel):
+    """M43 新 task family 的严格信封；delta/state/route/evidence 均不能由客户端提交。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["start", "continue", "switch", "cancel"]
+    task_id: str | None = Field(default=None, min_length=1, max_length=128)
+    expected_version: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_action_shape(self) -> "TaskRequestEnvelope":
+        has_identity = self.task_id is not None and self.expected_version is not None
+        if (self.task_id is None) != (self.expected_version is None):
+            raise ValueError("task_id 与 expected_version 必须同时提供")
+        if self.action == "start" and has_identity:
+            raise ValueError("start 不得提交已有 task identity")
+        if self.action != "start" and not has_identity:
+            raise ValueError("continue/switch/cancel 必须提交 task identity")
+        return self
 
 
 class QueryRequest(BaseModel):
@@ -36,12 +57,21 @@ class QueryRequest(BaseModel):
     enable_bounded_follow_up: bool = Field(default=False)
     follow_up_action: Literal["adjust_sql_scope", "explain_same_evidence", "ask_related_evidence"] | None = None
     follow_up_fields: dict[str, str] = Field(default_factory=dict)
+    # M43：有 task 信封才进入 Agent task family；省略时完整保留 M35–M42 行为。
+    task: TaskRequestEnvelope | None = None
 
     @model_validator(mode="after")
     def validate_resume_shape(self) -> "QueryRequest":
         """拒绝半截 resume，避免 API 猜测这是新问题还是旧任务补充。"""
 
         has_thread = self.thread_id is not None
+        if self.task is not None and (
+            has_thread or self.clarification_answers or self.follow_up_action is not None
+            or self.follow_up_fields or self.enable_bounded_follow_up
+        ):
+            raise ValueError("task family 与 legacy thread/follow-up payload 互斥")
+        if self.task is not None:
+            return self
         if has_thread != (self.expected_version is not None):
             raise ValueError("thread_id 与 expected_version 必须同时提供")
         is_resume = bool(self.clarification_answers)
@@ -113,6 +143,26 @@ class ThreadControlResponse(BaseModel):
     thread: ThreadView | None = None
 
 
+class TaskView(BaseModel):
+    """合法 owner 可见的 task 安全投影；不包含 owner 比较值、rows 或历史答案。"""
+
+    task_id: str
+    task_version: int = Field(ge=1)
+    status: Literal["claimed", "active", "cancelled", "switched", "cleared"]
+    expires_at: str
+    state: dict[str, Any]
+
+
+class TaskControlResponse(BaseModel):
+    """task clear 的闭合响应；失败不回显 task 状态。"""
+
+    ok: bool
+    reason_code: str
+    safety_status: Literal["passed", "blocked"]
+    message: str
+    task: TaskView | None = None
+
+
 class CostInfo(BaseModel):
     """一次 Agent 查询的成本与耗时快照。
 
@@ -177,3 +227,11 @@ class AgentResponse(BaseModel):
     thread: ThreadView | None = None
     # M38：只给出 branch 的安全状态与已验证引用，不把私有 typed Evidence 塞回 API。
     hybrid_branches: list[dict[str, Any]] = Field(default_factory=list)
+    # M43：只在 nested task envelope 路径填充；旧调用方得到稳定默认值。
+    runtime_family: Literal["legacy", "agent_task"] = "legacy"
+    task_action: Literal["start", "continue", "switch", "cancel", "rejected"] | None = None
+    task_runtime_invocation_count: int = Field(default=0, ge=0, le=1)
+    task: TaskView | None = None
+    task_delta: dict[str, Any] | None = None
+    task_transition: dict[str, Any] | None = None
+    node_contexts: list[dict[str, Any]] = Field(default_factory=list)

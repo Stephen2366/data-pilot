@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from time import perf_counter
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, ThreadControlResponse, ThreadView
+from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, TaskControlResponse, TaskView, ThreadControlResponse, ThreadView
 from engine.harness.adapters import RAGToolAdapter, Text2SQLToolAdapter
 from engine.harness.contracts import HarnessRequest, ToolObservation
 from engine.harness.graph import HarnessRuntime
@@ -22,6 +23,9 @@ from engine.harness.thread import ThreadCheckpointManager
 from engine.harness.turn import AgentTurnResult, TurnRequest, clear_thread, run_turn
 from engine.trace.recorder import TraceRecord, append_trace
 from engine.trace.runtime import build_trace_runtime_identity
+from engine.phase4b.task_boundary import TaskBoundary
+from engine.phase4b.task_turn import TaskTurnRequest, TaskTurnResult, clear_task, run_task_turn
+from engine.phase4b.task_runtime import B1_CONTRACT_IDENTITY
 
 
 router = APIRouter(prefix="/api", tags=["query"])
@@ -132,7 +136,8 @@ def _project_response(*, turn: AgentTurnResult, trace_id: str, started_at: float
 
 
 def _record_trace(
-    *, request: Request, request_body: QueryRequest, response: AgentResponse, turn: AgentTurnResult
+    *, request: Request, request_body: QueryRequest, response: AgentResponse, turn: AgentTurnResult,
+    task_turn: TaskTurnResult | None = None,
 ) -> None:
     """把同一份 Harness result 写成 JSONL 安全投影，Trace 不重新判断 route 或四轴。"""
 
@@ -140,6 +145,20 @@ def _record_trace(
     observation = result.observation
     hybrid_branches = _hybrid_branch_projection(result)
     decision = result.route_decision
+    deep_runtime_identity = build_trace_runtime_identity(
+        result=result, checkpoint_runtime=turn.checkpoint_runtime
+    )
+    runtime_identity = deep_runtime_identity
+    if task_turn is not None:
+        runtime_identity = {
+            "format": "phase4b-agent-task-runtime-v1",
+            "status": "complete",
+            "contract_identity": B1_CONTRACT_IDENTITY,
+            "task_state_version": task_turn.task.state.state_version if task_turn.task else None,
+            "turn_understanding_identity": task_turn.delta.source_identity if task_turn.delta else None,
+            "task_boundary": task_turn.task_runtime,
+            "deep_harness": deep_runtime_identity,
+        }
     trace_record = TraceRecord(
         trace_id=response.trace_id,
         question=request_body.question,
@@ -187,7 +206,15 @@ def _record_trace(
         graph_invocation_count=turn.graph_invocation_count,
         thread_lifecycle=turn.lifecycle.safe_projection() if turn.lifecycle else None,
         checkpoint_runtime=turn.checkpoint_runtime,
-        runtime_identity=build_trace_runtime_identity(result=result, checkpoint_runtime=turn.checkpoint_runtime),
+        runtime_identity=runtime_identity,
+        runtime_family=response.runtime_family,
+        task_action=response.task_action,
+        task_runtime_invocation_count=response.task_runtime_invocation_count,
+        task_lifecycle=task_turn.lifecycle.safe_projection() if task_turn else None,
+        task_state=task_turn.task.state.safe_projection() if task_turn and task_turn.task else None,
+        task_delta=task_turn.delta.safe_projection() if task_turn and task_turn.delta else None,
+        task_transition=task_turn.transition.safe_projection() if task_turn and task_turn.transition else None,
+        node_contexts=[item.safe_projection() for item in task_turn.node_contexts] if task_turn else [],
     )
     path = _trace_path(request)
     if path is None:
@@ -220,11 +247,49 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
     # 步骤 2：DB Session、深 Tool 与可选 Schema index 仅属于本次 invoke 的 runtime context。
     rag_tool_factory = getattr(request.app.state, "rag_tool_factory", None)
     rag_tool = rag_tool_factory() if rag_tool_factory is not None else RAGToolAdapter()
+    sql_tool_factory = getattr(request.app.state, "sql_tool_factory", None)
+    sql_tool = sql_tool_factory() if sql_tool_factory is not None else Text2SQLToolAdapter(
+        db=db, schema_vector_index=getattr(request.app.state, "schema_vector_index", None)
+    )
     runtime = HarnessRuntime(
-        sql_tool=Text2SQLToolAdapter(db=db, schema_vector_index=getattr(request.app.state, "schema_vector_index", None)),
+        sql_tool=sql_tool,
         rag_tool=rag_tool,
         router=getattr(request.app.state, "harness_router", None),
     )
+    if request_body.task is not None:
+        boundary: TaskBoundary = request.app.state.task_boundary
+        task_turn = run_task_turn(
+            request=TaskTurnRequest(
+                harness_request=harness_request,
+                action=request_body.task.action,
+                task_id=request_body.task.task_id,
+                expected_version=request_body.task.expected_version,
+            ),
+            runtime=runtime,
+            boundary=boundary,
+        )
+        # 复用兼容字段的唯一 projector，再只追加 task family 事实；SimpleNamespace 不参与业务判断。
+        compatible_turn = SimpleNamespace(
+            result=task_turn.result,
+            turn_action="rejected" if task_turn.action == "rejected" else "initial",
+            graph_invocation_count=task_turn.graph_invocation_count,
+            thread=None,
+            lifecycle=None,
+            checkpoint_runtime=task_turn.task_runtime,
+        )
+        response = _project_response(turn=compatible_turn, trace_id=trace_id, started_at=started_at)
+        response = response.model_copy(update={
+            "runtime_family": "agent_task",
+            "task_action": task_turn.action,
+            "task_runtime_invocation_count": task_turn.task_runtime_invocation_count,
+            "task": TaskView.model_validate(task_turn.task.safe_projection()) if task_turn.task else None,
+            "task_delta": task_turn.delta.safe_projection() if task_turn.delta else None,
+            "task_transition": task_turn.transition.safe_projection() if task_turn.transition else None,
+            "node_contexts": [item.safe_projection() for item in task_turn.node_contexts],
+        })
+        _record_trace(request=request, request_body=request_body, response=response, turn=compatible_turn, task_turn=task_turn)
+        return response
+
     checkpoint_manager: ThreadCheckpointManager = request.app.state.thread_checkpoint_manager
     turn = run_turn(
         request=TurnRequest(
@@ -241,6 +306,41 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
     response = _project_response(turn=turn, trace_id=trace_id, started_at=started_at)
     _record_trace(request=request, request_body=request_body, response=response, turn=turn)
     return response
+
+
+@router.delete("/query/tasks/{task_id}", response_model=TaskControlResponse)
+def clear_query_task(
+    task_id: str,
+    request: Request,
+    user_role: str = Query(default="ops"),
+    expected_version: int = Query(ge=1),
+) -> TaskControlResponse:
+    """由可信 owner/version 清理 task；clear 路径不调用深 Harness。"""
+
+    resolver = getattr(request.app.state, "caller_resolver", None)
+    resolution = resolver.resolve(user_role) if resolver is not None else None
+    boundary: TaskBoundary = request.app.state.task_boundary
+    task, lifecycle, ok, reason = clear_task(
+        task_id=task_id,
+        expected_version=expected_version,
+        caller=resolution.caller if resolution else None,
+        boundary=boundary,
+    )
+    safety = "passed" if ok else ("blocked" if reason == "task_unavailable" else "passed")
+    message = "当前任务已清理。" if ok else "当前任务无法清理。"
+    trace_record = TraceRecord(
+        trace_id=_trace_id(request), question="[task-clear]", user_role=user_role, route="none", answer=message,
+        safety_status=safety, cost=CostInfo(), execution_status="completed" if ok else "not_started",
+        answer_status="no_answer", reason_code=reason, caller_safe_ref=resolution.caller.audit_ref if resolution else None,
+        termination_action="answer" if ok else ("blocked" if safety == "blocked" else "failed"), turn_action="clear",
+        graph_invocation_count=0, checkpoint_runtime=boundary.runtime_identity,
+        runtime_identity={"format": "phase4b-task-runtime-v1", "status": "complete", "task_boundary": boundary.runtime_identity},
+        runtime_family="agent_task", task_action="clear", task_runtime_invocation_count=0,
+        task_lifecycle=lifecycle.safe_projection(), task_state=task.state.safe_projection() if task else None,
+    )
+    path = _trace_path(request)
+    append_trace(trace_record, path=path) if path is not None else append_trace(trace_record)
+    return TaskControlResponse(ok=ok, reason_code=reason, safety_status=safety, message=message, task=TaskView.model_validate(task.safe_projection()) if task else None)
 
 
 @router.delete("/query/threads/{thread_id}", response_model=ThreadControlResponse)

@@ -2926,3 +2926,236 @@ Get-Content eval/reports/m42/m42-capability-matrix.md
 
 **本地启动体验：** M42 暂无独立 API 或页面，因为它只交付 B0 数据/合同/Eval 前置，不把 M43 的 Agent runtime 提前塞进 `/api/query`。当前最合适的体验方式是运行上面的确定性测试，并阅读首次 deterministic report（确定性演练报告）和 capability matrix；它们会展示 7/8 月 oracle、最小 caller、真实漏选、Agent skeleton 与 M43–M48 未开放边界。
 
+## ★ M43 Phase 4B B1：让一次问答变成可继续、可更正、可作废的任务
+
+（2026-08-23）
+
+**简述**：M43 在不破坏旧 `/api/query` 的前提下新增 Agent task family（智能体任务运行时家族），让系统能保存通用任务状态、理解下一轮修改、使过期证据失效，并把 API（接口）、Trace（运行轨迹）和 Eval（评测）统一到同一份任务事实。
+
+### 先用大白话讲
+
+继续沿用“分析专员”的比喻。M42 给专员准备了固定账本和考试规则，但专员仍像一次性窗口：你先问“查 7 月净退款额”，下一句再说“改成 8 月，并和 7 月比较”，系统并没有一张正式工单说明 **“改的是哪项条件、旧结果还能不能用、这次是否真的重新查过”**。
+
+M43 给它加了四样东西：
+
+- **任务卡**：记录目标、条件、待补问题、证据要求和当前状态，不把整段聊天原样塞进去。
+- **变更单**：把“继续”“改条件”“纠正理解”“切换任务”“取消”等自然语言，转换成受控的 `TaskDelta`（任务增量）。
+- **证据有效期**：7 月 SQL（结构化查询）结果对“7 月查询”有效；改成 7 月和 8 月比较后，旧证据必须盖上“已失效”章，再重新查询。
+- **安全档案袋**：每个节点只拿完成自己工作需要的字段，并记录输入指纹；不会把历史答案、SQL 全部结果行或文档正文到处传。
+
+于是，同一任务可以连续办下去，也能说明 **状态为什么变、哪份证据失效、调用了几次深层工具、谁有权继续这张工单**。但它目前仍是“一轮最多查一次”的任务底座，不是已经能自主反复规划和恢复的完整 Agent Loop（智能体循环）。
+
+### 这次做了什么
+
+M43 解决的核心矛盾是：**多轮对话需要连续状态，但连续状态不能等于无限聊天历史，更不能让旧证据在条件变化后继续冒充有效答案。** 最终实现把自然语言理解、状态转换、执行边界、节点上下文和评测事实拆开，同时用一个 task turn（任务轮次）把它们重新收拢。
+
+1. **用通用 `TaskState` 和闭集 `TaskDelta` 表达“任务怎么变”。**
+
+   原来的 legacy turn（旧单轮运行）主要知道当前问题和一次执行结果，无法正式表达“用户是在改条件，还是另开任务”。M43 新增 `TaskDelta → TaskState` 纯状态转换：先识别增量类别，再合并目标、约束、待补问题、Evidence requirement（证据要求）、route（路由）和 termination（终止状态）。
+
+   - **通用设计**：月份、退款、渠道都只作为 `constraints`（约束）中的业务值；TaskState 顶层没有 `refund_month` 之类专用字段。以后换成 GMV、商品或其他行业任务，不必重写整个状态骨架。
+   - **确定性理解**：首版不调用大模型。它从 B1 合同中的指标别名和已确认 prior state（上一任务状态）解析问法；“8 月”缺少年份时，只能继承已经确认的 2026 年，不能使用系统当前年份猜测。
+   - **保守澄清**：用户只说“改成另一个月”时，系统记录 `pending_questions=[periods]`，本轮深 Graph（深层执行图）调用为 0，不伪造一个月份继续查。
+   - **验证证据**：单元测试覆盖 canonical（标准主线）T1/T2、歧义澄清、独立 switch（切换）和 cancel（取消）；最终 M43 聚焦测试共 **13 passed**。
+   - **能力边界**：这个理解器只冻结 B1 的窄规则，不等于开放领域语义理解，也没有证明大模型 Router 或自由 query rewrite（查询改写）质量。
+
+2. **把 Evidence invalidation（证据失效）做成状态事实，而不是一句提示。**
+
+   当任务条件发生语义变化，旧 SQL 结果即使真实执行过，也不再支持新问题。M43 不会删除这段历史，也不会继续把它列为 active（有效）；它把 validity（有效性）改成 `invalidated`，写明 `task_semantics_changed`、`task_cancelled`、`task_switched` 或 `task_cleared` 等原因。
+
+   - **canonical 故事**：T1 查询 2026 年 7 月实际净退款金额，得到 `120000`；T2 改成 8 月并与 7 月比较，旧 T1 SQL Evidence 先失效，再进行一次新查询，得到 8 月 `180000`、差额 `60000`、增幅 `50%`。
+   - **为什么不能只覆盖旧结果**：覆盖会抹掉“系统曾基于什么回答”；继续沿用则会产生过期证据污染。保留引用并改变 validity，类似数据库里保留审计记录，同时用状态字段阻止旧记录参与当前决策。
+   - **取消和清理**：cancel（取消）和 clear（清理）不调用深 Graph，但必须使剩余 active Evidence 失效；不能出现任务已结束、证据却仍被标为当前可用的矛盾状态。
+   - **验证证据**：deterministic rehearsal（确定性演练）的 **8/8 checks passed**，外部调用为 0；API 测试验证响应与 Trace 中的 state、delta、transition 和 invalidation count 来自同一事实。
+   - **未证明边界**：这些数字来自 M42 已冻结的 SQL oracle，不是新的真实 LLM 质量基线，也没有运行 sealed reserve（密封决策集）。
+
+3. **建立独立、原子的 task boundary（任务边界），防止跨用户和并发串线。**
+
+   TaskState 不能只是 API 文件里的一个字典。M43 把 owner（所有者）、tenant（租户）、TTL（过期时间）、version（版本）、claim/commit（领取执行权/提交状态）、switch、cancel 和 clear 收进 `TaskBoundary` 深接口。
+
+   - **一次执行权**：continue 先按 owner、TTL 和 expected version 做 compare-and-set（比较并设置）式 claim；只有当前版本能取得执行权。提交后版本继续前进，旧请求重放不会再次调用 Tool（工具）。
+   - **防枚举**：task 不存在和 task 属于另一个 owner 都返回同一个 `task_unavailable`，避免攻击者靠错误差异探测别人的任务是否存在。
+   - **原子 switch**：代码审查时发现，如果直接在旧 state 上 merge，新任务会带走旧约束和 Evidence。最终改为在同一把锁内退休旧 task、失效旧证据，并创建 generation=1 的独立新 task。
+   - **兼容取舍**：它与 M37 thread checkpoint（线程检查点）分家，不把旧 state family 强行升级；但当前实现仍是 process-local non-durable（仅当前进程、非持久化），服务重启或多 worker 不会恢复。
+   - **验证证据**：测试覆盖错 owner/未知任务同形失败、TTL、单次 claim、clear 和原子 switch；M35–M43 受影响回归 **117 passed**，说明旧 Harness/thread/RAG/Hybrid/Trace 没有被新 family 改义。
+
+4. **让每个节点只拿“刚好够用”的 Context（上下文），并留下实际输入指纹。**
+
+   多轮系统最容易把一个巨大 state 传给所有节点，最终没人说得清某个节点实际看了什么。M43 为 Turn Understanding、route/execution、SQL、controller/response 四种 purpose（用途）建立白名单 `NodeContext`（节点上下文）。
+
+   - **阶段真实输入**：理解节点记录原问题和 prior state identity；route/SQL 节点使用执行前 state；controller 才能看到本轮新增的安全 EvidenceRef（证据引用）。这避免用“执行后的完整状态”伪装成 SQL 节点的输入。
+   - **最小投影**：每个 Context 都有允许字段、source identities（来源身份）、field budget（字段预算）和 input fingerprint（输入指纹）；不携带 SQL rows、文档正文或完整历史答案。
+   - **参考适配**：借鉴 ARAG 的显式 GraphState/节点输入和 DataAgent 的主状态与执行状态分权，但不照搬 `MessagesState` 全历史、LLM 自由摘要或扁平大 state。
+   - **验证证据**：测试检查四类 purpose、预算和禁止字段；API 返回的 `node_contexts` 与 JSONL Trace 完全一致，task runtime 外层 identity 为 `phase4b-agent-task-runtime-v1`。
+   - **未证明边界**：M43 只有字段数量预算，没有实现长任务 token compact（上下文压缩）；真正的 Context Compact 属于 B6。
+
+5. **在同一 API 上新增严格 task family，同时保留 legacy 兼容。**
+
+   `/api/query` 没有另起一套业务入口，而是新增 nested `task` envelope（嵌套任务信封）。只有信封存在才走 agent task turn；普通请求、M36 clarification、M37 follow-up 和 M38 Hybrid 继续走原来的 legacy seam。
+
+   - **严格新合同**：`start` 不带 task identity；`continue/switch/cancel` 必须同时带服务端签发的 `task_id` 和 `expected_version`。新信封拒绝未知字段，也不能与 thread/follow-up 混用；客户端不能提交 delta、state、route、Evidence 或 runtime identity。
+   - **兼容旧客户端**：没有 task 信封时，旧顶层宽容解析和默认执行保持不变。采用 additive v2（增量第二版），没有原位修改 M42 的 B0 contract、Scenario v1 或首次 artifact。
+   - **同源观测**：响应、Trace 和 `phase4b-agent-scenario-artifact-v2` 共享 TaskDelta、state transition、Evidence validity、lifecycle 和 0/1 invocation count；Scenario v2 artifact（评测产物）identity 为 `cc9f696...b27c92`。
+   - **完整验证**：全仓后台 pytest（Python 测试框架）最终为 **500 passed、3 skipped、1 warning**，耗时 **584.22 秒**；warning 是既有 Starlette TestClient/httpx deprecation，3 个 skip 是既有 Milvus 环境专项。
+   - **真实边界**：每个 accepted task turn 仍最多一次深 Harness。它解决了任务连续性和证据一致性，还没有实现 M44/B2 的 Observation-driven Decision Loop（由观察结果驱动的多动作决策循环）。
+
+### 新概念
+
+- **`TaskDelta`（任务增量）**：不是重新描述整个任务，而是说明“这一轮改了什么”。它类似数据库更新语句或前端状态管理中的 action：`modify_constraint` 只改变约束，`cancel` 只改变生命周期，未知类别不能自由解释。
+
+- **`TaskState`（任务状态）**：服务端确认过的任务事实快照，包括目标、通用约束、待补问题、证据要求、路由、Evidence validity 和终止状态。它不是聊天记录，也不保存完整答案或结果行。
+
+- **Evidence invalidation（证据失效）**：证据原来真实存在，但任务条件已经变化，因此不能继续支撑当前答案。它和“删除证据”不同：审计历史还在，只是 active→invalidated 的状态迁移阻止误用。
+
+- **Claim/commit（领取与提交）**：先以 owner/version 原子领取一次执行权，深 Tool 完成后再提交新状态。可以类比 MySQL 的乐观锁：旧 version 的并发请求不能覆盖新状态，也不能重复消费同一执行预算。
+
+- **Node Context（节点上下文）**：某个节点真正允许看到的最小输入包。它带来源身份、字段预算和 fingerprint，作用类似 SpringBoot 中为不同 Service 准备的专用 DTO（数据传输对象），而不是把整个 Session（会话）对象塞给所有方法。
+
+- **Additive v2（增量第二版）**：旧合同保持原样，新能力用新 family/version 表达。这样历史 artifact 仍能按原 validator 复核，新消费者也不必通过猜字段判断版本。
+
+### 代码阅读路线
+
+1. **先看 B1 到底承诺了什么**：`domain_pack/phase4b/b1_contracts.json`、`engine/phase4b/b1_contracts.py`
+   从 canonical T1/T2、correction、switch/cancel 和 clarification 场景开始，再看 `load_b1_contract_bundle()` 如何校验 manifest、API 信封、词表和 turn 字段闭集。阅读重点是 **合同 identity 如何防止源码与报告各说各话**，不用先记完整 hash。
+
+2. **从 HTTP 信封找到新旧 family 分流点**：`app/schemas/agent.py`、`app/api/query.py`
+   `TaskRequestEnvelope` 冻结 start/continue/switch/cancel 的字段组合；`query()` 只有看到 `request_body.task` 才调用 `run_task_turn()`，否则继续 `run_turn()`。重点理解 **严格新信封和宽容 legacy 为什么可以同时存在**，以及 response projector（响应投影器）怎样复用旧字段后再追加 task facts。
+
+3. **理解自然语言如何变成状态转换**：`engine/phase4b/task_runtime.py`
+   先看 `understand_turn()` 形成 TaskDelta，再看 `apply_delta()` 合并 TaskState 和失效 Evidence，最后看 `project_node_contexts()`。这一文件是 B1 的纯逻辑核心：不需要数据库、FastAPI 或模型就能测试状态语义。
+
+4. **看任务怎样安全跨轮保存**：`engine/phase4b/task_boundary.py`
+   主角 `TaskBoundary` 封装 start、claim、commit、switch、clear 与 owner/TTL/version 检查。重点沿“continue 先 claim、成功后 commit”阅读，并观察 switch 为什么必须同锁退休旧 task 和创建新 task。
+
+5. **把状态机与一次深 Harness 串起来**：`engine/phase4b/task_turn.py`
+   `run_task_turn()` 是唯一 task turn seam：取得旧状态 → 理解 delta → 合并 state → 形成执行前 Context → 最多调用一次 `run_harness()` → 接入新 Evidence → commit。clarification、cancel 和 pre-rejection 会在深 Graph 前收口为 0 次调用。
+
+6. **看同一事实怎样进入 Trace 和 Eval**：`engine/trace/recorder.py`、`eval/agent_scenario_v2_contracts.py`
+   TraceRecord 增量加入 task family 字段；Scenario v2 validator 对 transition、Evidence、Context 和 lifecycle 做嵌套 closed-world 校验。重点理解 **API/Trace/Eval 不是三套判断器，而是同一 TaskTurnResult 的三个安全视图**。
+
+7. **最后用测试和演练复核完整故事**：`tests/test_m43_*.py`、`scripts/rehearse_m43_b1.py`、`eval/reports/m43/`
+   API 测试覆盖 T1/T2、correction、switch、cancel、clear、错版本和 legacy 兼容；rehearsal 零外部调用地生成 Scenario v2 artifact 与 Markdown/JSON 报告。先读测试名，再对照报告，可以最快建立工程实感。
+
+核心调用链：
+
+`POST /api/query + nested task envelope`
+→ `TaskRequestEnvelope`
+→ `run_task_turn()`
+→ `TaskBoundary.claim()`
+→ `understand_turn() + apply_delta()`
+→ `NodeContext projections`
+→ `run_harness()`（0 或 1 次）
+→ `attach_evidence() + commit()`
+→ `AgentResponse + JSONL Trace + Scenario v2`
+
+**模块闭环**：M42 冻结的 B0 数据、caller、场景和 oracle，现在第一次被真正的跨轮 Task runtime 消费；T1 建任务、T2 改约束并重查，API、Trace 和 Eval 能对上同一条状态链。
+
+### 设计要点
+
+- **状态与聊天历史分离**：只保存服务端确认过的目标、约束和安全 EvidenceRef，不把无限 messages 当作任务真相。
+- **生命周期动作由信封控制**：自由文本不能把 `continue` 偷换成 `cancel/switch`；客户端也不能直接提交 TaskDelta 或 route。
+- **Evidence validity 单调可审计**：条件变化、取消、切换和清理只会把 active Evidence 转成 invalidated，不会偷偷复活或覆盖历史。
+- **新旧运行时增量分家**：M42 v1、legacy thread/follow-up 和默认请求不改签；Agent task 用独立 v2、runtime identity 和 boundary。
+- **进程内就是进程内**：M43 明确 TTL、owner 和原子版本语义，但不把内存 adapter 包装成跨 worker/durable 能力。
+- **刻意限制每轮深调用次数**：B1 先证明状态连续与证据正确，Observation-driven 多动作预算必须由 M44/B2 另立合同，不能为了演示效果提前塞进来，汪。
+
+### 有面试价值的亮点
+
+1. **“我没有把多轮对话等同于保存聊天记录。”** 我把每轮自然语言先变成 closed-world TaskDelta，再合并到通用 TaskState。这样能明确区分继续、改条件、纠正、切换和取消，也能让退款、GMV 或其他行业任务共享同一状态骨架。
+
+2. **“旧结果不是删掉，而是失去证明力。”** 条件从单月改成双月比较后，我保留旧 SQL Evidence 的审计引用，但把 validity 标成 invalidated，再执行一次新查询。这个设计同时照顾可追溯性和答案正确性，避免旧证据静默污染新任务。
+
+3. **“并发安全藏在深接口里，不散落在 API。”** owner+tenant、TTL、version 和 claim/commit 都由 TaskBoundary 统一处理；switch 也在同一锁内退休旧任务并创建新任务。API 只调用 seam，不直接维护字典，因此未来换 durable adapter 时不必改自然语言理解和状态转换核心。
+
+4. **“我能证明每个节点实际看到了什么。”** route/SQL 使用执行前 state，controller 才看到新 Evidence；每份 Node Context 都有白名单、来源 identity、预算和 fingerprint。它既减少上下文泄露，也为后续排查“节点为何做出这个决定”留下可复核证据。
+
+5. **“兼容不是所有地方都宽松。”** legacy 顶层保持历史解析，新 task envelope 则严格拒绝未知字段和混用 payload。通过 additive v2 而不是全局 strict，我把新能力的安全合同与旧客户端兼容同时保住。
+
+### 面试官追问
+
+1. **[基础追问] 用户第二轮只说“改成 8 月，并和 7 月比较”，系统如何知道改的是同一个任务？**
+
+   客户端必须提交上一响应签发的 `task_id + expected_version`。TaskBoundary 先验证 owner、TTL 和版本并 claim 执行权；Turn Understanding 再读取这张任务卡里已经确认的 metric 和 2026 年，把相对月份解析成 `2026-07/2026-08`，形成 `modify_constraint` TaskDelta。随后状态机失效旧 Evidence，并用完整重建的问题调用一次深 Harness。
+
+2. **[工程/深挖追问] 为什么不用 Redis 或 LangGraph checkpointer 直接存整个 state？**
+
+   M43 的目标是先冻结 TaskState 语义和 turn boundary，而 durable 存储还需要多 worker、一致性更新、TTL 清扫、崩溃恢复和迁移合同。直接接 Redis 只能解决“放在哪里”，不能自动解决“什么能存、哪个版本能提交、旧证据何时失效”。所以本模块先用明确 non-durable adapter 验证深接口，后续持久化可以替换 adapter，但不能改变已经稳定的状态合同。
+
+3. **[工程/深挖追问] claim 后深 Tool 意外崩溃，任务会不会卡住？**
+
+   当前 manager 会保持 claimed 状态，旧请求不能重放并再次收费；正常 Tool 技术失败由 Harness 收敛为结果后仍可 commit。进程级意外崩溃的恢复没有在 B1 冒充完成，因为真正恢复需要 durable checkpoint、lease/超时回收和跨 worker 条件更新。这是当前 non-durable 边界的一部分，而不是用自动重试掩盖的不确定状态。
+
+4. **[工程/深挖追问] 你怎么保证 API、Trace 和 Eval 不会各自算出不同的状态？**
+
+   `run_task_turn()` 只生成一份 `TaskTurnResult`，其中包含 result、delta、transition、task projection、lifecycle、node contexts 和 invocation count。API projector、Trace recorder 和 Scenario v2 builder 只做安全投影；测试逐字段比较 response 与 JSONL Trace，v2 validator 再检查嵌套字段闭集和 content identity。它们可以展示不同字段，但不能重新判断业务状态。
+
+5. **[压力追问] 规则只会识别净退款和月份，一轮还只能调用一次工具，这也能叫 Agent runtime？**
+
+   这个质疑合理：M43 不是完整 Agent，也没有宣称自己已经会开放规划。它交付的是 Agent 必须先具备的可审计任务底座——跨轮 identity、通用状态增量、证据失效、并发执行权、节点最小上下文和同源 Trace/Eval。13 个聚焦测试、117 个受影响回归和 500 个全仓测试证明这些合同没有破坏旧系统；真正根据 Observation 连续选择多个动作，必须由 B2 在独立预算和停止规则下实现，不能靠把 while 循环塞进 B1 来冒领能力，喵。
+
+### 验证与下一步
+
+**验证结果：**
+
+| 范围 | 真实结果 | 证明什么 |
+|---|---:|---|
+| M43 聚焦测试 | 13 passed，1 warning | B1 合同、状态机、边界、API/Trace 与 Scenario v2 闭合 |
+| M35–M43 受影响回归 | 117 passed，1 warning | 新 task family 未改坏旧 Harness、thread、RAG/Hybrid 和 M42 v1 |
+| Deterministic rehearsal | 8/8 checks passed，external calls=0 | T1/T2、证据失效、correction、switch/cancel、clarification 与 oracle 一致 |
+| 全仓 pytest | 500 passed，3 skipped，1 warning，584.22 秒 | 整仓确定性回归通过 |
+
+warning（警告）是既有 Starlette TestClient/httpx deprecation；3 个 skip（跳过）是既有 Milvus 专项环境跳过。`compileall`（字节码编译检查）和 `git diff --check` 也通过。本模块没有运行真实 LLM、RAG Eval、remote embedding、Milvus 或 M46 reserve candidate。
+
+**下一步**：为 M44/B2 单独调查并制定 module plan，冻结 Observation-driven Decision Loop、允许动作、每轮/父子预算和停止条件。B1 当前 task runtime 是 B2 的输入底座，不得直接标记完整 Agent Loop 已完成。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录，已激活项目 Python 环境；命令不调用真实 LLM，不访问 sealed reserve。
+
+# 1. 复核 M43 合同、状态机、task boundary 和 API/Trace；预计 13 项全部通过。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m43-devlog tests/test_m43_b1_contracts.py tests/test_m43_task_runtime.py tests/test_m43_task_boundary.py tests/test_m43_task_api_trace.py
+
+# 2. 重新生成 B1 deterministic artifact/report；预计 8/8 checks passed、external_calls=0。
+python -m scripts.rehearse_m43_b1
+
+# 3. 阅读本轮演练报告，不需要启动数据库或模型服务。
+Get-Content eval/reports/m43/m43-b1-deterministic-report.md
+```
+
+环境未激活时，把 `python` 替换成 `AGENTS.md` 中项目学习环境的完整 Python 路径。
+
+**本地启动体验：**
+
+```powershell
+# 前置：本地数据库已准备好；要复现 120000/180000，必须在隔离数据库显式加载 Phase 4B profile。
+# 默认数据库和默认 seed 不会被 M43 自动切换。真实 SQL 生成还需要当前配置的模型服务可用。
+python -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs`，先在 `POST /api/query` 提交：
+
+```json
+{
+  "question": "查询 2026 年 7 月实际净退款金额。",
+  "user_role": "ops",
+  "task": {"action": "start"}
+}
+```
+
+从响应 `task` 中复制 `task_id` 和 `task_version`，再提交第二轮：
+
+```json
+{
+  "question": "改成 8 月，并和 7 月比较。",
+  "user_role": "ops",
+  "task": {
+    "action": "continue",
+    "task_id": "替换为上一响应的 task_id",
+    "expected_version": 1
+  }
+}
+```
+
+实际操作时 `expected_version` 必须复制上一响应的真实 `task_version`，不要固定照抄示例。重点观察 `task_delta.category=modify_constraint`、旧 Evidence 的 `validity=invalidated`、新 Evidence 为 active，以及 response/Trace 的 invocation count。没有 Phase 4B 隔离数据或模型不可用时，深 SQL 结果可能失败；此时用上面的聚焦测试和 deterministic rehearsal 复现冻结 oracle，不要为演示修改默认数据库或模型配置。
+
