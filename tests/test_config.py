@@ -78,3 +78,14 @@ def test_thread_checkpoint_ttl_is_finite_and_configurable() -> None:
 
     assert Settings(_env_file=None).thread_checkpoint_ttl_seconds == 900
     assert Settings(_env_file=None, THREAD_CHECKPOINT_TTL_SECONDS="30").thread_checkpoint_ttl_seconds == 30
+
+
+def test_enterprise_rag_defaults_semantic_but_requires_explicit_snapshot_paths() -> None:
+    """M44A 不把空配置解释成 lexical，也不在代码中猜本机 dataset 路径。"""
+
+    settings = Settings(_env_file=None)
+    assert settings.enterprise_rag_retrieval_mode == "semantic"
+    assert settings.enterprise_rag_profile_root is None
+    assert settings.enterprise_rag_profile_identity == ""
+    assert settings.enterprise_rag_semantic_root is None
+    assert settings.enterprise_rag_semantic_identity == ""

@@ -5,6 +5,7 @@
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -64,6 +65,15 @@ class Settings(BaseSettings):
     siliconflow_embedding_dimensions: int | None = Field(default=None, alias="SILICONFLOW_EMBEDDING_DIMENSIONS")
     qwen_embedding_model: str = Field(default="qwen3.7-text-embedding", alias="QWEN_EMBEDDING_MODEL")
     qwen_embedding_dimensions: int = Field(default=1024, alias="QWEN_EMBEDDING_DIMENSIONS")
+
+    # EnterpriseRAG-Bench 产品 RAG ============================================================
+    # ★ M44A：semantic 是产品默认，但数据快照必须显式选择。路径留空时应用仍可提供 SQL，
+    # RAG readiness 则明确 unavailable；绝不能悄悄退回 lexical 或仓库内小语料。
+    enterprise_rag_retrieval_mode: str = Field(default="semantic", alias="ENTERPRISE_RAG_RETRIEVAL_MODE")
+    enterprise_rag_profile_root: Path | None = Field(default=None, alias="ENTERPRISE_RAG_PROFILE_ROOT")
+    enterprise_rag_profile_identity: str = Field(default="", alias="ENTERPRISE_RAG_PROFILE_IDENTITY")
+    enterprise_rag_semantic_root: Path | None = Field(default=None, alias="ENTERPRISE_RAG_SEMANTIC_ROOT")
+    enterprise_rag_semantic_identity: str = Field(default="", alias="ENTERPRISE_RAG_SEMANTIC_IDENTITY")
 
     # 可观测性配置 =============================================================================
     # Phase 3B 只把 LangFuse 作为“旁路观测系统”：默认关闭，不影响 JSONL 主链路。

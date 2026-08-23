@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from engine.rag.evidence import DocumentEvidencePayload
 from engine.rag.knowledge_tool import KnowledgeRequest
 
 
-def _build_runtime(tmp_path: Path):
+def _build_runtime(tmp_path: Path, *, allow_cross_thread: bool = False):
     content = (
         "Alpha Approval Policy\n\n"
         "Alpha policy says every production approval requires manager review.\n\n"
@@ -69,6 +70,7 @@ def _build_runtime(tmp_path: Path):
     return load_enterprise_profile_runtime(
         root=root,
         profile_identity=manifest.profile_identity,
+        allow_cross_thread=allow_cross_thread,
     )
 
 
@@ -136,3 +138,26 @@ def test_external_evidence_reaches_answer_and_validated_citation(tmp_path: Path)
         assert isinstance(evidence.payload, DocumentEvidencePayload)
         assert evidence.payload.context_coordinates is not None
         assert result.ledger.stage_of(evidence.ref.evidence_id) == "cited"
+
+
+def test_m44a_shared_read_only_runtime_serializes_concurrent_sqlite_access(tmp_path: Path) -> None:
+    """lifespan 共享一条只读 connection 时，多请求仍应各自得到完整 Evidence。"""
+
+    with _build_runtime(tmp_path, allow_cross_thread=True) as runtime:
+        tool = runtime.knowledge_tool()
+
+        def retrieve(index: int):
+            return tool.retrieve(
+                KnowledgeRequest(
+                    question="What does the Alpha production approval require?",
+                    caller=make_test_caller(caller_id=f"m44a-thread-{index}", roles=("demo_user",)),
+                    purpose="answer_evidence",
+                    run_id=f"m44a-concurrent-{index}",
+                )
+            )
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            outcomes = list(pool.map(retrieve, range(8)))
+
+    assert all(item.reason_code == "evidence_retrieved" for item in outcomes)
+    assert all(len(item.selected_evidence) == 1 for item in outcomes)

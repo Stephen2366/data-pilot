@@ -86,10 +86,12 @@ def _client(trace_path: Path) -> Generator[TestClient, None, None]:
 
     previous_resolver = getattr(app.state, "caller_resolver", None)
     previous_manager = getattr(app.state, "thread_checkpoint_manager", None)
+    previous_rag_factory = getattr(app.state, "rag_tool_factory", None)
     app.dependency_overrides[get_db] = override_get_db
     app.state.trace_path = trace_path
     app.state.caller_resolver = FixtureCallerResolver(fixture_kind="test")
     app.state.thread_checkpoint_manager = ThreadCheckpointManager()
+    app.state.rag_tool_factory = lambda: query_api.RAGToolAdapter()
     _FakeSQLAdapter.calls = _FakeRAGAdapter.calls = 0
     try:
         yield TestClient(app)
@@ -98,6 +100,7 @@ def _client(trace_path: Path) -> Generator[TestClient, None, None]:
         delattr(app.state, "trace_path")
         app.state.caller_resolver = previous_resolver
         app.state.thread_checkpoint_manager = previous_manager
+        app.state.rag_tool_factory = previous_rag_factory
         Base.metadata.drop_all(database)
 
 

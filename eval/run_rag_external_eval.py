@@ -5,19 +5,61 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from app.core.config import get_settings
 from engine.rag.answer_flow import ANSWER_FLOW_RUNTIME_IDENTITY, RAGAnswerFlow
 from engine.rag.enterprise_generation import make_qwen_evidence_composer
-from engine.rag.enterprise_runtime import load_enterprise_profile_runtime
+from engine.rag.enterprise_product_runtime import (
+    EnterpriseProductRuntimeConfig,
+    load_enterprise_product_runtime,
+)
 from engine.rag.enterprise_semantic import KNOWLEDGE_GENERATION_POLICY
 from eval.rag_e2e_contracts import RAGResolvedRuntime
 from eval.rag_e2e_runner import run_rag_eval
 from eval.rag_e2e_runtime import ComposerRuntimeMetadata, FixedRAGEvalRouter, RAGProductExecutor
-from eval.rag_external_catalog import load_external_rag_catalog
+from eval.rag_external_catalog import build_external_scenario_selector, load_external_rag_catalog
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def build_external_resolved_runtime(
+    *,
+    product_identity: Any,
+    bundle: Any,
+    composer: Any,
+    model: str,
+    timeout_seconds: float,
+) -> RAGResolvedRuntime:
+    """把共用 resolver identity 投影为 artifact 合同，避免 CLI 另拼一套 backend 事实。"""
+
+    return RAGResolvedRuntime(
+        runtime_family="phase4-rag-external-product-harness-fixed-route-v1",
+        answer_flow_identity=ANSWER_FLOW_RUNTIME_IDENTITY,
+        composer_identity=composer.identity,
+        model=model,
+        provider="qwen",
+        timeout_seconds=timeout_seconds,
+        retry_count=0,
+        release_identity=bundle.release_identity,
+        corpus_identity=bundle.corpus_identity,
+        retrieval_adapter_identity=product_identity.retrieval_adapter_identity,
+        retrieval_recipe_identity=product_identity.retrieval_recipe_identity,
+        authorization_policy_identity=bundle.authorization_policy_identity,
+        release_outbound_policy_identity=bundle.outbound_policy_identity,
+        generation_outbound_policy_identity=KNOWLEDGE_GENERATION_POLICY.identity,
+        caller_fixture_identity="phase4-rag-e2e-test-fixture-v1",
+        route_policy_identity=FixedRAGEvalRouter.identity,
+        retrieval_mode=product_identity.retrieval_mode,
+        semantic_identity=product_identity.semantic_identity,
+        semantic_manifest_identity=product_identity.semantic_manifest_identity,
+        embedding_provider=product_identity.embedding_provider,
+        embedding_model=product_identity.embedding_model,
+        embedding_dimensions=product_identity.embedding_dimensions,
+        milvus_collection=product_identity.milvus_collection,
+        unit_set_identity=product_identity.unit_set_identity,
+    )
 
 
 def main() -> None:
@@ -28,16 +70,27 @@ def main() -> None:
     parser.add_argument("--profile-root", type=Path, required=True)
     parser.add_argument("--profile-identity", required=True)
     parser.add_argument(
+        "--retrieval-mode",
+        choices=("semantic", "lexical"),
+        help="Enterprise retrieval；省略时使用配置默认（M44A 默认 semantic）。",
+    )
+    parser.add_argument("--semantic-root", type=Path)
+    parser.add_argument("--semantic-identity")
+    parser.add_argument(
         "--partition",
         choices=("diagnostic_dev", "held_out", "all"),
         default="diagnostic_dev",
         help="默认 diagnostic_dev（日常诊断集）；held_out/all 必须显式指定。",
     )
-    parser.add_argument(
+    selector_group = parser.add_mutually_exclusive_group()
+    selector_group.add_argument(
         "--suite",
         choices=("smoke", "basic", "core", "hard", "reliability", "full"),
-        default="full",
         help="难度/协议套件；与 partition 做交集。smoke/reliability 只允许 diagnostic_dev。",
+    )
+    selector_group.add_argument(
+        "--scenario",
+        help="精确单题诊断；仍受 partition 约束，不能从默认 dev 越到 held-out。",
     )
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--report", type=Path, required=True)
@@ -56,8 +109,14 @@ def main() -> None:
         dataset_recipe_path=PROJECT_ROOT / "eval/cases/enterprise-rag-bench-v1.0.0-dataset.json",
         split_path=PROJECT_ROOT / "eval/cases/enterprise-rag-bench-v1.0.0-split.json",
         partition=args.partition,
-        suite=args.suite,
+        suite=args.suite or "full",
     )
+    if args.scenario:
+        selector = build_external_scenario_selector(
+            catalog=catalog,
+            partition=args.partition,
+            scenario_id=args.scenario,
+        )
     composer = make_qwen_evidence_composer(
         api_key=settings.dashscope_api_key,
         base_url=settings.dashscope_base_url,
@@ -66,29 +125,33 @@ def main() -> None:
     )
     artifact_path = args.artifact_dir / f"{args.run_id}.json"
     triage_path = args.triage or args.report.with_name(f"{args.report.stem}-triage.json")
-    with load_enterprise_profile_runtime(
-        root=args.profile_root,
+    runtime_config = EnterpriseProductRuntimeConfig(
+        retrieval_mode=args.retrieval_mode or settings.enterprise_rag_retrieval_mode,
+        profile_root=args.profile_root,
         profile_identity=args.profile_identity,
+        semantic_root=(
+            args.semantic_root
+            or settings.enterprise_rag_semantic_root
+            or args.dataset_root / "derived" / "enterprise_semantic"
+        ),
+        semantic_identity=args.semantic_identity or settings.enterprise_rag_semantic_identity,
+        dashscope_api_key=settings.dashscope_api_key,
+        dashscope_embedding_base_url=settings.dashscope_embedding_base_url,
+        embedding_model=settings.qwen_embedding_model,
+        embedding_dimensions=settings.qwen_embedding_dimensions,
+        timeout_seconds=args.timeout,
         allow_cross_thread=True,
-    ) as external:
+    )
+    with load_enterprise_product_runtime(config=runtime_config) as product:
+        external = product.runtime
+        identity = product.identity
         bundle = external.bundle
-        resolved = RAGResolvedRuntime(
-            runtime_family="phase4-rag-external-product-harness-fixed-route-v1",
-            answer_flow_identity=ANSWER_FLOW_RUNTIME_IDENTITY,
-            composer_identity=composer.identity,
+        resolved = build_external_resolved_runtime(
+            product_identity=identity,
+            bundle=bundle,
+            composer=composer,
             model=settings.qwen_model or "qwen3.7-plus",
-            provider="qwen",
             timeout_seconds=args.timeout,
-            retry_count=0,
-            release_identity=bundle.release_identity,
-            corpus_identity=bundle.corpus_identity,
-            retrieval_adapter_identity=external.adapter.identity,
-            retrieval_recipe_identity=external.adapter.recipe_identity,
-            authorization_policy_identity=bundle.authorization_policy_identity,
-            release_outbound_policy_identity=bundle.outbound_policy_identity,
-            generation_outbound_policy_identity=KNOWLEDGE_GENERATION_POLICY.identity,
-            caller_fixture_identity="phase4-rag-e2e-test-fixture-v1",
-            route_policy_identity=FixedRAGEvalRouter.identity,
         )
         executor = RAGProductExecutor(
             composer=composer,
@@ -102,6 +165,7 @@ def main() -> None:
                 knowledge_tool=external.knowledge_tool(),
                 composer=composer,
                 active_loader=external.active_loader,
+                retrieval_snapshot=identity.safe_projection(),
             ),
             resolved_runtime_override=resolved,
             router=FixedRAGEvalRouter(),

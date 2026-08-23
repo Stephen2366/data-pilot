@@ -50,6 +50,58 @@ class RAGTool(Protocol):
         """执行 retrieval + Gate，绝不生成一个 RAG 自然语言子答案。"""
 
 
+class UnavailableRAGToolAdapter:
+    """M44A fail-closed adapter：保留 Graph 四轴，但零 Knowledge/Composer 调用。
+
+    它像数据库连接池未就绪时的“拒绝连接”对象：让 SQL 路由仍能工作，让 RAG 路由得到
+    可诊断的 external_unavailable，同时绝不拿业务小语料或 lexical 伪装成功。
+    """
+
+    def __init__(self, *, reason_code: str = "enterprise_rag_runtime_unavailable") -> None:
+        self._reason_code = reason_code
+
+    def run(self, request: HarnessRequest) -> ToolObservation:
+        """返回零 Evidence、零 provider 的技术不可用 Observation。"""
+
+        del request
+        return ToolObservation(
+            tool_name="rag_answer_flow",
+            route="rag",
+            execution_status="external_unavailable",
+            answer_status="no_answer",
+            safety_status="passed",
+            reason_code=self._reason_code,
+            answer="Enterprise RAG runtime 当前不可用。",
+            diagnostics={
+                "runtime_identity": "enterprise-rag-product-v1",
+                # None 会让统一 Trace projector 明确标记 runtime snapshot 不完整；字符串
+                # "unavailable" 反而会被误判成一份完整且可比较的运行身份。
+                "composer_identity": None,
+                "release_identity": None,
+                "corpus_identity": None,
+                "retrieval_adapter_identity": None,
+                "retrieval_recipe_identity": None,
+                "retrieval_snapshot": {},
+                "authorization_policy_identity": None,
+                "outbound_policy_identity": None,
+                "knowledge_tool_calls": 0,
+                "composer_calls": 0,
+            },
+            error_type=self._reason_code,
+        )
+
+    def run_for_hybrid(
+        self,
+        request: HarnessRequest,
+        *,
+        requirement: AnswerEvidenceRequirement,
+    ) -> ToolObservation:
+        """Hybrid RAG branch 使用同一失败语义，不允许另一 backend 兜底。"""
+
+        del requirement
+        return self.run(request)
+
+
 def _result_fingerprint(columns: list[str], rows: list[dict[str, Any]]) -> str:
     """按 columns 顺序规范化结果，生成可复算 SQL Evidence fingerprint。"""
 

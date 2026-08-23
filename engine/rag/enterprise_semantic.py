@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
+from threading import RLock
 from time import perf_counter, sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -361,14 +362,46 @@ class EnterpriseMilvusSemanticAdapter:
 
         self._manifest = manifest
         self._provider = provider
+        self._lock = RLock()
+        self._closed = False
         self._client = MilvusClient(uri=manifest.milvus_uri, timeout=30)
-        visible_count, visible_identity = _milvus_unit_set(
-            self._client, manifest.collection_name
-        )
-        if visible_count != manifest.unit_count or visible_identity != manifest.unit_set_identity:
+        try:
+            if not self._client.has_collection(collection_name=manifest.collection_name):
+                raise RetrievalAdapterError(
+                    "semantic_collection_missing", manifest.collection_name
+                )
+            description = self._client.describe_collection(
+                collection_name=manifest.collection_name
+            ).get("description", "")
+            if description != f"{_DESCRIPTION_PREFIX}{manifest.semantic_identity}":
+                raise RetrievalAdapterError(
+                    "semantic_collection_identity_mismatch", manifest.collection_name
+                )
+            # ★ Milvus 重启后的 collection 可能仍存在但尚未 load。query_iterator 和 search
+            # 都要求 collection 已 load，所以冷启动顺序必须先 load/readiness，再核对 unit set。
+            self._client.load_collection(collection_name=manifest.collection_name)
+            load_state = self._client.get_load_state(collection_name=manifest.collection_name)
+            if "Loaded" not in str(load_state.get("state")):
+                raise RetrievalAdapterError(
+                    "semantic_collection_not_loaded", manifest.collection_name
+                )
+            visible_count, visible_identity = _milvus_unit_set(
+                self._client, manifest.collection_name
+            )
+            if visible_count != manifest.unit_count or visible_identity != manifest.unit_set_identity:
+                raise RetrievalAdapterError(
+                    "semantic_collection_unit_set_mismatch", manifest.collection_name
+                )
+        except RetrievalAdapterError:
             self._client.close()
-            raise RetrievalAdapterError("semantic_collection_unit_set_mismatch", manifest.collection_name)
-        self._client.load_collection(manifest.collection_name)
+            self._closed = True
+            raise
+        except Exception as exc:
+            self._client.close()
+            self._closed = True
+            raise RetrievalAdapterError(
+                "semantic_runtime_unavailable", type(exc).__name__
+            ) from exc
 
     def retrieve(self, *, question: str, confirmed_conditions: tuple[str, ...] = (), entries: tuple[CatalogEntry, ...], limit: int) -> RetrievalBatch:
         fingerprint = query_fingerprint(question, confirmed_conditions)
@@ -376,15 +409,23 @@ class EnterpriseMilvusSemanticAdapter:
             return RetrievalBatch(self.identity, self.recipe_identity, fingerprint, ())
         allowed = {entry.document_key.removeprefix("enterprise-unit:"): entry for entry in entries}
         query = "\n".join((question, *confirmed_conditions))
-        vector = _embed_with_retry(self._provider, [query])[0]
-        self._provider.clear_cache()
-        results = self._client.search(
-            collection_name=self._manifest.collection_name,
-            data=[vector],
-            limit=max(200, limit * 20),
-            output_fields=["unit_identity"],
-            anns_field="vector",
-        )
+        # ★ provider 带可变 cache/counter，MilvusClient 也由 lifespan 共享。首版用一把锁
+        # 串行化一次完整 search，宁可明确吞吐边界，也不制造跨请求向量/usage 串线。
+        try:
+            with self._lock:
+                vector = _embed_with_retry(self._provider, [query])[0]
+                self._provider.clear_cache()
+                results = self._client.search(
+                    collection_name=self._manifest.collection_name,
+                    data=[vector],
+                    limit=max(200, limit * 20),
+                    output_fields=["unit_identity"],
+                    anns_field="vector",
+                )
+        except RetrievalAdapterError:
+            raise
+        except Exception as exc:
+            raise RetrievalAdapterError("semantic_retrieval_unavailable", type(exc).__name__) from exc
         selected: list[tuple[CatalogEntry, float]] = []
         seen_physical: set[str] = set()
         for item in results[0]:
@@ -408,7 +449,11 @@ class EnterpriseMilvusSemanticAdapter:
         )
 
     def close(self) -> None:
-        self._client.close()
+        """幂等关闭共享 client；不 release collection，不改变外部索引状态。"""
+
+        if not self._closed:
+            self._client.close()
+            self._closed = True
 
 
 def load_enterprise_semantic_runtime(
@@ -418,6 +463,7 @@ def load_enterprise_semantic_runtime(
     semantic_root: Path,
     semantic_identity: str,
     query_provider: DashScopeEmbeddingProvider,
+    allow_cross_thread: bool = False,
 ):
     """把 semantic adapter 注入同一个 external bundle/context loader，不复制 Tool/AnswerFlow。"""
 
@@ -434,9 +480,22 @@ def load_enterprise_semantic_runtime(
     ):
         raise RetrievalAdapterError("semantic_query_embedding_mismatch", semantic_identity)
     runtime = load_enterprise_profile_runtime(
-        root=profile_root, profile_identity=profile_identity
+        root=profile_root,
+        profile_identity=profile_identity,
+        allow_cross_thread=allow_cross_thread,
     )
-    runtime.adapter = EnterpriseMilvusSemanticAdapter(
-        manifest=manifest, provider=query_provider
-    )
-    return runtime
+    try:
+        if (
+            manifest.corpus_identity != runtime.bundle.corpus_identity
+            or manifest.unit_recipe_identity != runtime.bundle.unit_recipe_identity
+        ):
+            raise RetrievalAdapterError(
+                "semantic_profile_snapshot_mismatch", semantic_identity
+            )
+        runtime.adapter = EnterpriseMilvusSemanticAdapter(
+            manifest=manifest, provider=query_provider
+        )
+        return runtime
+    except Exception:
+        runtime.close()
+        raise

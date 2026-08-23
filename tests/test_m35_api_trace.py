@@ -16,6 +16,7 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from engine.harness.caller import FixtureCallerResolver
+from engine.harness.adapters import RAGToolAdapter
 from scripts.seed_data import seed_database
 
 
@@ -37,15 +38,19 @@ def _client(trace_path: Path) -> Generator[TestClient, None, None]:
             yield session
 
     previous_resolver = getattr(app.state, "caller_resolver", None)
+    previous_rag_factory = getattr(app.state, "rag_tool_factory", None)
     app.dependency_overrides[get_db] = override_get_db
     app.state.trace_path = trace_path
     app.state.caller_resolver = FixtureCallerResolver(fixture_kind="test")
+    # M44A 后普通产品请求不再隐式使用业务小语料；历史合同测试必须显式注入 fixture。
+    app.state.rag_tool_factory = lambda: RAGToolAdapter()
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.clear()
         delattr(app.state, "trace_path")
         app.state.caller_resolver = previous_resolver
+        app.state.rag_tool_factory = previous_rag_factory
         Base.metadata.drop_all(engine)
 
 

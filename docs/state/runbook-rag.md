@@ -2,7 +2,7 @@
 
 > 业务 RAG、M34 EnterpriseRAG-Bench、external 180 题产品链路、RAG review 与候选对比的运行入口。公共授权、Gate、长任务与重跑纪律先读 [`runbook.md`](runbook.md)。当前运行身份见 [`rag-current-state.md`](rag-current-state.md)，评测数字、兼容基线和历史 artifact 见 [`eval-baselines.md`](eval-baselines.md)。
 
-更新时间：2026-08-23
+更新时间：2026-08-24
 
 ## AI 快速执行入口
 
@@ -53,6 +53,37 @@ Test-Path -LiteralPath $ragProfileRoot
 ```
 
 四个检查结果应分别为三个 `True` 和一个 `configured`。需要外网代理时使用公共 runbook 的 `HTTP_PROXY/HTTPS_PROXY`；实验覆盖只在当前进程生效，不修改 `.env`、默认模型、检索器、embedding、active profile 或 release。Codex/脚本工具的每次 shell 调用可能互不共享变量，所以下面的真实运行代码块会重复声明必要变量；不要把变量定义和命令拆到两个独立 shell 中。
+
+## EnterpriseRAG-Bench 语义检索产品运行（Milvus）
+
+> 本节的产品运行链路在 M44A 建立；此处按长期运维入口维护，不随模块结束归档。
+
+EnterpriseRAG-Bench 的产品 retrieval 默认是 `semantic`。lexical 只用于显式历史复现；semantic 配置或 Milvus 不可用时，`/health/rag` 与 RAG 请求明确 unavailable，**不会**回退 lexical 或仓库业务小语料。Schema Retrieval 的 `SCHEMA_VECTOR_BACKEND` 是 Text2SQL 的另一套配置，不能用它开启 Enterprise RAG。
+
+### 启动配置、preflight 与 Uvicorn
+
+```powershell
+$ragPython = 'D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe'
+$env:ENTERPRISE_RAG_RETRIEVAL_MODE = 'semantic'
+$env:ENTERPRISE_RAG_PROFILE_ROOT = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0\derived\enterprise_profiles'
+$env:ENTERPRISE_RAG_PROFILE_IDENTITY = 'e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2'
+$env:ENTERPRISE_RAG_SEMANTIC_ROOT = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0\derived\enterprise_semantic'
+$env:ENTERPRISE_RAG_SEMANTIC_IDENTITY = '9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20'
+
+docker ps
+& $ragPython -m scripts.check_enterprise_rag_runtime
+& $ragPython -m uvicorn app.main:app --reload
+```
+
+preflight 只验证 profile/manifest/unit-set/collection/load state，不发送 query embedding、不调用 Qwen Composer、不创建或重建 collection。`docker ps` 应看到 `milvus-standalone` healthy；本仓库没有负责启动 Milvus 的 compose 文件，应用也不会暗中启动 Docker。
+
+服务启动后先访问 `GET /health/rag`：
+
+- HTTP 200、`status=ready`：同时核对 `retrieval_mode=semantic`、目标 `semantic_identity` 和 `milvus_collection`；
+- HTTP 503：按 `reason_code` 检查缺失配置、API key、Milvus、manifest/collection 或 embedding identity；不要切 lexical 掩盖故障；
+- `/health` 只表示整个 API 进程仍活着，不能证明 RAG ready。
+
+上述变量必须和 Uvicorn 在同一个 PowerShell 会话中。若只想做历史 lexical 对照，把 mode 显式改为 `lexical`；这不代表产品默认，也不需要 semantic root/identity，但完整回答仍需要 Qwen 配置。
 
 ## Business RAG 真实 Eval
 
@@ -113,13 +144,38 @@ $ragPython = 'D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe'
 $ragDatasetRoot = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0'
 $ragProfileRoot = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0\derived\enterprise_profiles'
 $ragProfileIdentity = 'e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2'
+$ragSemanticRoot = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0\derived\enterprise_semantic'
+$ragSemanticIdentity = '9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20'
 $ragSuite = 'core'
 $ragRunId = "m41-rag-external-$ragSuite-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 & $ragPython -m eval.run_rag_external_eval `
   --dataset-root $ragDatasetRoot `
   --profile-root $ragProfileRoot `
   --profile-identity $ragProfileIdentity `
+  --semantic-root $ragSemanticRoot `
+  --semantic-identity $ragSemanticIdentity `
   --suite $ragSuite `
+  --run-id $ragRunId `
+  --report "eval/reports/$ragRunId.md"
+```
+
+当前省略 `--retrieval-mode` 即使用产品默认 semantic。只有复现历史 lexical baseline 时才显式增加 `--retrieval-mode lexical`；不得把 semantic failure 后的 lexical run 记成同一次授权的重试。
+
+精确单题只在用户明确点名 external Scenario 时使用，且仍受 partition 约束。默认 `diagnostic_dev` 不能选择 held-out ID：
+
+```powershell
+$ragPython = 'D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe'
+$ragDatasetRoot = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0'
+$ragProfileRoot = "$ragDatasetRoot\derived\enterprise_profiles"
+$ragSemanticRoot = "$ragDatasetRoot\derived\enterprise_semantic"
+$ragRunId = "rag-external-one-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+& $ragPython -m eval.run_rag_external_eval `
+  --dataset-root $ragDatasetRoot `
+  --profile-root $ragProfileRoot `
+  --profile-identity 'e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2' `
+  --semantic-root $ragSemanticRoot `
+  --semantic-identity '9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20' `
+  --scenario <explicit-dev-scenario-id> `
   --run-id $ragRunId `
   --report "eval/reports/$ragRunId.md"
 ```
@@ -133,12 +189,16 @@ $ragPython = 'D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe'
 $ragDatasetRoot = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0'
 $ragProfileRoot = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0\derived\enterprise_profiles'
 $ragProfileIdentity = 'e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2'
+$ragSemanticRoot = 'D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0\derived\enterprise_semantic'
+$ragSemanticIdentity = '9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20'
 $ragSuite = 'core'
 $ragRunId = "m41-rag-external-heldout-$ragSuite-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 & $ragPython -m eval.run_rag_external_eval `
   --dataset-root $ragDatasetRoot `
   --profile-root $ragProfileRoot `
   --profile-identity $ragProfileIdentity `
+  --semantic-root $ragSemanticRoot `
+  --semantic-identity $ragSemanticIdentity `
   --partition held_out `
   --suite $ragSuite `
   --run-id $ragRunId `
@@ -189,7 +249,7 @@ Gate 的含义继承公共 runbook：`passed` 仍要人工语义复核；`failed
 产品链路：`POST /api/query → Caller → Turn → Router → Harness → RAG Tool → Retrieval → Selection → Composer → Citation → API/Trace`。
 
 - Business：22 条 active release + `knowledge-deterministic-lexical-v1`；真实 Eval 使用独立 `phase4-rag-eval-business-generation-outbound-v1`，只允许已通过 caller/ACL/Gate 的指定业务类别发往 Qwen，普通 API 不继承该权限。
-- External：独立 immutable dataset/profile + SQLite FTS5 lexical adapter，当前 semantic candidate 未激活；题面、gold、60/120 split 和原生分层直接读取项目外数据，不复制第二份题库。
+- External：独立 immutable dataset/profile + Milvus semantic 产品默认；Milvus 只选 `unit_identity`，正文/Evidence coordinates 仍由 SQLite profile 权威回查。lexical 仅显式 baseline；题面、gold、60/120 split 和原生分层直接读取项目外数据，不复制第二份题库。
 - External 使用 public benchmark outbound policy 和 eval-only fixed-RAG route。fixed route 只固定进入 RAG 分支，因此验证产品 Harness/RAG Tool/AnswerFlow，但**不验证自然 Router 分类能力**。
 - Business 与 external 的 catalog、runtime、分母和结果必须分账，不能混成一个 RAG 总分。
 
@@ -246,6 +306,14 @@ $ragPython = 'D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe'
   --right <candidate-artifact.json> `
   --allow-runtime-difference retrieval_adapter_identity `
   --allow-runtime-difference retrieval_recipe_identity `
+  --allow-runtime-difference retrieval_mode `
+  --allow-runtime-difference semantic_identity `
+  --allow-runtime-difference semantic_manifest_identity `
+  --allow-runtime-difference embedding_provider `
+  --allow-runtime-difference embedding_model `
+  --allow-runtime-difference embedding_dimensions `
+  --allow-runtime-difference milvus_collection `
+  --allow-runtime-difference unit_set_identity `
   --output <candidate-compare.json>
 ```
 

@@ -107,6 +107,41 @@ def build_external_selector(
     )
 
 
+def build_external_scenario_selector(
+    *,
+    catalog: RAGScenarioCatalog,
+    partition: Partition,
+    scenario_id: str,
+) -> RAGSelector:
+    """构造单题产品 smoke；仍严格受 partition 约束，不能借 ID 偷看 held-out。"""
+
+    scenario = catalog.by_id().get(scenario_id)
+    if scenario is None:
+        raise RAGEvalContractError("rag_external_selector_invalid", "未知 Scenario")
+    allowed = (
+        partition == "all"
+        or (partition == "diagnostic_dev" and scenario.classification == "external_dev")
+        or (partition == "held_out" and scenario.classification == "external_heldout")
+    )
+    if not allowed:
+        raise RAGEvalContractError(
+            "rag_external_selector_partition_invalid",
+            "Scenario 不属于当前显式 partition",
+        )
+    payload = {
+        "selector_id": f"external-{partition}-scenario-{scenario_id}",
+        "selected_scenario_ids": (scenario_id,),
+        "replicate_count": 1,
+        "catalog_identity": catalog.catalog_identity,
+    }
+    return RAGSelector(
+        selector_id=str(payload["selector_id"]),
+        selected_scenario_ids=(scenario_id,),
+        replicate_count=1,
+        selector_identity=canonical_hash(payload),
+    )
+
+
 def load_external_rag_catalog(
     *,
     dataset_root: Path,

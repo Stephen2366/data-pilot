@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from time import perf_counter
 from typing import Any, Callable, Literal, Mapping, Protocol
@@ -308,6 +308,8 @@ class AnswerFlowDiagnostics:
     context_count: int
     context_characters: int
     elapsed_ms: float
+    # M44A：只有 Enterprise product runtime 会填充；业务 release 保持空对象兼容旧 artifact。
+    retrieval_snapshot: dict[str, Any] = field(default_factory=dict)
 
     def safe_projection(self) -> dict[str, Any]:
         """返回 Eval/Trace 可消费的白名单字段。"""
@@ -519,12 +521,18 @@ class RAGAnswerFlow:
         knowledge_tool: KnowledgeTool | None = None,
         composer: EvidenceComposer | None = None,
         active_loader: ActiveLoader = _default_active_loader,
+        retrieval_snapshot: Mapping[str, Any] | None = None,
     ) -> None:
-        """注入本地依赖便于故障测试；外部调用者仍只使用 ``run`` interface。"""
+        """注入本地依赖便于故障测试；外部调用者仍只使用 ``run`` interface。
+
+        ``retrieval_snapshot`` 只携带 resolver 已验证的安全 identity。AnswerFlow 不根据这些
+        字段选择后端，避免 Trace/Eval 的诊断元数据反向控制业务执行。
+        """
 
         self._knowledge_tool = knowledge_tool or KnowledgeTool()
         self._composer = composer or DeterministicEvidenceComposer()
         self._active_loader = active_loader
+        self._retrieval_snapshot = dict(retrieval_snapshot or {})
 
     def run(self, request: RAGAnswerRequest) -> RAGAnswerResult:
         """★ 执行一次取证、Gate、Composer、citation 和四轴投影。
@@ -1331,4 +1339,5 @@ class RAGAnswerFlow:
                 if isinstance(item.payload, DocumentEvidencePayload)
             ),
             elapsed_ms=round((perf_counter() - started_at) * 1000, 3),
+            retrieval_snapshot=dict(self._retrieval_snapshot),
         )

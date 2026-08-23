@@ -1,0 +1,435 @@
+{
+  "format": "phase4-rag-e2e-artifact-v1",
+  "status": "completed",
+  "run_spec": {
+    "run_id": "m44a-rag-external-qst0386-20260824-c6",
+    "catalog_identity": "c19270c0f911131d5488868ffe9ae9bfec8a6453eb35b0502729c9a8ffeabe21",
+    "selector_identity": "31179bd0f3687fa6057305e0ec9b9e9374ee3977d0abbafa10d8ff264a6de479",
+    "selected_scenario_ids": [
+      "qst_0386"
+    ],
+    "replicate_count": 1,
+    "runtime": {
+      "runtime_family": "phase4-rag-external-product-harness-fixed-route-v1",
+      "answer_flow_identity": "rag-answer-flow-local-v1",
+      "composer_identity": "rag-qwen-evidence-support-nonthinking-unbounded-v4",
+      "model": "qwen3.7-plus",
+      "provider": "qwen",
+      "timeout_seconds": 60.0,
+      "retry_count": 0,
+      "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+      "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+      "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+      "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+      "authorization_policy_identity": "document-authorization-v1",
+      "release_outbound_policy_identity": "phase4-outbound-v1",
+      "generation_outbound_policy_identity": "knowledge-enterprise-generation-outbound-v1",
+      "caller_fixture_identity": "phase4-rag-e2e-test-fixture-v1",
+      "route_policy_identity": "eval-fixed-rag-router-v1",
+      "retrieval_mode": "semantic",
+      "semantic_identity": "9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20",
+      "semantic_manifest_identity": "22c573755257c47c6264218ba1bbe2e1182ccc7ad91a15bc889e3e8da56be97b",
+      "embedding_provider": "dashscope",
+      "embedding_model": "qwen3.7-text-embedding",
+      "embedding_dimensions": 1024,
+      "milvus_collection": "datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89",
+      "unit_set_identity": "17d5af0b197ab3e4a069703d2095813f4727f1315a1e12bc06e631a9b793905f"
+    },
+    "assertion_plan": [
+      [
+        "qst_0386",
+        [
+          "route_correct",
+          "graph_path_correct",
+          "rag_tool_once",
+          "retrieved_gold",
+          "selected_gold",
+          "generation_visible_gold",
+          "cited_gold",
+          "answer_present",
+          "response_trace_consistent",
+          "runtime_identity_complete",
+          "provider_observed",
+          "composer_support_valid"
+        ],
+        [
+          "axes_correct",
+          "reason_correct",
+          "answer_facts_exact_lower_bound"
+        ]
+      ]
+    ],
+    "scorer_identity": "phase4-rag-funnel-scorer-v1",
+    "scenario_metadata": [
+      [
+        "qst_0386",
+        {
+          "classification": "external_dev",
+          "question_type": "constrained",
+          "source_types": [
+            "confluence"
+          ],
+          "document_cardinality": "single_document",
+          "difficulty": "core",
+          "gold_answer": "It was caused by a PromQL refactor that switched label matching from cluster_id to cluster, so clusters that only emitted cluster_id returned empty metrics and the autoscaler made no scale-out decisions. A hotfix restored compatibility by querying with the legacy label (and adding a fallback query when no series are returned), which resumed scale-out.",
+          "answer_facts": [
+            "The incident was caused by a PromQL refactor that changed label matching from cluster_id to cluster.",
+            "Clusters that only emitted the cluster_id label returned empty metrics after the refactor, so the autoscaler made no scale-out decisions and stayed at minimum.",
+            "A hotfix restored scale-out by querying using the legacy cluster_id label and adding a fallback query when no series were returned.",
+            "The answer must not attribute the Feb 2026 us-west stuck-at-min issue to autoscaler cooldown/stabilization window changes or capacity thrashing; that was the 2026-01-09 incident.",
+            "The answer must not say scale-out failed due to a GPU cloud quota ceiling or provisioning quota errors; that was a 2025-03-03 incident in eu-west.",
+            "The answer must not discuss an API Gateway 5xx surge, warm pool prewarm regression, hedged retries, or runtime watchdog restarts; that was a separate 2026-03-10 us-east-1 incident.",
+            "The answer must not claim the underlying cause was a control plane config schema rollout leading to cache-key cardinality/OOM; that was the 2026-02-07 P0 control plane outage."
+          ],
+          "expected_document_keys": [
+            "dsid_5e65a1cb22b6464e9f36d0fa2d1f4317"
+          ]
+        }
+      ]
+    ]
+  },
+  "run_spec_identity": "6e08e753dce2583ebe05f92a4dd7f977831d9d462cdf8146789d28d1b6698225",
+  "executions": [
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "trace_id": "90bf0e81-856b-4bd3-b6c7-5e691e7f0b53",
+      "status_code": 200,
+      "route": "rag",
+      "execution_status": "completed",
+      "answer_status": "complete",
+      "safety_status": "passed",
+      "reason_code": "answer_completed",
+      "answer": "The underlying cause was a refactor in the autoscaler PromQL query that switched label matching from cluster_id to cluster, causing the query to return no data for clusters emitting only cluster_id.\n\nThe hotfix applied to the autoscaler query restored scale-out by restoring label compatibility and adding a fallback query when no series are returned.",
+      "graph_steps": [
+        "route",
+        "rag_tool",
+        "controller"
+      ],
+      "graph_invocation_count": 1,
+      "rag_tool_calls": 1,
+      "stage_document_keys": [
+        [
+          "candidate",
+          [
+            "dsid_5e65a1cb22b6464e9f36d0fa2d1f4317",
+            "dsid_472dbefc22d34127a1a3e60467634de2",
+            "dsid_489293bccf1f4a4b9a459ab9034b446a",
+            "dsid_c2daaab889b246df8652445b3ff184fa",
+            "dsid_f2ffdf5d17e54bb38604ed4909b216f0"
+          ]
+        ],
+        [
+          "selected",
+          [
+            "dsid_5e65a1cb22b6464e9f36d0fa2d1f4317",
+            "dsid_472dbefc22d34127a1a3e60467634de2",
+            "dsid_489293bccf1f4a4b9a459ab9034b446a"
+          ]
+        ],
+        [
+          "generation_visible",
+          [
+            "dsid_5e65a1cb22b6464e9f36d0fa2d1f4317",
+            "dsid_472dbefc22d34127a1a3e60467634de2",
+            "dsid_489293bccf1f4a4b9a459ab9034b446a"
+          ]
+        ],
+        [
+          "cited",
+          [
+            "dsid_5e65a1cb22b6464e9f36d0fa2d1f4317"
+          ]
+        ]
+      ],
+      "stage_counts": [
+        [
+          "candidate",
+          5
+        ],
+        [
+          "selected",
+          3
+        ],
+        [
+          "generation_visible",
+          3
+        ],
+        [
+          "cited",
+          1
+        ]
+      ],
+      "identities_redacted": false,
+      "citations": [
+        {
+          "citation_id": "citation-slot:cee453dcc9a1dcb44858b8a4699ef37d5962d82c0c18ea75ddc38c99213ae21b",
+          "claim_ref": "claim:590fc7085342110a450461495f52e71d3d2bf4be248ee9fc728830c0f6b3b978",
+          "title": "Postmortem: SEV-2 Dedicated autoscaler stuck at min capacity (2026-02-09)",
+          "revision": "4682656dbdda7155408af86246ce0c35db967b676d78cf4fd4a44a19e414ad9c",
+          "anchor": "normalized-char:0-1691",
+          "authority_ref": "enterprise-rag-bench/70c572328a90ec5dc380c086181af4d3706264f5aefd71c2856329f996d93cf7/confluence/confluence/dsid_5e65a1cb22b6464e9f36d0fa2d1f4317__2026-02-09-sev2-dedicated-autoscaler-stuck.txt#normalized-char:0-1691"
+        },
+        {
+          "citation_id": "citation-slot:5107e1737fe2c1047b0aeaaa30bd82ef2d8ad04102d2e17064712ca68eea9fa6",
+          "claim_ref": "claim:288f5380f6af214e972c1e63d8b4958a3a6a57463602096f424a89d0d2da06f9",
+          "title": "Postmortem: SEV-2 Dedicated autoscaler stuck at min capacity (2026-02-09)",
+          "revision": "4682656dbdda7155408af86246ce0c35db967b676d78cf4fd4a44a19e414ad9c",
+          "anchor": "normalized-char:0-1691",
+          "authority_ref": "enterprise-rag-bench/70c572328a90ec5dc380c086181af4d3706264f5aefd71c2856329f996d93cf7/confluence/confluence/dsid_5e65a1cb22b6464e9f36d0fa2d1f4317__2026-02-09-sev2-dedicated-autoscaler-stuck.txt#normalized-char:0-1691"
+        }
+      ],
+      "docs_used": [
+        {
+          "citation_id": "citation-slot:cee453dcc9a1dcb44858b8a4699ef37d5962d82c0c18ea75ddc38c99213ae21b",
+          "title": "Postmortem: SEV-2 Dedicated autoscaler stuck at min capacity (2026-02-09)",
+          "revision": "4682656dbdda7155408af86246ce0c35db967b676d78cf4fd4a44a19e414ad9c",
+          "anchor": "normalized-char:0-1691"
+        },
+        {
+          "citation_id": "citation-slot:5107e1737fe2c1047b0aeaaa30bd82ef2d8ad04102d2e17064712ca68eea9fa6",
+          "title": "Postmortem: SEV-2 Dedicated autoscaler stuck at min capacity (2026-02-09)",
+          "revision": "4682656dbdda7155408af86246ce0c35db967b676d78cf4fd4a44a19e414ad9c",
+          "anchor": "normalized-char:0-1691"
+        }
+      ],
+      "rag_diagnostics": {
+        "runtime_identity": "rag-answer-flow-local-v1",
+        "composer_identity": "rag-qwen-evidence-support-nonthinking-unbounded-v4",
+        "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+        "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+        "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+        "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+        "authorization_policy_identity": "document-authorization-v1",
+        "outbound_policy_identity": "phase4-outbound-v1",
+        "knowledge_tool_calls": 1,
+        "gate_calls": 1,
+        "composer_calls": 1,
+        "validator_calls": 1,
+        "context_count": 3,
+        "context_characters": 5371,
+        "elapsed_ms": 7700.821,
+        "retrieval_snapshot": {
+          "retrieval_mode": "semantic",
+          "profile_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+          "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+          "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+          "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+          "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+          "semantic_identity": "9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20",
+          "semantic_manifest_identity": "22c573755257c47c6264218ba1bbe2e1182ccc7ad91a15bc889e3e8da56be97b",
+          "embedding_provider": "dashscope",
+          "embedding_model": "qwen3.7-text-embedding",
+          "embedding_dimensions": 1024,
+          "milvus_collection": "datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89",
+          "unit_set_identity": "17d5af0b197ab3e4a069703d2095813f4727f1315a1e12bc06e631a9b793905f"
+        }
+      },
+      "trace_runtime_identity": {
+        "format": "phase4-trace-runtime-v1",
+        "status": "complete",
+        "harness_identity": "phase4-harness-langgraph-v1",
+        "route": "rag",
+        "checkpoint_runtime": {
+          "adapter": "inprocess-bounded-thread-v2",
+          "state_version": "m37-thread-v2",
+          "ttl_seconds": 900
+        },
+        "route_runtime": {
+          "kind": "rag",
+          "tool": "rag_answer_flow",
+          "answer_flow_identity": "rag-answer-flow-local-v1",
+          "composer_identity": "rag-qwen-evidence-support-nonthinking-unbounded-v4",
+          "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+          "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+          "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+          "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+          "retrieval_snapshot": {
+            "retrieval_mode": "semantic",
+            "profile_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+            "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+            "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+            "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+            "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+            "semantic_identity": "9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20",
+            "semantic_manifest_identity": "22c573755257c47c6264218ba1bbe2e1182ccc7ad91a15bc889e3e8da56be97b",
+            "embedding_provider": "dashscope",
+            "embedding_model": "qwen3.7-text-embedding",
+            "embedding_dimensions": 1024,
+            "milvus_collection": "datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89",
+            "unit_set_identity": "17d5af0b197ab3e4a069703d2095813f4727f1315a1e12bc06e631a9b793905f"
+          },
+          "authorization_policy_identity": "document-authorization-v1",
+          "outbound_policy_identity": "phase4-outbound-v1"
+        },
+        "missing": []
+      },
+      "provider_attempts": [
+        {
+          "status": "succeeded",
+          "error_subtype": null,
+          "elapsed_ms": 6521.977,
+          "usage_delta": {
+            "request_count": 1,
+            "successful_response_count": 1,
+            "prompt_tokens": 1717,
+            "completion_tokens": 337,
+            "total_tokens": 2054
+          }
+        }
+      ],
+      "provider_usage": {
+        "completion_tokens": 337,
+        "prompt_tokens": 1717,
+        "total_tokens": 2054,
+        "successful_response_count": 1,
+        "request_count": 1
+      },
+      "response_trace_consistent": true
+    }
+  ],
+  "assertions": [
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "route_correct",
+      "effect": "required",
+      "status": "passed",
+      "reason": "route_correct=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "graph_path_correct",
+      "effect": "required",
+      "status": "passed",
+      "reason": "graph_path_correct=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "rag_tool_once",
+      "effect": "required",
+      "status": "passed",
+      "reason": "rag_tool_once=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "retrieved_gold",
+      "effect": "required",
+      "status": "passed",
+      "reason": "stage=candidate expected={'dsid_5e65a1cb22b6464e9f36d0fa2d1f4317': 1} actual={'dsid_5e65a1cb22b6464e9f36d0fa2d1f4317': 1, 'dsid_472dbefc22d34127a1a3e60467634de2': 1, 'dsid_489293bccf1f4a4b9a459ab9034b446a': 1, 'dsid_c2daaab889b246df8652445b3ff184fa': 1, 'dsid_f2ffdf5d17e54bb38604ed4909b216f0': 1}",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "selected_gold",
+      "effect": "required",
+      "status": "passed",
+      "reason": "stage=selected expected={'dsid_5e65a1cb22b6464e9f36d0fa2d1f4317': 1} actual={'dsid_5e65a1cb22b6464e9f36d0fa2d1f4317': 1, 'dsid_472dbefc22d34127a1a3e60467634de2': 1, 'dsid_489293bccf1f4a4b9a459ab9034b446a': 1}",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "generation_visible_gold",
+      "effect": "required",
+      "status": "passed",
+      "reason": "stage=generation_visible expected={'dsid_5e65a1cb22b6464e9f36d0fa2d1f4317': 1} actual={'dsid_5e65a1cb22b6464e9f36d0fa2d1f4317': 1, 'dsid_472dbefc22d34127a1a3e60467634de2': 1, 'dsid_489293bccf1f4a4b9a459ab9034b446a': 1}",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "cited_gold",
+      "effect": "required",
+      "status": "passed",
+      "reason": "stage=cited expected={'dsid_5e65a1cb22b6464e9f36d0fa2d1f4317': 1} actual={'dsid_5e65a1cb22b6464e9f36d0fa2d1f4317': 1}",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "answer_present",
+      "effect": "required",
+      "status": "passed",
+      "reason": "answer_present=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "response_trace_consistent",
+      "effect": "required",
+      "status": "passed",
+      "reason": "response_trace_consistent=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "runtime_identity_complete",
+      "effect": "required",
+      "status": "passed",
+      "reason": "runtime_identity_complete=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "provider_observed",
+      "effect": "required",
+      "status": "passed",
+      "reason": "provider_observed=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "composer_support_valid",
+      "effect": "required",
+      "status": "passed",
+      "reason": "composer_support_valid=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "axes_correct",
+      "effect": "advisory",
+      "status": "passed",
+      "reason": "axes_correct=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "reason_correct",
+      "effect": "advisory",
+      "status": "passed",
+      "reason": "reason_correct=True",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "assertion_id": "answer_facts_exact_lower_bound",
+      "effect": "advisory",
+      "status": "failed",
+      "reason": "exact_fact_checks={'The incident was caused by a PromQL refactor that changed label matching from cluster_id to cluster.': False, 'Clusters that only emitted the cluster_id label returned empty metrics after the refactor, so the autoscaler made no scale-out decisions and stayed at minimum.': False, 'A hotfix restored scale-out by querying using the legacy cluster_id label and adding a fallback query when no series were returned.': False, 'The answer must not attribute the Feb 2026 us-west stuck-at-min issue to autoscaler cooldown/stabilization window changes or capacity thrashing; that was the 2026-01-09 incident.': False, 'The answer must not say scale-out failed due to a GPU cloud quota ceiling or provisioning quota errors; that was a 2025-03-03 incident in eu-west.': False, 'The answer must not discuss an API Gateway 5xx surge, warm pool prewarm regression, hedged retries, or runtime watchdog restarts; that was a separate 2026-03-10 us-east-1 incident.': False, 'The answer must not claim the underlying cause was a control plane config schema rollout leading to cache-key cardinality/OOM; that was the 2026-02-07 P0 control plane outage.': False}",
+      "evidence_ref": "execution:qst_0386:1:90bf0e81-856b-4bd3-b6c7-5e691e7f0b53"
+    }
+  ],
+  "gate": {
+    "status": "passed",
+    "passed": 12,
+    "failed": 0,
+    "not_observed": 0
+  },
+  "artifact_identity": "0a5bc40a8514177d30fef6d49375d4edead1635fe178115a98d7b388d14c9647"
+}

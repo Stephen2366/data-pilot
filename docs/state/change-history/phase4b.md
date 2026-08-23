@@ -19,6 +19,24 @@
 
 ## 变更记录（新的在上）
 
+### [实验] M44A Enterprise semantic external dev Smoke（2026-08-24）
+
+- **范围与身份**：用户明确授权 RAG smoke，按 runbook 唯一执行 external `diagnostic_dev/smoke` 9 题各一次；run `m44a-rag-external-semantic-smoke-20260824-023039`、artifact `4bfff9d...5346d` completed，exit 0，无 resume/重跑、lexical fallback、held-out/all 或 reserve 访问。runtime 为 semantic `9aec12...e20`、manifest `22c573...97b`、Qwen embedding 1024、既有 Milvus collection/unit-set；运行前 preflight ready。
+- **自动结果**：9/9 HTTP 200、Composer 9/9 成功、retry0、usage `19033` tokens。Gate failed，required `92/16/0`、advisory `18/9/0`；primary triage `5 passed / 4 retrieval`，gold candidate/selected/generation-visible/cited 均为 `5/9`。qst_0016/0047/0181/0420 在 candidate 阶段漏 gold，但仍基于错误材料形成 complete answer。
+- **人工复核**：artifact + 9 checkpoint 哈希验证通过，闭集 verdict `2 pass / 7 fail`。qst_0019/0386 pass；四个 retrieval 漏失题均 fail；qst_0461 漏关键清理规则并混入无关安排，qst_0431 命中双 gold 但完整步骤不足，qst_0318 精确开始时间错误。
+- **候选对比**：与 2026-08-23 post-fix lexical smoke 只按 10 个预注册 runtime 字段做 candidate compare，自动 `1 win / 5 tie / 3 loss`、required `96/12/0→92/16/0`、tokens `20288→19033`；人工 `3/6→2/7`，唯一 verdict 退化为 qst_0461。两侧均为单次 generation、非 Reliability，且 runtime 字段共同变化，因此不能做单组件因果归因或声称 semantic 稳定更差。
+- **结论与证据**：本次结果没有 semantic 质量胜出证据，也表明单题 C6 不能外推 smoke；但不改变用户确认的 semantic 产品默认和 fail-closed 合同。本 run 不自动登记正式长期基线。artifact/report/triage/review/verdict/reviewed/compare 见 `eval/reports/m44a-rag-external-semantic-smoke-20260824-023039*` 与 `m44a-rag-external-semantic-smoke-vs-lexical-20260824-compare.json`；后续稳定判断需独立 Reliability/候选计划和授权。
+
+### [模块任务] M44A EnterpriseRAG-Bench Milvus 产品运行链路（2026-08-24）
+
+- **改动范围**：起始 commit `098bd6014fb6cad648eed17197e5a71b31f25c15`。新增 API/Eval 共用的 closed-world Enterprise runtime resolver、FastAPI lifespan 与 `/health/rag`、Milvus semantic adapter 冷启动/强身份门、external 精确 Scenario 入口、preflight 脚本、Trace/artifact additive identity 和 M44A 测试；历史 API 合同测试改为显式注入 deterministic 业务 RAG fixture。没有 ORM/Alembic/seed、业务 22 条 release、semantic snapshot 或 Phase 4B owner 变化。
+- **用户决策与默认合同**：M44A 插在 B1/B2 之间但不占里程碑，M44–M48 仍对应 B2–B6，M46 reserve 继续 sealed。用户确认 Enterprise 产品 API/external Eval 默认 semantic；lexical 只作显式历史 baseline。semantic 配置、provider 或 Milvus 不可用时 RAG 失败关闭、零 Evidence/Composer，不回退 lexical 或业务小语料；SQL 与 `/health` 仍可用，`/health/rag` 返回 503。应用不自动启动 Docker、建库、reset 或重建索引。
+- **实现与身份**：SQLite profile `e8783fe...fa2` 继续作为正文/Evidence authority，Milvus 只选 unit identity。resolver 强制核对 profile/corpus/unit recipe、semantic manifest `22c573...97b`、semantic `9aec12...e20`、embedding `dashscope/qwen3.7-text-embedding/1024`、collection `datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89` 及 unit-set `17d5af...905f`；冷启动严格 load→load state→unit-set query。共享只读 SQLite/Milvus client 受锁保护并幂等关闭；API、Trace 与 Eval 从同一 safe projection 取运行身份。旧 lexical artifact 对新增字段按预注册 optional `None` 兼容，不回写、不改签。
+- **真实 C6**：用户只授权 `diagnostic_dev/qst_0386` 恰好一次。run `m44a-rag-external-qst0386-20260824-c6` completed，artifact `0a5bc40...c9647`，required `12/0/0`、Gate passed；semantic candidate→selected→generation-visible→cited 为 `5→3→3→1`，Qwen attempts=1/retry0/2054 tokens，人工语义 verdict pass。自动 advisory exact-fact 下限仍失败并保留；没有第二次运行、lexical fallback、held-out/all 或索引写入，因此只证明真实向量产品链闭合，不是 semantic 质量基线。
+- **参考与适配**：定点复核 WrenAI source/derived-index seam、GustoBot vector-store/tool workflow、DB-GPT structured references、DataAgent best-effort replace 反例，以及 FastAPI lifespan、Milvus load/load-state 官方合同。借鉴 source/index 分权、稳定 workflow seam 和 readiness；适配为 SQLite authority + Milvus 候选 + Evidence/citation 强身份门；不照搬自动 reset/rebuild/watch、字符串 source、best-effort replace 或降级 fallback。精确坐标见 `docs/notes/m44a-plan.md` 与 notes。
+- **验证快照**：聚焦 `28 passed, 1 warning`；RAG/Eval 回归 `177 passed, 1 warning`；Harness/API/Phase 4B 回归 `96 passed, 1 warning`；最终全仓 `517 passed, 1 warning in 609.32s`。compileall、两个 CLI help、`git diff --check` 通过；真实 preflight 两次 ready，最终 10.48 秒且零 embedding/Composer transport。warning 均为既有 Starlette TestClient/httpx deprecation；两次 sandbox basetemp `WinError 5` 均在获批沙箱外重跑闭合。
+- **边界与后续**：历史 M34 @20 仍显示当前 dense snapshot 不胜 lexical；产品默认切换来自用户对“真实向量 RAG”的合同选择，不是质量优越结论。单题 C6 不外推 60/180、Reliability、吞吐或多 worker。下一模块仍是 M44/B2 独立 plan；新 embedding/recipe/Hybrid/rerank 或默认切换必须形成新 identity、证据和用户确认。
+
 ### [实验] M43 后真实 Qwen 交互验证：比较类 QueryPlan 不稳定与超时调整（2026-08-23）
 
 - **场景与边界**：M43 技术收工后，用真实 Qwen `qwen3.7-plus` 在默认 MySQL legacy 世界通过 `/api/query` 交互复现 canonical T1→T2。这不是正式 eval run（无 run_id/manifest/artifact），不登记基线，也不进入 `eval-baselines.md`（按该账本规则，运行事故/外部服务异常不作独立记录）。
@@ -46,6 +64,7 @@
 - **参考资料**：按 `phase4-reference.md` 定点复核 Wren/DataAgent 的 source/index/state seam、ARAG 的 Graph/state/tools/Eval skeleton、GustoBot multi-tool/finalize 和 DB-GPT Tool/Resource/Eval 分层。借鉴内容身份、状态/执行闭集和一次执行后评分；不照搬 watcher 充当原子发布、参考项目 TaskState 字段、开放循环、notebook 简单平均或模型输出作为安全事实。具体 reference ID 与适配表见 `docs/notes/m42-plan.md`。
 - **验证快照**：M42 全聚焦 `19 passed`，注释修正合同子集 `12 passed`；M1/M27/M31–M34 `179 passed, 1 warning`，M35–M41 `82 passed, 1 warning`；最终沙箱外全仓 `487 passed, 3 skipped, 1 warning in 566.30s`。首次全仓在 sandbox basetemp 因 `WinError 5` exit 1，保留为环境故障并以同命令/新 basetemp 重跑，不改实现或缩范围。warning 是既有 Starlette/httpx deprecation；compileall、diff check 与 trailing-whitespace 检查通过。
 - **遗留/后续**：M42 只完成 B0，不实现 TaskState、Loop、Hybrid runtime、RAG Subgraph、durable state 或 Context Compact。M43/B1 应直接消费本模块合同/fixture；M45/B3 从真实漏选 Observation 开始且只能用预注册动作/预算；M46/B4 才能按污染账本解封 reserve。active business release、默认 lexical/Composer/model、legacy runtime 与 M34/M41 baseline 均未切换。
+  ⚠️ 注（2026-08-24 / M44A）：这里的“默认 lexical 未切换”是 M42 当时事实；M44A 后仅 Enterprise 产品 API/external Eval 默认改为 semantic，22 条业务 release 的 deterministic lexical 和历史 M34/M41 artifact 仍不变。
 
 ### [小修] Phase 4B 参考项目里程碑下沉与反走马观花门（2026-08-23）
 

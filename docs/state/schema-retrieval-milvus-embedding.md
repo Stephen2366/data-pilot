@@ -2,12 +2,13 @@
 
 > 本文只保留当前 Schema Retrieval、Milvus 和 embedding 的运行事实。真实 Eval 命令见 [runbook.md](runbook.md)，M27 分母、Gate 与快照见 [eval-baselines.md](eval-baselines.md)，完整历史实验统一从 [CHANGELOG_INDEX.md](CHANGELOG_INDEX.md) 进入。
 
-更新时间：2026-08-13
+更新时间：2026-08-24
 
 ## 当前结论
 
-- 默认仍是 **`inmemory + deterministic + weighted`**：不依赖 Docker 或网络，是本地开发和默认 Eval 的主线。
-- Milvus 只在用户明确要求时启用。当前唯一文档化的 M27 Milvus embedding 路径是 **DashScope `qwen3.7-text-embedding` / 1024 维**；它不是默认切换结论。
+- **Text2SQL Schema Retrieval** 默认仍是 `inmemory + deterministic + weighted`：不依赖 Docker 或网络，是 SQL 本地开发和默认 Eval 主线。
+- **EnterpriseRAG-Bench 产品 RAG** 是另一条独立链：M44A 后默认使用 Milvus + DashScope `qwen3.7-text-embedding` / 1024 维；不读取 `SCHEMA_VECTOR_BACKEND`，也不改变 Schema Retrieval 默认。
+- M27 Schema Milvus 仍只在用户明确要求时启用；不得用这条规则推断 Enterprise RAG 应回退 lexical。
 - SiliconFlow embedding 的代码和配置入口仍保留，但不再是日常/M27 Eval 入口；没有用户明确指定时，不选择它。
 - M30 隔离 `knowledge_docs` 后，当前 Text2SQL schema document corpus 为 **186 条**，hash 为 `6b67606d782ec834efa2ffcdb94b3cbb8af148223f5a92a176b64f849e2e418d`。
 - 历史 M27 Milvus artifact/collection 的 195-doc hash `8a8b6626...` 仍是只读历史身份；它与当前 186-doc corpus 不匹配，后续新运行不得直接复用这些 collection。
@@ -21,6 +22,9 @@
 | M27 Milvus Eval | `SCHEMA_VECTOR_BACKEND=milvus`；`SCHEMA_EMBEDDING_PROVIDER=dashscope`；Qwen embedding 1024 维 | 用户明确要求 Milvus 时才启用。 |
 | Oracle | SQLite deterministic seed | 不因 Milvus 实验切换数据库或 `result_match` oracle。 |
 | 融合策略 | `weighted` | `rrf` 是历史否定实验，不切默认。 |
+| Enterprise 产品 RAG | `ENTERPRISE_RAG_RETRIEVAL_MODE=semantic`；semantic snapshot `9aec12...e20` | SQLite profile 是 authority，Milvus 只选 unit；完整配置与 preflight 见 `runbook-rag.md`。 |
+
+Enterprise 当前 collection 为 `datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89`，manifest `22c573...97b`，unit-set `17d5af...905f`。M44A 只读加载既有 139,214-unit snapshot，不新建、reset 或重建；不可用时 RAG 失败关闭，不影响 Schema Retrieval 的 inmemory 默认。
 
 用户只说“模型 + Milvus”时，优先复用**同模型、同 suite 的已有 Milvus 快照**所记录的 embedding、维度、collection 与 fusion；若没有这样的快照，必须先让用户指定 embedding，不能按主模型名称猜测。
 

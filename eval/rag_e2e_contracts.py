@@ -18,6 +18,16 @@ import yaml
 RAG_E2E_CONTRACT_VERSION = "phase4-rag-e2e-v1"
 RAG_E2E_ARTIFACT_FORMAT = "phase4-rag-e2e-artifact-v1"
 RAG_E2E_RUNTIME_FAMILY = "phase4-rag-product-harness-real-composer-v1"
+RAG_RUNTIME_ADDITIVE_FIELDS = (
+    "retrieval_mode",
+    "semantic_identity",
+    "semantic_manifest_identity",
+    "embedding_provider",
+    "embedding_model",
+    "embedding_dimensions",
+    "milvus_collection",
+    "unit_set_identity",
+)
 RAG_ASSERTION_IDS = frozenset({
     "route_correct", "axes_correct", "reason_correct", "graph_path_correct", "rag_tool_once",
     "retrieved_gold", "selected_gold", "generation_visible_gold", "cited_gold",
@@ -131,6 +141,15 @@ class RAGResolvedRuntime:
     generation_outbound_policy_identity: str
     caller_fixture_identity: str
     route_policy_identity: str = "deterministic-router-v1"
+    # M44A additive fields：旧 lexical/business artifact 缺失时由 dataclass 默认表达不适用。
+    retrieval_mode: str | None = None
+    semantic_identity: str | None = None
+    semantic_manifest_identity: str | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    embedding_dimensions: int | None = None
+    milvus_collection: str | None = None
+    unit_set_identity: str | None = None
 
 
 @dataclass(frozen=True)

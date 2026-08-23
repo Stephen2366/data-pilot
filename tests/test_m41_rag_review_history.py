@@ -10,7 +10,11 @@ import pytest
 
 from engine.rag.enterprise_answer_eval import finalize_answer_artifact
 from engine.rag.enterprise_dataset import canonical_identity
-from eval.rag_e2e_contracts import RAGEvalContractError, canonical_hash
+from eval.rag_e2e_contracts import (
+    RAGEvalContractError,
+    RAG_RUNTIME_ADDITIVE_FIELDS,
+    canonical_hash,
+)
 from eval.rag_e2e_review import build_review_bundle, compare_completed, verify_review_sources
 from eval.rag_m34_history import import_m34_answer_history
 from tests.test_m41_rag_e2e_contracts import _run
@@ -86,6 +90,42 @@ def test_candidate_compare_reports_paired_regression_and_rejects_unknown_allowli
     assert any(item["verdict"] == "loss" for item in result["paired_executions"])
     with pytest.raises(RAGEvalContractError, match="未知 runtime 字段"):
         compare_completed(left, right, allowed_runtime_differences=("not_a_runtime_field",))
+
+
+def test_pre_m44a_artifact_can_compare_with_semantic_candidate_only_by_explicit_allowlist(
+    tmp_path: Path,
+) -> None:
+    """旧 artifact 不改签；比较器只在内存为 M44A additive 字段补 None。"""
+
+    left = _run(tmp_path)
+    for field in RAG_RUNTIME_ADDITIVE_FIELDS:
+        left["run_spec"]["runtime"].pop(field, None)
+    _resign(left)
+    right = deepcopy(left)
+    right["run_spec"]["run_id"] = "m44a-semantic-candidate"
+    right["run_spec"]["runtime"].update(
+        {
+            "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+            "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+            "retrieval_mode": "semantic",
+            "semantic_identity": "semantic-v1",
+            "semantic_manifest_identity": "manifest-v1",
+            "embedding_provider": "dashscope",
+            "embedding_model": "qwen3.7-text-embedding",
+            "embedding_dimensions": 1024,
+            "milvus_collection": "collection-v1",
+            "unit_set_identity": "unit-set-v1",
+        }
+    )
+    _resign(right)
+    allowed = (
+        "retrieval_adapter_identity",
+        "retrieval_recipe_identity",
+        *RAG_RUNTIME_ADDITIVE_FIELDS,
+    )
+    result = compare_completed(left, right, allowed_runtime_differences=allowed)
+    assert result["comparison_mode"] == "candidate"
+    assert set(result["experiment_contract"]["actual_runtime_differences"]) == set(allowed)
 
 
 def test_m34_importer_is_offline_and_marks_missing_product_layers(tmp_path: Path) -> None:

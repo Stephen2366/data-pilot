@@ -2,11 +2,11 @@
 
 > 本文是知识库的当前运行状态入口，作用类似 `database-current-state.md`：只记录续接开发需要立刻知道的语料、active identity、运行接线、当前结论和活跃风险。评测数字、分母、artifact 与可比性规则统一以 `eval-baselines.md` 为准；本文不建立第二份评测账本。涉及知识原件、active release、外部 corpus、Knowledge Tool 或 M34 运行状态时必须先读本文。
 
-**更新时间：2026-08-23**
+**更新时间：2026-08-24**
 
 ## 一句话结论
 
-DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知识 release** 继续作为业务默认，M41 的 business 小 catalog 检查 ACL/安全合同；EnterpriseRAG-Bench 的 **36,417 篇文档 / 180 题**已接入独立 external 产品链路诊断，负责大规模检索与答案质量。external 默认仍是 lexical，60 dev 已真实运行，120 held-out 未运行。
+DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知识 release** 继续默认 deterministic lexical；EnterpriseRAG-Bench 的 **36,417 篇文档 / 180 题**产品 API/external Eval 在 M44A 后默认走既有 Milvus semantic snapshot。lexical 只作显式历史 baseline；semantic 不可用时失败关闭而不降级。60 dev 的历史 lexical 运行已完成，120 held-out 未运行。
 
 ## 当前两套知识运行口径
 
@@ -17,7 +17,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 | 权威输入 | `domain_pack/kb_docs/`、`domain_pack/metrics.yaml` | 项目外 EnterpriseRAG-Bench v1.0.0 `raw/`、`extracted/` |
 | 发布/存储 | `domain_pack/kb_releases/` immutable release | 项目外 immutable SQLite external profile + benchmark 专属 pointer |
 | active identity | release `7d0d0937...`；previous `4e86bdd...`；corpus `1927eb53...` | profile `e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2` |
-| 默认检索 | `knowledge-deterministic-lexical-v1` | SQLite FTS5 lexical adapter，`knowledge-sqlite-fts5-unicode61-v1` |
+| 默认检索 | `knowledge-deterministic-lexical-v1` | Milvus semantic adapter `knowledge-enterprise-milvus-semantic-v1`；lexical 仅显式 baseline |
 | 回答口径 | 业务回归使用 deterministic extractive Composer | M34 Answer Eval 使用 Qwen Composer 自然改写，并受严格 `support_text` / Evidence / citation 合同约束 |
 | 是否相互合并 | 否 | 否；不得修改业务 release/pointer |
 
@@ -71,32 +71,36 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - M41 `phase4-rag-e2e-v1` 通过 eval-only app-state factory 注入 Composer，但每题仍真实经过 `/api/query → caller → turn → Router → Harness → RAG Tool → business AnswerFlow → API/Trace`；退出后恢复 app state，普通 API 继续使用 deterministic Composer。一次 execution 形成共享 Evidence，scorer/report/triage/review/compare 不重跑 retrieval 或 provider。
 - 用户确认的 `phase4-rag-eval-business-generation-outbound-v1` 只允许显式 M41 CLI 把 active release 中已通过 caller/ACL/Gate、且 source class 为 `role_restricted_policy_text` / `metric_definition` 的 generation context 发给 Qwen；`security_policy`、未知类别或 identity 漂移在网络前失败关闭。它不是默认 `phase4-outbound-v1` 的扩权，也不得用于普通 API。
 - M41 external `phase4-rag-external-product-v2` 直接审计完整 M34 immutable 180 question set；difficulty `basic/core/hard=64/74/42`、partition `60 dev/120 held-out` 与 suite `smoke/basic/core/hard/reliability/full` 三轴分离，不复制题面。eval-only fixed-RAG Router 只固定进入 RAG 分支，因此评测 Harness/RAG Tool/AnswerFlow，不声称验证自然语言 Router 分类。
+- M44A 的普通 API 与 external Eval 共用 `EnterpriseProductRuntime` resolver。FastAPI lifespan 每进程 acquire/close 一次只读 SQLite profile 与 Milvus client；`/health` 只表示进程存活，`/health/rag` 才投影 profile/semantic/manifest/embedding/collection/unit-set readiness。Milvus 只返回 unit identity，正文、ACL、Evidence coordinates 和 citation 继续由 SQLite profile 权威回查。
+- semantic 启动严格执行 collection existence/description identity → load → load state → visible unit-set 核验；不创建、reset、release 或重建。任一步失败都使用 unavailable adapter，RAG 零 Evidence/Composer，且不回退 lexical/业务小语料；SQL 与普通 liveness 继续可用。
 
 ## 当前评测结论
 
 > 完整数值、共同 identity、artifact 和可比性规则只在 `docs/state/eval-baselines.md` 维护。这里仅保留会影响运行和下一步开发的结论。
 
-- 固定 @20、相同 corpus/parser/unit/split 的正式对照中，lexical 在 dev 和 held-out 都胜过当前 semantic candidate，因此 external 默认保持 lexical。
+- 固定 @20、相同 corpus/parser/unit/split 的 M34 正式对照中，lexical 在 dev 和 held-out 都胜过当前 dense semantic snapshot。M44A 按用户确认把 semantic 接为产品默认，是为了保证普通 RAG 真正使用向量数据库；这不是质量胜出结论，历史 lexical baseline 不改签。
 - gold 不进入 runtime，只在 Tool 返回后评分；retrieval gold coverage 不能冒充答案正确率。
 - completed Answer/Citation Eval 证明真实 Tool → Evidence → AnswerFlow → citation 链路与账本可复现，但暴露出 lexical 漏召回、多文档 context packing 不足和 Composer support 合同拒绝三类主要缺口。
 - `answer_status=complete` 只表示回答、support 和 citation 合同闭合，不等于答案正确；M34 没有启用 LLM Judge。
-- M39 只读审计已将冻结 M34 的 60 dev 分为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；120 held-out 未逐题消费。现有材料没有“首次 Observation 选择允许动作后新增 Evidence”的证据，也没有可比额外预算，因此 P6 为严格 `no_go`，不接入 RAG Subgraph、不切 external lexical 默认。可复核报告见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
+- M39 只读审计已将冻结 M34 的 60 dev 分为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；120 held-out 未逐题消费。现有材料没有“首次 Observation 选择允许动作后新增 Evidence”的证据，也没有可比额外预算，因此 P6 为严格 `no_go`，不接入 RAG Subgraph。其“当时不切 external lexical 默认”已被 M44A 的用户选择替代，但 B3/B4 Evidence 门未改变。可复核报告见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
 - M41 首次真实 business Qwen Smoke `m41-rag-smoke-20260822-01` 已 completed：2 个 Scenario、自动 required `23/23`、Gate `passed`、人工 review `2/2 pass`。唯一 generation 调用成功并消耗 `1012` tokens，no-candidate 题零 provider；该单次窄结果不能外推 Core、多文档、Reliability 或整体业务 RAG 质量，也尚未登记正式长期基线。
 - M41 external 60 dev `m41-rag-external-dev-20260822-01` 已 completed：primary triage `24 passed / 20 retrieval / 7 product_runtime / 5 citation / 4 selection`，candidate/selected/generation-visible/cited gold 为 `35/30/30/24`（分母均 60），usage `137299` tokens；人工语义 verdict `18 pass / 26 fail / 16 insufficient_evidence`。它证明 180 题可以像 Text2SQL 一样逐层定位，且自动链路通过不能代替语义正确。
 - M41 首条 post-fix dev core `m41-rag-external-core-20260823-151649` 已 completed：25 题，Gate `failed`（required 211/58/31），primary triage `9 retrieval / 7 product_runtime / 1 selection / 1 citation / 1 provider_or_support / 6 passed`，usage `53106` tokens；AI reviewer verdict `4 pass / 13 fail / 8 insufficient_evidence`。5 题 Composer 坏结构被如实标记（归类修正生效）；9 题 lexical 漏召回为最大失败层；verdict fail 主体是检索错文档→答偏与有引用仍拒答，4 例 pass 全部检索命中 gold——检索命中是语义正确的关键前提。未登记正式基线，120 held-out 未运行。
 - M41 post-fix dev Smoke/Basic `m41-rag-external-{smoke|basic}-20260823-154101` 已 completed：Smoke Gate `failed`（required 96/12/0）、语义 `3 pass / 6 fail`、20288 tokens；Basic Gate `failed`（215/25/12）、语义 `9 pass / 9 fail / 3 insufficient_evidence`、47814 tokens。Basic 的 3 个无答案都是 provider 有响应但 Composer 结构合同失败；30 requests 无 transport unavailable。Smoke/Basic 重叠 3 题 verdict 一致但不构成 Reliability；均未登记正式基线，held-out 未运行。
 - M42 B0 用最小 `ops + customer_service` caller 对冻结 gold-first 业务题执行一次默认 deterministic retrieval：期望 `refund_policy_basic + refund_policy_quality`，实际只选中 quality，Observation identity `e6bc5fa...aab99`，零 provider。该真实漏选是 Phase 4B B3 的诊断输入，不是新质量基线；M42 没有为通过而改变 active release、ACL、budget 或 lexical 默认。
+- M44A C6 `m44a-rag-external-qst0386-20260824-c6` 按用户授权只运行 `diagnostic_dev/qst_0386` 一次：completed artifact `0a5bc40...c9647`，required `12/0/0`，semantic candidate→selected→generation-visible→cited 为 `5→3→3→1`，Qwen 一次 2054 tokens，人工语义 pass。它证明 query embedding→Milvus→SQLite Evidence→Composer→citation 产品链闭合；advisory exact-fact 下限仍失败，因此既不登记正式长期基线，也不外推 60/180 题质量。
+- M44A semantic dev Smoke `m44a-rag-external-semantic-smoke-20260824-023039` 9 题一次 completed：required `92/16/0`、triage `5 passed / 4 retrieval`、人工 `2 pass / 7 fail`、19033 tokens。4 题 candidate 阶段漏 gold；另有命中 gold 后仍提取不全/事实错误。与历史 lexical smoke 的合法 candidate compare 为自动 `1 win / 5 tie / 3 loss`、人工 `3/6→2/7`；两侧均单次 generation，不能推导稳定 backend 因果或 Reliability，也不登记长期基线。
 
-M42 另创建 60 题 Phase 4B decision reserve，identity `f70c5fc...e505`，使用 external corpus/profile 的 20 份未进入既有 180 gold 的冻结文档；分布 basic/core/hard `20/20/20`，core 8、hard 20 道多文档。逐题材料在项目外 immutable store，仓库只保存安全 manifest。它在 M46 前保持 sealed，未运行 candidate，也不改变 M34/M41 基线或 external lexical 默认。
+M42 另创建 60 题 Phase 4B decision reserve，identity `f70c5fc...e505`，使用 external corpus/profile 的 20 份未进入既有 180 gold 的冻结文档；分布 basic/core/hard `20/20/20`，core 8、hard 20 道多文档。逐题材料在项目外 immutable store，仓库只保存安全 manifest。它在 M46 前保持 sealed，未运行 candidate，也不改变 M34/M41 基线；M44A 的产品默认切换没有读取或污染该 reserve。
 
-semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活候选：
+semantic snapshot 已完成全部 139,214 个 unique unit，并在 M44A 后成为 Enterprise 产品默认候选索引：
 
 - semantic identity `9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20`
 - Milvus collection `datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89`
 - unit-set identity `17d5af0b197ab3e4a069703d2095813f4727f1315a1e12bc06e631a9b793905f`
 - manifest identity `22c573755257c47c6264218ba1bbe2e1182ccc7ad91a15bc889e3e8da56be97b`
 
-该候选结论只约束当前 embedding、recipe 和检索协议，不证明 semantic、Hybrid 或 rerank 永久无价值。
+该默认只约束当前 embedding、recipe 和检索协议；它不证明 semantic 质量优于 lexical，也不改变未来 Hybrid/rerank 必须建立新 identity 与可比证据的要求。
 
 ## 当前相关合同
 
@@ -113,15 +117,16 @@ semantic candidate 已完成全部 139,214 个 unique unit，保留为未激活�
 
 ## 活跃风险与后续边界
 
-- **召回和多文档质量**：主要缺口仍是 lexical 漏召回、selected budget 和 context packing；M39 已完成 P6 分层审计，但没有证据授权多步子图。单变量 Pipeline 候选须独立计划；Subgraph 重开必须先在未污染 dev 证明 Observation 驱动动作新增 Evidence，并冻结 held-out 协议和可比预算。
+- **召回和多文档质量**：历史 lexical 运行暴露漏召回，selected budget/context packing 仍是跨 backend 风险；semantic 单题 C6 没有消除这些失败簇。M39 已完成 P6 分层审计，但没有证据授权多步子图。Subgraph 重开必须先在未污染 dev 证明 Observation 驱动动作新增 Evidence，并冻结 held-out 协议和可比预算。
 - **support 合同**：Composer 仍有输出被严格合同拒绝。不得通过 fuzzy/semantic 字符串放行换取表面 complete rate；若引入语义支持判断，需要独立合同和证据。
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
 - **能力范围**：M38 已把两类 canonical SQL + Document Hybrid 接入同一 Harness，但不是自由多轮或开放跨来源研究。第二次追问、Hybrid follow-up、optional branch、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
-- **M41 后续真实运行门**：历史 business Smoke 与旧 external 60 dev 均已按用户授权完成；当前 business 入口已合并为 5 题全量。external 默认 dev，120 held-out/all 仍须明确说出；任何真实运行都只授权一次，不得自动重跑或扩大 suite。旧 external dev artifact 是 Composer 误分类修正前、且缺 difficulty 的 pre-fix candidate；原件不得改签，未来 v2/post-fix run 不得伪装成直接复现。
+- **M41/M44A 后续真实运行门**：历史 business Smoke、lexical external dev 与 M44A semantic 单题 C6 均已按各自授权完成。external selector 默认 dev，产品 retrieval 默认 semantic；120 held-out/all 仍须明确说出。任何真实运行都只授权一次，不得自动重跑、扩大 suite 或在 semantic 失败后换 lexical 冒充同次授权。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **Phase 4B reserve 污染门**：M46 前不得读取逐题 gold、运行 candidate 或用 reserve 调参；发生提前访问/调参时必须按访问状态机标记 retired，不能继续充当 decision set。M34/M41 现有 180 题只作 historical regression，不与该 60 题 reserve 合并。
-- **默认切换**：semantic candidate、Hybrid、rerank 或新 recipe 必须产生新 identity，并以同 split 的单变量 A/B 和 held-out 证据经用户确认后才能切换。
+- **默认与质量证据分离**：M44A 的 semantic 产品默认是已确认合同；若要切回 lexical、换 embedding/recipe、Hybrid 或 rerank，必须产生新 identity、明确成本与单变量证据并经用户确认。单题 C6 或开发便利都不能触发切换。
+- **运行依赖与性能**：应用不启动或维护 Docker/Milvus；离线时 RAG 明确 unavailable。139k metadata/unit-set 启动核验约 10 秒，semantic query 首版以单锁保护共享 provider/client，尚未形成吞吐或多 worker 性能结论。
 - **未接入候选**：WixQA 仍只是项目外候选，未索引、未评测、也不属于 active corpus；后续若重新考虑，需另开 corpus 调查和接入计划。
 
 完整评测数字与 artifact 见 `docs/state/eval-baselines.md`；历史决策、实验过程、欠费/TLS EOF/checkpoint 修正见 `docs/notes/m34-notes.md`，并从 `docs/state/CHANGELOG_INDEX.md` 进入对应 Phase 历史。

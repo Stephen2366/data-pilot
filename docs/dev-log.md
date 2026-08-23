@@ -3159,3 +3159,147 @@ python -m uvicorn app.main:app --reload
 
 实际操作时 `expected_version` 必须复制上一响应的真实 `task_version`，不要固定照抄示例。重点观察 `task_delta.category=modify_constraint`、旧 Evidence 的 `validity=invalidated`、新 Evidence 为 active，以及 response/Trace 的 invocation count。没有 Phase 4B 隔离数据或模型不可用时，深 SQL 结果可能失败；此时用上面的聚焦测试和 deterministic rehearsal 复现冻结 oracle，不要为演示修改默认数据库或模型配置。
 
+## ★ M44A EnterpriseRAG-Bench Milvus 产品运行链路
+
+> 日期：2026-08-24
+> 简述：让普通 API 和 external Eval 默认走同一条真实 Milvus semantic 产品链；向量库不可用时明确失败，不再悄悄改用关键词检索或 22 条业务小语料。
+
+### 大白话理解
+
+过去系统虽然已经有 EnterpriseRAG-Bench 的 36,417 篇文档和 139,214-unit Milvus 索引，但平时启动 API 或运行 external Eval，不一定把它当成默认产品链。更危险的是，向量库没开时仍可能得到一段看似正常的 RAG 答案：这就像你要查公司的大型档案馆，前台却悄悄改去翻一只只有 22 张纸的小抽屉。
+
+M44A 把职责重新摆正：SQLite profile 是权威档案库，保存正文、版本、ACL 和引用坐标；Milvus 是语义索引卡，只负责从问题向量中选候选 unit。应用启动时核对两边身份、加载索引并确认可查询。任何一环不对，RAG 就明确 unavailable，绝不偷换后端；SQL 服务仍可运行，因此“应用活着”和“RAG 准备好”也被拆成两个健康信号。
+
+### 这次做了什么
+
+1. **API 和 Eval 共用一个 Enterprise runtime resolver。**
+
+   `engine/rag/enterprise_product_runtime.py` 统一解析 retrieval mode、profile、semantic manifest、embedding、Milvus collection 和 unit-set identity。产品默认是 `semantic`；`lexical` 只能显式选择来复现历史 baseline，请求体没有临时切换入口。
+
+2. **用 FastAPI lifespan 持有重资源，并拆开 liveness/readiness。**
+
+   每个进程只加载一次 139k metadata、只读 SQLite connection 和 Milvus client，关闭时幂等释放。`GET /health` 只表示 API 进程存活；`GET /health/rag` 才表示 Enterprise RAG 就绪。后者失败时，RAG 在取得 Evidence、调用 Composer 前停止，但 SQL 仍可工作。
+
+3. **让 Milvus 索引必须验明正身。**
+
+   代码不只看 collection 名或 row count，还核对 collection description 中的 semantic identity、manifest 的 corpus/unit recipe、embedding 模型与维度和可见 unit-set hash。冷启动顺序固定为 `load → load state → unit-set query`，不会自动创建、reset、release 或重建 collection。
+
+4. **保留 SQLite authority。**
+
+   Milvus 只返回 unit identity 和相似度候选，命中后仍回到 SQLite profile 加载正文、ACL、revision、anchor 和 Evidence coordinates，再经过 Knowledge Gate、Composer 与 Citation Validator。派生索引不能越过权威内容和授权边界。
+
+5. **让 API、Trace、Eval 记录同一运行身份。**
+
+   semantic identity、manifest、embedding、collection 和 unit set 都来自 runtime 的同一 safe projection。旧 lexical artifact 没有新字段时，只在比较器中补预注册 optional `None`，不回写、不改签。
+
+6. **用一次真实 C6 证明向量产品链走通。**
+
+   用户只授权 `diagnostic_dev/qst_0386` 恰好一次。结果为 HTTP 200、required Gate `12/0/0`，semantic candidate→selected→generation-visible→cited 为 `5→3→3→1`；Qwen 调用一次、2054 tokens，人工语义 verdict 为 pass。自动 advisory 的 exact-fact 下限仍失败并保留，所以它只证明链路闭合，不代表 semantic 在 60/180 题上优于历史 lexical。
+
+### 新概念
+
+- **Liveness 与 readiness**：进程能响应不等于外部依赖可服务。`/health` 类似“店门开着”，`/health/rag` 类似“档案、索引和检索员都已到岗”。
+- **Fail-closed**：依赖或身份不可信时停止提供该能力，不选择一个语义不同但更方便的后端继续返回结果。
+- **Authority 与 derived index**：SQLite 决定正文、版本和引用事实；Milvus 只是可重建的候选加速结构。
+- **Snapshot identity**：profile、corpus、recipe、embedding、collection 和 unit set 共同说明本轮到底查了哪份数据、哪套向量。
+- **Cold-start load**：collection 存在不等于已加载可查。Milvus 重启后必须 load 并确认状态。
+- **Additive compatibility**：新 artifact 增加 runtime 字段，但旧 artifact 不被重写，历史结论仍保留当时语义。
+
+### 代码阅读路线
+
+1. `app/core/config.py`：看 Enterprise 配置的 closed-world 选择和 semantic 默认。
+2. `engine/rag/enterprise_product_runtime.py`：看 profile/semantic 验证和产品 runtime 组装。
+3. `engine/rag/enterprise_semantic.py`：看 description、load state、unit-set 与 search。
+4. `app/main.py`、`app/api/query.py`：看 lifespan、`/health/rag` 与 fail-closed adapter。
+5. `engine/rag/enterprise_runtime.py`、`answer_flow.py`：看 Milvus 候选怎样回查 SQLite 并形成 Evidence/citation。
+6. `eval/run_rag_external_eval.py`、`eval/rag_e2e_contracts.py`、Trace runtime：看 API/Eval identity 同源和旧 artifact 兼容。
+7. `tests/test_m44a_*`、`scripts/check_enterprise_rag_runtime.py` 和 C6 report：把失败路径、preflight 与真实链路串起来。
+
+核心调用链：
+
+`FastAPI lifespan / external Eval`
+→ `EnterpriseProductRuntime resolver`
+→ `DashScope query embedding`
+→ `Milvus semantic search`
+→ `SQLite authority lookup + ACL/Gate`
+→ `Evidence selection`
+→ `Qwen Composer + Citation Validator`
+→ `API / Trace / Eval artifact`
+
+### 设计要点
+
+- **产品默认与质量结论分离**：默认 semantic 是用户确认的“真实向量 RAG”运行合同；历史 @20 lexical 指标仍更强，不能包装成质量胜出。
+- **不代管基础设施**：应用不会自动启动 Docker、创建 collection 或重建 snapshot。
+- **故障不能伪装成功**：Milvus、embedding key 或 identity 不可用时 `/health/rag` 503，RAG 零 Evidence/Composer，没有 fallback。
+- **共享资源先保正确性**：SQLite、embedding provider 与 Milvus client 用锁安全共享；首版接受串行 query 的吞吐限制。
+- **旧证据不改写**：M34/M41 lexical artifact、baseline 和分数保持原样，新 semantic 字段只增量进入当前协议。
+- **单题就是单题**：C6 能证明真实链路可工作，却不能外推大规模召回、Reliability、并发性能或生产 connector 真实性，汪。
+
+### 有面试价值的亮点
+
+1. **“我不只调用 Milvus，还证明调用了正确的 snapshot。”** description、manifest、embedding、profile/corpus 和 unit-set 多层校验防止同名或同主键集合装错向量。
+2. **“向量库不拥有正文事实。”** Milvus 只给 unit identity，SQLite 才负责正文、ACL、revision 和 citation anchor。
+3. **“健康检查不是一个布尔值。”** liveness 保住 SQL/API，RAG readiness 暴露外部依赖；局部失败既不拖垮整个服务，也不被 fallback 掩盖。
+4. **“API、Trace 和 Eval 不各自猜配置。”** 三者消费同一 safe projection，避免命令写 semantic、artifact 却记录另一条链。
+5. **“历史可比性没有被切默认破坏。”** 旧 lexical artifact 不改签，semantic 单题也没有伪装成与历史 60/180 的公平 A/B。
+
+### 面试官追问
+
+1. **[基础追问] 启动 Uvicorn 后，怎么知道 RAG 真的走向量库？**
+
+   在同一 PowerShell 配置 Enterprise profile/semantic identity，运行 preflight，再启动服务。`GET /health/rag` 必须返回 200，并显示 `retrieval_mode=semantic`、预期 semantic identity 和 collection；真实请求 Trace 还应记录相同 identity。只有 `/health` 200 不够。
+
+2. **[工程追问] 为什么不在 Milvus 挂掉时自动回退 lexical？**
+
+   两种检索器代表不同 runtime identity 和质量条件。自动回退会让用户误以为自己体验或评测的是向量 RAG，也会污染 artifact 可比性。明确失败才能把基础设施故障变成可诊断事实。
+
+3. **[工程追问] collection 名和数据条数都对，为什么还要多层校验？**
+
+   同一批 unit 主键可以被另一 embedding 或 recipe 重写，条数仍相同；同名 collection 也可能来自错误 snapshot。description、manifest 和 unit-set 分别防不同漂移。
+
+4. **[工程追问] 为什么不用 Milvus payload 中的正文直接生成？**
+
+   向量索引是派生物，payload 可能过期、字段不全或缺权威 ACL/revision。回查 SQLite 能让 Evidence、授权和 citation 指向同一份已验证原文。
+
+5. **[压力追问] semantic 历史指标还不如 lexical，设成默认不是倒退吗？**
+
+   如果目标是宣称质量提升，证据当然不成立；M44A 也没有这么宣称。模块解决的是运行真实性：用户要求普通 RAG 必须真正使用向量数据库，所以默认 semantic，并用 fail-closed 阻止伪装。历史 lexical 基线完整保留，单题 C6 只证明端到端可用；后续质量改进仍需兼容 A/B、失败分层和 held-out 决策，不能拿“默认”代替“更好”，喵。
+
+### 验证与下一步
+
+| 范围 | 真实结果 | 证明什么 |
+|---|---:|---|
+| M44A 最终聚焦 | 28 passed，1 warning | resolver、生命周期、identity、fail-closed、API/Eval 同源 |
+| RAG/Eval 回归 | 177 passed，1 warning | M31–M34/M41 历史合同兼容 |
+| Harness/API/Phase 4B 回归 | 96 passed，1 warning | M35–M43 不依赖产品 fallback |
+| 全仓 pytest | 517 passed，1 warning，609.32 秒 | 整仓确定性回归通过 |
+| 真实 C6 | required 12/0/0，Gate passed，2054 tokens | qst_0386 一次真实 semantic 产品链闭合 |
+
+warning 是既有 Starlette TestClient/httpx deprecation。C6 的自动 advisory exact-fact 下限失败、人工语义 pass 两个视图都保留；没有运行第二题、60 dev、120 held-out 或 lexical 配对。下一步仍是 M44/B2 的 Observation-driven Decision Loop 独立 plan；M44A 不占 B milestone，也没有读取 M46 sealed reserve。
+
+可复制的只读 preflight 与开发验证：
+
+```powershell
+# 先按 docs/state/runbook-rag.md 在同一 shell 设置 ENTERPRISE_RAG_* 变量。
+docker ps
+python -m scripts.check_enterprise_rag_runtime
+
+# 不调用真实 embedding/Composer 的聚焦测试。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m44a-devlog tests/test_m44a_enterprise_product_runtime.py tests/test_m44a_api_runtime.py
+```
+
+**本地启动体验：**
+
+```powershell
+# 完整变量值以 docs/state/runbook-rag.md 为准；Docker/Milvus 必须先由用户启动。
+$env:ENTERPRISE_RAG_RETRIEVAL_MODE = 'semantic'
+$env:ENTERPRISE_RAG_PROFILE_ROOT = '<enterprise_profiles 目录>'
+$env:ENTERPRISE_RAG_PROFILE_IDENTITY = 'e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2'
+$env:ENTERPRISE_RAG_SEMANTIC_ROOT = '<enterprise_semantic 目录>'
+$env:ENTERPRISE_RAG_SEMANTIC_IDENTITY = '9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20'
+python -m scripts.check_enterprise_rag_runtime
+python -m uvicorn app.main:app --reload
+```
+
+先打开 `http://127.0.0.1:8000/health/rag`，看到 200/ready 和正确 identity 后，再到 `http://127.0.0.1:8000/docs` 调用 `POST /api/query`。如果 `/health/rag` 是 503，应检查 Docker、Milvus、API key 或 snapshot identity；不要切 lexical 掩盖故障。应用不会替你启动 Docker，也不会重建向量索引。
+

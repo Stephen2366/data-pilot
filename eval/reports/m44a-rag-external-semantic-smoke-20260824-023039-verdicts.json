@@ -1,0 +1,38 @@
+{
+  "qst_0016:r1": {
+    "verdict": "fail",
+    "reason": "Gold 明确为 contractor access 默认 30 天后到期，回答却称证据没有具体默认期限，并转述离职后 24 小时 deprovision，未回答问题。"
+  },
+  "qst_0047:r1": {
+    "verdict": "fail",
+    "reason": "回答讨论旋转 exemplar 对改写截断和措辞的影响，没有回答减少 position bias 与破坏 prefix caching 的核心权衡，且未命中 gold 文档。"
+  },
+  "qst_0019:r1": {
+    "verdict": "pass",
+    "reason": "题目询问造成源 IP 改写的 device mode misconfiguration；回答准确指出桥接设备误设 Gateway/NAT 而非 bridge/passthrough，正确回答核心原因。"
+  },
+  "qst_0386:r1": {
+    "verdict": "pass",
+    "reason": "准确说明 PromQL 从 cluster_id 改为 cluster 导致空 metrics，并说明恢复标签兼容和 no-series fallback 的 hotfix；未混入禁答事故。"
+  },
+  "qst_0461:r1": {
+    "verdict": "fail",
+    "reason": "只提到给开封罐贴日期，遗漏超过 14 天检查气味/外观并丢弃、每周五 16:00 清理及具体清理动作，还加入 tentative roster 和 Monday standup 等非 gold 内容。"
+  },
+  "qst_0181:r1": {
+    "verdict": "fail",
+    "reason": "把 signed-cookie refresh 的 30–120 秒随机 jitter 错答成 callback retry 的 200–800ms backoff，机制、时间范围和目标均不符。"
+  },
+  "qst_0420:r1": {
+    "verdict": "fail",
+    "reason": "把已经过时的 $0.05/1k tokens 当作当前 catalog，并明确声称 measurement basis 是 tokens；正确答案应是 provider-billed GiB、$0.085/GiB 和 sampled bytes attribution。"
+  },
+  "qst_0431:r1": {
+    "verdict": "fail",
+    "reason": "命中两份 gold 并给出高层回滚骨架，但 completeness 题要求的 Hosted 区域顺序、Dedicated 逐集群 redeploy/客户沟通、30/60 分钟稳定观察、关闭与证据记录均缺失。"
+  },
+  "qst_0318:r1": {
+    "verdict": "fail",
+    "reason": "永久修复全面上线日期 2026-03-17 正确，但 job start time 错答为 02:21Z；gold 是精确的 2026-03-09T02:18:22Z。"
+  }
+}

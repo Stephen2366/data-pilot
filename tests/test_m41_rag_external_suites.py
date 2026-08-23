@@ -12,6 +12,7 @@ from eval.rag_external_catalog import (
     EXTERNAL_RELIABILITY_IDS,
     EXTERNAL_SMOKE_IDS,
     build_external_selector,
+    build_external_scenario_selector,
     classify_external_difficulty,
 )
 from eval.rag_e2e_scoring import render_report
@@ -89,6 +90,25 @@ def test_smoke_cannot_be_repointed_to_held_out() -> None:
     with pytest.raises(RAGEvalContractError, match="冻结 dev 套件"):
         build_external_selector(
             catalog=catalog, dev_ids=dev, held_out_ids=held, partition="held_out", suite="smoke"
+        )
+
+
+def test_exact_scenario_selector_stays_inside_explicit_partition() -> None:
+    """单题 smoke 降低真实验证成本，但不能成为读取 held-out 的旁路。"""
+
+    catalog, dev, held = _catalog()
+    selected = build_external_scenario_selector(
+        catalog=catalog,
+        partition="diagnostic_dev",
+        scenario_id=dev[0],
+    )
+    assert selected.selected_scenario_ids == (dev[0],)
+    assert selected.replicate_count == 1
+    with pytest.raises(RAGEvalContractError, match="partition"):
+        build_external_scenario_selector(
+            catalog=catalog,
+            partition="diagnostic_dev",
+            scenario_id=held[0],
         )
 
 

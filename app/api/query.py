@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, TaskControlResponse, TaskView, ThreadControlResponse, ThreadView
-from engine.harness.adapters import RAGToolAdapter, Text2SQLToolAdapter
+from engine.harness.adapters import RAGToolAdapter, Text2SQLToolAdapter, UnavailableRAGToolAdapter
 from engine.harness.contracts import HarnessRequest, ToolObservation
 from engine.harness.graph import HarnessRuntime
 from engine.harness.thread import ThreadCheckpointManager
@@ -246,7 +246,19 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
 
     # 步骤 2：DB Session、深 Tool 与可选 Schema index 仅属于本次 invoke 的 runtime context。
     rag_tool_factory = getattr(request.app.state, "rag_tool_factory", None)
-    rag_tool = rag_tool_factory() if rag_tool_factory is not None else RAGToolAdapter()
+    # ★ M44A：None 不再表示“使用仓库内小语料”。产品 runtime 未配置/未就绪时，
+    # RAG 路由明确 external_unavailable；Eval/测试若要替换，必须注入显式 factory。
+    rag_tool = (
+        rag_tool_factory()
+        if rag_tool_factory is not None
+        else UnavailableRAGToolAdapter(
+            reason_code=str(
+                getattr(request.app.state, "rag_runtime_status", {}).get(
+                    "reason_code", "enterprise_rag_runtime_unavailable"
+                )
+            )
+        )
+    )
     sql_tool_factory = getattr(request.app.state, "sql_tool_factory", None)
     sql_tool = sql_tool_factory() if sql_tool_factory is not None else Text2SQLToolAdapter(
         db=db, schema_vector_index=getattr(request.app.state, "schema_vector_index", None)

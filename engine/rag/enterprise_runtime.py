@@ -12,8 +12,9 @@ import sqlite3
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
+from threading import RLock
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, Protocol
 
 from engine.rag.answer_flow import RAGAnswerFlow
 from engine.rag.catalog import CatalogEntry
@@ -36,6 +37,13 @@ ENTERPRISE_ADAPTER_IDENTITY = "knowledge-enterprise-sqlite-lexical-v1"
 ENTERPRISE_RETRIEVAL_RECIPE = "fts5-unicode61-or-bm25-dedup-physical-v1"
 ENTERPRISE_DOCUMENT_KEY_PREFIX = "enterprise-unit:"
 _QUERY_TOKEN = re.compile(r"[A-Za-z0-9_]+")
+
+
+class _Lock(Protocol):
+    """RLock 的最小 context-manager 形状，便于隔离测试注入。"""
+
+    def __enter__(self) -> object: ...
+    def __exit__(self, *args: object) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -155,8 +163,9 @@ class EnterpriseSqliteRetrievalAdapter:
     identity = ENTERPRISE_ADAPTER_IDENTITY
     recipe_identity = ENTERPRISE_RETRIEVAL_RECIPE
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(self, connection: sqlite3.Connection, *, connection_lock: _Lock | None = None) -> None:
         self._connection = connection
+        self._connection_lock = connection_lock or RLock()
 
     def retrieve(
         self,
@@ -194,18 +203,21 @@ class EnterpriseSqliteRetrievalAdapter:
         expression = " OR ".join(f'"{token}"' for token in tokens)
         scan_limit = max(500, limit * 50)
         try:
-            rows = self._connection.execute(
-                """
-                SELECT u.unit_identity, u.physical_source_identity,
-                       bm25(units_fts) AS raw_score
-                FROM units_fts
-                JOIN units AS u ON u.row_id = units_fts.rowid
-                WHERE units_fts MATCH ?
-                ORDER BY raw_score ASC, u.unit_identity ASC
-                LIMIT ?
-                """,
-                (expression, scan_limit),
-            ).fetchall()
+            # ★ check_same_thread=False 只是允许跨线程使用，不代表同一 connection 上的多次
+            # cursor 操作应该交错；一把短锁让共享 lifespan runtime 保持只读且可预测。
+            with self._connection_lock:
+                rows = self._connection.execute(
+                    """
+                    SELECT u.unit_identity, u.physical_source_identity,
+                           bm25(units_fts) AS raw_score
+                    FROM units_fts
+                    JOIN units AS u ON u.row_id = units_fts.rowid
+                    WHERE units_fts MATCH ?
+                    ORDER BY raw_score ASC, u.unit_identity ASC
+                    LIMIT ?
+                    """,
+                    (expression, scan_limit),
+                ).fetchall()
         except sqlite3.Error as exc:
             raise RetrievalAdapterError("retrieval_backend_unavailable", str(exc)) from exc
 
@@ -238,21 +250,23 @@ class EnterpriseSqliteRetrievalAdapter:
 class EnterpriseContextLoader:
     """只在 unit 已通过 pre-selection 且真正命中后，加载受控正文和回查坐标。"""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(self, connection: sqlite3.Connection, *, connection_lock: _Lock | None = None) -> None:
         self._connection = connection
+        self._connection_lock = connection_lock or RLock()
 
     def __call__(self, entry: CatalogEntry) -> MaterializedDocumentContext:
         unit_identity = _unit_identity(entry.document_key)
         try:
-            row = self._connection.execute(
-                """
-                SELECT unit_identity, physical_source_identity, logical_document_id,
-                       source_type, document_revision, normalized_start, normalized_end,
-                       anchor, content_sha256, content
-                FROM units WHERE unit_identity = ?
-                """,
-                (unit_identity,),
-            ).fetchone()
+            with self._connection_lock:
+                row = self._connection.execute(
+                    """
+                    SELECT unit_identity, physical_source_identity, logical_document_id,
+                           source_type, document_revision, normalized_start, normalized_end,
+                           anchor, content_sha256, content
+                    FROM units WHERE unit_identity = ?
+                    """,
+                    (unit_identity,),
+                ).fetchone()
         except sqlite3.Error as exc:
             raise RetrievalAdapterError("retrieval_context_unavailable", str(exc)) from exc
         if row is None:
@@ -295,8 +309,15 @@ class EnterpriseProfileRuntime:
         self.selection = selection
         self.manifest = manifest
         self.bundle = _load_bundle(connection, manifest)
-        self.adapter = EnterpriseSqliteRetrievalAdapter(connection)
-        self.context_loader = EnterpriseContextLoader(connection)
+        # lifespan runtime 会被多个请求线程共享；正文和 lexical 查询共用同一只读连接锁。
+        self._connection_lock = RLock()
+        self.adapter = EnterpriseSqliteRetrievalAdapter(
+            connection, connection_lock=self._connection_lock
+        )
+        self.context_loader = EnterpriseContextLoader(
+            connection, connection_lock=self._connection_lock
+        )
+        self._closed = False
 
     def active_loader(self) -> tuple[EnterpriseProfileSelection, EnterpriseProfileBundle]:
         """沿用旧 active-loader seam；显式 candidate 也保留其 lifecycle 事实。"""
@@ -317,10 +338,15 @@ class EnterpriseProfileRuntime:
         )
 
     def close(self) -> None:
+        """幂等释放 adapter 与 SQLite；初始化失败/应用 shutdown 可安全共用。"""
+
+        if self._closed:
+            return
         adapter_close = getattr(self.adapter, "close", None)
         if callable(adapter_close):
             adapter_close()
         self._connection.close()
+        self._closed = True
 
     def __enter__(self) -> "EnterpriseProfileRuntime":
         return self

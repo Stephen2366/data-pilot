@@ -62,6 +62,7 @@ def _single_tool_runtime(observation: ToolObservation | None, *, kind: str) -> d
         "corpus_identity": diagnostics.get("corpus_identity"),
         "retrieval_adapter_identity": diagnostics.get("retrieval_adapter_identity"),
         "retrieval_recipe_identity": diagnostics.get("retrieval_recipe_identity"),
+        "retrieval_snapshot": diagnostics.get("retrieval_snapshot") or {},
         "authorization_policy_identity": diagnostics.get("authorization_policy_identity"),
         "outbound_policy_identity": diagnostics.get("outbound_policy_identity"),
     }

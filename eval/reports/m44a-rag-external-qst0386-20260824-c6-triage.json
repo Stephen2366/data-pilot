@@ -1,0 +1,19 @@
+{
+  "format": "phase4-rag-e2e-triage-v1",
+  "artifact_identity": "0a5bc40a8514177d30fef6d49375d4edead1635fe178115a98d7b388d14c9647",
+  "cases": [
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "primary_stage": "passed",
+      "failed_assertions": [
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    }
+  ]
+}

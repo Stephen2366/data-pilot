@@ -1,0 +1,139 @@
+{
+  "format": "phase4-rag-e2e-triage-v1",
+  "artifact_identity": "4bfff9dffdf57ca667bbfa1f585eb287b37ff5de3d6dd9d32c49628c00d5346d",
+  "cases": [
+    {
+      "scenario_id": "qst_0016",
+      "replicate": 1,
+      "primary_stage": "retrieval",
+      "failed_assertions": [
+        "retrieved_gold",
+        "selected_gold",
+        "generation_visible_gold",
+        "cited_gold",
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    },
+    {
+      "scenario_id": "qst_0047",
+      "replicate": 1,
+      "primary_stage": "retrieval",
+      "failed_assertions": [
+        "retrieved_gold",
+        "selected_gold",
+        "generation_visible_gold",
+        "cited_gold",
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    },
+    {
+      "scenario_id": "qst_0019",
+      "replicate": 1,
+      "primary_stage": "passed",
+      "failed_assertions": [
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    },
+    {
+      "scenario_id": "qst_0386",
+      "replicate": 1,
+      "primary_stage": "passed",
+      "failed_assertions": [
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    },
+    {
+      "scenario_id": "qst_0461",
+      "replicate": 1,
+      "primary_stage": "passed",
+      "failed_assertions": [
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    },
+    {
+      "scenario_id": "qst_0181",
+      "replicate": 1,
+      "primary_stage": "retrieval",
+      "failed_assertions": [
+        "retrieved_gold",
+        "selected_gold",
+        "generation_visible_gold",
+        "cited_gold",
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    },
+    {
+      "scenario_id": "qst_0420",
+      "replicate": 1,
+      "primary_stage": "retrieval",
+      "failed_assertions": [
+        "retrieved_gold",
+        "selected_gold",
+        "generation_visible_gold",
+        "cited_gold",
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    },
+    {
+      "scenario_id": "qst_0431",
+      "replicate": 1,
+      "primary_stage": "passed",
+      "failed_assertions": [
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    },
+    {
+      "scenario_id": "qst_0318",
+      "replicate": 1,
+      "primary_stage": "passed",
+      "failed_assertions": [
+        "answer_facts_exact_lower_bound"
+      ],
+      "not_observed_assertions": [],
+      "reason_code": "answer_completed",
+      "execution_status": "completed",
+      "provider_attempts": 1,
+      "review_required": true
+    }
+  ]
+}

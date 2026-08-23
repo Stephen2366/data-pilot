@@ -2,7 +2,7 @@
 
 > DataPilot 的公共运行入口。运行任何项目命令前先读本文，再按任务进入 Text2SQL 或 RAG 专用 runbook。当前状态见 `AI_CONTEXT.md`，评测数字见 `eval-baselines.md`；本文不保存历史实验和基线数字。
 
-更新时间：2026-08-23
+更新时间：2026-08-24
 
 ## 先选链路
 
@@ -23,6 +23,8 @@
 ## API / Harness
 
 - 统一入口：`POST /api/query`。
+- EnterpriseRAG-Bench 产品 RAG 的环境变量、Milvus preflight 和 Uvicorn 启动方式见 `runbook-rag.md`；应用不会自动启动 Docker/Milvus。
+- `GET /health` 是进程 liveness；`GET /health/rag` 是 Enterprise RAG readiness。后者 503 时 RAG 失败关闭且零 Evidence/Composer，但 SQL 与 liveness 仍可工作；不得把它解释成 lexical fallback。
 - `APP_ENV=local|demo|test` 才注入 fixture caller resolver；请求里的 `user_role` 只能选择 fixture 身份，不能自行授权。
 - 其他环境没有 authenticated resolver 时，在 Tool 前以 `caller_untrusted` 失败关闭。
 - 最小请求：`{"question":"这个怎么处理？","user_role":"ops"}`。

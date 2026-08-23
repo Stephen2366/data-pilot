@@ -9,7 +9,12 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from eval.rag_e2e_contracts import RAGEvalContractError, canonical_hash, validate_completed_artifact
+from eval.rag_e2e_contracts import (
+    RAGEvalContractError,
+    RAG_RUNTIME_ADDITIVE_FIELDS,
+    canonical_hash,
+    validate_completed_artifact,
+)
 
 
 REVIEW_FORMAT = "phase4-rag-e2e-review-v1"
@@ -184,6 +189,11 @@ def compare_completed(
     if mismatches:
         raise RAGEvalContractError("rag_compare_not_comparable", f"identity 不同: {mismatches}")
     left_runtime, right_runtime = dict(left_spec.get("runtime") or {}), dict(right_spec.get("runtime") or {})
+    # M44A 前的 lexical artifact 没有 semantic snapshot 字段。比较时只为这组明确 additive
+    # 字段补 None，不改写 artifact 原件；old↔new 可显式声明候选差异，其他未知字段仍拒绝。
+    for field in RAG_RUNTIME_ADDITIVE_FIELDS:
+        left_runtime.setdefault(field, None)
+        right_runtime.setdefault(field, None)
     known_runtime_fields = set(left_runtime) & set(right_runtime)
     unknown_allowed = set(allowed_runtime_differences) - known_runtime_fields
     if unknown_allowed:
