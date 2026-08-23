@@ -19,6 +19,14 @@
 
 ## 变更记录（新的在上）
 
+### [实验] M43 后真实 Qwen 交互验证：比较类 QueryPlan 不稳定与超时调整（2026-08-23）
+
+- **场景与边界**：M43 技术收工后，用真实 Qwen `qwen3.7-plus` 在默认 MySQL legacy 世界通过 `/api/query` 交互复现 canonical T1→T2。这不是正式 eval run（无 run_id/manifest/artifact），不登记基线，也不进入 `eval-baselines.md`（按该账本规则，运行事故/外部服务异常不作独立记录）。
+- **比较类 QueryPlan 不稳定**：同一 T2“查询 2026-07 和 2026-08 的实际净退款金额，并计算差额和变化率”4 次尝试 3 种失败——2 次 45s 读超时（`read operation timed out`）；1 次生成 PostgreSQL 方言 `DATE_TRUNC('month', …)`，MySQL 报 `1305 FUNCTION datapilot_dev.DATE_TRUNC does not exist`（prompt 已要求 MySQL 兼容语法，模型未遵守）；1 次 QueryPlan 结构非法（`ORDER BY` 别名 `month` 未在 `output_expressions` 绑定）被 M10 自检以 `plan_validation_failed` 在碰库前拦截。成功两次总 latency `105.3s` / `43.3s`；单月 T1 在 45s 内稳定成功。
+- **超时调整**：本机 `.env` 增加 `LLM_TIMEOUT_SECONDS=120`，避免比较类 QueryPlan 被 45s 误杀；config 默认仍 45、retry0 不变。
+- **两个世界再次印证**：默认 MySQL legacy 世界 7 月净退款为 `19920`（即 M42 登记的 103 条 6 月 `processed_at` 尾巴），canonical `120000/180000` 只在显式 `profile_alias="phase4b"` 隔离副本成立；M43 task 机制（delta/invalidation/Context/版本）在两种数据世界与四种失败路径下均按合同工作。
+- **路线价值**：四种失败分别死于客户端超时、数据库方言、计划自检三层，实证纵深防御；“执行失败 → 观察错误 → 修正重试”正是 M44/B2 Observation-driven Loop 的输入场景；`DATE_TRUNC` 方言错误是 Text2SQL 方言自检/修复课题（P5 质量项）的候选证据。
+
 ### [模块任务] M43 Phase 4B B1 Task runtime 与自然多轮 v1（2026-08-23）
 
 - **改动范围**：起始 commit `8ae217c8904dfe808c32b346028bff251bbf2f7d`。新增 additive B1 contract/manifest、通用 `TaskDelta → TaskState` 状态机、Evidence invalidator、进程内 task boundary、deterministic Turn Understanding、四类 node Context、安全 task turn、Scenario artifact v2、rehearsal/report 与 4 组 13 项测试；同一 `/api/query` 只在 nested `task` envelope 存在时进入 agent task family，并增加独立 task clear。M42 v1 与 legacy 请求不改签、不切默认。

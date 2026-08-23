@@ -17,7 +17,7 @@
 ## 公共环境
 
 - 默认模型：`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`
-- 默认可靠性：`LLM_TIMEOUT_SECONDS=45`、`LLM_MAX_RETRIES=0`、`LLM_RETRY_BACKOFF_SECONDS=1`
+- 默认可靠性：`LLM_TIMEOUT_SECONDS=45`、`LLM_MAX_RETRIES=0`、`LLM_RETRY_BACKOFF_SECONDS=1`；本机 `.env` 已覆盖 `LLM_TIMEOUT_SECONDS=120`（2026-08-23，Qwen 比较类 QueryPlan 实测 43~105s），config 默认仍 45。
 - 实验配置只在当前 shell 临时覆盖；不得顺手修改 `.env`、默认模型、embedding、向量库或 active identity。
 
 ## API / Harness
