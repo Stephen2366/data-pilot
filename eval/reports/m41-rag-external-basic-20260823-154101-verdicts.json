@@ -1,0 +1,23 @@
+{
+  "qst_0016:r1": {"verdict": "fail", "reason": "Gold 明确为默认 30 天，回答却称没有默认期限。"},
+  "qst_0019:r1": {"verdict": "pass", "reason": "准确指出桥接设备误设 Gateway/NAT 导致源 IP 重写。"},
+  "qst_0022:r1": {"verdict": "pass", "reason": "准确覆盖取 100 万美元与前 12 个月费用较高者，并列出故意不当行为和保密违约例外。"},
+  "qst_0023:r1": {"verdict": "fail", "reason": "Gold 列出五组必需 reviewer，回答却称证据没有指定角色。"},
+  "qst_0029:r1": {"verdict": "pass", "reason": "准确说明 Okta device-trust 策略误作用于服务账号组，撤销 refresh token 并产生 invalid_grant。"},
+  "qst_0031:r1": {"verdict": "fail", "reason": "没有给出控制台、redwoodctl 和 telemetry status 验证步骤，反而称证据不存在。"},
+  "qst_0045:r1": {"verdict": "fail", "reason": "遗漏 Gold 的约 120GB compressed 关键估算值。"},
+  "qst_0047:r1": {"verdict": "fail", "reason": "没有回答 position bias 与 prefix cache 的核心权衡，且材料主题错误。"},
+  "qst_0050:r1": {"verdict": "fail", "reason": "遗漏 ;language 格式和 X-Redwood-Template-Opt-In 头，并错误改成环境配置开关。"},
+  "qst_0059:r1": {"verdict": "pass", "reason": "准确给出 artifact uploads/git pushes 的 17:50Z–18:20Z 审计窗口。"},
+  "qst_0062:r1": {"verdict": "pass", "reason": "准确给出 GET /v1/traces/{id} 以及 level 和 time_window 参数语义。"},
+  "qst_0079:r1": {"verdict": "pass", "reason": "准确覆盖 10% reserved burst 和主推理路由 KV-prefix caching 两项缓解措施。"},
+  "qst_0086:r1": {"verdict": "insufficient_evidence", "reason": "Composer 坏结构后只有安全兜底，无可判自然语言答案或引用。"},
+  "qst_0091:r1": {"verdict": "insufficient_evidence", "reason": "Composer 返回非法 cardinality 后只有安全兜底，无可判答案。"},
+  "qst_0116:r1": {"verdict": "fail", "reason": "只泛称 retention 不一致，遗漏某些环境仅保留 90 天这一关键风险。"},
+  "qst_0117:r1": {"verdict": "fail", "reason": "引用错误路线材料，把 Q1/Q2/Q3 答成 Q3 2026/Q1 2027/Q2 2027，时间和能力均不符。"},
+  "qst_0118:r1": {"verdict": "insufficient_evidence", "reason": "Composer 坏结构后只有安全兜底，无法评判 evidence-first pipeline 答案。"},
+  "qst_0122:r1": {"verdict": "pass", "reason": "准确覆盖 47% 利用率、0.72 entropy、slot churn 和 09:00–13:00 UTC 不可靠 headroom。"},
+  "qst_0151:r1": {"verdict": "pass", "reason": "准确给出 Security 下发 sudoers 策略变化导致 ci-agent 的 sudo upload helper 被拒绝这一根因。"},
+  "qst_0155:r1": {"verdict": "fail", "reason": "没有列出 INIT/REGISTERING/ACTIVE/DRAINING/DEGRADED/RETIRED 状态及关键转换，回答偏向 fallback/proxy。"},
+  "qst_0157:r1": {"verdict": "pass", "reason": "准确给出从 DEV 到 OPS 重分配供应商 credit 的 corrective journal CJ-2026-041。"}
+}

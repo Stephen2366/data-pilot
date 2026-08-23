@@ -12,12 +12,12 @@
 | 业务 RAG、M34 external、180 题 Eval、RAG review | [`runbook-rag.md`](runbook-rag.md) |
 | 启动 API、调用 `/api/query`、查看 Trace、判断 Eval 生命周期 | 继续读本文 |
 
+用户只说“eval / 评测 / core / smoke / reliability”而未指明 Text2SQL 还是 RAG 时，先问一句再路由；`stress` 仅 Text2SQL，`basic / hard / full / business / held-out` 仅 RAG。
+
 ## 公共环境
 
-- 项目 Python：`D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe`
 - 默认模型：`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`
 - 默认可靠性：`LLM_TIMEOUT_SECONDS=45`、`LLM_MAX_RETRIES=0`、`LLM_RETRY_BACKOFF_SECONDS=1`
-- 需要外网时使用：`HTTP_PROXY=http://127.0.0.1:7897`、`HTTPS_PROXY=http://127.0.0.1:7897`
 - 实验配置只在当前 shell 临时覆盖；不得顺手修改 `.env`、默认模型、embedding、向量库或 active identity。
 
 ## API / Harness
@@ -41,7 +41,7 @@
 ## 真实 Eval 公共纪律
 
 1. 真实 LLM Eval 默认不自动运行。
-2. 用户明确说“执行 / 跑某个 selector、suite 或 partition”时，只授权该范围恰好一次；不重复询问，也不扩大范围、换默认或额外重跑。
+2. 用户明确说“执行 / 跑某个 selector、suite 或 partition”时，只授权该范围恰好一次；不重复询问，也不扩大范围、换默认或额外重跑。未指明 Text2SQL/RAG 不算“明确说”，先问一句，不属重复询问。
 3. 一个授权只创建一个 `run_id`。前台等待超时不代表运行结束，必须检查同一 run 的 manifest、checkpoint、artifact。
 4. manifest 仍为 `running` 或 checkpoint 继续增加时只等待；禁止换 ID 重跑。
 5. completed artifact 才是自动评测事实源；部分 checkpoint、Markdown report 或历史投影不能冒充 completed run。
@@ -55,12 +55,10 @@
 
 ## 长任务与验证
 
-- 先运行与改动直接相关的测试；失败后只修复并重跑相关用例。
-- 预计超过 2 分钟的完整 pytest、Eval、构建或数据处理，按 `AGENTS.md` 使用后台任务，并把 stdout、stderr、exit code 和 done marker 写入 `.agent_work/temp/`。
-- 后台任务未完成或未检查退出码时，不得宣称通过。
-- 完整仓库验证使用：`python -m pytest -p no:cacheprovider --basetemp=.agent_work\temp\pytest-<name>`。
-- 文档或代码修改后运行：`git diff --check`。
+- 长任务纪律（后台、日志路径、checkpoint、汇报方式）按 `AGENTS.md`「长时间命令与余额控制」执行。
+- 完整仓库验证：`python -m pytest -p no:cacheprovider --basetemp=.agent_work\temp\pytest-<name>`
+- 改动后运行：`git diff --check`
 
 ## 数据库安全提醒
 
-`python -m scripts.seed_data --reset` 会重建本地目标库，只能在任务明确要求重置 seed 时执行。数据库当前事实和迁移状态见 `database-current-state.md`；具体检查命令见 Text2SQL runbook。
+数据库重置见 Text2SQL runbook

@@ -19,12 +19,32 @@
 
 ## 变更记录（新的在上）
 
+### [实验] M41 external dev Smoke + Basic post-fix 真实运行（2026-08-23）
+
+- 用户授权“执行一次 rag eval smoke、basic”，按 runbook 唯一映射为 external `diagnostic_dev` Smoke 9 题与 Basic 21 题各一次；两个独立 run 均 exit 0、manifest/artifact completed，无 resume/重跑，未运行 held-out/core/hard/reliability/full/all。
+- Smoke `m41-rag-external-smoke-20260823-154101`：Gate `failed`，required `96/12/0`；triage `4 passed / 2 selection / 2 citation / 1 retrieval`；9 provider responses / `20288 tokens`。来源哈希复验后的 AI reviewer verdict `3 pass / 6 fail`，其中自动 triage passed 的 qst_0318 仍因上线日期错误判 fail。
+- Basic `m41-rag-external-basic-20260823-154101`：Gate `failed`，required `215/25/12`；triage `12 passed / 4 retrieval / 3 product_runtime / 1 selection / 1 citation`；21 provider responses / `47814 tokens`。AI reviewer verdict `9 pass / 9 fail / 3 insufficient_evidence`；3 个无答案均为 provider 有响应但 Composer 结构合同失败，不是 transport unavailable。
+- 两套共 30 requests / `68102 tokens`，重叠 qst_0016/0019/0047 的 verdict 均一致（fail/pass/fail），但 3 题单次重叠不能冒充 Reliability。结果继续显示自动链路通过不等于语义正确，错材料/漏召回和 Composer 严格结构合同仍是主要缺口。
+- artifact/report/triage/review/verdict/reviewed 证据位于 `eval/reports/m41-rag-external-{smoke|basic}-20260823-154101*`，30 checkpoint/Trace 位于 `.agent_work/temp/m41-rag-external-checkpoints/`。两条均不自动登记正式长期基线，不改变默认 lexical/Composer/model，120 held-out 保持锁定。
+
+### [实验] M41 external dev core 首条 post-fix 真实运行（2026-08-23）
+
+- 用户授权“执行一次 rag eval core”，唯一映射为 external dev core：25 题 / 25 执行、`diagnostic_dev`、Qwen `qwen3.7-plus`、60s/retry0、public benchmark policy。run ID `m41-rag-external-core-20260823-151649`，artifact identity `fe498be7c4a4beff01e76fef2baed27651cc3ddefe4ca831e16bd1b3f3338fe8`，manifest/artifact/report/triage/checkpoint 全部闭合。
+- 结果：Gate `failed`，required `211 passed / 58 failed / 31 not_observed`；usage `53106 tokens`（25 requests / 24 provider 成功）；AnswerFlow latency p50 `8852ms` / p95 `11973ms`；primary triage `9 retrieval / 7 product_runtime / 1 selection / 1 citation / 1 provider_or_support / 6 passed`。
+- 失败明细：5 题 `composer_output_invalid`（Composer 坏结构，运行后修正的分类如实生效，下游 funnel/answer 标 `not_observed`）；3 题 `composer_unavailable`；9 题 retrieval 主因（gold 四层全缺但 `answer_present` 通过，漏召回后仍完成回答）。
+- 逐题语义 verdict（AI reviewer，闭集覆盖 + 来源哈希校验，与自动 Gate 并列）：`4 pass / 13 fail / 8 insufficient_evidence`。fail 主体是“检索错文档→答偏”（qst_0199/0200/0268/0282/0289 等）和“已引用 gold 仍拒答”（qst_0198/0279）；8 例 insufficient 全部是无答案的 Composer/provider 坏结构题；4 例 pass（qst_0386/0457/0461/0462）全部检索命中 gold。自动 Gate 通过的 6 题中有 2 题 verdict 仍 fail，再次证明自动断言不能代替语义正确性。
+- 结论：首条 post-fix dev core 快照再次确认 lexical 漏召回是首要质量瓶颈，且 Composer support/坏结构拒绝造成 8/25 无答案；不改变 M39 P6 `no_go`、默认 lexical/Composer/model，不自动登记正式长期基线，120 held-out 未运行。
+- 执行环境插曲：首次后台启动时 PowerShell 日志重定向被沙箱拒绝（零 provider 调用、无任何 run 状态），获准 `danger-full-access` 后同 run ID 重试成功；不属于换 ID 重跑。
+- 证据：artifact/report/triage/review/reviewed/verdicts 位于 `eval/reports/m41-rag-external-core-20260823-151649*`；25 checkpoint/Trace 位于 `.agent_work/temp/m41-rag-external-checkpoints/<run-id>/`。
+
 ### [小修] M41 RAG Eval 用户入口去歧义（2026-08-23）
 
 - business catalog 只有 5 个业务合同场景，故将旧 smoke/core/diagnostic/reliability selectors 合并为唯一 `business`（5 题各 1 次）；保留 `--scenario` 单题入口和场景内部诊断分类，历史 Smoke artifact 不改名、不改签。
 - external `diagnostic_dev` 改为 CLI 安全默认。runbook 约定裸 smoke/basic/core/hard/reliability/full 均表示 external dev；只有明确说 `held-out` 才触碰 120 题封存集，从而消除 business core 与 external core 的歧义。
 - 本次只改评测入口、selector、测试与状态文档，未运行真实 Tool/LLM Eval，也未改变产品 RAG runtime、题目、评分器或既有基线。
 - 验证：两个 CLI help 通过；M41 聚焦 `13 passed, 1 warning in 1.75s`，warning 为既有 TestClient/httpx deprecation；未重复执行全仓 pytest。
+- 后续按用户确认将 RAG Runbook 分层重组，而非删成入门简版：前部新增自然语言映射、完整执行闭环、当前固定路径/identity 与 self-contained PowerShell 命令；中后部完整保留生命周期、fixed-route 边界、失败分层、语义 Review、strict/candidate Compare、历史回看和数据维护路由。补齐 held-out 分层题数、同 run 超时/恢复检查和完成后汇报合同。
+- 文档重组零 provider 调用；四个 CLI help、当前路径/API Key 脱敏检查、immutable dev/held-out suite 数量和 Markdown/diff check 均通过，未重复运行 pytest。
 
 ### [模块任务] M41 补充：external 难度套件与候选 A/B compare（2026-08-23）
 

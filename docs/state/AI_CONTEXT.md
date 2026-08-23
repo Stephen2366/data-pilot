@@ -11,7 +11,7 @@
 | 当前活动模块 | M41 RAG Eval 补充：business 单一入口 + external 难度套件与候选 A/B compare；120 held-out 保持锁定（2026-08-23） |
 | 当前 plan    | `docs/notes/m41-plan.md`；external 60 dev 已按用户授权运行，任何重跑或 120 held-out 仍需新授权 |
 | 当前 notes   | `docs/notes/m41-notes.md`                                    |
-| 待决事项     | 尚无 external v2/post-fix 产品基线；旧 60 dev 是 pre-fix candidate。建立新基线或运行 120 held-out 均需新 run ID 与新授权 |
+| 待决事项     | 已有 post-fix dev smoke/basic/core 快照（均未登记正式基线）；登记正式长期基线或运行 120 held-out 仍需用户确认与新授权 |
 | 更新时间     | 2026-08-23                                                   |
 
 ## 必读规则
@@ -50,6 +50,8 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-23 | 用户授权 external dev Smoke + Basic 各一次并 completed：Smoke 9 题 Gate `failed`（required `96/12/0`），usage `20288 tokens`，triage `4 passed / 2 selection / 2 citation / 1 retrieval`，语义 verdict `3 pass / 6 fail`；Basic 21 题 Gate `failed`（required `215/25/12`），usage `47814 tokens`，triage `12 passed / 4 retrieval / 3 product_runtime / 1 selection / 1 citation`，语义 verdict `9 pass / 9 fail / 3 insufficient_evidence`。Basic 的 3 个无答案均为 provider 有响应但 Composer 结构合同失败；两套共 30 requests / 68102 tokens，无 transport unavailable。重叠 3 题 verdict 一致，但不构成 Reliability 证明；不登记基线、不改默认，120 held-out 未运行。 |
+| 2026-08-23 | 用户授权首条 v2/post-fix external dev core 真实运行 `m41-rag-external-core-20260823-151649` completed：25 题 / 25 执行，Gate `failed`（required `211 passed / 58 failed / 31 not_observed`），primary triage `9 retrieval / 7 product_runtime / 1 selection / 1 citation / 1 provider_or_support / 6 passed`，usage `53106 tokens`（24/25 provider 成功，latency p50 8.9s）。5 题 `composer_output_invalid` 被如实标记（归类修正生效）。AI reviewer 逐题语义 verdict `4 pass / 13 fail / 8 insufficient_evidence`：fail 主体为检索错文档→答偏与有引用仍拒答，4 例 pass 全部检索命中 gold；自动 Gate 通过的 6 题中 2 题 verdict 仍 fail，再次证明自动断言 ≠ 语义正确。结论强化 lexical 漏召回为首要瓶颈；不改变任何默认、不登记基线，120 held-out 未运行。 |
 | 2026-08-23 | M41 RAG Eval 用户入口去歧义：business 的旧 smoke/core/diagnostic/reliability 合并为唯一 `business`（5 题各 1 次），仍可 `--scenario` 精确诊断；external 的裸 smoke/basic/core/hard/reliability/full 默认使用 `diagnostic_dev`。因此日常说“执行 core RAG Eval”即 external dev core；只有明确说 `held-out` 才触碰封存集。历史 artifact 不改签，本次零 provider 调用。 |
 | 2026-08-23 | M41 补充完成 external canonical 180 catalog 与 `basic/core/hard=64/74/42`；dev suites 为 smoke `9`、basic `21`、core `25`、hard `14`、reliability `6×3`、full `60`。`phase4-rag-e2e-compare-v2` 默认 strict repeat，只有显式 runtime allowlist 才允许候选 A/B，并输出 paired/失败层/difficulty/usage/latency；不替代人工语义 review。零 provider 调用；聚焦 `19 passed`、M31–M41 回归 `234 passed`、全仓 `467 passed, 3 skipped, 1 warning`。 |
 | 2026-08-23 | M41 已把 M34 冻结 180 题直接接入分层诊断：保留原生 `question_type × source_signature × document_cardinality` 和 60 dev / 120 held-out split，不复制题面。旧 180 Answer + retrieval artifacts 已零调用投影为分层历史报告。用户授权的 external 60 dev 产品链路 run `m41-rag-external-dev-20260822-01` completed：60 requests / 137299 tokens，Gate failed，primary triage 为 `24 passed / 20 retrieval / 7 product_runtime / 5 citation / 4 selection`；人工语义 verdict `18 pass / 26 fail / 16 insufficient_evidence`；120 held-out 未运行。运行暴露 5 个 Composer 坏结构被误记 Harness failure，已修正未来分类并新增 `composer_support_valid`；原 artifact 不改签、不重跑，标记 pre-fix candidate。最新 M31–M41 回归 `229 passed, 1 warning`；全仓 `462 passed, 3 skipped, 1 warning`。 |

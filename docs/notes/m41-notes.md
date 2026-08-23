@@ -340,3 +340,86 @@
 - 两个 CLI help 检查通过；M41 business lifecycle、review/compare 和 external suite 聚焦测试为 `13 passed, 1 warning in 1.75s`。warning 是既有 Starlette TestClient/httpx deprecation。
 - 第一次 pytest 因项目既有共享 `.agent_work/temp/pytest-tmp` 被 Windows 锁定，9 项停在 fixture setup、4 项通过；改用新的专用 `--basetemp` 后 13 项全部通过。该问题不是代码测试失败，未删除或修改被锁目录。
 - `git diff --check` 通过，仅有既有 LF→CRLF 提示；本轮没有调用 Tool/LLM，没有真实 Eval 成本，也没有重复跑全仓测试。
+
+## M41 补充：RAG Runbook 分层重组（2026-08-23）
+
+### Implementation checklist
+
+- [x] 将自然语言授权映射与执行闭环移到文档前部，使入门级 AI 先确定“跑什么、跑多少、不能扩大什么”。
+- [x] 补齐项目 Python、external dataset/profile root、profile identity、唯一 run ID 规则和可直接复制的 Business/External PowerShell 命令。
+- [x] 补齐前台超时/后台运行后的同 run 检查顺序，以及完成后必须汇报的 Gate、usage、失败层、artifact identity 与 review 状态。
+- [x] 保留并重新组织 fixed-RAG route、三轴分离、held-out 停门、artifact 生命周期、失败分层、人工 review、严格/候选 compare 和可比性边界。
+- [x] 只删除重复表达；历史旧结果与一次性维护命令不丢失，降到后部“历史回看与数据维护”区域并继续保留路由。
+- [x] 回读完整 RAG Runbook，检查命令与当前 CLI 一致，运行 CLI help 和 `git diff --check`；不执行真实 Tool/LLM Eval，不重复运行 pytest。
+
+### 修改原则
+
+- “入门友好”只改变阅读顺序和复制成本，不降低评测合同。快速入口负责执行，后续章节负责解释为什么安全、怎样诊断和什么结论不能说。
+- Runbook 保存稳定操作步骤；当前运行身份和历史数字仍分别由 `rag-current-state.md`、`eval-baselines.md` 维护，但日常命令必需的当前 external 路径/identity 在 Runbook 提供一份明确快照，并要求运行前与状态文档核对。
+
+### 实施与验证结果
+
+- RAG Runbook 改为“快速映射 → 完整闭环 → 固定参数/完整命令 → 生命周期与汇报 → 技术边界 → Review → Compare → 历史维护”的分层结构；不是删成简版操作卡。
+- 保留旧文档的产品链路、出站权限、fixed-RAG route、三轴、held-out、artifact、失败漏斗、人工复核、严格/候选 compare、历史 M34 回看和数据维护边界；只合并了重复的授权/dev/held-out 表述。
+- 新增 self-contained PowerShell 命令，避免 AI 在不同 shell 之间丢失变量；明确当前 dataset root、profile root、profile identity、唯一时间戳 run ID、manifest 检查和结果汇报字段。
+- 当前 Python/dataset/profile 路径检查通过，Settings 只输出 `DASHSCOPE_API_KEY=configured`、未输出密钥。Business/External/Review/Compare CLI help 与文档一致。
+- immutable catalog 只读核验：dev basic/core/hard/full 为 `21/25/14/60`，held-out 为 `43/49/28/120`；与 Runbook 表格一致。一次初始只读核验误用了不存在的 `execution_keys()` 辅助方法，未触发 Eval；改为 selector 字段后核验通过。
+- Markdown fence 闭合，`git diff --check` 通过；没有运行真实 Tool/LLM Eval，没有 provider 消耗，也没有因纯文档重组重复运行 pytest。
+
+## M41 真实运行：external dev Smoke + Basic（2026-08-23）
+
+### 后台任务启动前 checkpoint
+
+- 用户授权范围：external `diagnostic_dev` 的 `smoke` 与 `basic` 各运行一次；Smoke 为 9 题/9 executions，Basic 为 21 题/21 executions。两个 suite 使用独立 run ID；不运行 held-out、core、hard、reliability、full/all，不自动重跑。
+- run IDs：`m41-rag-external-smoke-20260823-154101`、`m41-rag-external-basic-20260823-154101`。
+- resolved input：项目 Python `fastapi0614`；dataset root `D:\.Work\Practice\AI-Project\data-pilot-datasets\enterprise-rag-bench\v1.0.0`；active profile `e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2`；Qwen `qwen3.7-plus`；external dev 默认 partition。
+- 启动前检查：Python、dataset、profile root/profile JSON 均存在，active pointer 与 profile identity 一致，DashScope API Key 已配置且未输出密钥；两个 run ID 均无 artifact/checkpoint/report 冲突。
+- 已知现场：系统中存在两个 2026-08-22 启动的旧 Python 进程；当前权限无法读取其命令行，但本次使用全新 run ID 和独立 checkpoint/artifact。未对旧进程做任何操作。
+- 执行方式：按顺序在一个隐藏后台 PowerShell 中先 Smoke、后 Basic；分别保存 stdout、stderr、exit code，并写 overall exit 与 done marker。当前状态为“待启动”，不得提前记为 completed 或通过。
+- 风险与停门：任何 provider unavailable、合同失败和质量失败均保留原证据，不换 ID 重跑；完成后必须读取两个 manifest/artifact/report/triage、usage 与失败层，再判断结果。旧 pre-fix 60 dev 不是当前协议兼容基线，本次单次绝对结果不能直接宣称模块变好。
+
+### 后台任务（已完成；启动记录保留，结果见下）
+
+- 启动时间：2026-08-23 15:41；后台 PID `46184`，启动后 `HasExited=False`。
+- 执行脚本：`.agent_work/temp/run_m41_rag_smoke_basic_20260823_154101.ps1`；PowerShell parser 语法检查通过。
+- Runner stdout/stderr：`.agent_work/temp/m41-rag-smoke-basic-20260823-154101-runner.out`、`.agent_work/temp/m41-rag-smoke-basic-20260823-154101-runner.err`。
+- Smoke stdout/stderr/exit：`.agent_work/temp/m41-rag-external-smoke-20260823-154101.out`、`.err`、`.exit`。
+- Basic stdout/stderr/exit：`.agent_work/temp/m41-rag-external-basic-20260823-154101.out`、`.err`、`.exit`。
+- Overall exit/done：`.agent_work/temp/m41-rag-smoke-basic-20260823-154101.exit`、`.done`。
+- Smoke manifest/artifact：`.agent_work/temp/m41-rag-external-checkpoints/m41-rag-external-smoke-20260823-154101/manifest.json`、`eval/reports/m41-rag-external-artifacts/m41-rag-external-smoke-20260823-154101.json`。
+- Basic manifest/artifact：`.agent_work/temp/m41-rag-external-checkpoints/m41-rag-external-basic-20260823-154101/manifest.json`、`eval/reports/m41-rag-external-artifacts/m41-rag-external-basic-20260823-154101.json`。
+- 当前结论：任务已成功启动，按顺序先 Smoke 后 Basic；结果仍是“运行中，待检查”，不得提前宣称 completed、通过或失败。用户后续要求继续时，先读 overall done/exit、两个 suite exit、manifest、artifact 和必要日志，再更新最终结论。
+
+### 运行结果（completed，2026-08-23）
+
+- 后台于 `2026-08-23T15:46:50+08:00` 完成；Smoke、Basic 和 overall exit 均为 `0`，两个 manifest/artifact 均为 `completed`，未发生 resume 或重跑。held-out/core/hard/reliability/full/all 均未运行。
+- Smoke `m41-rag-external-smoke-20260823-154101`：9/9 executions 均 completed/complete，artifact identity `9e31fab3faf836b8509e227000261da89023df074d8aa50322f71b95a4a3b7f4`。Gate `failed`，required `96 passed / 12 failed / 0 not_observed`；triage `4 passed / 2 selection / 2 citation / 1 retrieval`。9 requests 全部 provider response 成功，prompt `17364` + completion `2924` = `20288 tokens`；provider-attempt latency p50 `6285ms` / p95 `15019ms`。
+- Smoke 逐题语义 review 闭集覆盖并通过 artifact + 9 checkpoint 哈希复验：`3 pass / 6 fail / 0 insufficient_evidence`。通过为 qst_0019/0386/0461；主要错误包括 30 天规则答反、prefix cache 权衡答偏、遗漏 30–120 秒 jitter、缺失 GiB 费率、rollback 不完整和 rollout 日期错误。自动 triage passed 的 qst_0318 仍因日期错误被人工判 fail。
+- Basic `m41-rag-external-basic-20260823-154101`：21 executions 中 `18 completed / 3 failed`，artifact identity `10836eef6c459606dde95a3c299f7233d389ded68fb8df2f29ef6a1f96799c28`。Gate `failed`，required `215 passed / 25 failed / 12 not_observed`；triage `12 passed / 4 retrieval / 3 product_runtime / 1 selection / 1 citation`。21 requests 均收到 provider response，prompt `41367` + completion `6447` = `47814 tokens`；provider-attempt latency p50 `6090ms` / p95 `10433ms`。
+- Basic 三个 product runtime failure：qst_0086、qst_0118 为 `composer_output_invalid`，qst_0091 为 `composer_response_invalid_cardinality` 投影的 `composer_unavailable`；均是 provider 有响应但结构合同失败，不是网络 unavailable。
+- Basic 逐题语义 review 闭集覆盖并通过 artifact + 21 checkpoint 哈希复验：`9 pass / 9 fail / 3 insufficient_evidence`。3 个 insufficient 正是上述无答案 Composer 失败；fail 集中在漏召回/错材料后答偏或拒答，以及自动链路通过但关键事实缺失。Smoke 与 Basic 重叠的 qst_0016/0019/0047 在两次运行中的人工 verdict 一致（fail/pass/fail），但 3 题一致性不等于 Reliability 证明。
+- 两套合计 30 requests / `68102 tokens`，没有 transport external unavailable。两个 Gate 均 failed，说明 CLI/产品链路成功完成不等于质量通过；自动断言也再次不能替代语义 review。
+- 证据：artifact/report/triage 位于 `eval/reports/m41-rag-external-{smoke|basic}-20260823-154101*`；review/verdict/reviewed/reviewed-verified 同前缀；30 checkpoint/Trace 位于 `.agent_work/temp/m41-rag-external-checkpoints/<run-id>/`。当前均是 post-fix dev 快照，不自动登记正式长期基线，也不能与旧 pre-fix 60 dev 假装严格可比。
+
+## M41 授权运行 external dev core（2026-08-23）
+
+- 用户授权原话："执行一次 rag eval core"。按 runbook-rag「AI 快速执行入口」唯一映射为 external dev core：25 题 / 25 次执行，partition 默认 `diagnostic_dev`；Qwen `qwen3.7-plus`、timeout 60s、retry0、public benchmark generation policy。不运行 held-out、不调用 Judge、不扩大 suite。
+- 冻结 run ID：`m41-rag-external-core-20260823-151649`（时间戳唯一；artifact/checkpoint 目标均不存在，无覆盖、无恢复旧 run）。
+- 运行预检：Python / DatasetRoot / ProfileRoot 三个 `True`，`DASHSCOPE_API_KEY=configured`。
+- 运行命令：`python -m eval.run_rag_external_eval --dataset-root <dataset-root> --profile-root <profile-root> --profile-identity e8783fe0... --suite core --run-id m41-rag-external-core-20260823-151649 --report eval/reports/m41-rag-external-core-20260823-151649.md`
+- 后台脚本：`.agent_work/temp/run_m41_external_core_20260823-151649.ps1`；stdout `.agent_work/temp/m41-rag-external-core-20260823-151649.out`；stderr `.agent_work/temp/m41-rag-external-core-20260823-151649.err`；退出码 `...exit`；完成标记 `...done`。
+- 状态：**运行中，待检查**。中断按同一 run 处理（同 RunSpec + `--resume` 合法前缀），不得换 ID 重跑。
+- 预期产物：checkpoint/Trace 在 `.agent_work/temp/m41-rag-external-checkpoints/<run-id>/`，completed artifact 在 `eval/reports/m41-rag-external-artifacts/<run-id>.json`，triage 自动生成 `eval/reports/<run-id>-triage.json`。完成后离线生成 review bundle 与 verdict；是否登记基线由用户决定。
+- 执行环境插曲：第一次后台启动（`pwsh-1`）在 PowerShell 重定向日志文件时被沙箱拒绝（`...out is denied`，workspace-write 模式），未进入 Python、零 provider 调用、无 manifest/checkpoint/artifact 残留；确认无部分状态后按沙箱规则以 `danger-full-access` 重试同一脚本同一 run ID（`pwsh-2`）。run 从未开始，这不属于换 ID 重跑。
+
+### 运行结果（completed，2026-08-23）
+
+- exit 0、manifest/artifact `completed`；artifact identity `fe498be7c4a4beff01e76fef2baed27651cc3ddefe4ca831e16bd1b3f3338fe8`，文件 `eval/reports/m41-rag-external-artifacts/m41-rag-external-core-20260823-151649.json`。
+- Gate `failed`：required `211 passed / 58 failed / 31 not_observed`（共 300）；advisory `34 passed / 31 failed / 10 not_observed`（75）。
+- usage：25 requests / 24 successful responses；prompt `45139` + completion `7967` = **53106 tokens**。
+- latency（AnswerFlow，20 样本）：p50 `8852ms`、p95 `11973ms`。
+- 状态分布：execution `17 completed / 8 failed`；answer `17 complete / 8 no_answer`。
+- primary triage：`9 retrieval / 7 product_runtime / 1 selection / 1 citation / 1 provider_or_support / 6 passed`。
+- 失败明细：5 题 `composer_output_invalid`（qst_0181/0215/0233/0236/0389，Composer 坏结构，本次已如实标记、下游 funnel/answer 全部 `not_observed`）；3 题 `composer_unavailable`（qst_0248/0252/0387，其中 0248/0252 的 retrieved/selected/visible gold 仍 observed failed）；9 题 retrieval 主因（gold 四层全缺但 `answer_present` 通过，即漏召回后仍完成回答）；qst_0200 主因 selection、qst_0211 主因 citation。
+- review bundle 已生成并校验（artifact + 25 checkpoint 哈希）；逐题语义 verdict 由 AI reviewer 完成、闭集覆盖并合并（`eval/reports/m41-rag-external-core-20260823-151649-reviewed.json`，来源再校验通过）：**pass 4 / fail 13 / insufficient_evidence 8**。fail 主体是"检索错文档→答偏"（qst_0199/0200/0268/0282/0289 等）与"已引用 gold 仍拒答"（qst_0198/0279）；8 例 insufficient 全部是无答案的 Composer/provider 坏结构题；4 例 pass（qst_0386/0457/0461/0462）全部检索命中 gold。自动 Gate 通过的 6 题中有 2 题 verdict 仍 fail（qst_0198/0388），再次证明自动断言 ≠ 语义正确。自动 Gate 与 verdict 并列，互不改写。
+- 该 run 是当前 v2/post-fix 协议（difficulty 三轴 + `composer_support_valid`）下第一条 external dev core 快照；不自动成为正式长期基线，登记与否由用户决定；120 held-out 未运行。
