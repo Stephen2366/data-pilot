@@ -2260,7 +2260,7 @@ python -m uvicorn app.main:app --reload
 
 预计返回 `route=hybrid`、`answer_status=complete` 和 SQL/document citation。随后查看 `eval/traces/traces.jsonl` 的同一 `trace_id`：你会看到 `runtime_identity` 中的 thin plan、Synthesizer 与两支 runtime 摘要，但看不到文档正文、完整 Hybrid rows、raw thread id 或结构化 thread 参数。当前仍是 local/demo fixture caller；不要把这次体验解释成开放 Hybrid、真实外部模型或生产认证。
 
-## ★ ★ ★ Phase 4 中半阶段总结：M35–M40
+## ★ ★ ★ Phase 4 中下半阶段总结：M35–M40
 
 （2026-08-18）
 

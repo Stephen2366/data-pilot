@@ -230,6 +230,12 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 
 把故事所需的数据、身份、知识、Hybrid 语义和评测身份先变成真实可执行合同，避免后续围绕不存在的 7/8 月数据或伪造的 RAG 失败开发抽象。
 
+### 参考项目小结
+
+- **Eval 骨架**：定点复核 `ARAG-EVAL` 与 `DBGPT-EVAL`，借鉴“先保存实际 Agent answer/context，再评分”和 retrieval/answer 分层；不照搬 notebook 简单均值、空结果统一记零或评分时重跑 pipeline。
+- **数据与发布身份**：若 B0 新增 seed、decision reserve 或业务语料，定点复核 `WREN-INDEX/WATCH` 与 `DATAAGENT-REPLACE`，只借鉴 source/derived 分离和成功后推进状态；不把 mtime fingerprint、best-effort cleanup 或“有索引”当成可复现 identity、原子发布或回滚保证。
+- **规模教训必须在 B0 落地**：参考复核必须回答当前 fixture/corpus 的文档数、长度/结构、问题类型、失败可观测性与产品链路差异。M29–M33 虽逐模块定点看过源码，但 11/22 条短知识仍无法暴露大 corpus 上的召回、context packing 与多文档失败，最终由 M34 的 36,417 文档、180 题与真实 Tool 链路补底座。B0 不得再用小 fixture 合同全绿推断 Agent/RAG 质量底座已足够。
+
 ### 主要交付物
 
 - 北极星 canonical sequence、extended sequence 与配套非 happy-path catalog；
@@ -261,6 +267,12 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 ### 目标
 
 建立 adapter-neutral 的 TaskState/TaskDelta/turn-event 语义，并立即通过 T1–T2 证明自然语言条件修改与 Evidence 失效，而不是只建设横向数据类。
+
+### 参考项目小结
+
+- 定点复核 `ARAG-STATE/GRAPH` 的 `State/AgentState`、reducer、主图/子图边界和 clarification interrupt，借鉴显式状态字段、去重与任务/检索状态分离；对照源码同时记录其 `MessagesState` 全历史、LLM rewrite/summary、`InMemorySaver` 和固定 clarification 循环不能直接支撑 DataPilot 的 typed TaskDelta、Evidence validity 与安全投影。
+- 定点复核 `DATAAGENT-GRAPH` 中 state key strategy 与固定 Graph 接线，仅借鉴“先冻结状态合并语义，再由节点/边消费”的思路；不复制其大而平的全图 state、Java 平台层或完整 NL2SQL 节点编排。
+- B1 的阅读证据必须跟踪一条真实自然语言 turn 如何进入 state、被节点裁剪并导致 Evidence 失效；只摘录 state class 字段或 LangGraph 概念不算完成参考复核。
 
 ### 能力范围
 
@@ -302,6 +314,12 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 
 让顶层 Controller 真正消费 Observation 并在同次任务运行中选择下一动作，使 Agent 能完成原因分析、跨 Tool 补 Evidence 或停止，而不是依赖固定 DAG 或要求用户每次手工触发下一步。
 
+### 参考项目小结
+
+- 定点复核 `ARAG-GRAPH/STATE` 的 conditional edges、Tool/iteration counter、fallback/collect-answer 终止和已执行 retrieval key，借鉴“边读取状态并且每条回边都有停止”；不照搬 LLM 自由 tool call、强制首次搜索、开放 query rewrite、fan-out 或 fallback 生成答案。
+- 定点复核 `DATAAGENT-GRAPH` 中 Planner/Executor/repair/human-review 的显式 conditional edge，借鉴深模块与固定控制边界；不将其平台级 PlanExecutor、Python 执行或修复循环搬入 DataPilot。
+- B2 的参考结论必须用 DataPilot 的 `Observation → eligible Action → EvidenceDelta → Progress/Termination` 通路重述，并指出移除哪个 Observation/边后能力应失败；只说“参考项目也用 LangGraph”不构成设计证据。
+
 ### 能力范围
 
 - 随真实消费方建立 first-class Action、Budget ledger、EvidenceDelta、Progress/Termination；
@@ -339,6 +357,13 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 ### 目标
 
 产生 M39 当时缺少的新 Evidence：知道 RAG 失败发生在哪一层，并证明哪些动作只有在首次 Observation 后执行才会稳定新增有效 Document Evidence。
+
+### 参考项目小结
+
+- 定点复核 `ARAG-CHUNK/TOOLS/STATE/EVAL`：标题 parent、child search、parent expansion 和真实 Tool context 证明检索单元与回答上下文可以分层；但顺序 parent ID、固定字符参数、字符串 Observation、LLM 自主扩展和 notebook 评分都不是 DataPilot action card 的正向合同。
+- 定点复核 `DBGPT-RESOURCE/EVAL`，借鉴 chunk/reference 同步返回与 retrieval/answer 分评；对照 `DBGPT-TOOL` 仅取第一个 resource、编号正文/错误字符串直接进 Observation 的反例，确保失败层与 reference identity 不会在诊断时丢失。
+- **禁止在玩具规模上选 action**：B3 必须同时检查参考实现的 corpus 假设和 DataPilot business/M34 的文档规模、长度、多文档题、Tool 延迟及失败漏斗。参考源码只能证明 action seam 可实现，不能证明该 action 在当前 corpus 有效；准入仍必须由真实 diagnostic Evidence 与可比预算决定。
+- 若 action 需要改 chunk/release/corpus，追加复核 `WREN-INDEX/WATCH` 和 `DATAAGENT-REPLACE`，但仍使用 DataPilot 独立 candidate identity、不可变 artifact 和 active pointer 决策门。
 
 ### 能力范围
 
@@ -379,6 +404,12 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 
 在不改变 Knowledge Tool 对上层语义、Evidence/ACL/AnswerFlow 或顶层控制权的前提下，完整交付可运行、可回退、可追踪的 experimental RAG Subgraph，并用可比 A/B 决定是否默认化。
 
+### 参考项目小结
+
+- 定点复核 `ARAG-GRAPH/STATE/TOOLS`，借鉴主图/子图分工、child search 与 parent expansion 独立动作、retrieval key/context 去重及显式 Tool/iteration stop；不照搬 `MessagesState`、强制搜索、开放 LLM 动作、字符串 Tool output、子图答案或其预算参数。
+- 定点复核 `DBGPT-TOOL/RESOURCE` 和 `GUSTO-WORKFLOW`，用“纯正文 Observation/末尾拼 sources”与 structured references 的差异检查 Subgraph 是否丢失 Evidence identity；不照搬 PostgreSQL→Milvus级联、自动多后端 fallback、“任一命中就 complete”或最后去重文档名作 citation。
+- B4 必须把参考项目的实际控制流与 DataPilot 的父子预算、eligible action set、Shared Gate/Composer/Citation 唯一所有者逐项对照，并在 business 与大规模 reserve 上分别验证；只跑通参考项目的 toy demo 或 DataPilot 单条 T4 不算完成。
+
 ### 能力范围
 
 - Subgraph 在首次 retrieval Observation 后，按 runtime/corpus、ACL、Observation 与剩余预算形成 eligible action set，并从其中选择恢复动作或停止；全局 catalog 至少两种动作，至少一个 runtime/corpus 能在不同真实 Observation/Scenario 下分别选择两种动作，不要求单题同时暴露两者；
@@ -415,6 +446,12 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 
 把已稳定的 TaskState/turn boundary 语义落到真正持久的 checkpoint，使同一任务在重启、多 worker、并发和重复请求下仍能安全恢复。
 
+### 参考项目小结
+
+- 定点复核 `DATAAGENT-GRAPH` 的 `mysqlCheckpointSaver/memoryCheckpointSaver/nl2sqlGraphCompileConfig`，借鉴 checkpointer 作为可替换编译依赖、使用 Graph serializer 和 interrupt point 的接线 seam；源码只证明“接了 MySQL saver”，没有自动证明 owner/tenant/role、TTL、CAS claim、重复提交、隐私或清理合同。
+- 对照 `ARAG-GRAPH` 默认 `InMemorySaver + interrupt_before`，将其作为“能暂停不等于能持久恢复”的反例；B5 不保存 Graph 执行栈，而是从 DataPilot 的安全 task boundary 重进 Decision Loop。
+- B5 的参考阅读必须沿一次 write/claim/version bump/resume/clear 通路追到存储语义或明确其未覆盖处，不能看到 saver 构造器就宣称 durability 设计已有参考依据；参考项目缺口必须由当时依赖官方文档、存储后端能力与 DataPilot 并发测试补齐。
+
 ### 能力范围
 
 - 通过稳定 task boundary interface 提供 in-memory 与 durable adapter；不提前规定 MySQL/Redis/其他后端，由 module plan 根据事务/CAS、部署和清理要求选择；
@@ -449,6 +486,12 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 ### 目标
 
 在 node-level Context Builder 和 durable typed ledger 稳定后，加入可验证的结构化 Compact，并用同一条连续任务完成全阶段验收。
+
+### 参考项目小结
+
+- 定点复核 `ARAG-STATE` 中 `_retrieval_contexts`、`should_compress_context`、`compress_context`、retrieval keys 和 recent-history 处理，借鉴触发前计算 context 规模、保留已执行搜索/parent 身份、压缩后防重复动作；不照搬 LLM 自由摘要、将 Tool 正文整段注入 summary、删除历史消息后以摘要作 authority 或其 token 阈值。
+- 结合 `ARAG-EVAL` “保存实际 answer/context 再评分”的思路，但 compact 验收必须是 DataPilot typed behavior equivalence，包括 goal、constraint、Evidence validity、permission、action/budget/termination，不是摘要文本相似度或最终答案逐字相同。
+- B6 的阅读证据必须追踪压缩前哪些原始事实被删除、压缩后哪些字段成为节点真实入模 context，并标记参考实现无法证明的高风险保真项；只阅读 prompt 或 summary 函数不足以支撑 Compact 设计。
 
 ### 能力范围
 
@@ -573,6 +616,20 @@ Phase 4B 只有在以下条件全部满足后才能收工：
 
 Phase 4B 参考顺序固定为：**本文合同 → 最新 state/代码/失败 Evidence → `docs/phase4-reference.md` 能力卡 → 外部源码定点复核**。参考项目只提供局部 seam、反例和实现证据，不能替代 DataPilot 的 ACL、outbound、四轴、Evidence 或 Eval 决策。
 
+### 17.1 禁止走马观花式源码阅读
+
+外部参考是为了暴露设计假设和缺口，不是为 module plan 填一张“已阅读”表。不规定通读整仓、固定文件数或行数，但每个里程碑的 module plan/notes 必须留下足以让后续 AI 复核的最小证据：
+
+1. **先有问题，后有入口**：写明当前 DataPilot 失败 Evidence/设计问题，再选 reference ID 和源码符号；不得只读 README、analysis、本文小结或搜索命中片段就宣称已复核。
+2. **追到能回答问题的真实通路**：至少查看直接实现，并按风险补读必要的 caller/callee、state/edge、存储/测试或数据入口，直到能说清输入、状态变化、输出、失败/停止与实际保证边界。深度由决策风险决定，不为形式强制阅读无关文件。
+3. **必须检查规模与代表性**：回答参考项目和 DataPilot 在 corpus/数据量、文档长度、问题多样性、调用链、并发/持久性、安全和 Eval 上的差异。小 demo 没有出现某类失败，只能记为“未覆盖/不可观测”，不得推断问题不存在。
+4. **形成可执行取舍**：notes 至少记录源码直接事实、借鉴 seam、DataPilot 适配、明确不照搬、参考未覆盖项和验证方式。结论必须能改变或确认 interface、边界、Scenario 或实验；简单罗列项目名/函数名不算完成。
+5. **承认外部覆盖空白**：现有项目不足以支撑持久化、Compact、ACL/outbound 或真实规模结论时，按问题补读当时依赖官方文档、新参考项目或 DataPilot 自身实验；不得从“没看到”推导“不需要”。
+
+M29–M33 的教训是：**每个模块都读过参考源码，不等于阶段底座已被验证**。当时定点复核帮助建立 Evidence、Tool、citation 和发布 seam，但 11/22 条短知识无法诊断大 corpus 召回和多文档回答，因而额外开 M34 引入 EnterpriseRAG-Bench 才暴露稳定失败结构。Phase 4B 每个里程碑的参考小结都必须与其实际 Scenario/Eval 规模联动，不得再把 interface 复核冒充成能力底座验证。
+
+### 17.2 能力快速索引
+
 | 能力 | 优先参考与源码入口 | 主要借鉴 | 明确不照搬 |
 |---|---|---|---|
 | 顶层 Loop / 状态 / Context | `ARAG-GRAPH/STATE`：`agentic-rag-for-dummies/project/rag_agent/graph.py::create_agent_graph`、`graph_state.py::AgentState/append_unique`、`nodes.py::should_compress_context/compress_context` | conditional edge、Tool/iteration count、去重 context、显式压缩前后状态与停止 | `MessagesState` 全历史、强制首搜、开放动作、LLM 自由 rewrite/summary、默认 InMemorySaver、其预算/阈值 |
@@ -583,7 +640,7 @@ Phase 4B 参考顺序固定为：**本文合同 → 最新 state/代码/失败 E
 | Eval | `ARAG-EVAL`：`agentic-rag-for-dummies/notebooks/evaluation.ipynb::query_rag/assert_saved_outputs_match_dataset/score_answer`；`DBGPT-EVAL`：`DB-GPT/packages/dbgpt-core/src/dbgpt/rag/evaluation/retriever.py` 与 `answer.py` 的 retrieval/answer evaluators | 保存实际 Agent answer/context 后再评分，retrieval 与 answer 分层 | notebook 简单均值、空结果一律计零、为评分重跑 pipeline、LLM Judge 取代 required Gate/`not_observed` |
 | corpus/release 若需新增业务语料 | `WREN-INDEX/WATCH`：`WrenAI/core/wren/src/wren/memory/index_backend.py::MemoryIndex.reset/LanceDBIndex.rebuild`、`watch.py::compute_fingerprint/poll_once`；`DATAAGENT-REPLACE`：`AgentVectorStoreServiceImpl.java::replaceDocumentsByMetadata` | source/derived 分离、成功后推进 observed state、替换失败清理 | mtime fingerprint 冒充 corpus identity、best-effort replacement 冒充原子发布/完整回滚、常驻 watcher/平台服务 |
 
-进入 B2、B4、B5、B6 前必须重新定点核对相关源码和当时依赖官方文档，并在 module plan/notes 记录“当前失败证据、借鉴 seam、DataPilot 适配、不照搬、验证方式”。持久 checkpoint 和 Compact 是 `phase4-reference.md` 现有地图中覆盖较弱的新重点；若定点复核形成长期可复用结论，应同步更新 reference，而不是在 module plan 里复制一份公共参考地图。
+B0–B6 分别按本文各里程碑的“参考项目小结”重新定点核对相关源码；进入 B2、B4、B5、B6 这些会改变控制权、循环、持久化或 context 的里程碑时，还必须核对当时依赖官方文档。module plan/notes 按§17.1 保留可复核证据。持久 checkpoint 和 Compact 是 `phase4-reference.md` 现有地图中覆盖较弱的新重点；若定点复核形成长期可复用结论，应同步更新 reference，而不是在 module plan 里复制一份公共参考地图。
 
 ## 18. 主要风险与控制
 
@@ -622,6 +679,11 @@ Phase 4B 参考顺序固定为：**本文合同 → 最新 state/代码/失败 E
 9. **每片完成后滚动规划**：按 `finish-module → finish-docs → 用户人工检查 → accept-module` 收口，更新 `AI_CONTEXT`/专项 state/技术历史，再依据最新证据制定下一 module plan。
 
 ## 20. 修订记录
+
+### 2026-08-23：参考项目下沉到各里程碑与反走马观花门
+
+- 重读 `phase4-reference.md` 并定点复核 WrenAI、DataAgent、agentic-rag-for-dummies、GustoBot 与 DB-GPT 对应源码，在 B0–B6 每个里程碑增加参考项目小结，明确借鉴、不照搬与本里程碑必须追踪的实际通路。
+- 将 M29–M33 “逐模块定点阅读但仍未暴露大 corpus 底座缺口，后由 M34 补齐”固化为规模/代表性教训。新门禁止只看 README、analysis 或搜索片段，但不规定通读整仓、固定文件数或行数；验收改为能回答真实通路、规模差异、保证边界与 DataPilot 取舍。
 
 ### 2026-08-22：新旧合同衔接与决策门有界化
 

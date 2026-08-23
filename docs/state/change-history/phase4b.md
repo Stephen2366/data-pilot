@@ -19,6 +19,13 @@
 
 ## 变更记录（新的在上）
 
+### [小修] Phase 4B 参考项目里程碑下沉与反走马观花门（2026-08-23）
+
+- 重读 `docs/phase4-reference.md`，并回到 WrenAI source/index/watch、DataAgent Graph/checkpointer/replacement、ARAG Graph/state/tools/chunk/compact、GustoBot multi-tool/finalize 与 DB-GPT Tool/Resource/Eval 实际源码核对输入、状态、输出、停止及保证边界。
+- `docs/phase4b-roadmap.md` 的 B0–B6 每个里程碑现都有就地参考项目小结，将 Eval 骨架、TaskState/Context、顶层 Loop、RAG 失败诊断、Subgraph、durable checkpoint 与 Compact 分别对应到精确 reference ID、借鉴 seam 和不照搬边界。
+- 新增适度的源码阅读门：不强制通读整仓或固定文件数，但禁止只看 README/analysis/搜索片段；module plan/notes 必须能复核当前问题、真实调用/状态通路、规模与代表性差异、保证边界、DataPilot 适配与验证方式。特别固化 M29–M33 虽逐模块读过参考源码，仍因 11/22 条短知识无法诊断大 corpus 问题、最终需 M34 补底座的教训。
+- 本次仅更新路线与历史文档，未修改代码、Eval 合同、运行默认、reference ID 定义或任何 active identity；未运行 Tool/LLM/embedding/Eval。
+
 ### [实验] M41 external dev Smoke + Basic post-fix 真实运行（2026-08-23）
 
 - 用户授权“执行一次 rag eval smoke、basic”，按 runbook 唯一映射为 external `diagnostic_dev` Smoke 9 题与 Basic 21 题各一次；两个独立 run 均 exit 0、manifest/artifact completed，无 resume/重跑，未运行 held-out/core/hard/reliability/full/all。
