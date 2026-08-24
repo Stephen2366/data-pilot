@@ -19,6 +19,10 @@
 
 ## 变更记录（新的在上）
 
+### [小修] Live Dev Probe 诊断与证据时效口径（2026-08-24）
+
+- 根据 M44 多轮真实修复经验，在 `runbook.md` 和 module plan 模板精简补齐：总体/子能力三态、失败层→根因假设→最小判别动作、实际 strategy/usage 记账、模块累计额度、事务数据恢复、禁止人为触发故障，以及核心行为改变后旧 Probe 失效。未扩大 standing authorization、Formal Eval 或产品 runtime；`AGENTS.md`/`AI_CONTEXT.md` 继续只保留入口指针。
+
 ### [实验] M44 defect repair Live Dev Probe 与 SQL repair A/B（2026-08-24）
 
 - **范围**：M44 重开后先修复真实 MySQL 1305/DATE_TRUNC typed classification 与 API/Trace 脱敏，并登记精确 month bucket fidelity 等价；聚焦 deterministic `38 passed, 1 warning`。随后按用户授权比较服务端候选 A `deterministic_ast` 与候选 B `llm_enriched`，各运行一次真实 `/api/query` T1→T2、Qwen、MySQL 和事务内 Phase 4B seed；不触碰 T3～T5、RAG、held-out、reserve 或生产默认。
