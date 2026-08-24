@@ -14,6 +14,8 @@
 
 用户只说“eval / 评测 / core / smoke / reliability”而未指明 Text2SQL 还是 RAG 时，先问一句再路由；`stress` 仅 Text2SQL，`basic / hard / full / business / held-out` 仅 RAG。
 
+口令映射：用户说“执行当前模块的 Probe / 开发期真实探针”，且当前 plan 已预注册 Probe ID 与场景时，按本文 standing authorization 直接执行；用户说 `smoke/core/reliability/held-out/eval` 等 selector 时，走 Formal Eval 精确授权。只说“跑个真实测试看看”但没有已注册 Probe 或范围不明时，先确定最小场景，不能解释成任意 Eval 授权。
+
 ## 公共环境
 
 - 默认模型：`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`
@@ -46,9 +48,23 @@
 - LangFuse 默认关闭。只有显式任务才设置 `LANGFUSE_ENABLED=true`；Cloud 只是旁路增强，不能影响本地 EvalRun。
 - LangFuse 专项排障不放在本 runbook；需要时按 `AI_CONTEXT.md` 和历史索引进入对应资料。
 
+## Live Dev Probe（开发期真实探针）
+
+Live Dev Probe 用少量真实 API、LLM、MySQL、Milvus/RAG 调用检查产品效果，防止只靠 pytest/fake 形成“合同通过但真实体验不可用”。本节是其 standing authorization、计数口径、默认额度、禁区、重验与 Formal Eval 分账的唯一事实源；满足下述边界时开发中无需逐次询问。
+
+1. **适用与设计**：module plan 必须先判断是否适用，并冻结 Probe ID、真实场景、产品入口、观察字段、三态标准、预算、停止条件和切片时点。修改真实 LLM、数据库、RAG/Milvus、API 多轮或外部 runtime 行为时原则上适用；纯静态合同/数据结构可说明理由后跳过。
+2. **开发时点与阻塞门**：第一条真实纵向链路可运行后执行首个 Probe；后续 Probe 在对应关键切片完成后、依赖其结果的下一切片开始前执行。notes 开工 checklist 要预登记 `after Mx-A / before Mx-B` 一类时点。Probe 必须先形成 `passed / failed / inconclusive` 观察结果和对应的 `continue / revise / stop` 开发决策；只有 `continue` 才能放行被它阻塞的下一切片，`revise` 必须先修复并按第 7 条最小重验，`stop` 暂停对应分支。禁止把所有 Probe 统一拖到代码冻结或 `finish-module`。
+3. **开发决策证据**：Probe 完成后立刻记录执行时间、当时代码阶段、HEAD、模块相关 dirty 文件、命令、真实依赖、调用次数、tokens、Response/Trace identity、三态结果，以及由此产生的 `continue / revise / stop` 决定。notes 中 Probe、决策、后续修改和重验必须保持时间顺序；HEAD 只代表提交基线，不能单独冒充实际工作树指纹。高风险模块可在 plan 中追加限定模块文件范围的 diff hash，但不作为所有模块的默认硬要求。
+4. **计数口径与默认额度**：一次 `provider call` 是一次真实 provider 出站尝试，不等于一个用户 turn 或一次 API 请求；chat、embedding、repair 等分别计数，provider retry 也逐次计数。`observed tokens` 累加 provider usage 的 `total_tokens`；缺少该字段时，只有 prompt/input 与 completion/output 两部分都完整可观察才使用两者之和。usage 缺失或分项不完整时不估算、不记成 0，标记 `token_usage_observed=false`，调用次数硬门仍然有效。默认每模块 2～4 个场景，每个场景首次执行恰好 1 次，总 provider calls ≤ 8、observed tokens ≤ 30000；plan 可收紧。预计会扩大任一上限时先取得用户确认；单次真实响应意外造成超限时如实记账并立即停止。
+5. **真实链路**：优先经过 API → caller/task → Tool → MySQL/Milvus/LLM → Response/Trace；检查语义结果、resolved runtime identity、usage、Evidence/状态变化和失败层，HTTP 200 不能单独算通过。
+6. **数据与动作禁区**：自动探针只用 canonical、公开或 diagnostic/dev 场景。禁止 held-out、sealed reserve、`all/full`、Reliability 重复、大规模 generation、新数据出站类别、数据库 reset、索引重建、active release/default 切换或其他有状态扩权。
+7. **首次执行、重验与停止**：不得为了通过而自动重跑、换 run ID、换模型/backend、切 fallback 或放宽安全门。首次出现系统性失败就停止并定位；只有具体修复已经落盘，才允许对受影响的最小场景额外重验 1 次。首次与重验都计入第 4 条总 calls/tokens 上限，必须保留两个 attempt，不能冒充 Reliability。结果记为 `passed / failed / inconclusive`，真实依赖不可用属于 `inconclusive`，不能用 fake 通过覆盖。
+8. **证据身份**：可以复用现有 Eval runner 的单 Scenario/dev 入口，但 run/notes/report 必须明确标记 `exploratory`、`baseline-ineligible`。除非现有 artifact schema 已支持，否则不得虚构 protocol 字段；开发探针不写入正式基线、不与正式 Eval 分母混算。
+9. **收工职责**：`finish-module` 只审计 Probe 是否在计划切片时点发生。适用模块缺少开发期证据时，必须写 `development_probe_missing` 并返回开发流程；不能在收工阶段首次跑一次就抹掉流程缺口。按时尝试但真实依赖不可用的 `inconclusive` 可以作为真实边界保留。模块完成时说明探针结论，并提醒用户是否值得执行正式 Smoke/Core/Reliability/held-out 或基线候选。
+
 ## 真实 Eval 公共纪律
 
-1. 真实 LLM Eval 默认不自动运行。
+1. Formal Eval 默认不自动运行；上节额度内的 Live Dev Probe 是已授权例外，但它不是 Formal Eval，不能产生正式质量或基线结论。
 2. 用户明确说“执行 / 跑某个 selector、suite 或 partition”时，只授权该范围恰好一次；不重复询问，也不扩大范围、换默认或额外重跑。未指明 Text2SQL/RAG 不算“明确说”，先问一句，不属重复询问。
 3. 一个授权只创建一个 `run_id`。前台等待超时不代表运行结束，必须检查同一 run 的 manifest、checkpoint、artifact。
 4. manifest 仍为 `running` 或 checkpoint 继续增加时只等待；禁止换 ID 重跑。

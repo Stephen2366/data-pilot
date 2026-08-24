@@ -19,6 +19,17 @@
 
 ## 变更记录（新的在上）
 
+### [小修] 开发期 Live Dev Probe 真实效果验证纪律（2026-08-24）
+
+- **影响面**：所有后续模块的 module plan、开发切片、真实调用授权、过程 notes 与 `finish-module` 门禁；不改变产品 runtime、默认模型或既有 Eval 基线。
+- 用户确认建立 pytest/deterministic → Live Dev Probe → Formal Eval 三层验证。今后 module plan 必须提前判断真实探针是否适用，并写清 Probe ID、场景、产品链路、观察事实、三态结果、预算、停止条件、切片时点和正式 Eval 建议。
+- Live Dev Probe 获长期 standing authorization：默认每模块 2～4 个 canonical/public/diagnostic-dev 场景、每场景首次 1 次、总 provider calls≤8、observed tokens≤30000；具体修复落盘后可在总额度内对最小受影响场景额外重验 1 次并保留前后 attempt。它优先经过真实 API/caller/task/Tool/MySQL/Milvus/LLM/Response/Trace，只作 exploratory、baseline-ineligible 开发证据，不登记长期基线、不与正式 Eval 分母混算，也不得为通过重跑或换模型/backend。
+- 自动授权明确排除 held-out、M46 sealed reserve、all/full、Reliability 重复、大规模 generation、新数据出站类别、数据库 reset、索引重建和 active/default 切换。Formal Smoke/Core/Reliability/held-out/基线候选继续需要用户精确授权；本次只修改工作流文档和 `finish-module` skill，没有运行真实 provider、Eval 或改动产品代码/默认 runtime。
+
+> ⚠️ 注（同日用户复核后修正）：初版虽要求开发期 Probe，但主要硬门仍落在 `finish-module`，存在全部拖到收工才首次执行的漏洞。现已改为切片级阻塞门：首条纵向链路可运行后即执行，结果必须在下一依赖切片前形成 `continue/revise/stop` 决定；`finish-module` 只审计开发时点证据，缺失时记录 `development_probe_missing` 并退回开发，不能靠收工补跑冒充开发期验证。
+
+> 生效边界：自 2026-08-24 后新建的 module plan 起强制执行，当前路线即 M45 起；M44 及更早模块不追溯补造开发期证据。若旧模块重开并发生实质性代码修改，新修改部分适用本纪律。后续 Formal Eval 或新模块 Probe 可以提供新的最终效果证据，但不能改写旧模块当时的开发过程事实。
+
 ### [模块任务] M44 Phase 4B B2 Evidence-driven Bounded Decision Loop（2026-08-24）
 
 - **改动范围**：新增 additive B2 contract/manifest、TaskState v2、typed Requirement/Action/Budget/Consumption/EvidenceDelta/Progress/Termination、服务端 Knowledge Runtime Resolver、独立 task-only LangGraph Loop、Agent Scenario v3、rehearsal/report 和四组 M44 测试；task envelope 改接一次深 Loop invoke，legacy 非 task Harness、M42 v1 与 M43 v2 validator 保持兼容。B2 contract identity `a808b321...d485b`。

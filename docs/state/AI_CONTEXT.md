@@ -47,6 +47,7 @@
 - LangFuse 默认关闭，JSONL trace 为主；SQL 安全为只读 AST + RBAC + 敏感字段策略。
 - Trace runtime identity：legacy SQL/RAG/Hybrid/澄清恢复/安全拒绝继续投影 `phase4-trace-runtime-v1`；task family 外层投影 `phase4b-agent-task-runtime-v1`，并以 `agent_loop_runtime`、action attempts、budget、termination 和 knowledge runtime 安全投影描述 B2。缺少安全 identity 只标 `unavailable`、不阻断业务。Trace 不保存 raw `thread_id`/raw `task_id`、结构化控制参数副本、rows、文档正文、prompt、raw DB error 或 stack，但沿用既有用户可见 `answer` 保存合同。
 - 现有 Text2SQL chat/schema embedding 出站在 transport 前按 `phase4-outbound-v1` 精确登记；普通 Knowledge/RAG 与 LangFuse Cloud 继续默认拒绝。唯一例外是用户确认的 M41 显式 Eval CLI：`phase4-rag-eval-business-generation-outbound-v1` 只允许已通过 active release、caller/ACL/Gate 的政策/指标 generation context 发往 Qwen，security/未知类别网络前拒绝；该 policy 不进入普通 API。
+- 开发期真实验证：Live Dev Probe 是已获 standing authorization 的开发期真实验证；额度、计数口径、禁区、重验与 Formal Eval 分账见 `docs/state/runbook.md`。Probe 必须嵌入开发切片；`finish-module` 只审计时点证据，缺失时以 `development_probe_missing` 退回开发。
 
 ## 最近验证事实
 

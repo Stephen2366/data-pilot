@@ -92,11 +92,12 @@
 - 关键合同：引用 C1/C2
 - 交付物：
 - 验证方式：
+- Live Probe checkpoint：<不适用及理由；或 after Mx-A / before Mx-B，引用第 8 节 Probe ID，写明它阻塞哪个后续切片>
 - 完成门：
 
 后续切片使用同一格式。
 
-工作切片必须回答“做什么、产出什么、如何证明完成”，不再次解释完整背景。
+工作切片必须回答“做什么、产出什么、如何证明完成”，不再次解释完整背景。适用 Live Dev Probe 的模块至少有一个 checkpoint 位于首条真实纵向链路可运行之后、依赖该结果的后续切片之前；禁止把全部 checkpoint 放到代码冻结或 `finish-module`。
 
 ## 7. 决策门
 
@@ -131,6 +132,21 @@
 
 ## 8. 验证与验收矩阵
 
+### Live Dev Probe（开发期真实探针）
+
+先判断本模块是否存在 pytest/fake 无法证明的真实效果。涉及真实 LLM、MySQL、RAG/Milvus、API 多轮或外部 runtime 时必须设计；不适用时写明理由，不能直接省略。
+
+| Probe ID / 执行时点 | 探针场景 | 真实产品链路/依赖 | 需要观察的结果与 Trace 事实 | 通过/失败/不确定标准 | 决策与停止条件 |
+| ------------------- | -------- | ----------------- | -------------------------- | -------------------- | ---------------- |
+| P1 / after Mx-A、before Mx-B | <自然语言或多轮场景> | <API → Tool → DB/LLM/RAG> | <语义结果、identity、usage、Evidence/状态、失败层> | <三态判断标准> | <结果如何决定继续/修正/停止；阻塞哪个切片> |
+
+- standing authorization、计数口径、默认额度、禁区、重验和 Formal Eval 分账统一引用 `docs/state/runbook.md`「Live Dev Probe」，不要在 module plan 复制公共政策。本 plan 只写收紧项；需要扩大默认边界时进入第 7 节决策门并等待用户确认。
+- 可以复用现有 Eval runner 的安全单 Scenario/dev 产品入口；本 plan 只需写清具体入口、exploratory / baseline-ineligible 证据落点，以及暴露问题后允许的最小重验对象。
+- 如果真实依赖不可用，记录 `inconclusive` 和失败层；不得用 fake 通过替代真实结论。
+- notes 开工 checklist 必须预登记每个 Probe ID、预计执行时点和被阻塞切片；实际执行后立即记录执行时间、当时代码阶段、HEAD、模块相关 dirty 文件、Response/Trace identity、三态结果与开发决策。仅在 `finish-module` 首次补跑不能满足“开发期 Probe”完成门。
+- 模块级 Probe 完成门：所有预注册 Probe 已在计划切片时点执行并形成三态结果和开发决策，不存在未处理的 `revise`、`stop` 或 `development_probe_missing`；不适用时，理由必须与实际代码影响面一致。`inconclusive` 只有按本 plan 形成明确处置后才能满足此门，不能冒充 `passed`。
+- 模块完成后建议用户执行的 Formal Eval：<写明确 selector/partition/目的；无则写“当前无需正式 Eval”>。
+
 | 能力/合同 | 验证方式    | 通过标准     | 优先级   |
 | --------- | ----------- | ------------ | -------- |
 | <C1>      | <测试/检查> | <可判断结果> | 必须完成 |
@@ -141,6 +157,8 @@
 
 - 聚焦测试顺序；
 - 全量回归范围；
+- Live Dev Probe 引用的 runbook 公共边界、本模块收紧项或需确认的扩权项，以及不可外推结论；
+- 每个 Probe checkpoint 的切片时点，以及其结果如何影响后续开发；
 - 不属于本模块的真实 LLM、远程服务或人工验证；
 - 历史 artifact 和既有合同的只读边界。
 
