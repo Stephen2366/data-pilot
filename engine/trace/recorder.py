@@ -102,6 +102,12 @@ class TraceRecord(BaseModel):
     task_delta: dict[str, Any] | None = None
     task_transition: dict[str, Any] | None = None
     node_contexts: list[dict[str, Any]] = Field(default_factory=list)
+    # M44：与 API / Agent Scenario v3 同源的 B2 Decision Loop 安全投影。
+    action_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    agent_budget: dict[str, Any] | None = None
+    agent_termination: dict[str, Any] | None = None
+    knowledge_runtimes: list[dict[str, str]] = Field(default_factory=list)
+    agent_loop_runtime: dict[str, Any] | None = None
 
 
 class TraceBackend(Protocol):

@@ -6,10 +6,13 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from engine.harness.contracts import AgentRunResult, HarnessRequest, RouteDecision
-from engine.harness.graph import HarnessRuntime, run_harness
+from engine.harness.graph import HarnessRuntime
+from engine.phase4b.agent_loop import AgentLoopResult, AgentLoopRuntime, run_agent_loop
+from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver
+from engine.phase4b.loop_contracts import AgentNodeContext
 from engine.phase4b.task_boundary import TaskBoundary, TaskBoundaryError, TaskLifecycleFact, TaskProjection
 from engine.governance import TrustedCaller
-from engine.phase4b.task_runtime import NodeContext, TaskDelta, TaskState, TaskTransition, apply_delta, attach_evidence, project_node_contexts, understand_turn
+from engine.phase4b.task_runtime import NodeContext, TaskDelta, TaskState, TaskTransition, apply_delta, project_node_contexts, understand_turn
 
 
 @dataclass(frozen=True)
@@ -33,12 +36,19 @@ class TaskTurnResult:
     task: TaskProjection | None
     delta: TaskDelta | None
     transition: TaskTransition | None
-    node_contexts: tuple[NodeContext, ...]
+    node_contexts: tuple[NodeContext | AgentNodeContext, ...]
     lifecycle: TaskLifecycleFact
     task_runtime: dict[str, object]
+    agent_loop: AgentLoopResult | None = None
 
 
-def run_task_turn(*, request: TaskTurnRequest, runtime: HarnessRuntime, boundary: TaskBoundary) -> TaskTurnResult:
+def run_task_turn(
+    *,
+    request: TaskTurnRequest,
+    runtime: HarnessRuntime,
+    boundary: TaskBoundary,
+    agent_runtime: AgentLoopRuntime | None = None,
+) -> TaskTurnResult:
     """理解、claim、状态转换、最多一次深 Harness、commit 收敛成同一事实。"""
 
     caller = request.harness_request.caller
@@ -58,37 +68,45 @@ def run_task_turn(*, request: TaskTurnRequest, runtime: HarnessRuntime, boundary
             prior_state_identity=previous.identity if previous else None,
         )
         if state.status == "clarification_required":
+            local_contexts = (_as_agent_context(contexts[0]), _as_agent_context(contexts[3]))
             result = _local_result("task_clarification_required", "请补充明确的指标和月份。", answer_status="clarification_required", caller_ref=caller.audit_ref if caller else None)
             if claim is None:
                 task, lifecycle = boundary.start(caller=caller, state=state)
             else:
                 task, lifecycle = boundary.commit(claim=claim, caller=caller, state=state)
-            return TaskTurnResult(result, request.action, 0, 1, task, delta, transition, contexts, lifecycle, boundary.runtime_identity)
+            return TaskTurnResult(result, request.action, 0, 1, task, delta, transition, local_contexts, lifecycle, boundary.runtime_identity)
         if delta.category == "cancel":
+            local_contexts = (_as_agent_context(contexts[0]), _as_agent_context(contexts[3]))
             assert claim is not None
             task, lifecycle = boundary.commit(claim=claim, caller=caller, state=state, terminal_status="cancelled")
             result = _local_result("task_cancelled", "当前任务已取消。", caller_ref=caller.audit_ref if caller else None)
-            return TaskTurnResult(result, request.action, 0, 1, task, delta, transition, contexts, lifecycle, boundary.runtime_identity)
+            return TaskTurnResult(result, request.action, 0, 1, task, delta, transition, local_contexts, lifecycle, boundary.runtime_identity)
 
         resolved_question = _execution_question(state)
         harness = request.harness_request
         deep_request = HarnessRequest(question=resolved_question, run_id=harness.run_id, caller=caller, active_sql_role=harness.active_sql_role, force_new_pipeline=harness.force_new_pipeline, schema_retrieval_profile=harness.schema_retrieval_profile, schema_fusion_strategy=harness.schema_fusion_strategy)
-        result = run_harness(request=deep_request, runtime=runtime)
-        refs = tuple(result.observation.evidence_refs) if result.observation else ()
-        committed_state = attach_evidence(state, refs)
+        # M44：task family 的唯一 Graph 是独立 Decision Loop。未显式注入 resolver 的旧
+        # direct caller 仍能跑 SQL-only task，但 registry 为空，绝不把 legacy RAG 当 fallback。
+        active_agent_runtime = agent_runtime or AgentLoopRuntime(
+            sql_tool=runtime.sql_tool,
+            knowledge_resolver=KnowledgeRuntimeResolver(()),
+            hybrid_synthesizer=runtime.hybrid_synthesizer,
+        )
+        loop = run_agent_loop(request=deep_request, state=state, runtime=active_agent_runtime)
+        result = loop.result
+        committed_state = loop.state
+        committed_projection = committed_state.safe_projection()
+        pre_loop_projection = state.safe_projection()
+        loop_changed = tuple(
+            key for key, value in committed_projection.items() if pre_loop_projection.get(key) != value
+        )
         transition = replace(
             transition,
             after_identity=committed_state.identity,
-            changed_fields=tuple(dict.fromkeys((*transition.changed_fields, "evidence"))),
+            changed_fields=tuple(dict.fromkeys((*transition.changed_fields, *loop_changed))),
         )
-        post_contexts = project_node_contexts(
-            question=request.harness_request.question,
-            state=committed_state,
-            delta=delta,
-            prior_state_identity=previous.identity if previous else None,
-        )
-        # 理解/route/SQL 的 fingerprint 保留执行前事实；controller 才能看到本轮新 EvidenceRef。
-        contexts = (*contexts[:3], post_contexts[3])
+        # 只保留实际执行节点：turn_understanding + Loop 的 decision/action/controller response。
+        contexts = (_as_agent_context(contexts[0]), *loop.contexts)
         if request.action == "start":
             task, lifecycle = boundary.start(caller=caller, state=committed_state)
         elif request.action == "switch":
@@ -97,7 +115,10 @@ def run_task_turn(*, request: TaskTurnRequest, runtime: HarnessRuntime, boundary
         else:
             assert claim is not None
             task, lifecycle = boundary.commit(claim=claim, caller=caller, state=committed_state)
-        return TaskTurnResult(result, request.action, 1, 1, task, delta, transition, contexts, lifecycle, boundary.runtime_identity)
+        return TaskTurnResult(
+            result, request.action, 1, 1, task, delta, transition, contexts,
+            lifecycle, boundary.runtime_identity, loop,
+        )
     except TaskBoundaryError as exc:
         result = _local_result(exc.reason_code, _message(exc.reason_code), safety_status=exc.safety_status, caller_ref=caller.audit_ref if caller else None)
         lifecycle = boundary.lifecycle_rejection(request.task_id or "", exc.reason_code)
@@ -112,6 +133,16 @@ def clear_task(*, task_id: str, expected_version: int, caller: TrustedCaller | N
         return task, lifecycle, True, "task_cleared"
     except TaskBoundaryError as exc:
         return None, boundary.lifecycle_rejection(task_id, exc.reason_code), False, exc.reason_code
+
+
+def _as_agent_context(context: NodeContext) -> AgentNodeContext:
+    """把 M43 legacy Context 投影到 M44 v2；不修改 v2 artifact 的旧 serializer。"""
+
+    return AgentNodeContext(
+        purpose=context.purpose, source_identities=context.source_identities,
+        payload=context.payload, allowed_fields=tuple(context.payload),
+        field_budget=context.field_budget, token_budget=768,
+    )
 
 
 def _execution_question(state: TaskState) -> str:

@@ -40,7 +40,7 @@ class HybridPlan:
     """
 
     identity: str
-    operator: Literal["refund_reason_and_policy", "metric_value_and_definition"]
+    operator: Literal["refund_reason_and_policy", "metric_value_and_definition", "refund_change_and_policy"]
     sql_question: str
     rag_question: str
     requirement: AnswerEvidenceRequirement

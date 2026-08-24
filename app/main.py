@@ -26,6 +26,7 @@ from engine.rag.enterprise_product_runtime import (
     load_enterprise_product_runtime,
 )
 from engine.rag.retrieval import RetrievalAdapterError
+from engine.rag.release import ReleaseError, load_active_release
 
 
 logger = logging.getLogger(__name__)
@@ -191,6 +192,14 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     # M44A：lifespan 在配置闭合时注入 Enterprise product factory；None 表示 fail-closed，
     # endpoint 不再构造业务小语料。Eval/测试仍可在进入 lifespan 前显式覆盖深 seam。
     application.state.rag_tool_factory = None
+    # M44：task business requirement 的可信 registry seam。它与普通 API 的 Enterprise
+    # 默认完全分离，不能由请求体选择；测试可显式替换 factory 但不能改 scope。
+    application.state.business_rag_tool_factory = lambda: RAGToolAdapter()
+    try:
+        _pointer, business_bundle = load_active_release()
+        application.state.business_rag_runtime_identity = f"business-release:{business_bundle.release_identity}"
+    except ReleaseError:
+        application.state.business_rag_runtime_identity = "business-release:unavailable"
     application.state.rag_runtime_status = _unavailable_rag_status(
         mode=settings.enterprise_rag_retrieval_mode,
         reason_code="enterprise_rag_lifespan_not_started",

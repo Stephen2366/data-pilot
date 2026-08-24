@@ -21,6 +21,8 @@ class TaskRequestEnvelope(BaseModel):
 
     @model_validator(mode="after")
     def validate_action_shape(self) -> "TaskRequestEnvelope":
+        """固定 start 与已有 task identity 的互斥形状，拒绝半截 resume。"""
+
         has_identity = self.task_id is not None and self.expected_version is not None
         if (self.task_id is None) != (self.expected_version is None):
             raise ValueError("task_id 与 expected_version 必须同时提供")
@@ -235,3 +237,9 @@ class AgentResponse(BaseModel):
     task_delta: dict[str, Any] | None = None
     task_transition: dict[str, Any] | None = None
     node_contexts: list[dict[str, Any]] = Field(default_factory=list)
+    # M44：task-only additive B2 facts；legacy response 保持空投影。
+    action_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    agent_budget: dict[str, Any] | None = None
+    agent_termination: dict[str, Any] | None = None
+    knowledge_runtimes: list[dict[str, str]] = Field(default_factory=list)
+    agent_loop_runtime: dict[str, Any] | None = None

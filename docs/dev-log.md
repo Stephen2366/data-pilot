@@ -3303,3 +3303,201 @@ python -m uvicorn app.main:app --reload
 
 先打开 `http://127.0.0.1:8000/health/rag`，看到 200/ready 和正确 identity 后，再到 `http://127.0.0.1:8000/docs` 调用 `POST /api/query`。如果 `/health/rag` 是 503，应检查 Docker、Milvus、API key 或 snapshot identity；不要切 lexical 掩盖故障。应用不会替你启动 Docker，也不会重建向量索引。
 
+## ★ M44 Phase 4B B2：让 Agent 根据证据连续行动，但始终有预算和刹车
+
+（2026-08-24）
+
+**简述**：M44 把 M43“每轮最多做一次深查询”的任务底座升级成 **Evidence-driven Bounded Decision Loop（证据驱动的有界决策循环）**：同一个任务回合里可以根据新证据继续查 SQL、查文档或做一次受限 SQL 修复，同时用确定性规则、实际消费账本和稳定停止条件防止失控。
+
+### 先用大白话讲
+
+把 Agent 想成一位做退款分析的调查员。M43 时，他每次进档案室只能办一件事：查完 7、8 月退款金额，就必须出来等下一句话。M44 给了他一张**最多三次调查动作的任务单**：先查金额，看到“质量问题”确实是增长原因后，再查哪些商品受影响；如果用户还要政策解释，才去业务资料柜取对应文档。
+
+但这不是让调查员自由发挥。每次行动前，都有一位不调用模型的**确定性 Controller（规则化控制器）**检查：当前还缺什么证据、前置证据是否成立、这个动作是否做过、预算是否够。查不到必需政策时，系统会明确交付 partial（部分结果）并停止，不会重复翻同一个柜子假装努力。
+
+**最终价值**是：系统第一次拥有了“观察结果后继续行动”的 Agent Loop（智能体循环），同时每一步为什么执行、花了多少预算、增加了什么证据、为何停止，都能在 API（接口响应）、Trace（运行轨迹）和 Eval artifact（评测工件）中对账。
+
+### 这次做了什么
+
+这次工作的核心矛盾是：**多步能力越强，失控、重复调用、预算超限和审计不一致的风险越大**。M44 没有用一个开放 `while` 循环放大旧 Harness（单轮编排器），而是为 task family（任务请求族）增加独立的深 Loop，并把动作、证据增量、消费和停止都变成类型化事实。
+
+1. **把“一轮一次工具”升级成“一轮内按证据连续行动”。**
+
+   Loop 不是预先写死“SQL → SQL → RAG（检索增强生成）”，而是每做完一个动作就读取新的 Observation（工具观察结果），再判断下一步。
+
+   - **原问题**：M43 能保存跨轮任务状态，却无法在同一回合里根据查询结果继续查原因、商品或政策。
+   - **解决方式**：`run_agent_loop(...)` 成为 task 路径唯一深入口；每个节点只执行一个 Evidence action（获取证据的动作），然后回到 Controller 重新裁决。
+   - **真实场景**：T3 只有在“退款原因”SQL 产生正向证据增量后，才继续执行“受影响商品”SQL；旧回合已经有效的证据会被识别，不会被重复查询。
+   - **重要边界**：M44 只准入已有的 SQL、Knowledge 和精确 SQL repair 动作；检索改写、父文档扩展等 recovery action（恢复动作）属于 M45/B3，不在本模块偷跑。
+   - **验证锚点**：deterministic rehearsal 的 T3、T4、T5 三条检查全部通过，证明多动作顺序、跨轮覆盖与更正后重取可复现。
+
+2. **用三层预算和稳定停止给 Agent 装上刹车。**
+
+   `BudgetLedger`（预算账本）记录的是**实际已经发生的消费**，不是执行前的乐观估算。
+
+   - **父预算**：每个 Loop 最多 3 次 Evidence action / deep Tool（深工具）、1 次 Knowledge action、6 次模型调用和 24000 个已观测 token。
+   - **子预算**：SQL 最多 3 次；每个 requirement（证据需求）最多修复 1 次；检索 batch 为 1，candidate 最多 5，selected 和 generation-visible 最多各 3。
+   - **停止规则**：预算耗尽、重复动作、无进展、安全拒绝、runtime 不可用、不可恢复错误和合同错误都有稳定 termination（终止事实）。
+   - **关键取舍**：如果工具已经超额返回，系统保留这笔真实消费后立刻停止，不能为了让账面好看而把已发生调用抹掉。业务检索只找到 quality 政策却缺 basic 时，会停止为 `budget_exhausted/required_coverage_incomplete`，不会重复同一查询。
+   - **验证锚点**：聚焦测试覆盖实际消费超额、重复/no-progress 和 required coverage 不完整；rehearsal 的 negative skip（负例跳过）检查通过。
+
+3. **让 task 知识检索由服务端选运行时，不能由请求偷换语料。**
+
+   `KnowledgeRuntimeResolver`（知识运行时解析器）只接受服务端生成的 typed scope（类型化范围）。
+
+   - **两套账分离**：业务政策使用 22 条 active release 的 deterministic lexical（确定性关键词检索）；external 文档使用 M44A 的 Enterprise Milvus semantic（向量检索）。
+   - **安全原因**：用户自然语言和请求 JSON 都不能选择 corpus（语料集）或 backend（后端），否则可能绕过 ACL（访问控制）、把评测题查到错误资料库，或在故障时悄悄切换口径。
+   - **失败处理**：scope、identity、ACL 或 readiness 不闭合就失败关闭，不在 business/external 之间 fallback（自动降级）。
+   - **兼容边界**：普通非 task RAG 继续保持 M44A Enterprise semantic 默认；legacy Harness 的 SQL/RAG/Hybrid 拓扑也没有被改写。
+   - **验证锚点**：M44 聚焦集同时覆盖 task resolver、M44A API 与前序 task/legacy 合同，最终 57 项全部通过。
+
+4. **只为一个明确的 MySQL 方言错误开放一次最小修复。**
+
+   M43 的真实 Qwen 运行曾生成 PostgreSQL 的 `DATE_TRUNC`，通过安全检查后在 MySQL 执行失败。M44 没有因此开放“任何错误都让模型重试”。
+
+   - **准入条件**：仅当候选 SQL 已通过安全门、执行错误精确映射为 `mysql_unsupported_date_trunc` 时，才允许一次 `sql_repair`。
+   - **最小出站**：repair prompt（修复提示）只带当前问题、MySQL 方言、稳定 issue code、安全候选 SQL 和输出格式；不发送 Schema、指标关系、原始数据库错误、结果行或调用栈。
+   - **纵深防御**：修复结果必须重新经过 QueryPlan validation（查询计划校验）、SQL fidelity（SQL 与计划一致性）、SQL Guard（只读与权限安全门）和真实执行。
+   - **未证明边界**：本模块用 deterministic fake（确定性替身）验证了 repair once，没有运行真实模型 repair showcase；timeout 和非法 QueryPlan 仍不会自动重试。
+   - **验证锚点**：rehearsal 的 repair once 和 negative skip 均通过，既证明精确错误可修，也证明不匹配的错误不会进入 repair。
+
+5. **让 API、Trace 和 Agent Scenario v3 共用同一份事实。**
+
+   系统先形成一份 `AgentLoopResult`，再由不同出口做安全投影，避免三套组件各自推断“发生了什么”。
+
+   - **可审计字段**：action attempts、实际 budget、EvidenceDelta（证据增量）、progress、termination、knowledge runtime 和实际执行节点的 Context v2。
+   - **隐私边界**：不保存 raw task/thread ID、数据库 rows、文档正文、prompt、raw DB error、stack 或 Thought（模型思维过程）。
+   - **兼容方式**：新增 Scenario v3，不改签 M42 v1 和 M43 v2 validator；legacy Trace identity 继续保留。
+   - **验证证据**：v3 deterministic rehearsal 为 **6/6 checks、external calls=0**，artifact identity 为 `63c9483...ac700`；聚焦测试 **57 passed**，全仓测试 **539 passed**。这些证明控制、安全和兼容合同闭合，不代表真实模型或 36,417 篇文档的质量提升。
+
+### 新概念
+
+- **Evidence-driven Loop（证据驱动循环）**：下一步不只看用户原问题，还要看上一动作真正新增了什么证据。像医生先看化验结果，再决定是否做下一项检查，而不是把所有检查无条件开一遍。
+- **Closed-world Action（闭集动作）**：Controller 只能从预注册动作中选择，类似 Java 的枚举加策略表；未知动作不是“尽量执行”，而是合同错误并停止。
+- **Budget Ledger（预算账本）**：同时记录限额和实际消费。它更像 Redis 计数器与财务流水的结合：不只问“还能不能扣”，还要保留“刚才到底扣了多少”。
+- **EvidenceDelta（证据增量）**：描述一次动作新增、替换、失效了哪些证据。Controller 根据 delta 判断是否真的前进，避免“工具返回成功”被误当成“任务有进展”。
+- **Stable termination（稳定终止）**：同样的状态和消费必须得到同样的停止原因，不能依赖模型临场说“我觉得够了”。这让 API、Trace、测试和 Eval 能精确对账。
+- **Fail-closed runtime resolution（失败关闭的运行时解析）**：服务端无法证明应该查哪套语料、使用哪个安全身份时，宁可明确 unavailable，也不自动换一个看似能工作的后端。
+
+### 代码阅读路线
+
+1. **先看能力清单和预算边界**：`domain_pack/phase4b/b2_contracts.json`、`engine/phase4b/b2_contracts.py`
+   JSON 冻结 B2 的 action、termination、knowledge scope 和预算；Python loader 校验 manifest identity。先理解“允许什么”，再读“怎么执行”，就不会把后续实现细节误认为开放能力。
+
+2. **再看 Loop 使用的类型化事实**：`engine/phase4b/loop_contracts.py`
+   重点看 `EvidenceRequirement`、`BudgetLedger`、`EvidenceDelta`、`ProgressDecision`、`ActionAttempt` 和 `TerminationFact`。这些对象是 Controller 与 SQL/RAG adapter 之间的窄接口，避免 Controller 直接解析每种工具的私有返回结构。
+
+3. **沿主流程读决策循环**：`engine/phase4b/agent_loop.py`
+   从 `run_agent_loop(...)` 开始，先看初始 requirement coverage，再看 Controller 如何选择 action、节点如何记录实际 consumption、回边如何判断 duplicate/no-progress/budget，最后看 termination 如何形成。阅读重点是“每次动作后重新裁决”，不需要先死抠每个 projection helper。
+
+4. **看 task 如何进入 Loop 并跨轮保存结果**：`engine/phase4b/task_turn.py`、`engine/phase4b/task_runtime.py`
+   前者把 Turn Understanding（回合理解）和 Loop 接起来，后者把 typed requirement、Evidence validity（证据有效性）和 termination 合并进 TaskState v2。这里能看到 T5 更正约束时，旧证据为什么必须 invalidated（作废）后再获取。
+
+5. **看知识运行时为何不能由用户选择**：`engine/phase4b/knowledge_runtime.py`、`app/main.py`
+   resolver 根据服务端 requirement scope 取得 business 或 external factory；`app/main.py` 负责组装实际 runtime。这个 seam（可替换接缝）让生产 adapter 和测试 fake 共用同一合同，又不把 backend 开关暴露给 HTTP 请求。
+
+6. **看 SQL repair 如何保持安全边界**：`engine/nl2sql/generator.py`、`engine/nl2sql/llm_call.py`、`engine/nl2sql/pipeline.py`、`engine/governance.py`
+   先看错误怎样归一成稳定 issue code，再看独立 `sql_repair` outbound purpose 和最小 prompt，最后看修复 SQL 如何重走计划、fidelity、Guard 与执行。重点是“一次窄修复”，不是通用 retry。
+
+7. **最后对照外部投影和证据**：`app/api/query.py`、`app/schemas/agent.py`、`engine/trace/recorder.py`、`eval/agent_scenario_v3_contracts.py`、`scripts/rehearse_m44_b2.py`
+   依次看同一 Loop 事实如何进入 HTTP response、JSONL Trace 和 v3 artifact，再用四组 `tests/test_m44_*.py` 对照成功、partial、repair、预算、隐私和兼容反例。
+
+核心调用链：
+
+`POST /api/query（nested task envelope）`
+→ `run_task_turn()`
+→ `run_agent_loop()`
+→ `deterministic Controller`
+→ `SQL / Knowledge / SQL repair action`
+→ `EvidenceDelta + actual consumption`
+→ `progress / termination`
+→ `TaskState v2 + API / Trace / Scenario v3`
+
+### 设计要点
+
+- **一个外部入口，内部多步**：task turn 只调用一次 `run_agent_loop(...)`，循环复杂度留在深 module 内，不把动作编排泄漏到 API。
+- **Controller 不调用模型**：首版 next action 完全确定性，decision model calls/tokens 固定为 0；未选的模型 proposal 方案只有形成稳定 paraphrase 失败簇并重新授权后才能重开。
+- **实际消费优先于漂亮账面**：调用已经发生就必须记账，即使因此超限并停止，也不能回滚审计事实。
+- **修复不是绕过安全门**：`DATE_TRUNC` repair 只修方言，不携带更多敏感上下文，也不跳过 QueryPlan、fidelity、Guard 或执行检查。
+- **能力完成和质量提升分开说**：M44 完成的是 B2 控制面；真实 RAG 漏召回仍然存在，B3 recovery、B4 RAG Subgraph、B5 durable state 和 B6 Compact 都没有完成，汪。
+
+### 有面试价值的亮点
+
+1. **“我做的不是 while 循环，而是可审计的有限状态调查流程。”** 每个动作都有 typed requirement、execution key、EvidenceDelta、实际消费和 termination；Controller 在每一步后重新判断，重复、无进展和超预算都有确定结果。
+
+2. **“预算不是配置文件里的数字，而是运行时守恒账。”** 系统同时约束父动作数、工具类型、修复次数、检索漏斗和模型调用；已经发生的超额消费仍保留，然后安全停止。这比只用 LangGraph recursion limit 更接近真实成本与审计需求。
+
+3. **“我只修复可证明安全的一类错误。”** `DATE_TRUNC` 必须来自已过 Guard 的候选 SQL，并精确命中稳定错误码；repair prompt 最小化，输出重新走全部安全门。这个设计展示了恢复能力与安全边界可以同时成立。
+
+4. **“请求不能决定自己查哪套知识库。”** business/external runtime 由服务端 typed requirement 解析，ACL、identity 或 readiness 不闭合就失败关闭，防止跨语料越权和静默 fallback 污染评测。
+
+5. **“API、Trace、Eval 从同一运行事实投影。”** response 能给用户看结果，Trace 能排障，Scenario v3 能做 closed-world 校验，但三者不重新计算状态；这解决了 Agent 系统最常见的“日志说做了，账本却对不上”问题。
+
+### 面试官追问
+
+1. **[基础追问] 你怎么判断 Agent 应该继续行动，而不是现在就回答？**
+
+   Controller 先看当前 typed requirements 是否已经被 active Evidence 覆盖，再看前置 requirement 是否满足、上一动作是否产生正向 EvidenceDelta、候选 execution key 是否重复以及预算是否允许。比如 T3 只有“退款原因”证据真的增加后，才会查受影响商品；如果没有正向增量，就按 no-progress 停止，而不是靠模型主观决定。
+
+2. **[工程/深挖追问] 为什么不能直接用 LangGraph 的 recursion limit 控制成本？**
+
+   recursion limit 只知道图走了多少步，不知道一次节点里调用了几个模型、检索返回多少 candidate、是否已经做过同一业务动作，也不能表达“Knowledge 只能一次、每个 requirement 只能修一次”。M44 把它当最后一道框架保险，真正的业务限制由 BudgetLedger 和 execution key 承担，并把实际消费投影到 Trace/Eval。
+
+3. **[工程/深挖追问] 工具调用已经超过 token 预算才返回，系统怎么处理？**
+
+   预算检查无法撤销已经发生的外部调用，所以系统会完整记录本次 `ResourceConsumption`，让 ledger 如实超限，然后立刻终止为 budget exhausted。这样账本与 provider 账单一致，也防止下一动作继续扩大损失。把超额部分截成上限值反而会破坏审计。
+
+4. **[工程/深挖追问] SQL repair 会不会让模型借重试绕过 SQL Guard？**
+
+   不会把原错误和全部 Schema 重新喂给模型自由生成。只有 safety-passed candidate 在 MySQL 执行时精确出现 `DATE_TRUNC` 方言错误才准入一次 repair；prompt 字段有 allowlist，修复结果还必须重新通过 QueryPlan validation、SQL fidelity、Guard 和执行。其他执行错误、timeout、非法计划都不会进入这条回边。
+
+5. **[压力追问] 你的下一动作是规则写死的，场景也很窄，这真算 Agent 吗？**
+
+   这个质疑有合理部分：M44 不是开放世界规划器，也没有宣称能处理任意问法。它解决的是更基础但可验证的问题——一个任务能否根据 Observation 连续选择多个动作，同时守住预算、ACL、去重、停止和审计合同。6/6 rehearsal、57 个聚焦测试和 539 个全仓测试证明这个控制面成立；模型 proposal 只有在确定性理解形成稳定失败簇后才值得引入，否则只是用不可控性换“看起来更智能”，喵。
+
+### 验证与下一步
+
+**验证结果：**
+
+| 范围 | 真实结果 | 证明什么 |
+|---|---:|---|
+| M44 最终聚焦 | 57 passed，1 warning | B2 contract、Loop、v3、API/Trace、前序兼容和 repair 安全边界闭合 |
+| Deterministic rehearsal | 6/6 checks，external calls=0 | T3/T4/T5、repair once 和 negative skip 的同源 artifact 可复现 |
+| 全仓 pytest | 539 passed，1 warning，599.47 秒 | legacy、M42/M43/M44A 与 M44 B2 整仓回归通过 |
+| 静态交付门 | compileall、`git diff --check` 通过 | 语法和补丁格式无错误 |
+
+warning（警告）是既有 Starlette TestClient/httpx deprecation。本模块**没有运行**真实 provider、真实 SQL repair showcase、RAG Eval、120 held-out 或 M46 sealed reserve；这些结果证明控制合同，不证明真实模型稳定性或 RAG 质量提升。
+
+**下一步**：M45/B3 从已经保存的 Document Observation 和 `required_coverage_incomplete` 失败开始，先诊断并准入预注册 recovery action；不提前实现 M46/B4 RAG Subgraph，也不读取 sealed reserve。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录，已激活项目 Python 环境；以下命令使用 fake/fixture，
+# 不调用真实 LLM、embedding 或 RAG Eval，也不读取 sealed reserve。
+
+# 1. 复核 B2 合同、Loop、Scenario v3 和 API/Trace；预计 M44 用例全部通过。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m44-devlog tests/test_m44_b2_contracts.py tests/test_m44_agent_loop.py tests/test_m44_agent_scenario_v3.py tests/test_m44_api_trace.py
+
+# 2. 重新生成 deterministic artifact/report；预计 6/6 checks、external_calls=0。
+python -m scripts.rehearse_m44_b2
+
+# 3. 阅读人类可读报告；不会触发产品调用。
+Get-Content eval/reports/m44/m44-b2-deterministic-report.md
+```
+
+环境未激活时，把 `python` 替换成 `AGENTS.md` 中项目学习环境的完整 Python 路径。
+
+**本地启动体验：**
+
+```powershell
+# 前置：本地数据库、caller fixture 和模型配置已准备好。
+# 若要体验 external Document action，还需按 runbook-rag.md 准备 M44A Enterprise runtime；
+# business policy action 使用当前 22 条 active release，不会自动切到 external corpus。
+python -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs`，在 `POST /api/query` 先提交一个带 nested `task` 的 start 请求，再把响应中的 `task_id` 和最新 `task_version` 带入 continue 请求。可以从“查询 2026 年 7 月和 8 月实际净退款金额并比较”开始，再追问“分析增长原因和受影响商品”；重点观察响应中的 `action_attempts`、`agent_budget`、`agent_termination` 和 task Evidence validity。
+
+真实模型可能出现 timeout 或非法 QueryPlan；只有精确的 MySQL `DATE_TRUNC` 执行错误会进入一次 repair。若只想稳定复现冻结的 T3/T4/T5 路径，请使用上面的 deterministic rehearsal，不要为了演示改默认模型、放宽预算或切换知识后端。
+

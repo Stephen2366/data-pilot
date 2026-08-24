@@ -1,0 +1,3652 @@
+{
+  "artifact_version": "phase4b-agent-scenario-artifact-v3",
+  "status": "completed",
+  "run_spec": {
+    "run_id": "m44-b2-deterministic",
+    "seed_identity": "57f9ce0458f3602b2abe8c66d52bb89b6dfe46365bc7f7eb4bd251cd9f974203",
+    "caller_identity": "fixture:m44-rehearsal",
+    "knowledge_runtime_identities": [
+      "business-release:rehearsal"
+    ],
+    "policy_identities": [
+      "sql-guard",
+      "business-acl",
+      "outbound-deny-by-default"
+    ],
+    "contract_identity": "a808b321ba8cae63ef0adaed3815d4becdfd650c37e2b30e9f1402ed8ecd485b"
+  },
+  "run_spec_identity": "55ac4b222729fffa75f0004868699380d340a82c6cf92b37148ee6b0c0f713a6",
+  "turns": [
+    {
+      "scenario_id": "T3",
+      "turn_id": "T3",
+      "task_delta": {
+        "category": "start_task",
+        "goal": "查询实际净退款金额",
+        "set_constraints": {
+          "metric": "net_refund_amount",
+          "periods": [
+            "2026-07",
+            "2026-08"
+          ],
+          "comparison": true,
+          "breakdown_dimension": "product"
+        },
+        "remove_constraints": [],
+        "add_requirements": [
+          "sql:refund_reason:quality_issue:2026-07,2026-08",
+          "sql:product_sku:quality_issue:2026-07,2026-08"
+        ],
+        "evidence_requirements": [
+          {
+            "identity": "sql:refund_reason:quality_issue:2026-07,2026-08",
+            "kind": "sql",
+            "purpose": "quality_driver",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "ef6d2b32853f1ac09971897355cf34811459164a2c435862334315bb386bef39"
+          },
+          {
+            "identity": "sql:product_sku:quality_issue:2026-07,2026-08",
+            "kind": "sql",
+            "purpose": "quality_product_breakdown",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": "quality_increment_positive",
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "20f02cb21ca13693e28eb38226d4ef90cdb388c26eb8d1759626310b4cdf2f68"
+          }
+        ],
+        "route": "sql",
+        "pending_questions": [],
+        "source_identity": "phase4b-deterministic-turn-understanding-v1"
+      },
+      "task_state": {
+        "state_version": "phase4b-task-state-v2",
+        "generation": 1,
+        "status": "active",
+        "goal": "查询实际净退款金额",
+        "constraints": {
+          "breakdown_dimension": "product",
+          "comparison": true,
+          "metric": "net_refund_amount",
+          "periods": [
+            "2026-07",
+            "2026-08"
+          ]
+        },
+        "pending_questions": [],
+        "requirements": [
+          "sql:refund_reason:quality_issue:2026-07,2026-08",
+          "sql:product_sku:quality_issue:2026-07,2026-08"
+        ],
+        "evidence_requirements": [
+          {
+            "identity": "sql:refund_reason:quality_issue:2026-07,2026-08",
+            "kind": "sql",
+            "purpose": "quality_driver",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "ef6d2b32853f1ac09971897355cf34811459164a2c435862334315bb386bef39"
+          },
+          {
+            "identity": "sql:product_sku:quality_issue:2026-07,2026-08",
+            "kind": "sql",
+            "purpose": "quality_product_breakdown",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": "quality_increment_positive",
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "20f02cb21ca13693e28eb38226d4ef90cdb388c26eb8d1759626310b4cdf2f68"
+          }
+        ],
+        "route": "sql",
+        "evidence": [
+          {
+            "ref": {
+              "run_id": "m44-t3",
+              "evidence_id": "evidence:384cf7781b0c1d6a69ab43ec9e1937db36d7ba50218aa2fe1ad1c4a007477736",
+              "evidence_kind": "sql",
+              "authority_identity": "phase4b-seed",
+              "revision": "frozen",
+              "content_identity": "oracle:m44-t3:1",
+              "anchor": "sql-result"
+            },
+            "route": "sql",
+            "requirement_identity": "sql:refund_reason:quality_issue:2026-07,2026-08",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 1,
+            "action_id": "collect_sql_evidence",
+            "input_fingerprint": "f233f3aa0cfed6695861dd2e502c181a9e954803953a6505e27b2d7dfe40379e",
+            "runtime_identity": null
+          },
+          {
+            "ref": {
+              "run_id": "m44-t3",
+              "evidence_id": "evidence:7b85d6d5b4a2b82f74a08ca4669082e58dc2b60e5f3df41728801814ab429477",
+              "evidence_kind": "sql",
+              "authority_identity": "phase4b-seed",
+              "revision": "frozen",
+              "content_identity": "oracle:m44-t3:5",
+              "anchor": "sql-result"
+            },
+            "route": "sql",
+            "requirement_identity": "sql:product_sku:quality_issue:2026-07,2026-08",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 1,
+            "action_id": "collect_sql_evidence",
+            "input_fingerprint": "35d9f3e80fbc89b49f50abe9dc12d48ccce55b9738f32d01dc26d8be5ae8320e",
+            "runtime_identity": null
+          }
+        ],
+        "termination": "answer_ready",
+        "last_action_attempts": [
+          {
+            "ordinal": 1,
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:refund_reason:quality_issue:2026-07,2026-08",
+            "input_fingerprint": "f233f3aa0cfed6695861dd2e502c181a9e954803953a6505e27b2d7dfe40379e",
+            "duplicate_key": "527288da0630dcda5614a58c39f29d2d51240fcc20b7351def0c60c9d3008d04",
+            "status": "completed",
+            "observation": {
+              "tool_name": "text2sql",
+              "route": "sql",
+              "execution_status": "completed",
+              "answer_status": "complete",
+              "safety_status": "passed",
+              "reason_code": "sql_completed",
+              "error_type": null,
+              "evidence_refs": [
+                {
+                  "run_id": "m44-t3",
+                  "evidence_id": "evidence:384cf7781b0c1d6a69ab43ec9e1937db36d7ba50218aa2fe1ad1c4a007477736",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-t3:1",
+                  "anchor": "sql-result"
+                }
+              ],
+              "diagnostics": {}
+            },
+            "budget_before": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 0,
+                "deep_tools": 0,
+                "sql_actions": 0,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0
+            },
+            "budget_after": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 1,
+                "deep_tools": 1,
+                "sql_actions": 1,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "evidence_delta": {
+              "added": [
+                {
+                  "run_id": "m44-t3",
+                  "evidence_id": "evidence:384cf7781b0c1d6a69ab43ec9e1937db36d7ba50218aa2fe1ad1c4a007477736",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-t3:1",
+                  "anchor": "sql-result"
+                }
+              ],
+              "removed": [],
+              "invalidated": [],
+              "duplicate": []
+            },
+            "progress": {
+              "coverage_increased": true,
+              "eligible_action_remains": true,
+              "reason_code": "coverage_increased"
+            }
+          },
+          {
+            "ordinal": 2,
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:product_sku:quality_issue:2026-07,2026-08",
+            "input_fingerprint": "35d9f3e80fbc89b49f50abe9dc12d48ccce55b9738f32d01dc26d8be5ae8320e",
+            "duplicate_key": "a75420c32cbd7d5fe5fc7710f1443469cac3d937fe845aa823855fe12c864b31",
+            "status": "completed",
+            "observation": {
+              "tool_name": "text2sql",
+              "route": "sql",
+              "execution_status": "completed",
+              "answer_status": "complete",
+              "safety_status": "passed",
+              "reason_code": "sql_completed",
+              "error_type": null,
+              "evidence_refs": [
+                {
+                  "run_id": "m44-t3",
+                  "evidence_id": "evidence:7b85d6d5b4a2b82f74a08ca4669082e58dc2b60e5f3df41728801814ab429477",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-t3:5",
+                  "anchor": "sql-result"
+                }
+              ],
+              "diagnostics": {}
+            },
+            "budget_before": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 1,
+                "deep_tools": 1,
+                "sql_actions": 1,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0
+            },
+            "budget_after": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 2,
+                "deep_tools": 2,
+                "sql_actions": 2,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "evidence_delta": {
+              "added": [
+                {
+                  "run_id": "m44-t3",
+                  "evidence_id": "evidence:7b85d6d5b4a2b82f74a08ca4669082e58dc2b60e5f3df41728801814ab429477",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-t3:5",
+                  "anchor": "sql-result"
+                }
+              ],
+              "removed": [],
+              "invalidated": [],
+              "duplicate": []
+            },
+            "progress": {
+              "coverage_increased": true,
+              "eligible_action_remains": false,
+              "reason_code": "coverage_increased"
+            }
+          }
+        ],
+        "last_budget": {
+          "profile": {
+            "identity": "phase4b-b2-parent-budget-conservative-v1",
+            "max_actions": 3,
+            "max_deep_tools": 3,
+            "max_sql_actions": 3,
+            "max_knowledge_actions": 1,
+            "max_repairs_per_requirement": 1,
+            "max_retrieval_batches": 1,
+            "max_candidates": 5,
+            "max_selected": 3,
+            "max_generation_visible": 3,
+            "max_model_calls": 6,
+            "max_total_tokens": 24000
+          },
+          "consumed": {
+            "actions": 2,
+            "deep_tools": 2,
+            "sql_actions": 2,
+            "knowledge_actions": 0,
+            "repairs": 0,
+            "retrieval_batches": 0,
+            "candidates": 0,
+            "selected": 0,
+            "generation_visible": 0,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0.0
+          }
+        },
+        "last_termination": {
+          "reason": "answer_ready",
+          "detail_code": "answer_ready",
+          "active_requirement_identities": [
+            "sql:refund_reason:quality_issue:2026-07,2026-08",
+            "sql:product_sku:quality_issue:2026-07,2026-08"
+          ],
+          "unresolved_requirement_identities": []
+        }
+      },
+      "actions": [
+        {
+          "ordinal": 1,
+          "action_id": "collect_sql_evidence",
+          "requirement_identity": "sql:refund_reason:quality_issue:2026-07,2026-08",
+          "input_fingerprint": "f233f3aa0cfed6695861dd2e502c181a9e954803953a6505e27b2d7dfe40379e",
+          "duplicate_key": "527288da0630dcda5614a58c39f29d2d51240fcc20b7351def0c60c9d3008d04",
+          "status": "completed",
+          "observation": {
+            "tool_name": "text2sql",
+            "route": "sql",
+            "execution_status": "completed",
+            "answer_status": "complete",
+            "safety_status": "passed",
+            "reason_code": "sql_completed",
+            "error_type": null,
+            "evidence_refs": [
+              {
+                "run_id": "m44-t3",
+                "evidence_id": "evidence:384cf7781b0c1d6a69ab43ec9e1937db36d7ba50218aa2fe1ad1c4a007477736",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-t3:1",
+                "anchor": "sql-result"
+              }
+            ],
+            "diagnostics": {}
+          },
+          "budget_before": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 0,
+              "deep_tools": 0,
+              "sql_actions": 0,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "consumed": {
+            "actions": 1,
+            "deep_tools": 1,
+            "sql_actions": 1,
+            "knowledge_actions": 0,
+            "repairs": 0,
+            "retrieval_batches": 0,
+            "candidates": 0,
+            "selected": 0,
+            "generation_visible": 0,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0
+          },
+          "budget_after": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "evidence_delta": {
+            "added": [
+              {
+                "run_id": "m44-t3",
+                "evidence_id": "evidence:384cf7781b0c1d6a69ab43ec9e1937db36d7ba50218aa2fe1ad1c4a007477736",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-t3:1",
+                "anchor": "sql-result"
+              }
+            ],
+            "removed": [],
+            "invalidated": [],
+            "duplicate": []
+          },
+          "progress": {
+            "coverage_increased": true,
+            "eligible_action_remains": true,
+            "reason_code": "coverage_increased"
+          }
+        },
+        {
+          "ordinal": 2,
+          "action_id": "collect_sql_evidence",
+          "requirement_identity": "sql:product_sku:quality_issue:2026-07,2026-08",
+          "input_fingerprint": "35d9f3e80fbc89b49f50abe9dc12d48ccce55b9738f32d01dc26d8be5ae8320e",
+          "duplicate_key": "a75420c32cbd7d5fe5fc7710f1443469cac3d937fe845aa823855fe12c864b31",
+          "status": "completed",
+          "observation": {
+            "tool_name": "text2sql",
+            "route": "sql",
+            "execution_status": "completed",
+            "answer_status": "complete",
+            "safety_status": "passed",
+            "reason_code": "sql_completed",
+            "error_type": null,
+            "evidence_refs": [
+              {
+                "run_id": "m44-t3",
+                "evidence_id": "evidence:7b85d6d5b4a2b82f74a08ca4669082e58dc2b60e5f3df41728801814ab429477",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-t3:5",
+                "anchor": "sql-result"
+              }
+            ],
+            "diagnostics": {}
+          },
+          "budget_before": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "consumed": {
+            "actions": 1,
+            "deep_tools": 1,
+            "sql_actions": 1,
+            "knowledge_actions": 0,
+            "repairs": 0,
+            "retrieval_batches": 0,
+            "candidates": 0,
+            "selected": 0,
+            "generation_visible": 0,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0
+          },
+          "budget_after": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 2,
+              "deep_tools": 2,
+              "sql_actions": 2,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "evidence_delta": {
+            "added": [
+              {
+                "run_id": "m44-t3",
+                "evidence_id": "evidence:7b85d6d5b4a2b82f74a08ca4669082e58dc2b60e5f3df41728801814ab429477",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-t3:5",
+                "anchor": "sql-result"
+              }
+            ],
+            "removed": [],
+            "invalidated": [],
+            "duplicate": []
+          },
+          "progress": {
+            "coverage_increased": true,
+            "eligible_action_remains": false,
+            "reason_code": "coverage_increased"
+          }
+        }
+      ],
+      "budget": {
+        "profile": {
+          "identity": "phase4b-b2-parent-budget-conservative-v1",
+          "max_actions": 3,
+          "max_deep_tools": 3,
+          "max_sql_actions": 3,
+          "max_knowledge_actions": 1,
+          "max_repairs_per_requirement": 1,
+          "max_retrieval_batches": 1,
+          "max_candidates": 5,
+          "max_selected": 3,
+          "max_generation_visible": 3,
+          "max_model_calls": 6,
+          "max_total_tokens": 24000
+        },
+        "consumed": {
+          "actions": 2,
+          "deep_tools": 2,
+          "sql_actions": 2,
+          "knowledge_actions": 0,
+          "repairs": 0,
+          "retrieval_batches": 0,
+          "candidates": 0,
+          "selected": 0,
+          "generation_visible": 0,
+          "model_calls": 0,
+          "total_tokens": 0,
+          "token_usage_observed": true,
+          "timeouts": 0,
+          "latency_ms": 0.0
+        }
+      },
+      "node_contexts": [
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "decision",
+          "source_identities": [
+            "2c14e3c688b6c2d652001f20cd37f7e31527a5d42827aa52d0a8f6b966bc1d66"
+          ],
+          "payload": {
+            "requirement_identities": [
+              "sql:refund_reason:quality_issue:2026-07,2026-08",
+              "sql:product_sku:quality_issue:2026-07,2026-08"
+            ],
+            "active_evidence_ids": [],
+            "budget_profile_identity": "phase4b-b2-parent-budget-conservative-v1",
+            "controller_identity": "phase4b-deterministic-controller-v1"
+          },
+          "allowed_fields": [
+            "requirement_identities",
+            "active_evidence_ids",
+            "budget_profile_identity",
+            "controller_identity"
+          ],
+          "field_budget": 4,
+          "token_budget": 768,
+          "estimated_tokens": 72,
+          "input_fingerprint": "3c1581bb5de70e751012129556ea1e9f24fc4b4a4f0fc74dd7f03e3b25182c2b"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "sql_action",
+          "source_identities": [
+            "2c14e3c688b6c2d652001f20cd37f7e31527a5d42827aa52d0a8f6b966bc1d66",
+            "sql:refund_reason:quality_issue:2026-07,2026-08"
+          ],
+          "payload": {
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:refund_reason:quality_issue:2026-07,2026-08",
+            "input_fingerprint": "f233f3aa0cfed6695861dd2e502c181a9e954803953a6505e27b2d7dfe40379e",
+            "budget_before_identity": "51eb973c838994b95651ee580cdffd207f1424378eb0929c7349aba01cd338b0",
+            "runtime_scope": "not_applicable"
+          },
+          "allowed_fields": [
+            "action_id",
+            "requirement_identity",
+            "input_fingerprint",
+            "budget_before_identity",
+            "runtime_scope"
+          ],
+          "field_budget": 5,
+          "token_budget": 512,
+          "estimated_tokens": 83,
+          "input_fingerprint": "51d9aa1882a63dbe406211292ccad3a249cd4aca68996bfaceb2853748507b71"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "sql_action",
+          "source_identities": [
+            "291c21bc934847e0d66bd9d6f828a8aaf79b97351dcfc230e83a3bb87e13570a",
+            "sql:product_sku:quality_issue:2026-07,2026-08"
+          ],
+          "payload": {
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:product_sku:quality_issue:2026-07,2026-08",
+            "input_fingerprint": "35d9f3e80fbc89b49f50abe9dc12d48ccce55b9738f32d01dc26d8be5ae8320e",
+            "budget_before_identity": "947c37e2dd1d6fddf12eadd857c9084ea78b1458206c56ac101f7c54d72bfa99",
+            "runtime_scope": "not_applicable"
+          },
+          "allowed_fields": [
+            "action_id",
+            "requirement_identity",
+            "input_fingerprint",
+            "budget_before_identity",
+            "runtime_scope"
+          ],
+          "field_budget": 5,
+          "token_budget": 512,
+          "estimated_tokens": 82,
+          "input_fingerprint": "f860cc7d8edd03bf68b76a53a975e6103ce71e725888ae98041a4d2f5c4ddf7b"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "controller_response",
+          "source_identities": [
+            "6bae09147feca7d5d0ec000c955013ba05e1423d9358d3f77f454d4139c61612"
+          ],
+          "payload": {
+            "termination": {
+              "reason": "answer_ready",
+              "detail_code": "answer_ready",
+              "active_requirement_identities": [
+                "sql:refund_reason:quality_issue:2026-07,2026-08",
+                "sql:product_sku:quality_issue:2026-07,2026-08"
+              ],
+              "unresolved_requirement_identities": []
+            },
+            "action_count": 2,
+            "budget_identity": "0a512df864061f1813b703993d090c0528a5dbf01e19ddc0a3371c382ea6c440",
+            "route": "sql"
+          },
+          "allowed_fields": [
+            "termination",
+            "action_count",
+            "budget_identity",
+            "route"
+          ],
+          "field_budget": 4,
+          "token_budget": 768,
+          "estimated_tokens": 93,
+          "input_fingerprint": "77140b397cca82977e0950a4a04fc2b9587b30f666c6abecd7d92074ef8ef46a"
+        }
+      ],
+      "termination": {
+        "reason": "answer_ready",
+        "detail_code": "answer_ready",
+        "active_requirement_identities": [
+          "sql:refund_reason:quality_issue:2026-07,2026-08",
+          "sql:product_sku:quality_issue:2026-07,2026-08"
+        ],
+        "unresolved_requirement_identities": []
+      },
+      "runtime_identity": {
+        "format": "phase4b-agent-loop-langgraph-v1",
+        "contract_identity": "a808b321ba8cae63ef0adaed3815d4becdfd650c37e2b30e9f1402ed8ecd485b",
+        "task_state_version": "phase4b-task-state-v2",
+        "controller_identity": "phase4b-deterministic-controller-v1",
+        "budget_profile_identity": "phase4b-b2-parent-budget-conservative-v1",
+        "knowledge_resolver_identity": "phase4b-knowledge-runtime-resolver-v1"
+      },
+      "assertions": [
+        [
+          "required:t3",
+          "passed"
+        ]
+      ]
+    },
+    {
+      "scenario_id": "T4",
+      "turn_id": "T4",
+      "task_delta": {
+        "category": "add_evidence_requirement",
+        "goal": "查询实际净退款金额",
+        "set_constraints": {
+          "metric": "net_refund_amount",
+          "periods": [
+            "2026-07",
+            "2026-08"
+          ],
+          "comparison": true,
+          "breakdown_dimension": "reason"
+        },
+        "remove_constraints": [],
+        "add_requirements": [
+          "sql:refund_reason:2026-07,2026-08",
+          "document:refund_policy_basic+refund_policy_quality"
+        ],
+        "evidence_requirements": [
+          {
+            "identity": "sql:refund_reason:2026-07,2026-08",
+            "kind": "sql",
+            "purpose": "reason_breakdown",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "ef6d2b32853f1ac09971897355cf34811459164a2c435862334315bb386bef39"
+          },
+          {
+            "identity": "document:refund_policy_basic+refund_policy_quality",
+            "kind": "document",
+            "purpose": "refund_policy_interpretation",
+            "runtime_scope": "business_release",
+            "expected_document_keys": [
+              "refund_policy_basic",
+              "refund_policy_quality"
+            ],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "019c228fb525448292bf849ec38db71121198431f5a410742f1f1ed1e01bfd9c"
+          }
+        ],
+        "route": "hybrid",
+        "pending_questions": [],
+        "source_identity": "phase4b-deterministic-turn-understanding-v1"
+      },
+      "task_state": {
+        "state_version": "phase4b-task-state-v2",
+        "generation": 1,
+        "status": "active",
+        "goal": "查询实际净退款金额",
+        "constraints": {
+          "breakdown_dimension": "reason",
+          "comparison": true,
+          "metric": "net_refund_amount",
+          "periods": [
+            "2026-07",
+            "2026-08"
+          ]
+        },
+        "pending_questions": [],
+        "requirements": [
+          "sql:refund_reason:2026-07,2026-08",
+          "document:refund_policy_basic+refund_policy_quality"
+        ],
+        "evidence_requirements": [
+          {
+            "identity": "sql:refund_reason:2026-07,2026-08",
+            "kind": "sql",
+            "purpose": "reason_breakdown",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "ef6d2b32853f1ac09971897355cf34811459164a2c435862334315bb386bef39"
+          },
+          {
+            "identity": "document:refund_policy_basic+refund_policy_quality",
+            "kind": "document",
+            "purpose": "refund_policy_interpretation",
+            "runtime_scope": "business_release",
+            "expected_document_keys": [
+              "refund_policy_basic",
+              "refund_policy_quality"
+            ],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "019c228fb525448292bf849ec38db71121198431f5a410742f1f1ed1e01bfd9c"
+          }
+        ],
+        "route": "hybrid",
+        "evidence": [
+          {
+            "ref": {
+              "run_id": "m44-t4",
+              "evidence_id": "evidence:d517fa1401b8247dc6ff8de22fb84f88ca3f185f82efefa0fd9bbb3e01d47de5",
+              "evidence_kind": "sql",
+              "authority_identity": "phase4b-seed",
+              "revision": "frozen",
+              "content_identity": "oracle:m44-t4:1",
+              "anchor": "sql-result"
+            },
+            "route": "sql",
+            "requirement_identity": "sql:refund_reason:2026-07,2026-08",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 1,
+            "action_id": "collect_sql_evidence",
+            "input_fingerprint": "409824220fa4f41745ed90b19a6d1b596f5ac27cd4b0da0cb10fca3e42b2cee6",
+            "runtime_identity": null
+          },
+          {
+            "ref": {
+              "run_id": "m44-t4",
+              "evidence_id": "doc:refund_policy_basic",
+              "evidence_kind": "document",
+              "authority_identity": "business-authority",
+              "revision": "r1",
+              "content_identity": "body:refund_policy_basic",
+              "anchor": "refund_policy_basic"
+            },
+            "route": "document",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 1,
+            "action_id": "collect_document_evidence",
+            "input_fingerprint": "3a27fe883ece26a3d25b9e179877c7f4a4c71e63b473c6d705bd7c50f5018503",
+            "runtime_identity": "business-release:rehearsal"
+          },
+          {
+            "ref": {
+              "run_id": "m44-t4",
+              "evidence_id": "doc:refund_policy_quality",
+              "evidence_kind": "document",
+              "authority_identity": "business-authority",
+              "revision": "r1",
+              "content_identity": "body:refund_policy_quality",
+              "anchor": "refund_policy_quality"
+            },
+            "route": "document",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 1,
+            "action_id": "collect_document_evidence",
+            "input_fingerprint": "3a27fe883ece26a3d25b9e179877c7f4a4c71e63b473c6d705bd7c50f5018503",
+            "runtime_identity": "business-release:rehearsal"
+          }
+        ],
+        "termination": "answer_ready",
+        "last_action_attempts": [
+          {
+            "ordinal": 1,
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:refund_reason:2026-07,2026-08",
+            "input_fingerprint": "409824220fa4f41745ed90b19a6d1b596f5ac27cd4b0da0cb10fca3e42b2cee6",
+            "duplicate_key": "dc01af545f8d5181a8e3496afbb7992ee4351cb2f72b9fa1c2c42c1b3b76ebbf",
+            "status": "completed",
+            "observation": {
+              "tool_name": "text2sql",
+              "route": "sql",
+              "execution_status": "completed",
+              "answer_status": "complete",
+              "safety_status": "passed",
+              "reason_code": "sql_completed",
+              "error_type": null,
+              "evidence_refs": [
+                {
+                  "run_id": "m44-t4",
+                  "evidence_id": "evidence:d517fa1401b8247dc6ff8de22fb84f88ca3f185f82efefa0fd9bbb3e01d47de5",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-t4:1",
+                  "anchor": "sql-result"
+                }
+              ],
+              "diagnostics": {}
+            },
+            "budget_before": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 0,
+                "deep_tools": 0,
+                "sql_actions": 0,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0
+            },
+            "budget_after": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 1,
+                "deep_tools": 1,
+                "sql_actions": 1,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "evidence_delta": {
+              "added": [
+                {
+                  "run_id": "m44-t4",
+                  "evidence_id": "evidence:d517fa1401b8247dc6ff8de22fb84f88ca3f185f82efefa0fd9bbb3e01d47de5",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-t4:1",
+                  "anchor": "sql-result"
+                }
+              ],
+              "removed": [],
+              "invalidated": [],
+              "duplicate": []
+            },
+            "progress": {
+              "coverage_increased": true,
+              "eligible_action_remains": true,
+              "reason_code": "coverage_increased"
+            }
+          },
+          {
+            "ordinal": 2,
+            "action_id": "collect_document_evidence",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "input_fingerprint": "3a27fe883ece26a3d25b9e179877c7f4a4c71e63b473c6d705bd7c50f5018503",
+            "duplicate_key": "3ba5a0d6c0b9652557ce0408a30e7a09f19337ed30c692da691114f2d3a3fe86",
+            "status": "completed",
+            "observation": {
+              "tool_name": "rag_evidence_gate",
+              "route": "rag",
+              "execution_status": "completed",
+              "answer_status": "complete",
+              "safety_status": "passed",
+              "reason_code": "hybrid_document_evidence_ready",
+              "error_type": null,
+              "evidence_refs": [
+                {
+                  "run_id": "m44-t4",
+                  "evidence_id": "doc:refund_policy_basic",
+                  "evidence_kind": "document",
+                  "authority_identity": "business-authority",
+                  "revision": "r1",
+                  "content_identity": "body:refund_policy_basic",
+                  "anchor": "refund_policy_basic"
+                },
+                {
+                  "run_id": "m44-t4",
+                  "evidence_id": "doc:refund_policy_quality",
+                  "evidence_kind": "document",
+                  "authority_identity": "business-authority",
+                  "revision": "r1",
+                  "content_identity": "body:refund_policy_quality",
+                  "anchor": "refund_policy_quality"
+                }
+              ],
+              "diagnostics": {
+                "candidate_count": 2,
+                "selected_count": 2,
+                "context_count": 2,
+                "knowledge_runtime_kind": "business_release",
+                "resolved_runtime_identity": "business-release:rehearsal"
+              }
+            },
+            "budget_before": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 1,
+                "deep_tools": 1,
+                "sql_actions": 1,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 0,
+              "knowledge_actions": 1,
+              "repairs": 0,
+              "retrieval_batches": 1,
+              "candidates": 2,
+              "selected": 2,
+              "generation_visible": 2,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0
+            },
+            "budget_after": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 2,
+                "deep_tools": 2,
+                "sql_actions": 1,
+                "knowledge_actions": 1,
+                "repairs": 0,
+                "retrieval_batches": 1,
+                "candidates": 2,
+                "selected": 2,
+                "generation_visible": 2,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "evidence_delta": {
+              "added": [
+                {
+                  "run_id": "m44-t4",
+                  "evidence_id": "doc:refund_policy_basic",
+                  "evidence_kind": "document",
+                  "authority_identity": "business-authority",
+                  "revision": "r1",
+                  "content_identity": "body:refund_policy_basic",
+                  "anchor": "refund_policy_basic"
+                },
+                {
+                  "run_id": "m44-t4",
+                  "evidence_id": "doc:refund_policy_quality",
+                  "evidence_kind": "document",
+                  "authority_identity": "business-authority",
+                  "revision": "r1",
+                  "content_identity": "body:refund_policy_quality",
+                  "anchor": "refund_policy_quality"
+                }
+              ],
+              "removed": [],
+              "invalidated": [],
+              "duplicate": []
+            },
+            "progress": {
+              "coverage_increased": true,
+              "eligible_action_remains": false,
+              "reason_code": "coverage_increased"
+            }
+          }
+        ],
+        "last_budget": {
+          "profile": {
+            "identity": "phase4b-b2-parent-budget-conservative-v1",
+            "max_actions": 3,
+            "max_deep_tools": 3,
+            "max_sql_actions": 3,
+            "max_knowledge_actions": 1,
+            "max_repairs_per_requirement": 1,
+            "max_retrieval_batches": 1,
+            "max_candidates": 5,
+            "max_selected": 3,
+            "max_generation_visible": 3,
+            "max_model_calls": 6,
+            "max_total_tokens": 24000
+          },
+          "consumed": {
+            "actions": 2,
+            "deep_tools": 2,
+            "sql_actions": 1,
+            "knowledge_actions": 1,
+            "repairs": 0,
+            "retrieval_batches": 1,
+            "candidates": 2,
+            "selected": 2,
+            "generation_visible": 2,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0.0
+          }
+        },
+        "last_termination": {
+          "reason": "answer_ready",
+          "detail_code": "answer_ready",
+          "active_requirement_identities": [
+            "sql:refund_reason:2026-07,2026-08",
+            "document:refund_policy_basic+refund_policy_quality"
+          ],
+          "unresolved_requirement_identities": []
+        }
+      },
+      "actions": [
+        {
+          "ordinal": 1,
+          "action_id": "collect_sql_evidence",
+          "requirement_identity": "sql:refund_reason:2026-07,2026-08",
+          "input_fingerprint": "409824220fa4f41745ed90b19a6d1b596f5ac27cd4b0da0cb10fca3e42b2cee6",
+          "duplicate_key": "dc01af545f8d5181a8e3496afbb7992ee4351cb2f72b9fa1c2c42c1b3b76ebbf",
+          "status": "completed",
+          "observation": {
+            "tool_name": "text2sql",
+            "route": "sql",
+            "execution_status": "completed",
+            "answer_status": "complete",
+            "safety_status": "passed",
+            "reason_code": "sql_completed",
+            "error_type": null,
+            "evidence_refs": [
+              {
+                "run_id": "m44-t4",
+                "evidence_id": "evidence:d517fa1401b8247dc6ff8de22fb84f88ca3f185f82efefa0fd9bbb3e01d47de5",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-t4:1",
+                "anchor": "sql-result"
+              }
+            ],
+            "diagnostics": {}
+          },
+          "budget_before": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 0,
+              "deep_tools": 0,
+              "sql_actions": 0,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "consumed": {
+            "actions": 1,
+            "deep_tools": 1,
+            "sql_actions": 1,
+            "knowledge_actions": 0,
+            "repairs": 0,
+            "retrieval_batches": 0,
+            "candidates": 0,
+            "selected": 0,
+            "generation_visible": 0,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0
+          },
+          "budget_after": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "evidence_delta": {
+            "added": [
+              {
+                "run_id": "m44-t4",
+                "evidence_id": "evidence:d517fa1401b8247dc6ff8de22fb84f88ca3f185f82efefa0fd9bbb3e01d47de5",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-t4:1",
+                "anchor": "sql-result"
+              }
+            ],
+            "removed": [],
+            "invalidated": [],
+            "duplicate": []
+          },
+          "progress": {
+            "coverage_increased": true,
+            "eligible_action_remains": true,
+            "reason_code": "coverage_increased"
+          }
+        },
+        {
+          "ordinal": 2,
+          "action_id": "collect_document_evidence",
+          "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+          "input_fingerprint": "3a27fe883ece26a3d25b9e179877c7f4a4c71e63b473c6d705bd7c50f5018503",
+          "duplicate_key": "3ba5a0d6c0b9652557ce0408a30e7a09f19337ed30c692da691114f2d3a3fe86",
+          "status": "completed",
+          "observation": {
+            "tool_name": "rag_evidence_gate",
+            "route": "rag",
+            "execution_status": "completed",
+            "answer_status": "complete",
+            "safety_status": "passed",
+            "reason_code": "hybrid_document_evidence_ready",
+            "error_type": null,
+            "evidence_refs": [
+              {
+                "run_id": "m44-t4",
+                "evidence_id": "doc:refund_policy_basic",
+                "evidence_kind": "document",
+                "authority_identity": "business-authority",
+                "revision": "r1",
+                "content_identity": "body:refund_policy_basic",
+                "anchor": "refund_policy_basic"
+              },
+              {
+                "run_id": "m44-t4",
+                "evidence_id": "doc:refund_policy_quality",
+                "evidence_kind": "document",
+                "authority_identity": "business-authority",
+                "revision": "r1",
+                "content_identity": "body:refund_policy_quality",
+                "anchor": "refund_policy_quality"
+              }
+            ],
+            "diagnostics": {
+              "candidate_count": 2,
+              "selected_count": 2,
+              "context_count": 2,
+              "knowledge_runtime_kind": "business_release",
+              "resolved_runtime_identity": "business-release:rehearsal"
+            }
+          },
+          "budget_before": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "consumed": {
+            "actions": 1,
+            "deep_tools": 1,
+            "sql_actions": 0,
+            "knowledge_actions": 1,
+            "repairs": 0,
+            "retrieval_batches": 1,
+            "candidates": 2,
+            "selected": 2,
+            "generation_visible": 2,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0
+          },
+          "budget_after": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 2,
+              "deep_tools": 2,
+              "sql_actions": 1,
+              "knowledge_actions": 1,
+              "repairs": 0,
+              "retrieval_batches": 1,
+              "candidates": 2,
+              "selected": 2,
+              "generation_visible": 2,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "evidence_delta": {
+            "added": [
+              {
+                "run_id": "m44-t4",
+                "evidence_id": "doc:refund_policy_basic",
+                "evidence_kind": "document",
+                "authority_identity": "business-authority",
+                "revision": "r1",
+                "content_identity": "body:refund_policy_basic",
+                "anchor": "refund_policy_basic"
+              },
+              {
+                "run_id": "m44-t4",
+                "evidence_id": "doc:refund_policy_quality",
+                "evidence_kind": "document",
+                "authority_identity": "business-authority",
+                "revision": "r1",
+                "content_identity": "body:refund_policy_quality",
+                "anchor": "refund_policy_quality"
+              }
+            ],
+            "removed": [],
+            "invalidated": [],
+            "duplicate": []
+          },
+          "progress": {
+            "coverage_increased": true,
+            "eligible_action_remains": false,
+            "reason_code": "coverage_increased"
+          }
+        }
+      ],
+      "budget": {
+        "profile": {
+          "identity": "phase4b-b2-parent-budget-conservative-v1",
+          "max_actions": 3,
+          "max_deep_tools": 3,
+          "max_sql_actions": 3,
+          "max_knowledge_actions": 1,
+          "max_repairs_per_requirement": 1,
+          "max_retrieval_batches": 1,
+          "max_candidates": 5,
+          "max_selected": 3,
+          "max_generation_visible": 3,
+          "max_model_calls": 6,
+          "max_total_tokens": 24000
+        },
+        "consumed": {
+          "actions": 2,
+          "deep_tools": 2,
+          "sql_actions": 1,
+          "knowledge_actions": 1,
+          "repairs": 0,
+          "retrieval_batches": 1,
+          "candidates": 2,
+          "selected": 2,
+          "generation_visible": 2,
+          "model_calls": 0,
+          "total_tokens": 0,
+          "token_usage_observed": true,
+          "timeouts": 0,
+          "latency_ms": 0.0
+        }
+      },
+      "node_contexts": [
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "decision",
+          "source_identities": [
+            "98024345355baa27aaa3f71b00191a98677b3476c9d2455bf55c6e40b75adc49"
+          ],
+          "payload": {
+            "requirement_identities": [
+              "sql:refund_reason:2026-07,2026-08",
+              "document:refund_policy_basic+refund_policy_quality"
+            ],
+            "active_evidence_ids": [],
+            "budget_profile_identity": "phase4b-b2-parent-budget-conservative-v1",
+            "controller_identity": "phase4b-deterministic-controller-v1"
+          },
+          "allowed_fields": [
+            "requirement_identities",
+            "active_evidence_ids",
+            "budget_profile_identity",
+            "controller_identity"
+          ],
+          "field_budget": 4,
+          "token_budget": 768,
+          "estimated_tokens": 70,
+          "input_fingerprint": "f92a45676efa142a6c69de6a8a920aee1e540fbea40ab3a1b44c32a89d659e62"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "sql_action",
+          "source_identities": [
+            "98024345355baa27aaa3f71b00191a98677b3476c9d2455bf55c6e40b75adc49",
+            "sql:refund_reason:2026-07,2026-08"
+          ],
+          "payload": {
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:refund_reason:2026-07,2026-08",
+            "input_fingerprint": "409824220fa4f41745ed90b19a6d1b596f5ac27cd4b0da0cb10fca3e42b2cee6",
+            "budget_before_identity": "51eb973c838994b95651ee580cdffd207f1424378eb0929c7349aba01cd338b0",
+            "runtime_scope": "not_applicable"
+          },
+          "allowed_fields": [
+            "action_id",
+            "requirement_identity",
+            "input_fingerprint",
+            "budget_before_identity",
+            "runtime_scope"
+          ],
+          "field_budget": 5,
+          "token_budget": 512,
+          "estimated_tokens": 79,
+          "input_fingerprint": "8db42829d5a308a3fccdaf105828e5178f87e5e99745ca9d3692db662599b1a3"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "document_action",
+          "source_identities": [
+            "5a41bae79e2a9923c12afb008925c0da4828bde9b52e89bd53b8ada858165324",
+            "document:refund_policy_basic+refund_policy_quality"
+          ],
+          "payload": {
+            "action_id": "collect_document_evidence",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "input_fingerprint": "3a27fe883ece26a3d25b9e179877c7f4a4c71e63b473c6d705bd7c50f5018503",
+            "budget_before_identity": "947c37e2dd1d6fddf12eadd857c9084ea78b1458206c56ac101f7c54d72bfa99",
+            "runtime_scope": "business_release"
+          },
+          "allowed_fields": [
+            "action_id",
+            "requirement_identity",
+            "input_fingerprint",
+            "budget_before_identity",
+            "runtime_scope"
+          ],
+          "field_budget": 5,
+          "token_budget": 512,
+          "estimated_tokens": 85,
+          "input_fingerprint": "a56282f0714c8c0be01044aa8e5b8e363ea568306bd135cef25b24f0d61ee880"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "hybrid_synthesis",
+          "source_identities": [
+            "sql:refund_reason:2026-07,2026-08",
+            "document:refund_policy_basic+refund_policy_quality"
+          ],
+          "payload": {
+            "evidence_ids": [
+              "evidence:d517fa1401b8247dc6ff8de22fb84f88ca3f185f82efefa0fd9bbb3e01d47de5",
+              "doc:refund_policy_basic",
+              "doc:refund_policy_quality"
+            ],
+            "termination_reason": "answer_ready",
+            "synthesizer_identity": "hybrid-deterministic-structured-v1"
+          },
+          "allowed_fields": [
+            "evidence_ids",
+            "termination_reason",
+            "synthesizer_identity"
+          ],
+          "field_budget": 3,
+          "token_budget": 768,
+          "estimated_tokens": 63,
+          "input_fingerprint": "97bfa5a37a7c97669bfb043b006ac1f811d9de34b47e263b5f7caed9ef0b5545"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "controller_response",
+          "source_identities": [
+            "597666afc615631e010bf343738c1f5fab34a4142c05c786872a566804d3f212"
+          ],
+          "payload": {
+            "termination": {
+              "reason": "answer_ready",
+              "detail_code": "answer_ready",
+              "active_requirement_identities": [
+                "sql:refund_reason:2026-07,2026-08",
+                "document:refund_policy_basic+refund_policy_quality"
+              ],
+              "unresolved_requirement_identities": []
+            },
+            "action_count": 2,
+            "budget_identity": "a8ecb84fb7b9c77093911386a526e7482144ab1cef4736f17e0f0cf0f8791bc9",
+            "route": "hybrid"
+          },
+          "allowed_fields": [
+            "termination",
+            "action_count",
+            "budget_identity",
+            "route"
+          ],
+          "field_budget": 4,
+          "token_budget": 768,
+          "estimated_tokens": 92,
+          "input_fingerprint": "41cce2412319e9eac266dda475bf4874859831ed619401ba44635ac81cbf777e"
+        }
+      ],
+      "termination": {
+        "reason": "answer_ready",
+        "detail_code": "answer_ready",
+        "active_requirement_identities": [
+          "sql:refund_reason:2026-07,2026-08",
+          "document:refund_policy_basic+refund_policy_quality"
+        ],
+        "unresolved_requirement_identities": []
+      },
+      "runtime_identity": {
+        "format": "phase4b-agent-loop-langgraph-v1",
+        "contract_identity": "a808b321ba8cae63ef0adaed3815d4becdfd650c37e2b30e9f1402ed8ecd485b",
+        "task_state_version": "phase4b-task-state-v2",
+        "controller_identity": "phase4b-deterministic-controller-v1",
+        "budget_profile_identity": "phase4b-b2-parent-budget-conservative-v1",
+        "knowledge_resolver_identity": "phase4b-knowledge-runtime-resolver-v1"
+      },
+      "assertions": [
+        [
+          "required:t4",
+          "passed"
+        ]
+      ]
+    },
+    {
+      "scenario_id": "T5",
+      "turn_id": "T5",
+      "task_delta": {
+        "category": "correct_previous_understanding",
+        "goal": "查询实际净退款金额",
+        "set_constraints": {
+          "metric": "net_refund_amount",
+          "periods": [
+            "2026-07",
+            "2026-08"
+          ],
+          "comparison": true,
+          "breakdown_dimension": "channel"
+        },
+        "remove_constraints": [],
+        "add_requirements": [
+          "sql:channel:2026-07,2026-08",
+          "document:refund_policy_basic+refund_policy_quality"
+        ],
+        "evidence_requirements": [
+          {
+            "identity": "sql:channel:2026-07,2026-08",
+            "kind": "sql",
+            "purpose": "channel_breakdown",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "ad8fe4b76b8dcadee473ee178fd5f0b5b95d99985417209e55d38d149b6779f9"
+          },
+          {
+            "identity": "document:refund_policy_basic+refund_policy_quality",
+            "kind": "document",
+            "purpose": "refund_policy_interpretation",
+            "runtime_scope": "business_release",
+            "expected_document_keys": [
+              "refund_policy_basic",
+              "refund_policy_quality"
+            ],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "8fe3a72e5929dadf817f306b4efd82821eff278f2e221859d6a927a1cd4c8048"
+          }
+        ],
+        "route": "hybrid",
+        "pending_questions": [],
+        "source_identity": "phase4b-deterministic-turn-understanding-v1"
+      },
+      "task_state": {
+        "state_version": "phase4b-task-state-v2",
+        "generation": 2,
+        "status": "active",
+        "goal": "查询实际净退款金额",
+        "constraints": {
+          "breakdown_dimension": "channel",
+          "comparison": true,
+          "metric": "net_refund_amount",
+          "periods": [
+            "2026-07",
+            "2026-08"
+          ]
+        },
+        "pending_questions": [],
+        "requirements": [
+          "sql:channel:2026-07,2026-08",
+          "document:refund_policy_basic+refund_policy_quality"
+        ],
+        "evidence_requirements": [
+          {
+            "identity": "sql:channel:2026-07,2026-08",
+            "kind": "sql",
+            "purpose": "channel_breakdown",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "ad8fe4b76b8dcadee473ee178fd5f0b5b95d99985417209e55d38d149b6779f9"
+          },
+          {
+            "identity": "document:refund_policy_basic+refund_policy_quality",
+            "kind": "document",
+            "purpose": "refund_policy_interpretation",
+            "runtime_scope": "business_release",
+            "expected_document_keys": [
+              "refund_policy_basic",
+              "refund_policy_quality"
+            ],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "8fe3a72e5929dadf817f306b4efd82821eff278f2e221859d6a927a1cd4c8048"
+          }
+        ],
+        "route": "hybrid",
+        "evidence": [
+          {
+            "ref": {
+              "run_id": "m44-t4",
+              "evidence_id": "evidence:d517fa1401b8247dc6ff8de22fb84f88ca3f185f82efefa0fd9bbb3e01d47de5",
+              "evidence_kind": "sql",
+              "authority_identity": "phase4b-seed",
+              "revision": "frozen",
+              "content_identity": "oracle:m44-t4:1",
+              "anchor": "sql-result"
+            },
+            "route": "sql",
+            "requirement_identity": "sql:refund_reason:2026-07,2026-08",
+            "validity": "invalidated",
+            "invalidation_reason": "task_semantics_changed",
+            "source_generation": 1,
+            "action_id": "collect_sql_evidence",
+            "input_fingerprint": "409824220fa4f41745ed90b19a6d1b596f5ac27cd4b0da0cb10fca3e42b2cee6",
+            "runtime_identity": null
+          },
+          {
+            "ref": {
+              "run_id": "m44-t4",
+              "evidence_id": "doc:refund_policy_basic",
+              "evidence_kind": "document",
+              "authority_identity": "business-authority",
+              "revision": "r1",
+              "content_identity": "body:refund_policy_basic",
+              "anchor": "refund_policy_basic"
+            },
+            "route": "document",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "validity": "invalidated",
+            "invalidation_reason": "task_semantics_changed",
+            "source_generation": 1,
+            "action_id": "collect_document_evidence",
+            "input_fingerprint": "3a27fe883ece26a3d25b9e179877c7f4a4c71e63b473c6d705bd7c50f5018503",
+            "runtime_identity": "business-release:rehearsal"
+          },
+          {
+            "ref": {
+              "run_id": "m44-t4",
+              "evidence_id": "doc:refund_policy_quality",
+              "evidence_kind": "document",
+              "authority_identity": "business-authority",
+              "revision": "r1",
+              "content_identity": "body:refund_policy_quality",
+              "anchor": "refund_policy_quality"
+            },
+            "route": "document",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "validity": "invalidated",
+            "invalidation_reason": "task_semantics_changed",
+            "source_generation": 1,
+            "action_id": "collect_document_evidence",
+            "input_fingerprint": "3a27fe883ece26a3d25b9e179877c7f4a4c71e63b473c6d705bd7c50f5018503",
+            "runtime_identity": "business-release:rehearsal"
+          },
+          {
+            "ref": {
+              "run_id": "m44-t5",
+              "evidence_id": "evidence:23aa8fd37e49eee197b12ea289f21bbcadfce01d1a603a20bf40dceea717abf6",
+              "evidence_kind": "sql",
+              "authority_identity": "phase4b-seed",
+              "revision": "frozen",
+              "content_identity": "oracle:m44-t5:2",
+              "anchor": "sql-result"
+            },
+            "route": "sql",
+            "requirement_identity": "sql:channel:2026-07,2026-08",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 2,
+            "action_id": "collect_sql_evidence",
+            "input_fingerprint": "cd5a0671e559cf2b1579a6395dc98e078702f90c290fccae63157cf507e39caa",
+            "runtime_identity": null
+          },
+          {
+            "ref": {
+              "run_id": "m44-t5",
+              "evidence_id": "doc:refund_policy_basic",
+              "evidence_kind": "document",
+              "authority_identity": "business-authority",
+              "revision": "r1",
+              "content_identity": "body:refund_policy_basic",
+              "anchor": "refund_policy_basic"
+            },
+            "route": "document",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 2,
+            "action_id": "collect_document_evidence",
+            "input_fingerprint": "23cb7310d475873be9fa660467ac0a5c382d8261b50c1843f015bf2701b0b9b6",
+            "runtime_identity": "business-release:rehearsal"
+          },
+          {
+            "ref": {
+              "run_id": "m44-t5",
+              "evidence_id": "doc:refund_policy_quality",
+              "evidence_kind": "document",
+              "authority_identity": "business-authority",
+              "revision": "r1",
+              "content_identity": "body:refund_policy_quality",
+              "anchor": "refund_policy_quality"
+            },
+            "route": "document",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 2,
+            "action_id": "collect_document_evidence",
+            "input_fingerprint": "23cb7310d475873be9fa660467ac0a5c382d8261b50c1843f015bf2701b0b9b6",
+            "runtime_identity": "business-release:rehearsal"
+          }
+        ],
+        "termination": "answer_ready",
+        "last_action_attempts": [
+          {
+            "ordinal": 1,
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:channel:2026-07,2026-08",
+            "input_fingerprint": "cd5a0671e559cf2b1579a6395dc98e078702f90c290fccae63157cf507e39caa",
+            "duplicate_key": "2fc64279538e615d6c553246f6aefd5cbb19133716e309091ef81a092576506a",
+            "status": "completed",
+            "observation": {
+              "tool_name": "text2sql",
+              "route": "sql",
+              "execution_status": "completed",
+              "answer_status": "complete",
+              "safety_status": "passed",
+              "reason_code": "sql_completed",
+              "error_type": null,
+              "evidence_refs": [
+                {
+                  "run_id": "m44-t5",
+                  "evidence_id": "evidence:23aa8fd37e49eee197b12ea289f21bbcadfce01d1a603a20bf40dceea717abf6",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-t5:2",
+                  "anchor": "sql-result"
+                }
+              ],
+              "diagnostics": {}
+            },
+            "budget_before": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 0,
+                "deep_tools": 0,
+                "sql_actions": 0,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0
+            },
+            "budget_after": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 1,
+                "deep_tools": 1,
+                "sql_actions": 1,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "evidence_delta": {
+              "added": [
+                {
+                  "run_id": "m44-t5",
+                  "evidence_id": "evidence:23aa8fd37e49eee197b12ea289f21bbcadfce01d1a603a20bf40dceea717abf6",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-t5:2",
+                  "anchor": "sql-result"
+                }
+              ],
+              "removed": [],
+              "invalidated": [],
+              "duplicate": []
+            },
+            "progress": {
+              "coverage_increased": true,
+              "eligible_action_remains": true,
+              "reason_code": "coverage_increased"
+            }
+          },
+          {
+            "ordinal": 2,
+            "action_id": "collect_document_evidence",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "input_fingerprint": "23cb7310d475873be9fa660467ac0a5c382d8261b50c1843f015bf2701b0b9b6",
+            "duplicate_key": "b322af8ab5447e442db12781d693b09f891c6e9009f2b394c52a0f9e7a2acf7a",
+            "status": "completed",
+            "observation": {
+              "tool_name": "rag_evidence_gate",
+              "route": "rag",
+              "execution_status": "completed",
+              "answer_status": "complete",
+              "safety_status": "passed",
+              "reason_code": "hybrid_document_evidence_ready",
+              "error_type": null,
+              "evidence_refs": [
+                {
+                  "run_id": "m44-t5",
+                  "evidence_id": "doc:refund_policy_basic",
+                  "evidence_kind": "document",
+                  "authority_identity": "business-authority",
+                  "revision": "r1",
+                  "content_identity": "body:refund_policy_basic",
+                  "anchor": "refund_policy_basic"
+                },
+                {
+                  "run_id": "m44-t5",
+                  "evidence_id": "doc:refund_policy_quality",
+                  "evidence_kind": "document",
+                  "authority_identity": "business-authority",
+                  "revision": "r1",
+                  "content_identity": "body:refund_policy_quality",
+                  "anchor": "refund_policy_quality"
+                }
+              ],
+              "diagnostics": {
+                "candidate_count": 2,
+                "selected_count": 2,
+                "context_count": 2,
+                "knowledge_runtime_kind": "business_release",
+                "resolved_runtime_identity": "business-release:rehearsal"
+              }
+            },
+            "budget_before": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 1,
+                "deep_tools": 1,
+                "sql_actions": 1,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 0,
+              "knowledge_actions": 1,
+              "repairs": 0,
+              "retrieval_batches": 1,
+              "candidates": 2,
+              "selected": 2,
+              "generation_visible": 2,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0
+            },
+            "budget_after": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 2,
+                "deep_tools": 2,
+                "sql_actions": 1,
+                "knowledge_actions": 1,
+                "repairs": 0,
+                "retrieval_batches": 1,
+                "candidates": 2,
+                "selected": 2,
+                "generation_visible": 2,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "evidence_delta": {
+              "added": [
+                {
+                  "run_id": "m44-t5",
+                  "evidence_id": "doc:refund_policy_basic",
+                  "evidence_kind": "document",
+                  "authority_identity": "business-authority",
+                  "revision": "r1",
+                  "content_identity": "body:refund_policy_basic",
+                  "anchor": "refund_policy_basic"
+                },
+                {
+                  "run_id": "m44-t5",
+                  "evidence_id": "doc:refund_policy_quality",
+                  "evidence_kind": "document",
+                  "authority_identity": "business-authority",
+                  "revision": "r1",
+                  "content_identity": "body:refund_policy_quality",
+                  "anchor": "refund_policy_quality"
+                }
+              ],
+              "removed": [],
+              "invalidated": [],
+              "duplicate": []
+            },
+            "progress": {
+              "coverage_increased": true,
+              "eligible_action_remains": false,
+              "reason_code": "coverage_increased"
+            }
+          }
+        ],
+        "last_budget": {
+          "profile": {
+            "identity": "phase4b-b2-parent-budget-conservative-v1",
+            "max_actions": 3,
+            "max_deep_tools": 3,
+            "max_sql_actions": 3,
+            "max_knowledge_actions": 1,
+            "max_repairs_per_requirement": 1,
+            "max_retrieval_batches": 1,
+            "max_candidates": 5,
+            "max_selected": 3,
+            "max_generation_visible": 3,
+            "max_model_calls": 6,
+            "max_total_tokens": 24000
+          },
+          "consumed": {
+            "actions": 2,
+            "deep_tools": 2,
+            "sql_actions": 1,
+            "knowledge_actions": 1,
+            "repairs": 0,
+            "retrieval_batches": 1,
+            "candidates": 2,
+            "selected": 2,
+            "generation_visible": 2,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0.0
+          }
+        },
+        "last_termination": {
+          "reason": "answer_ready",
+          "detail_code": "answer_ready",
+          "active_requirement_identities": [
+            "sql:channel:2026-07,2026-08",
+            "document:refund_policy_basic+refund_policy_quality"
+          ],
+          "unresolved_requirement_identities": []
+        }
+      },
+      "actions": [
+        {
+          "ordinal": 1,
+          "action_id": "collect_sql_evidence",
+          "requirement_identity": "sql:channel:2026-07,2026-08",
+          "input_fingerprint": "cd5a0671e559cf2b1579a6395dc98e078702f90c290fccae63157cf507e39caa",
+          "duplicate_key": "2fc64279538e615d6c553246f6aefd5cbb19133716e309091ef81a092576506a",
+          "status": "completed",
+          "observation": {
+            "tool_name": "text2sql",
+            "route": "sql",
+            "execution_status": "completed",
+            "answer_status": "complete",
+            "safety_status": "passed",
+            "reason_code": "sql_completed",
+            "error_type": null,
+            "evidence_refs": [
+              {
+                "run_id": "m44-t5",
+                "evidence_id": "evidence:23aa8fd37e49eee197b12ea289f21bbcadfce01d1a603a20bf40dceea717abf6",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-t5:2",
+                "anchor": "sql-result"
+              }
+            ],
+            "diagnostics": {}
+          },
+          "budget_before": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 0,
+              "deep_tools": 0,
+              "sql_actions": 0,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "consumed": {
+            "actions": 1,
+            "deep_tools": 1,
+            "sql_actions": 1,
+            "knowledge_actions": 0,
+            "repairs": 0,
+            "retrieval_batches": 0,
+            "candidates": 0,
+            "selected": 0,
+            "generation_visible": 0,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0
+          },
+          "budget_after": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "evidence_delta": {
+            "added": [
+              {
+                "run_id": "m44-t5",
+                "evidence_id": "evidence:23aa8fd37e49eee197b12ea289f21bbcadfce01d1a603a20bf40dceea717abf6",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-t5:2",
+                "anchor": "sql-result"
+              }
+            ],
+            "removed": [],
+            "invalidated": [],
+            "duplicate": []
+          },
+          "progress": {
+            "coverage_increased": true,
+            "eligible_action_remains": true,
+            "reason_code": "coverage_increased"
+          }
+        },
+        {
+          "ordinal": 2,
+          "action_id": "collect_document_evidence",
+          "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+          "input_fingerprint": "23cb7310d475873be9fa660467ac0a5c382d8261b50c1843f015bf2701b0b9b6",
+          "duplicate_key": "b322af8ab5447e442db12781d693b09f891c6e9009f2b394c52a0f9e7a2acf7a",
+          "status": "completed",
+          "observation": {
+            "tool_name": "rag_evidence_gate",
+            "route": "rag",
+            "execution_status": "completed",
+            "answer_status": "complete",
+            "safety_status": "passed",
+            "reason_code": "hybrid_document_evidence_ready",
+            "error_type": null,
+            "evidence_refs": [
+              {
+                "run_id": "m44-t5",
+                "evidence_id": "doc:refund_policy_basic",
+                "evidence_kind": "document",
+                "authority_identity": "business-authority",
+                "revision": "r1",
+                "content_identity": "body:refund_policy_basic",
+                "anchor": "refund_policy_basic"
+              },
+              {
+                "run_id": "m44-t5",
+                "evidence_id": "doc:refund_policy_quality",
+                "evidence_kind": "document",
+                "authority_identity": "business-authority",
+                "revision": "r1",
+                "content_identity": "body:refund_policy_quality",
+                "anchor": "refund_policy_quality"
+              }
+            ],
+            "diagnostics": {
+              "candidate_count": 2,
+              "selected_count": 2,
+              "context_count": 2,
+              "knowledge_runtime_kind": "business_release",
+              "resolved_runtime_identity": "business-release:rehearsal"
+            }
+          },
+          "budget_before": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "consumed": {
+            "actions": 1,
+            "deep_tools": 1,
+            "sql_actions": 0,
+            "knowledge_actions": 1,
+            "repairs": 0,
+            "retrieval_batches": 1,
+            "candidates": 2,
+            "selected": 2,
+            "generation_visible": 2,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0
+          },
+          "budget_after": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 2,
+              "deep_tools": 2,
+              "sql_actions": 1,
+              "knowledge_actions": 1,
+              "repairs": 0,
+              "retrieval_batches": 1,
+              "candidates": 2,
+              "selected": 2,
+              "generation_visible": 2,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "evidence_delta": {
+            "added": [
+              {
+                "run_id": "m44-t5",
+                "evidence_id": "doc:refund_policy_basic",
+                "evidence_kind": "document",
+                "authority_identity": "business-authority",
+                "revision": "r1",
+                "content_identity": "body:refund_policy_basic",
+                "anchor": "refund_policy_basic"
+              },
+              {
+                "run_id": "m44-t5",
+                "evidence_id": "doc:refund_policy_quality",
+                "evidence_kind": "document",
+                "authority_identity": "business-authority",
+                "revision": "r1",
+                "content_identity": "body:refund_policy_quality",
+                "anchor": "refund_policy_quality"
+              }
+            ],
+            "removed": [],
+            "invalidated": [],
+            "duplicate": []
+          },
+          "progress": {
+            "coverage_increased": true,
+            "eligible_action_remains": false,
+            "reason_code": "coverage_increased"
+          }
+        }
+      ],
+      "budget": {
+        "profile": {
+          "identity": "phase4b-b2-parent-budget-conservative-v1",
+          "max_actions": 3,
+          "max_deep_tools": 3,
+          "max_sql_actions": 3,
+          "max_knowledge_actions": 1,
+          "max_repairs_per_requirement": 1,
+          "max_retrieval_batches": 1,
+          "max_candidates": 5,
+          "max_selected": 3,
+          "max_generation_visible": 3,
+          "max_model_calls": 6,
+          "max_total_tokens": 24000
+        },
+        "consumed": {
+          "actions": 2,
+          "deep_tools": 2,
+          "sql_actions": 1,
+          "knowledge_actions": 1,
+          "repairs": 0,
+          "retrieval_batches": 1,
+          "candidates": 2,
+          "selected": 2,
+          "generation_visible": 2,
+          "model_calls": 0,
+          "total_tokens": 0,
+          "token_usage_observed": true,
+          "timeouts": 0,
+          "latency_ms": 0.0
+        }
+      },
+      "node_contexts": [
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "decision",
+          "source_identities": [
+            "d060913b950ea89904ad7d80d1bf5418f0bd8c250ccf5d05fc7c4bd828633c81"
+          ],
+          "payload": {
+            "requirement_identities": [
+              "sql:channel:2026-07,2026-08",
+              "document:refund_policy_basic+refund_policy_quality"
+            ],
+            "active_evidence_ids": [],
+            "budget_profile_identity": "phase4b-b2-parent-budget-conservative-v1",
+            "controller_identity": "phase4b-deterministic-controller-v1"
+          },
+          "allowed_fields": [
+            "requirement_identities",
+            "active_evidence_ids",
+            "budget_profile_identity",
+            "controller_identity"
+          ],
+          "field_budget": 4,
+          "token_budget": 768,
+          "estimated_tokens": 69,
+          "input_fingerprint": "162ea9f431b78aa37069017991ba41db3caa3e1b1e6eaf2db3210fb2992bc361"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "sql_action",
+          "source_identities": [
+            "d060913b950ea89904ad7d80d1bf5418f0bd8c250ccf5d05fc7c4bd828633c81",
+            "sql:channel:2026-07,2026-08"
+          ],
+          "payload": {
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:channel:2026-07,2026-08",
+            "input_fingerprint": "cd5a0671e559cf2b1579a6395dc98e078702f90c290fccae63157cf507e39caa",
+            "budget_before_identity": "51eb973c838994b95651ee580cdffd207f1424378eb0929c7349aba01cd338b0",
+            "runtime_scope": "not_applicable"
+          },
+          "allowed_fields": [
+            "action_id",
+            "requirement_identity",
+            "input_fingerprint",
+            "budget_before_identity",
+            "runtime_scope"
+          ],
+          "field_budget": 5,
+          "token_budget": 512,
+          "estimated_tokens": 78,
+          "input_fingerprint": "3bc5352bfb6e2f07c8cef02321c5eeb6e11fb927a23afb1fcfdc4b59af98b817"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "document_action",
+          "source_identities": [
+            "1060d4695b4b3a1f87c9a420b397c35f30f0f99e252d787189b7971a0380d1d8",
+            "document:refund_policy_basic+refund_policy_quality"
+          ],
+          "payload": {
+            "action_id": "collect_document_evidence",
+            "requirement_identity": "document:refund_policy_basic+refund_policy_quality",
+            "input_fingerprint": "23cb7310d475873be9fa660467ac0a5c382d8261b50c1843f015bf2701b0b9b6",
+            "budget_before_identity": "947c37e2dd1d6fddf12eadd857c9084ea78b1458206c56ac101f7c54d72bfa99",
+            "runtime_scope": "business_release"
+          },
+          "allowed_fields": [
+            "action_id",
+            "requirement_identity",
+            "input_fingerprint",
+            "budget_before_identity",
+            "runtime_scope"
+          ],
+          "field_budget": 5,
+          "token_budget": 512,
+          "estimated_tokens": 85,
+          "input_fingerprint": "877039f4604e25403c344925c66be00db3b7501cbd91b2c69c67ab7d4973ca91"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "hybrid_synthesis",
+          "source_identities": [
+            "sql:channel:2026-07,2026-08",
+            "document:refund_policy_basic+refund_policy_quality"
+          ],
+          "payload": {
+            "evidence_ids": [
+              "evidence:23aa8fd37e49eee197b12ea289f21bbcadfce01d1a603a20bf40dceea717abf6",
+              "doc:refund_policy_basic",
+              "doc:refund_policy_quality"
+            ],
+            "termination_reason": "answer_ready",
+            "synthesizer_identity": "hybrid-deterministic-structured-v1"
+          },
+          "allowed_fields": [
+            "evidence_ids",
+            "termination_reason",
+            "synthesizer_identity"
+          ],
+          "field_budget": 3,
+          "token_budget": 768,
+          "estimated_tokens": 63,
+          "input_fingerprint": "2ac2a8dde6e447c6e43517df8eafd97ca094481087ae9cbfc456f999538547eb"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "controller_response",
+          "source_identities": [
+            "eca38616763968deff3664836dedce47d7d8531640c10b389c4136f5b4ce5a6e"
+          ],
+          "payload": {
+            "termination": {
+              "reason": "answer_ready",
+              "detail_code": "answer_ready",
+              "active_requirement_identities": [
+                "sql:channel:2026-07,2026-08",
+                "document:refund_policy_basic+refund_policy_quality"
+              ],
+              "unresolved_requirement_identities": []
+            },
+            "action_count": 2,
+            "budget_identity": "a8ecb84fb7b9c77093911386a526e7482144ab1cef4736f17e0f0cf0f8791bc9",
+            "route": "hybrid"
+          },
+          "allowed_fields": [
+            "termination",
+            "action_count",
+            "budget_identity",
+            "route"
+          ],
+          "field_budget": 4,
+          "token_budget": 768,
+          "estimated_tokens": 90,
+          "input_fingerprint": "69ec455d738d31e86d1cde29dde87fa17d6e0df0ce789f4b184fd63932bf6e14"
+        }
+      ],
+      "termination": {
+        "reason": "answer_ready",
+        "detail_code": "answer_ready",
+        "active_requirement_identities": [
+          "sql:channel:2026-07,2026-08",
+          "document:refund_policy_basic+refund_policy_quality"
+        ],
+        "unresolved_requirement_identities": []
+      },
+      "runtime_identity": {
+        "format": "phase4b-agent-loop-langgraph-v1",
+        "contract_identity": "a808b321ba8cae63ef0adaed3815d4becdfd650c37e2b30e9f1402ed8ecd485b",
+        "task_state_version": "phase4b-task-state-v2",
+        "controller_identity": "phase4b-deterministic-controller-v1",
+        "budget_profile_identity": "phase4b-b2-parent-budget-conservative-v1",
+        "knowledge_resolver_identity": "phase4b-knowledge-runtime-resolver-v1"
+      },
+      "assertions": [
+        [
+          "required:t5",
+          "passed"
+        ]
+      ]
+    },
+    {
+      "scenario_id": "SQL_DIALECT_REPAIR",
+      "turn_id": "SQL_DIALECT_REPAIR",
+      "task_delta": {
+        "category": "start_task",
+        "goal": "查询实际净退款金额",
+        "set_constraints": {
+          "metric": "net_refund_amount",
+          "periods": [
+            "2026-08"
+          ]
+        },
+        "remove_constraints": [],
+        "add_requirements": [
+          "sql:net_refund_amount:2026-08"
+        ],
+        "evidence_requirements": [
+          {
+            "identity": "sql:net_refund_amount:2026-08",
+            "kind": "sql",
+            "purpose": "metric_comparison",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "b99d91ff113809119675395e9eeda51f9a12ea44fef535173962291ec78a82b0"
+          }
+        ],
+        "route": "sql",
+        "pending_questions": [],
+        "source_identity": "phase4b-deterministic-turn-understanding-v1"
+      },
+      "task_state": {
+        "state_version": "phase4b-task-state-v2",
+        "generation": 1,
+        "status": "active",
+        "goal": "查询实际净退款金额",
+        "constraints": {
+          "metric": "net_refund_amount",
+          "periods": [
+            "2026-08"
+          ]
+        },
+        "pending_questions": [],
+        "requirements": [
+          "sql:net_refund_amount:2026-08"
+        ],
+        "evidence_requirements": [
+          {
+            "identity": "sql:net_refund_amount:2026-08",
+            "kind": "sql",
+            "purpose": "metric_comparison",
+            "runtime_scope": "not_applicable",
+            "expected_document_keys": [],
+            "depends_on": null,
+            "required": true,
+            "freshness": "current_run",
+            "query_fingerprint": "b99d91ff113809119675395e9eeda51f9a12ea44fef535173962291ec78a82b0"
+          }
+        ],
+        "route": "sql",
+        "evidence": [
+          {
+            "ref": {
+              "run_id": "m44-repair",
+              "evidence_id": "evidence:3b795787aa86682c963226db42b2bc42b5b5c42186c48defbd3fc7530f0319b3",
+              "evidence_kind": "sql",
+              "authority_identity": "phase4b-seed",
+              "revision": "frozen",
+              "content_identity": "oracle:m44-repair:1",
+              "anchor": "sql-result"
+            },
+            "route": "sql",
+            "requirement_identity": "sql:net_refund_amount:2026-08",
+            "validity": "active",
+            "invalidation_reason": null,
+            "source_generation": 1,
+            "action_id": "repair_sql_evidence",
+            "input_fingerprint": "17f127f9404a623678238bd3740059f1341ec73d727f01d75b2d77cdee9ab5ec",
+            "runtime_identity": null
+          }
+        ],
+        "termination": "answer_ready",
+        "last_action_attempts": [
+          {
+            "ordinal": 1,
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:net_refund_amount:2026-08",
+            "input_fingerprint": "fdd25f88d2a0f3e429eb9221751ebdb81d4ad2fcb2380fde8e66f45e37773f01",
+            "duplicate_key": "80d387e80bdad514227c11017742ead73620ae391878f64b4e458750f786efb2",
+            "status": "failed",
+            "observation": {
+              "tool_name": "text2sql",
+              "route": "sql",
+              "execution_status": "failed",
+              "answer_status": "no_answer",
+              "safety_status": "passed",
+              "reason_code": "sql_dialect_incompatible",
+              "error_type": "sql_execution_error",
+              "evidence_refs": [],
+              "diagnostics": {
+                "issue_code": "mysql_unsupported_date_trunc"
+              }
+            },
+            "budget_before": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 0,
+                "deep_tools": 0,
+                "sql_actions": 0,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0
+            },
+            "budget_after": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 1,
+                "deep_tools": 1,
+                "sql_actions": 1,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "evidence_delta": {
+              "added": [],
+              "removed": [],
+              "invalidated": [],
+              "duplicate": []
+            },
+            "progress": {
+              "coverage_increased": false,
+              "eligible_action_remains": true,
+              "reason_code": "recoverable_observation"
+            }
+          },
+          {
+            "ordinal": 2,
+            "action_id": "repair_sql_evidence",
+            "requirement_identity": "sql:net_refund_amount:2026-08",
+            "input_fingerprint": "17f127f9404a623678238bd3740059f1341ec73d727f01d75b2d77cdee9ab5ec",
+            "duplicate_key": "6a67e085a383c82632d86befdce4330c8550f9d5a4b1e282936a0277fcd3f8ca",
+            "status": "completed",
+            "observation": {
+              "tool_name": "text2sql",
+              "route": "sql",
+              "execution_status": "completed",
+              "answer_status": "complete",
+              "safety_status": "passed",
+              "reason_code": "sql_completed",
+              "error_type": null,
+              "evidence_refs": [
+                {
+                  "run_id": "m44-repair",
+                  "evidence_id": "evidence:3b795787aa86682c963226db42b2bc42b5b5c42186c48defbd3fc7530f0319b3",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-repair:1",
+                  "anchor": "sql-result"
+                }
+              ],
+              "diagnostics": {}
+            },
+            "budget_before": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 1,
+                "deep_tools": 1,
+                "sql_actions": 1,
+                "knowledge_actions": 0,
+                "repairs": 0,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 1,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0
+            },
+            "budget_after": {
+              "profile": {
+                "identity": "phase4b-b2-parent-budget-conservative-v1",
+                "max_actions": 3,
+                "max_deep_tools": 3,
+                "max_sql_actions": 3,
+                "max_knowledge_actions": 1,
+                "max_repairs_per_requirement": 1,
+                "max_retrieval_batches": 1,
+                "max_candidates": 5,
+                "max_selected": 3,
+                "max_generation_visible": 3,
+                "max_model_calls": 6,
+                "max_total_tokens": 24000
+              },
+              "consumed": {
+                "actions": 2,
+                "deep_tools": 2,
+                "sql_actions": 2,
+                "knowledge_actions": 0,
+                "repairs": 1,
+                "retrieval_batches": 0,
+                "candidates": 0,
+                "selected": 0,
+                "generation_visible": 0,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_usage_observed": true,
+                "timeouts": 0,
+                "latency_ms": 0.0
+              }
+            },
+            "evidence_delta": {
+              "added": [
+                {
+                  "run_id": "m44-repair",
+                  "evidence_id": "evidence:3b795787aa86682c963226db42b2bc42b5b5c42186c48defbd3fc7530f0319b3",
+                  "evidence_kind": "sql",
+                  "authority_identity": "phase4b-seed",
+                  "revision": "frozen",
+                  "content_identity": "oracle:m44-repair:1",
+                  "anchor": "sql-result"
+                }
+              ],
+              "removed": [],
+              "invalidated": [],
+              "duplicate": []
+            },
+            "progress": {
+              "coverage_increased": true,
+              "eligible_action_remains": false,
+              "reason_code": "coverage_increased"
+            }
+          }
+        ],
+        "last_budget": {
+          "profile": {
+            "identity": "phase4b-b2-parent-budget-conservative-v1",
+            "max_actions": 3,
+            "max_deep_tools": 3,
+            "max_sql_actions": 3,
+            "max_knowledge_actions": 1,
+            "max_repairs_per_requirement": 1,
+            "max_retrieval_batches": 1,
+            "max_candidates": 5,
+            "max_selected": 3,
+            "max_generation_visible": 3,
+            "max_model_calls": 6,
+            "max_total_tokens": 24000
+          },
+          "consumed": {
+            "actions": 2,
+            "deep_tools": 2,
+            "sql_actions": 2,
+            "knowledge_actions": 0,
+            "repairs": 1,
+            "retrieval_batches": 0,
+            "candidates": 0,
+            "selected": 0,
+            "generation_visible": 0,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0.0
+          }
+        },
+        "last_termination": {
+          "reason": "answer_ready",
+          "detail_code": "answer_ready",
+          "active_requirement_identities": [
+            "sql:net_refund_amount:2026-08"
+          ],
+          "unresolved_requirement_identities": []
+        }
+      },
+      "actions": [
+        {
+          "ordinal": 1,
+          "action_id": "collect_sql_evidence",
+          "requirement_identity": "sql:net_refund_amount:2026-08",
+          "input_fingerprint": "fdd25f88d2a0f3e429eb9221751ebdb81d4ad2fcb2380fde8e66f45e37773f01",
+          "duplicate_key": "80d387e80bdad514227c11017742ead73620ae391878f64b4e458750f786efb2",
+          "status": "failed",
+          "observation": {
+            "tool_name": "text2sql",
+            "route": "sql",
+            "execution_status": "failed",
+            "answer_status": "no_answer",
+            "safety_status": "passed",
+            "reason_code": "sql_dialect_incompatible",
+            "error_type": "sql_execution_error",
+            "evidence_refs": [],
+            "diagnostics": {
+              "issue_code": "mysql_unsupported_date_trunc"
+            }
+          },
+          "budget_before": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 0,
+              "deep_tools": 0,
+              "sql_actions": 0,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "consumed": {
+            "actions": 1,
+            "deep_tools": 1,
+            "sql_actions": 1,
+            "knowledge_actions": 0,
+            "repairs": 0,
+            "retrieval_batches": 0,
+            "candidates": 0,
+            "selected": 0,
+            "generation_visible": 0,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0
+          },
+          "budget_after": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "evidence_delta": {
+            "added": [],
+            "removed": [],
+            "invalidated": [],
+            "duplicate": []
+          },
+          "progress": {
+            "coverage_increased": false,
+            "eligible_action_remains": true,
+            "reason_code": "recoverable_observation"
+          }
+        },
+        {
+          "ordinal": 2,
+          "action_id": "repair_sql_evidence",
+          "requirement_identity": "sql:net_refund_amount:2026-08",
+          "input_fingerprint": "17f127f9404a623678238bd3740059f1341ec73d727f01d75b2d77cdee9ab5ec",
+          "duplicate_key": "6a67e085a383c82632d86befdce4330c8550f9d5a4b1e282936a0277fcd3f8ca",
+          "status": "completed",
+          "observation": {
+            "tool_name": "text2sql",
+            "route": "sql",
+            "execution_status": "completed",
+            "answer_status": "complete",
+            "safety_status": "passed",
+            "reason_code": "sql_completed",
+            "error_type": null,
+            "evidence_refs": [
+              {
+                "run_id": "m44-repair",
+                "evidence_id": "evidence:3b795787aa86682c963226db42b2bc42b5b5c42186c48defbd3fc7530f0319b3",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-repair:1",
+                "anchor": "sql-result"
+              }
+            ],
+            "diagnostics": {}
+          },
+          "budget_before": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 1,
+              "deep_tools": 1,
+              "sql_actions": 1,
+              "knowledge_actions": 0,
+              "repairs": 0,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "consumed": {
+            "actions": 1,
+            "deep_tools": 1,
+            "sql_actions": 1,
+            "knowledge_actions": 0,
+            "repairs": 1,
+            "retrieval_batches": 0,
+            "candidates": 0,
+            "selected": 0,
+            "generation_visible": 0,
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_usage_observed": true,
+            "timeouts": 0,
+            "latency_ms": 0
+          },
+          "budget_after": {
+            "profile": {
+              "identity": "phase4b-b2-parent-budget-conservative-v1",
+              "max_actions": 3,
+              "max_deep_tools": 3,
+              "max_sql_actions": 3,
+              "max_knowledge_actions": 1,
+              "max_repairs_per_requirement": 1,
+              "max_retrieval_batches": 1,
+              "max_candidates": 5,
+              "max_selected": 3,
+              "max_generation_visible": 3,
+              "max_model_calls": 6,
+              "max_total_tokens": 24000
+            },
+            "consumed": {
+              "actions": 2,
+              "deep_tools": 2,
+              "sql_actions": 2,
+              "knowledge_actions": 0,
+              "repairs": 1,
+              "retrieval_batches": 0,
+              "candidates": 0,
+              "selected": 0,
+              "generation_visible": 0,
+              "model_calls": 0,
+              "total_tokens": 0,
+              "token_usage_observed": true,
+              "timeouts": 0,
+              "latency_ms": 0.0
+            }
+          },
+          "evidence_delta": {
+            "added": [
+              {
+                "run_id": "m44-repair",
+                "evidence_id": "evidence:3b795787aa86682c963226db42b2bc42b5b5c42186c48defbd3fc7530f0319b3",
+                "evidence_kind": "sql",
+                "authority_identity": "phase4b-seed",
+                "revision": "frozen",
+                "content_identity": "oracle:m44-repair:1",
+                "anchor": "sql-result"
+              }
+            ],
+            "removed": [],
+            "invalidated": [],
+            "duplicate": []
+          },
+          "progress": {
+            "coverage_increased": true,
+            "eligible_action_remains": false,
+            "reason_code": "coverage_increased"
+          }
+        }
+      ],
+      "budget": {
+        "profile": {
+          "identity": "phase4b-b2-parent-budget-conservative-v1",
+          "max_actions": 3,
+          "max_deep_tools": 3,
+          "max_sql_actions": 3,
+          "max_knowledge_actions": 1,
+          "max_repairs_per_requirement": 1,
+          "max_retrieval_batches": 1,
+          "max_candidates": 5,
+          "max_selected": 3,
+          "max_generation_visible": 3,
+          "max_model_calls": 6,
+          "max_total_tokens": 24000
+        },
+        "consumed": {
+          "actions": 2,
+          "deep_tools": 2,
+          "sql_actions": 2,
+          "knowledge_actions": 0,
+          "repairs": 1,
+          "retrieval_batches": 0,
+          "candidates": 0,
+          "selected": 0,
+          "generation_visible": 0,
+          "model_calls": 0,
+          "total_tokens": 0,
+          "token_usage_observed": true,
+          "timeouts": 0,
+          "latency_ms": 0.0
+        }
+      },
+      "node_contexts": [
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "decision",
+          "source_identities": [
+            "e4fc789e7c84e930b3bc51a768185213a54fbed2af53de2f6b7a894d3048f1b3"
+          ],
+          "payload": {
+            "requirement_identities": [
+              "sql:net_refund_amount:2026-08"
+            ],
+            "active_evidence_ids": [],
+            "budget_profile_identity": "phase4b-b2-parent-budget-conservative-v1",
+            "controller_identity": "phase4b-deterministic-controller-v1"
+          },
+          "allowed_fields": [
+            "requirement_identities",
+            "active_evidence_ids",
+            "budget_profile_identity",
+            "controller_identity"
+          ],
+          "field_budget": 4,
+          "token_budget": 768,
+          "estimated_tokens": 56,
+          "input_fingerprint": "f05d97f92335821484ec968aab9d6adbfb44b4591eaf295534f10c845d557873"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "sql_action",
+          "source_identities": [
+            "e4fc789e7c84e930b3bc51a768185213a54fbed2af53de2f6b7a894d3048f1b3",
+            "sql:net_refund_amount:2026-08"
+          ],
+          "payload": {
+            "action_id": "collect_sql_evidence",
+            "requirement_identity": "sql:net_refund_amount:2026-08",
+            "input_fingerprint": "fdd25f88d2a0f3e429eb9221751ebdb81d4ad2fcb2380fde8e66f45e37773f01",
+            "budget_before_identity": "51eb973c838994b95651ee580cdffd207f1424378eb0929c7349aba01cd338b0",
+            "runtime_scope": "not_applicable"
+          },
+          "allowed_fields": [
+            "action_id",
+            "requirement_identity",
+            "input_fingerprint",
+            "budget_before_identity",
+            "runtime_scope"
+          ],
+          "field_budget": 5,
+          "token_budget": 512,
+          "estimated_tokens": 78,
+          "input_fingerprint": "2e61cc87aea31352c326b41ca74872fd74a9c5883ce17d981a3e66845bc037e2"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "sql_action",
+          "source_identities": [
+            "e4fc789e7c84e930b3bc51a768185213a54fbed2af53de2f6b7a894d3048f1b3",
+            "sql:net_refund_amount:2026-08"
+          ],
+          "payload": {
+            "action_id": "repair_sql_evidence",
+            "requirement_identity": "sql:net_refund_amount:2026-08",
+            "input_fingerprint": "17f127f9404a623678238bd3740059f1341ec73d727f01d75b2d77cdee9ab5ec",
+            "budget_before_identity": "947c37e2dd1d6fddf12eadd857c9084ea78b1458206c56ac101f7c54d72bfa99",
+            "runtime_scope": "not_applicable"
+          },
+          "allowed_fields": [
+            "action_id",
+            "requirement_identity",
+            "input_fingerprint",
+            "budget_before_identity",
+            "runtime_scope"
+          ],
+          "field_budget": 5,
+          "token_budget": 512,
+          "estimated_tokens": 78,
+          "input_fingerprint": "87e42d66b7fe71c63fa0cddba7b6aa7a9bf8cb801cce114b0fe0b935b927cec1"
+        },
+        {
+          "context_version": "phase4b-agent-node-context-v2",
+          "purpose": "controller_response",
+          "source_identities": [
+            "139633ec4307f84c228e4cb3c5ea1fc47a7919e8a06ec46759d61468428c3323"
+          ],
+          "payload": {
+            "termination": {
+              "reason": "answer_ready",
+              "detail_code": "answer_ready",
+              "active_requirement_identities": [
+                "sql:net_refund_amount:2026-08"
+              ],
+              "unresolved_requirement_identities": []
+            },
+            "action_count": 2,
+            "budget_identity": "ca1dcbf88d84957b430dc6f77de7d026b299cbf7bf27ba968cabf260e368bc26",
+            "route": "sql"
+          },
+          "allowed_fields": [
+            "termination",
+            "action_count",
+            "budget_identity",
+            "route"
+          ],
+          "field_budget": 4,
+          "token_budget": 768,
+          "estimated_tokens": 77,
+          "input_fingerprint": "e1af91a8257a57f20261fc8125521a396e56f327b10ced3d3cab44c54cdf974d"
+        }
+      ],
+      "termination": {
+        "reason": "answer_ready",
+        "detail_code": "answer_ready",
+        "active_requirement_identities": [
+          "sql:net_refund_amount:2026-08"
+        ],
+        "unresolved_requirement_identities": []
+      },
+      "runtime_identity": {
+        "format": "phase4b-agent-loop-langgraph-v1",
+        "contract_identity": "a808b321ba8cae63ef0adaed3815d4becdfd650c37e2b30e9f1402ed8ecd485b",
+        "task_state_version": "phase4b-task-state-v2",
+        "controller_identity": "phase4b-deterministic-controller-v1",
+        "budget_profile_identity": "phase4b-b2-parent-budget-conservative-v1",
+        "knowledge_resolver_identity": "phase4b-knowledge-runtime-resolver-v1"
+      },
+      "assertions": [
+        [
+          "required:sql_dialect_repair",
+          "passed"
+        ]
+      ]
+    }
+  ],
+  "artifact_identity": "63c9483c8d55b958b48925085d99c9bb14164c1120a7d364c0b1c611dabac700"
+}

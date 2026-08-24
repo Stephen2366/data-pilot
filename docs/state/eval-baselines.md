@@ -20,6 +20,7 @@
 - **M43 Phase 4B B1 deterministic artifact**：新增 additive `phase4b-agent-scenario-artifact-v2`，只记录 TaskDelta、state transition、Evidence validity、node Context、task lifecycle 与 0/1 invocation 事实；M42 v1 未改签。当前 rehearsal artifact `cc9f696...b27c92` 绑定 B1 contract `383fbf5...e9d32`，8 项 deterministic checks 通过、external calls 为 0。它证明 B1 技术合同和冻结 oracle，不是 LLM/Agent 质量分数或正式长期基线；M46 reserve 仍 sealed。
 - **M44A Enterprise semantic 技术 smoke**：产品 API/external Eval 默认改为 semantic，但 M34 lexical/semantic 正式 retrieval 结果和历史 artifact 不改签。单题 C6 `m44a-rag-external-qst0386-20260824-c6` 只证明真实向量产品链闭合，不自动登记正式长期基线，也不构成 lexical/semantic A/B。
 - **M44A semantic dev Smoke**：9 题 post-fix external smoke `m44a-rag-external-semantic-smoke-20260824-023039` 已 completed；Gate `92/16/0`、人工 `2/7`。与历史 lexical smoke 的 candidate compare 已按预注册 runtime 字段闭合，但单次 generation 不构成 Reliability 或单组件因果；仍不登记正式长期基线。
+- **M44 Agent Scenario v3**：`phase4b-agent-scenario-v3` 是 B2 closed-world deterministic 控制/安全 artifact；rehearsal identity `63c9483c8d55b958b48925085d99c9bb14164c1120a7d364c0b1c611dabac700`，6/6 checks、external calls=0。它冻结 action sequence、actual consumption、EvidenceDelta/progress/termination、Context 与 private-payload 安全投影，不产生真实模型/RAG 质量分数，不与 M27/M34/M41 基线混算。
 - **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
 ## 读数与分母

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 
@@ -69,6 +69,7 @@ class LLMCallEvidence:
     prompt_length: int
     system_prompt_length: int
     attempts: tuple[LLMAttemptEvidence, ...]
+    usage: dict[str, int | bool] = field(default_factory=lambda: {"observed": False})
 
     def to_trace_metadata(self) -> dict[str, Any]:
         """转换成 JSONL / LangFuse 都能消费的普通字典。"""
@@ -84,6 +85,7 @@ class LLMCallEvidence:
             "system_prompt_length": self.system_prompt_length,
             "final_outcome": self.attempts[-1].outcome if self.attempts else "not_started",
             "attempts": [asdict(attempt) for attempt in self.attempts],
+            "usage": dict(self.usage),
         }
 
 
@@ -138,6 +140,7 @@ def execute_llm_call(
         else float(getattr(client, "retry_backoff_seconds", 1.0)),
     )
     attempts: list[LLMAttemptEvidence] = []
+    usage_before = _usage_snapshot(client)
 
     for attempt_number in range(1, resolved_retries + 2):
         started = time.perf_counter()
@@ -160,7 +163,7 @@ def execute_llm_call(
                     error_message=str(exc)[:500],
                 )
             )
-            evidence = _build_evidence(client, stage, prompt, system_prompt, resolved_retries, attempts)
+            evidence = _build_evidence(client, stage, prompt, system_prompt, resolved_retries, attempts, usage_before)
             exc.call_evidence = evidence
             exc.stage = exc.stage or stage
             exc.prompt_length = exc.prompt_length or len(prompt)
@@ -180,7 +183,7 @@ def execute_llm_call(
                     error_message=str(exc)[:500],
                 )
             )
-            evidence = _build_evidence(client, stage, prompt, system_prompt, resolved_retries, attempts)
+            evidence = _build_evidence(client, stage, prompt, system_prompt, resolved_retries, attempts, usage_before)
             raise LLMGenerationError(
                 f"LLM client 调用异常：{exc}",
                 stage=stage,
@@ -198,7 +201,7 @@ def execute_llm_call(
             )
             return LLMCallResult(
                 content=content,
-                evidence=_build_evidence(client, stage, prompt, system_prompt, resolved_retries, attempts),
+                evidence=_build_evidence(client, stage, prompt, system_prompt, resolved_retries, attempts, usage_before),
             )
 
     raise AssertionError("LLM attempt loop should always return or raise")
@@ -211,6 +214,7 @@ def _build_evidence(
     system_prompt: str,
     max_retries: int,
     attempts: list[LLMAttemptEvidence],
+    usage_before: dict[str, int] | None,
 ) -> LLMCallEvidence:
     """集中提取非敏感 client 属性，保持 trace metadata 稳定。"""
 
@@ -223,4 +227,24 @@ def _build_evidence(
         prompt_length=len(prompt),
         system_prompt_length=len(system_prompt),
         attempts=tuple(attempts),
+        usage=_usage_delta(client, usage_before),
     )
+
+
+def _usage_snapshot(client: SupportsComplete) -> dict[str, int] | None:
+    """只在 client 暴露真实 provider counter 时读取；fake 不伪造 token。"""
+
+    names = ("request_count", "prompt_tokens", "completion_tokens", "total_tokens")
+    if not all(hasattr(client, name) for name in names):
+        return None
+    return {name: int(getattr(client, name, 0) or 0) for name in names}
+
+
+def _usage_delta(client: SupportsComplete, before: dict[str, int] | None) -> dict[str, int | bool]:
+    if before is None:
+        return {"observed": False}
+    after = _usage_snapshot(client) or before
+    return {
+        "observed": True,
+        **{name: max(0, after[name] - value) for name, value in before.items()},
+    }

@@ -18,6 +18,7 @@ from engine.nl2sql.generator import (
     QueryPlanExtractionError,
     SQLPlanContractError,
     generate_query_plan,
+    generate_sql_repair_from_plan_step,
     generate_sql_from_plan_step,
     get_default_llm_client,
     validate_sql_plan_contract,
@@ -80,6 +81,20 @@ class Text2SQLPipelineResult:
         if self.tool_result is not None:
             return self.tool_result.safety_status
         return "blocked" if self.blocked_reason else "passed"
+
+
+@dataclass(frozen=True)
+class SQLRepairContext:
+    """顶层 Controller 允许传入的最小修复事实；不承载 raw DB error。"""
+
+    candidate_sql: str
+    issue_code: str
+
+    def __post_init__(self) -> None:
+        if self.issue_code != "mysql_unsupported_date_trunc":
+            raise ValueError("sql_repair_issue_not_allowed")
+        if not self.candidate_sql.strip():
+            raise ValueError("sql_repair_candidate_missing")
 
 
 def _blocked_result(
@@ -244,6 +259,7 @@ def run_text2sql_pipeline(
     schema_retrieval_profile: str = "default",
     schema_fusion_strategy: str = "weighted",
     schema_vector_index: VectorIndex | None = None,
+    repair_context: SQLRepairContext | None = None,
 ) -> Text2SQLPipelineResult:
     """执行 M11 single-step Text2SQL pipeline。
 
@@ -487,17 +503,27 @@ def run_text2sql_pipeline(
         )
 
     # 步骤 4：局部 Schema SQL 生成 -----------------------------------------------------------
-    span = trace_context.start_span(name="sql_generation", parent_step_id=plan_step.step_id)
+    generation_stage = "sql_repair" if repair_context is not None else "sql_generation"
+    span = trace_context.start_span(name=generation_stage, parent_step_id=plan_step.step_id)
     sql_call_evidence: list[LLMCallEvidence] = []
     try:
-        generated_sql = generate_sql_from_plan_step(
-            question=question,
-            user_role=user_role,
-            plan_step=plan_step,
-            schema_graph=schema_graph,
-            domain_schema=active_domain_schema,
-            llm_client=llm_client,
-            llm_evidence_sink=sql_call_evidence.append,
+        generation_args = {
+            "question": question,
+            "user_role": user_role,
+            "plan_step": plan_step,
+            "schema_graph": schema_graph,
+            "domain_schema": active_domain_schema,
+            "llm_client": llm_client,
+            "llm_evidence_sink": sql_call_evidence.append,
+        }
+        generated_sql = (
+            generate_sql_repair_from_plan_step(
+                **generation_args,
+                candidate_sql=repair_context.candidate_sql,
+                issue_code=repair_context.issue_code,
+            )
+            if repair_context is not None
+            else generate_sql_from_plan_step(**generation_args)
         )
     except LLMGenerationError as exc:
         span.fail(
@@ -511,7 +537,7 @@ def run_text2sql_pipeline(
                 answer_hint=answer_hint,
                 trace_steps=trace_context.trace_steps,
                 issue_tags=["llm_generation_error"],
-                blocked_reason=f"局部 Schema SQL 生成失败：{exc}",
+                blocked_reason=f"局部 Schema SQL {'修复' if repair_context else '生成'}失败：{exc}",
                 error_type="llm_generation_error",
             ),
             trace_context,
@@ -570,6 +596,8 @@ def run_text2sql_pipeline(
             "plan_step_joins": plan_step.joins,
             "plan_step_output_columns": plan_step.output_columns,
             "query_plan_step": plan_step.model_dump(mode="json"),
+            "generation_stage": generation_stage,
+            "repair_issue_code": repair_context.issue_code if repair_context else None,
             "sql_guard_precheck_status": "passed" if guard_precheck.is_allowed else "blocked",
             "sql_guard_precheck_reason": guard_precheck.blocked_reason,
             **(fidelity_result.to_trace_metadata() if fidelity_result is not None else {}),

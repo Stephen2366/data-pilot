@@ -26,9 +26,14 @@ from engine.trace.runtime import build_trace_runtime_identity
 from engine.phase4b.task_boundary import TaskBoundary
 from engine.phase4b.task_turn import TaskTurnRequest, TaskTurnResult, clear_task, run_task_turn
 from engine.phase4b.task_runtime import B1_CONTRACT_IDENTITY
+from engine.phase4b.agent_loop import AgentLoopRuntime
+from engine.phase4b.b2_contracts import load_b2_contract_bundle
+from engine.phase4b.identity import canonical_hash
+from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver, KnowledgeRuntimeSpec
 
 
 router = APIRouter(prefix="/api", tags=["query"])
+B2_BUNDLE = load_b2_contract_bundle()
 
 
 def _trace_id(request: Request) -> str:
@@ -49,6 +54,10 @@ def _observation_projection(observation: ToolObservation | None) -> dict[str, An
 
     if observation is None:
         return None
+    safe_diagnostics = {
+        key: value for key, value in observation.diagnostics.items()
+        if key.lower() not in {"technical_message", "raw_error", "stack", "prompt", "rows", "thought"}
+    }
     return {
         "tool_name": observation.tool_name,
         "route": observation.route,
@@ -58,7 +67,7 @@ def _observation_projection(observation: ToolObservation | None) -> dict[str, An
         "reason_code": observation.reason_code,
         "error_type": observation.error_type,
         "sql_time_ms": observation.sql_time_ms,
-        "diagnostics": observation.diagnostics,
+        "diagnostics": safe_diagnostics,
         "ledger": observation.ledger_projection,
     }
 
@@ -153,11 +162,13 @@ def _record_trace(
         runtime_identity = {
             "format": "phase4b-agent-task-runtime-v1",
             "status": "complete",
-            "contract_identity": B1_CONTRACT_IDENTITY,
+            "contract_identity": B2_BUNDLE.content_identity,
+            "predecessor_contract_identity": B1_CONTRACT_IDENTITY,
             "task_state_version": task_turn.task.state.state_version if task_turn.task else None,
             "turn_understanding_identity": task_turn.delta.source_identity if task_turn.delta else None,
             "task_boundary": task_turn.task_runtime,
             "deep_harness": deep_runtime_identity,
+            "agent_loop": task_turn.agent_loop.runtime_identity if task_turn.agent_loop else None,
         }
     trace_record = TraceRecord(
         trace_id=response.trace_id,
@@ -215,6 +226,11 @@ def _record_trace(
         task_delta=task_turn.delta.safe_projection() if task_turn and task_turn.delta else None,
         task_transition=task_turn.transition.safe_projection() if task_turn and task_turn.transition else None,
         node_contexts=[item.safe_projection() for item in task_turn.node_contexts] if task_turn else [],
+        action_attempts=[item.safe_projection() for item in task_turn.agent_loop.attempts] if task_turn and task_turn.agent_loop else [],
+        agent_budget=task_turn.agent_loop.budget.safe_projection() if task_turn and task_turn.agent_loop else None,
+        agent_termination=task_turn.agent_loop.termination.safe_projection() if task_turn and task_turn.agent_loop else None,
+        knowledge_runtimes=[dict(item) for item in task_turn.agent_loop.knowledge_runtimes] if task_turn and task_turn.agent_loop else [],
+        agent_loop_runtime=dict(task_turn.agent_loop.runtime_identity) if task_turn and task_turn.agent_loop else None,
     )
     path = _trace_path(request)
     if path is None:
@@ -270,6 +286,27 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
     )
     if request_body.task is not None:
         boundary: TaskBoundary = request.app.state.task_boundary
+        runtime_specs: list[KnowledgeRuntimeSpec] = []
+        business_factory = getattr(request.app.state, "business_rag_tool_factory", None)
+        if business_factory is not None:
+            runtime_specs.append(KnowledgeRuntimeSpec(
+                "business_release", business_factory,
+                str(getattr(request.app.state, "business_rag_runtime_identity", "business-release-active-v1")),
+            ))
+        if rag_tool_factory is not None:
+            raw_external_identity = getattr(request.app.state, "rag_runtime_status", {}).get("runtime_identity")
+            external_identity = (
+                f"external-profile:{canonical_hash(raw_external_identity)}"
+                if isinstance(raw_external_identity, dict) else str(raw_external_identity or "external-profile-active-v1")
+            )
+            runtime_specs.append(KnowledgeRuntimeSpec(
+                "external_profile", rag_tool_factory, external_identity
+            ))
+        agent_runtime = AgentLoopRuntime(
+            sql_tool=sql_tool,
+            knowledge_resolver=KnowledgeRuntimeResolver(tuple(runtime_specs)),
+            hybrid_synthesizer=runtime.hybrid_synthesizer,
+        )
         task_turn = run_task_turn(
             request=TaskTurnRequest(
                 harness_request=harness_request,
@@ -279,6 +316,7 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             ),
             runtime=runtime,
             boundary=boundary,
+            agent_runtime=agent_runtime,
         )
         # 复用兼容字段的唯一 projector，再只追加 task family 事实；SimpleNamespace 不参与业务判断。
         compatible_turn = SimpleNamespace(
@@ -298,6 +336,11 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             "task_delta": task_turn.delta.safe_projection() if task_turn.delta else None,
             "task_transition": task_turn.transition.safe_projection() if task_turn.transition else None,
             "node_contexts": [item.safe_projection() for item in task_turn.node_contexts],
+            "action_attempts": [item.safe_projection() for item in task_turn.agent_loop.attempts] if task_turn.agent_loop else [],
+            "agent_budget": task_turn.agent_loop.budget.safe_projection() if task_turn.agent_loop else None,
+            "agent_termination": task_turn.agent_loop.termination.safe_projection() if task_turn.agent_loop else None,
+            "knowledge_runtimes": [dict(item) for item in task_turn.agent_loop.knowledge_runtimes] if task_turn.agent_loop else [],
+            "agent_loop_runtime": dict(task_turn.agent_loop.runtime_identity) if task_turn.agent_loop else None,
         })
         _record_trace(request=request, request_body=request_body, response=response, turn=compatible_turn, task_turn=task_turn)
         return response

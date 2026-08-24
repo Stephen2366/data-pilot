@@ -73,6 +73,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - M41 external `phase4-rag-external-product-v2` 直接审计完整 M34 immutable 180 question set；difficulty `basic/core/hard=64/74/42`、partition `60 dev/120 held-out` 与 suite `smoke/basic/core/hard/reliability/full` 三轴分离，不复制题面。eval-only fixed-RAG Router 只固定进入 RAG 分支，因此评测 Harness/RAG Tool/AnswerFlow，不声称验证自然语言 Router 分类。
 - M44A 的普通 API 与 external Eval 共用 `EnterpriseProductRuntime` resolver。FastAPI lifespan 每进程 acquire/close 一次只读 SQLite profile 与 Milvus client；`/health` 只表示进程存活，`/health/rag` 才投影 profile/semantic/manifest/embedding/collection/unit-set readiness。Milvus 只返回 unit identity，正文、ACL、Evidence coordinates 和 citation 继续由 SQLite profile 权威回查。
 - semantic 启动严格执行 collection existence/description identity → load → load state → visible unit-set 核验；不创建、reset、release 或重建。任一步失败都使用 unavailable adapter，RAG 零 Evidence/Composer，且不回退 lexical/业务小语料；SQL 与普通 liveness 继续可用。
+- M44 task family 另由服务端 `KnowledgeRuntimeResolver` 按 typed requirement scope 选择 `business_release/external_profile`；请求不能提交 scope/backend。business action 使用 22 条 active release lexical，external action 使用上述 M44A semantic runtime；scope、identity、ACL 或 readiness 不闭合时该 action 失败关闭，不在两套账之间 fallback。普通非 task RAG 的 Enterprise semantic 默认不受影响。
 
 ## 当前评测结论
 
@@ -114,6 +115,7 @@ semantic snapshot 已完成全部 139,214 个 unique unit，并在 M44A 后成�
 - M41 `phase4-rag-e2e-v1`：canonical business RAG catalog 对外只保留唯一 `business` selector（5 题各 1 次）；场景内部分类只用于诊断。冻结 product runtime、release/corpus/retrieval/Composer/policy/caller identity，建立 retrieved→selected→generation-visible→provider/support→cited→answer funnel、closed-world artifact、Gate、triage、review。external 的裸 smoke/basic/core/hard/reliability/full 默认指向 dev；`phase4-rag-e2e-compare-v2` 默认 strict repeat，只有显式声明允许变化的 runtime 字段才进入候选 A/B。
 - M41 external-180：完整 180 catalog 复用同一 Evidence/Gate/review 框架，以 partition × suite 选择运行范围；dev 为 smoke 9、basic 21、core 25、hard 14、reliability 6×3、full 60。业务题与 external 题不得混成同一分数。
 - M42 `phase4b-agent-scenario-v1`：sequence/turn/execution/assertion closed-world skeleton，安全投影只保存 evidence kind/ref 和三态结果；B0 capability matrix 明示 M43–M48 unavailable。它不替代 M41 单题 RAG Eval，也不证明 Agent runtime 或 RAG Subgraph 已可执行。
+- M44 `phase4b-agent-scenario-v3`：从同一 B2 Loop 事实冻结 task/contract/seed/caller/knowledge/policy identity、逐 action budget/EvidenceDelta/progress/termination、Context 与 private payload；deterministic rehearsal 6/6、零 provider。B2 在业务首次检索只返回 quality 而缺 basic 时稳定停止为 `budget_exhausted/required_coverage_incomplete`，不会重复 query；这证明控制和审计合同，不是 B3 recovery 或 B4 RAG Subgraph。
 
 ## 活跃风险与后续边界
 

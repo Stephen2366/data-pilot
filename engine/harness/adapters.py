@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.schemas.agent import ToolCallTrace
 from engine.harness.contracts import HarnessRequest, ToolObservation
 from engine.nl2sql.generator import LLMGenerationError, generate_sql
-from engine.nl2sql.pipeline import Text2SQLPipelineResult, run_text2sql_pipeline
+from engine.nl2sql.pipeline import SQLRepairContext, Text2SQLPipelineResult, run_text2sql_pipeline
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.nl2sql.templates import match_template
 from engine.rag.answer_flow import (
@@ -38,6 +38,11 @@ class Text2SQLTool(Protocol):
 
     def run_for_hybrid(self, request: HarnessRequest) -> ToolObservation:
         """执行同一 SQL 深链并保留仅供 Hybrid controller 消费的 typed Evidence。"""
+
+    def run_repair(
+        self, request: HarnessRequest, *, candidate_sql: str, issue_code: str
+    ) -> ToolObservation:
+        """对 allowlisted 方言 Observation 执行至多一次受控修复。"""
 
 
 class RAGTool(Protocol):
@@ -213,19 +218,30 @@ def _sql_observation(
     if result is None or resolved_error is not None or result.safety_status != "passed":
         execution = "external_unavailable" if resolved_error in {"llm_generation_error", "query_plan_extraction_error"} else "failed"
         technical_message = message or (result.blocked_reason if result else None) or "Text2SQL 当前不可用。"
+        dialect_failure = bool(
+            sql
+            and "date_trunc" in sql.lower()
+            and resolved_error == "sql_execution_error"
+            and result is not None
+            and result.safety_status == "passed"
+        )
+        reason_code = "sql_dialect_incompatible" if dialect_failure else (resolved_error or "text2sql_failed")
         return ToolObservation(
             tool_name="text2sql",
             route="sql",
             execution_status=execution,
             answer_status="no_answer",
             safety_status="passed",
-            reason_code=resolved_error or "text2sql_failed",
+            reason_code=reason_code,
             answer="当前无法完成数据查询，请稍后再试。",
             sql=sql,
             tables_used=tuple(result.tables_used) if result else (),
             tool_calls=(resolved_call,) if resolved_call else (),
             trace_steps=tuple(trace_steps),
-            diagnostics={"technical_message": technical_message},
+            diagnostics={
+                "technical_message": technical_message,
+                **({"issue_code": "mysql_unsupported_date_trunc"} if dialect_failure else {}),
+            },
             error_type=resolved_error or "text2sql_failed",
             sql_time_ms=result.sql_time_ms if result else 0.0,
             langfuse_trace_id=lifecycle.get("trace_id"),
@@ -324,7 +340,23 @@ class Text2SQLToolAdapter:
 
         return self.run(request)
 
-    def _run_new_pipeline(self, request: HarnessRequest) -> ToolObservation:
+    def run_repair(
+        self, request: HarnessRequest, *, candidate_sql: str, issue_code: str
+    ) -> ToolObservation:
+        """受控 repair 仍走 QueryPlan validation、Guard、执行与 Evidence 构造。"""
+
+        if request.caller is None or request.active_sql_role is None:
+            raise ValueError("未解析 caller 不得进入 Text2SQL repair")
+        if not request.force_new_pipeline:
+            raise ValueError("sql_repair_requires_new_pipeline")
+        return self._run_new_pipeline(
+            request,
+            repair_context=SQLRepairContext(candidate_sql=candidate_sql, issue_code=issue_code),
+        )
+
+    def _run_new_pipeline(
+        self, request: HarnessRequest, *, repair_context: SQLRepairContext | None = None
+    ) -> ToolObservation:
         """复用既有 Schema Retrieval → QueryPlan → Guard 深链。"""
 
         result: Text2SQLPipelineResult = run_text2sql_pipeline(
@@ -335,6 +367,7 @@ class Text2SQLToolAdapter:
             schema_retrieval_profile=request.schema_retrieval_profile,
             schema_fusion_strategy=request.schema_fusion_strategy,
             schema_vector_index=self._schema_vector_index,
+            repair_context=repair_context,
         )
         semantic_request_rejection = any(
             step.name == "plan_validation"

@@ -344,8 +344,10 @@ DEFAULT_OUTBOUND_POLICY = OutboundPolicy(
         # ★ 只登记现有 Text2SQL 数据类别；同一 receiver 的 Document Evidence 仍因缺规则而拒绝。
         OutboundRule("qwen_chat", "query_plan", "text2sql_prompt", TEXT2SQL_CHAT_FIELDS),
         OutboundRule("qwen_chat", "sql_generation", "text2sql_prompt", TEXT2SQL_CHAT_FIELDS),
+        OutboundRule("qwen_chat", "sql_repair", "text2sql_prompt", TEXT2SQL_CHAT_FIELDS),
         OutboundRule("deepseek_chat", "query_plan", "text2sql_prompt", TEXT2SQL_CHAT_FIELDS),
         OutboundRule("deepseek_chat", "sql_generation", "text2sql_prompt", TEXT2SQL_CHAT_FIELDS),
+        OutboundRule("deepseek_chat", "sql_repair", "text2sql_prompt", TEXT2SQL_CHAT_FIELDS),
         OutboundRule("dashscope_embedding", "schema_embedding", "schema_text", SCHEMA_EMBEDDING_FIELDS),
         OutboundRule("siliconflow_embedding", "schema_embedding", "schema_text", SCHEMA_EMBEDDING_FIELDS),
     )

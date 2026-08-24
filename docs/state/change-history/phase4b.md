@@ -19,6 +19,16 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M44 Phase 4B B2 Evidence-driven Bounded Decision Loop（2026-08-24）
+
+- **改动范围**：新增 additive B2 contract/manifest、TaskState v2、typed Requirement/Action/Budget/Consumption/EvidenceDelta/Progress/Termination、服务端 Knowledge Runtime Resolver、独立 task-only LangGraph Loop、Agent Scenario v3、rehearsal/report 和四组 M44 测试；task envelope 改接一次深 Loop invoke，legacy 非 task Harness、M42 v1 与 M43 v2 validator 保持兼容。B2 contract identity `a808b321...d485b`。
+- **用户决策与预算**：G44-1～G44-4 均选 A。普通 API 保持 M44A Enterprise semantic，task requirement 由服务端 closed-world scope 选择 business/external；next Action 完全确定性，decision model calls/tokens=0；父预算最多 3 Evidence actions/deep Tools、SQL 3、Knowledge 1、每 requirement repair 1、retrieval batch 1、candidate 5、selected/generation-visible 3、model calls 6、observed tokens 24000；SQL repair 使用独立最小 outbound purpose。未选的结构化模型 proposal 方案 B 只进入 `AI_CONTEXT` 防遗忘账本，不是 M44 未完成项。
+- **关键实现与修正**：Controller 在每次 action 前按 typed requirement/依赖、duplicate/no-progress 和实际消费重新裁决，超额消费保留账本后稳定停止。跨 turn active Evidence 覆盖旧 requirement；T3 由 reason Observation 的正向 Evidence 增量驱动 product SQL，T4 形成 SQL→business Document Hybrid，T5 correction 显式 invalidation 后重取 SQL/document。业务检索缺 required basic 时停止 `budget_exhausted/required_coverage_incomplete` 且不重复 query。精确 `DATE_TRUNC` 执行错误仅允许一次最小 repair，prompt 不含 Schema、raw DB error、rows 或 stack，修复结果重走 QueryPlan validation、SQL fidelity、Guard 与执行。
+- **安全投影与 Eval**：API、JSONL Trace 和 Scenario v3 从同一 Loop/turn facts 投影 action attempts、budget、termination、knowledge runtime 与 actual-node Context v2；不保存 raw task/thread ID、rows、正文、prompt、raw DB error、stack 或 Thought。v3 rehearsal artifact `63c9483...ac700`，T3/T4/T5、repair once、negative skip 共 6/6，external calls=0；它是 deterministic 控制/安全证据，不是质量基线。
+- **参考与适配**：定点复核 ARAG conditional edge/state/nodes、DataAgent dispatcher/repair 回边和 LangGraph Runtime/conditional edge/recursion limit。借鉴 typed state 回边、固定 dispatcher、execution key 去重和实际 Context；适配为 DataPilot closed-world action、三层业务预算与 fail-closed Evidence；不照搬 LLM 自由 tool call、字符串 Observation、平台大状态、人审/Python executor 或用框架 recursion limit 冒充业务预算。精确坐标见 `docs/notes/m44-plan.md` 与 notes。
+- **验证快照**：最终聚焦 `57 passed, 1 warning`；deterministic rehearsal 6/6、external calls=0；后台全仓 `539 passed, 1 warning in 599.47s`，exit 0。compileall 与 `git diff --check` 在代码冻结点通过，技术档案写入后再次复核。warning 为既有 Starlette TestClient/httpx deprecation。
+- **边界与后续**：未运行真实 provider、真实 repair showcase、RAG Eval、held-out/all 或 sealed reserve；未实现 B3 recovery action、B4 RAG Subgraph、B5 durable state、B6 Compact。下一模块 M45/B3 只能基于已保存 Observation 诊断并准入预注册 action；M46 前 reserve 保持 sealed。数据库 schema/seed/指标、embedding/Milvus snapshot、业务 active release、默认模型与历史基线均未改变。
+
 ### [实验] M44A Enterprise semantic external dev Smoke（2026-08-24）
 
 - **范围与身份**：用户明确授权 RAG smoke，按 runbook 唯一执行 external `diagnostic_dev/smoke` 9 题各一次；run `m44a-rag-external-semantic-smoke-20260824-023039`、artifact `4bfff9d...5346d` completed，exit 0，无 resume/重跑、lexical fallback、held-out/all 或 reserve 访问。runtime 为 semantic `9aec12...e20`、manifest `22c573...97b`、Qwen embedding 1024、既有 Milvus collection/unit-set；运行前 preflight ready。
