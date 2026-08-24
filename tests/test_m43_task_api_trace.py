@@ -29,10 +29,10 @@ class _B1SQLTool:
         comparison = "并计算差额" in request.question
         august_only = "8 月" in request.question and not comparison
         rows = (
-            ({"period": "2026-07", "net_refund_amount": 120000}, {"period": "2026-08", "net_refund_amount": 180000, "delta": 60000, "rate": 0.5})
+            ({"period": "2026-07", "net_refund_amount": 120000}, {"period": "2026-08", "net_refund_amount": 180000})
             if comparison else (({"period": "2026-08", "net_refund_amount": 180000},) if august_only else ({"period": "2026-07", "net_refund_amount": 120000},))
         )
-        answer = "8 月为 180000。" if august_only else ("7 月为 120000。" if not comparison else "7 月 120000，8 月 180000，增加 60000，增幅 50%。")
+        answer = "8 月为 180000。" if august_only else ("7 月为 120000。" if not comparison else "SQL 已返回两个月的基础金额。")
         return ToolObservation(
             tool_name="text2sql", route="sql", execution_status="completed", answer_status="complete",
             safety_status="passed", reason_code="sql_completed", answer=answer, sql="SELECT safe_b1_oracle",
@@ -80,6 +80,7 @@ def test_canonical_t1_t2_share_task_fact_and_requery_after_invalidation(tmp_path
     assert _B1SQLTool.calls == 2
     assert body["runtime_family"] == "agent_task" and body["task_delta"]["category"] == "modify_constraint"
     assert body["rows"][1] == {"period": "2026-08", "net_refund_amount": 180000, "delta": 60000, "rate": 0.5}
+    assert "增加 60000" in body["answer"] and "50%" in body["answer"]
     validity = [item["validity"] for item in body["task"]["state"]["evidence"]]
     assert validity == ["invalidated", "active"]
     assert body["task_transition"]["invalidated_evidence_count"] == 1
@@ -90,6 +91,8 @@ def test_canonical_t1_t2_share_task_fact_and_requery_after_invalidation(tmp_path
     assert traces[1]["task_transition"]["after_identity"] == traces[1]["task_lifecycle"]["state_identity"]
     assert traces[1]["runtime_identity"]["format"] == "phase4b-agent-task-runtime-v1"
     assert traces[1]["runtime_identity"]["contract_identity"]
+    assert traces[1]["rows"] == body["rows"]
+    assert traces[1]["tool_observation"]["diagnostics"]["comparison_completion"]["status"] == "complete"
 
 
 def test_clarify_cancel_clear_and_pre_rejection_never_call_graph(tmp_path: Path) -> None:

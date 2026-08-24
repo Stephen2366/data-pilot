@@ -65,6 +65,57 @@ def test_contract_accepts_proven_semantic_equivalences(order_by: list[str], limi
     assert result.reason_code == "fidelity_ok"
 
 
+def test_contract_accepts_only_exact_month_bucket_dialect_translation() -> None:
+    """DATE_TRUNC→DATE_FORMAT 只在同字段、month、固定首日格式时登记窄等价。"""
+
+    schema = load_domain_schema()
+    step = _step(
+        tables=["refunds"],
+        order_by=["month ASC"],
+        output_columns=["month"],
+        output_expressions={"month": "DATE_TRUNC('month', refunds.processed_at)"},
+    )
+    accepted = evaluate_sql_plan_fidelity(
+        plan_step=step,
+        candidate_sql=(
+            "SELECT DATE_FORMAT(refunds.processed_at, '%Y-%m-01') AS month "
+            "FROM refunds GROUP BY DATE_FORMAT(refunds.processed_at, '%Y-%m-01') "
+            "ORDER BY month ASC"
+        ),
+        domain_schema=schema,
+    )
+
+    assert accepted.status == "passed"
+    assert accepted.narrow_equivalences == (
+        "month_bucket_dialect_translation:date_trunc_to_date_format",
+    )
+
+    rejected_sql = (
+        "SELECT {expression} AS month FROM refunds GROUP BY {expression} ORDER BY month {direction}"
+    )
+    rejected = (
+        rejected_sql.format(
+            expression="DATE_FORMAT(refunds.requested_at, '%Y-%m-01')",
+            direction="ASC",
+        ),
+        rejected_sql.format(
+            expression="DATE_FORMAT(refunds.processed_at, '%Y-%m')",
+            direction="ASC",
+        ),
+        rejected_sql.format(
+            expression="DATE_FORMAT(refunds.processed_at, '%Y-%m-01')",
+            direction="DESC",
+        ),
+    )
+    for sql in rejected:
+        result = evaluate_sql_plan_fidelity(
+            plan_step=step,
+            candidate_sql=sql,
+            domain_schema=schema,
+        )
+        assert result.status == "failed"
+
+
 @pytest.mark.parametrize(
     ("step", "sql", "reason_code"),
     [

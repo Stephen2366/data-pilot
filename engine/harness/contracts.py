@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from app.schemas.agent import ToolCallTrace
 from engine.governance import TrustedCaller
+from engine.nl2sql.sql_repair import SQLRepairSnapshot
 from engine.rag.answer_flow import AnswerEvidenceRequirement
 from engine.rag.evidence import Evidence, EvidenceLedger, EvidenceRef
 from engine.trace.recorder import TraceStep
@@ -295,6 +296,7 @@ class ToolObservation:
     # 投影绝不读取它们，避免把正文或完整 SQL result 变成长期可见数据。
     evidence_ledger: EvidenceLedger | None = field(default=None, repr=False, compare=False)
     raw_evidence: tuple[Evidence, ...] = field(default=(), repr=False, compare=False)
+    sql_repair_snapshot: SQLRepairSnapshot | None = field(default=None, repr=False, compare=False)
     diagnostics: dict[str, Any] = field(default_factory=dict)
     blocked_reason: str | None = None
     error_type: str | None = None

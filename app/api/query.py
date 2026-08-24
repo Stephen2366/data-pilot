@@ -15,13 +15,13 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, TaskControlResponse, TaskView, ThreadControlResponse, ThreadView
+from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, TaskControlResponse, TaskView, ThreadControlResponse, ThreadView, ToolCallTrace
 from engine.harness.adapters import RAGToolAdapter, Text2SQLToolAdapter, UnavailableRAGToolAdapter
 from engine.harness.contracts import HarnessRequest, ToolObservation
 from engine.harness.graph import HarnessRuntime
 from engine.harness.thread import ThreadCheckpointManager
 from engine.harness.turn import AgentTurnResult, TurnRequest, clear_thread, run_turn
-from engine.trace.recorder import TraceRecord, append_trace
+from engine.trace.recorder import TraceRecord, TraceStep, append_trace
 from engine.trace.runtime import build_trace_runtime_identity
 from engine.phase4b.task_boundary import TaskBoundary
 from engine.phase4b.task_turn import TaskTurnRequest, TaskTurnResult, clear_task, run_task_turn
@@ -34,6 +34,7 @@ from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver, Knowledge
 
 router = APIRouter(prefix="/api", tags=["query"])
 B2_BUNDLE = load_b2_contract_bundle()
+_SAFE_SQL_EXECUTION_MESSAGE = "SQL 执行失败。"
 
 
 def _trace_id(request: Request) -> str:
@@ -70,6 +71,37 @@ def _observation_projection(observation: ToolObservation | None) -> dict[str, An
         "diagnostics": safe_diagnostics,
         "ledger": observation.ledger_projection,
     }
+
+
+def _safe_tool_calls(calls: list[ToolCallTrace]) -> list[ToolCallTrace]:
+    """在公开边界再次脱敏 SQL 执行错误，防止 adapter 误把 driver 原文透传出去。"""
+
+    return [
+        call.model_copy(update={"message": _SAFE_SQL_EXECUTION_MESSAGE})
+        if call.error_type == "sql_execution_error"
+        else call
+        for call in calls
+    ]
+
+
+def _safe_trace_steps(steps: tuple[Any, ...]) -> list[Any]:
+    """清理 SQL execution span；Response 与 JSONL Trace 共守同一 raw-error 禁区。"""
+
+    projected: list[Any] = []
+    for step in steps:
+        if isinstance(step, TraceStep) and step.error_type == "sql_execution_error":
+            safe_metadata = {
+                key: value
+                for key, value in step.metadata.items()
+                if key in {"tables_used", "latency_ms", "issue_code"}
+            }
+            projected.append(step.model_copy(update={
+                "output_summary": _SAFE_SQL_EXECUTION_MESSAGE,
+                "metadata": safe_metadata,
+            }))
+        else:
+            projected.append(step)
+    return projected
 
 
 def _hybrid_branch_projection(result: Any) -> list[dict[str, Any]]:
@@ -111,6 +143,7 @@ def _project_response(*, turn: AgentTurnResult, trace_id: str, started_at: float
     tool_calls = list(observation.tool_calls) if observation else (
         [call for branch in result.hybrid.branches for call in branch.observation.tool_calls] if result.hybrid else []
     )
+    tool_calls = _safe_tool_calls(tool_calls)
     citations = list(observation.citations) if observation else (list(result.hybrid.citations) if result.hybrid else [])
 
     # 步骤 2：blocked_reason 只表达安全裁决；技术故障只能在 reason/error_type 中诊断。----
@@ -188,7 +221,7 @@ def _record_trace(
         blocked_reason=response.blocked_reason,
         cost=response.cost,
         tool_calls=response.tool_calls,
-        trace_steps=list(observation.trace_steps) if observation else [],
+        trace_steps=_safe_trace_steps(observation.trace_steps) if observation else [],
         error_type=response.error_type,
         langfuse_trace_id=observation.langfuse_trace_id if observation else None,
         langfuse_trace_url=observation.langfuse_trace_url if observation else None,

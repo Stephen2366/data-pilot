@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from engine.governance import demo_caller
 from engine.harness.contracts import HarnessRequest, ToolObservation
+from engine.nl2sql.planner import QueryPlanStep
+from engine.nl2sql.sql_repair import SQLRepairSnapshot
 from engine.phase4b.agent_loop import AgentLoopRuntime, run_agent_loop
 import engine.phase4b.agent_loop as agent_loop_module
 from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver, KnowledgeRuntimeSpec
@@ -68,11 +70,23 @@ def _sql_observation(request: HarnessRequest, *, rows: tuple[dict[str, object], 
 
 
 def _dialect_failure() -> ToolObservation:
+    sql = "SELECT DATE_TRUNC('month', paid_at) AS month FROM refunds"
+    snapshot = SQLRepairSnapshot(
+        candidate_sql=sql,
+        issue_code="mysql_unsupported_date_trunc",
+        plan_step=QueryPlanStep(
+            step_id="repair-step", step_index=1, step_type="sql_query",
+            purpose="按月查询退款", task_type="aggregation", tables=["refunds"],
+            columns=["refunds.paid_at"], group_by=["refunds.paid_at"],
+            output_columns=["month"], output_expressions={"month": "refunds.paid_at"},
+        ),
+    )
     return ToolObservation(
         tool_name="text2sql", route="sql", execution_status="failed", answer_status="no_answer",
         safety_status="passed", reason_code="sql_dialect_incompatible",
-        sql="SELECT DATE_TRUNC('month', paid_at) FROM refunds",
+        sql=sql,
         error_type="sql_execution_error", diagnostics={"issue_code": "mysql_unsupported_date_trunc"},
+        sql_repair_snapshot=snapshot,
     )
 
 
@@ -128,9 +142,10 @@ class ProductSQLTool:
     def run(self, request: HarnessRequest) -> ToolObservation:
         return self.run_for_hybrid(request)
 
-    def run_repair(self, request: HarnessRequest, *, candidate_sql: str, issue_code: str) -> ToolObservation:
+    def run_repair(self, request: HarnessRequest, *, snapshot: SQLRepairSnapshot) -> ToolObservation:
         self.repair_calls += 1
-        assert "DATE_TRUNC" in candidate_sql and issue_code == "mysql_unsupported_date_trunc"
+        assert "DATE_TRUNC" in snapshot.candidate_sql
+        assert snapshot.issue_code == "mysql_unsupported_date_trunc"
         return _sql_observation(request, rows=({"period": "2026-08", "net_refund_amount": 180000},))
 
 
@@ -161,7 +176,7 @@ class FailureSQLTool:
     def run(self, request: HarnessRequest) -> ToolObservation:
         return self.run_for_hybrid(request)
 
-    def run_repair(self, request: HarnessRequest, *, candidate_sql: str, issue_code: str) -> ToolObservation:
+    def run_repair(self, request: HarnessRequest, *, snapshot: SQLRepairSnapshot) -> ToolObservation:
         self.repair_calls += 1
         raise AssertionError("非 allowlisted failure 不得进入 repair")
 
@@ -175,6 +190,21 @@ class NoEvidenceSQLTool:
             tool_name="text2sql", route="sql", execution_status="completed", answer_status="no_answer",
             safety_status="passed", reason_code="sql_completed_without_evidence",
         )
+
+    def run(self, request: HarnessRequest) -> ToolObservation:
+        return self.run_for_hybrid(request)
+
+
+@dataclass
+class ComparisonSQLTool:
+    """只返回基础两期 rows，差额必须由 Agent completion 产生。"""
+
+    rows: tuple[dict[str, object], ...]
+    calls: int = 0
+
+    def run_for_hybrid(self, request: HarnessRequest) -> ToolObservation:
+        self.calls += 1
+        return _sql_observation(request, rows=self.rows)
 
     def run(self, request: HarnessRequest) -> ToolObservation:
         return self.run_for_hybrid(request)
@@ -208,6 +238,36 @@ def test_t3_second_product_action_depends_on_positive_quality_observation() -> N
     stopped = run_agent_loop(request=_request(question, "m44-negative"), state=_state(question), runtime=_runtime(negative))
     assert negative.calls == 1 and stopped.termination.reason == "answer_ready"
     assert len(stopped.attempts) == 1
+
+
+def test_metric_comparison_completion_controls_answer_ready() -> None:
+    question = "查询 2026 年 7 月和 8 月实际净退款金额，并计算差额和变化率。"
+    success_tool = ComparisonSQLTool((
+        {"month": "2026-07-01", "net_refund_amount": 120000},
+        {"month": "2026-08-01", "net_refund_amount": 180000},
+    ))
+    success = run_agent_loop(
+        request=_request(question, "m44-comparison-success"),
+        state=_state(question),
+        runtime=_runtime(success_tool),  # type: ignore[arg-type]
+    )
+    assert success.termination.reason == "answer_ready"
+    assert success.result.answer_status == "complete"
+    assert success.result.observation is not None
+    assert success.result.observation.rows[1]["delta"] == 60000.0
+    assert "增加 60000" in success.result.answer
+
+    incomplete_tool = ComparisonSQLTool((
+        {"month": "2026-08-01", "net_refund_amount": 180000},
+    ))
+    incomplete = run_agent_loop(
+        request=_request(question, "m44-comparison-incomplete"),
+        state=_state(question),
+        runtime=_runtime(incomplete_tool),  # type: ignore[arg-type]
+    )
+    assert incomplete.termination.reason == "no_progress"
+    assert incomplete.termination.detail_code == "comparison_row_count_mismatch"
+    assert incomplete.result.answer_status == "partial"
 
 
 def test_t3_after_existing_t2_evidence_does_not_repeat_old_requirement() -> None:

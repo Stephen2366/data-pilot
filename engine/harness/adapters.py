@@ -14,6 +14,7 @@ from app.schemas.agent import ToolCallTrace
 from engine.harness.contracts import HarnessRequest, ToolObservation
 from engine.nl2sql.generator import LLMGenerationError, generate_sql
 from engine.nl2sql.pipeline import SQLRepairContext, Text2SQLPipelineResult, run_text2sql_pipeline
+from engine.nl2sql.sql_repair import SQLRepairSnapshot, SQLRepairStrategy, validate_sql_repair_strategy
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.nl2sql.templates import match_template
 from engine.rag.answer_flow import (
@@ -40,7 +41,7 @@ class Text2SQLTool(Protocol):
         """执行同一 SQL 深链并保留仅供 Hybrid controller 消费的 typed Evidence。"""
 
     def run_repair(
-        self, request: HarnessRequest, *, candidate_sql: str, issue_code: str
+        self, request: HarnessRequest, *, snapshot: SQLRepairSnapshot
     ) -> ToolObservation:
         """对 allowlisted 方言 Observation 执行至多一次受控修复。"""
 
@@ -129,6 +130,7 @@ def _sql_observation(
     lifecycle: dict[str, str | None] | None = None,
     semantic_request_rejection: bool = False,
     output_projection_rejection: bool = False,
+    repair_snapshot: SQLRepairSnapshot | None = None,
 ) -> ToolObservation:
     """集中区分确定性 SQL 合同拒绝与技术失败，避免旧 API 的“全都 blocked”回归。"""
 
@@ -218,12 +220,13 @@ def _sql_observation(
     if result is None or resolved_error is not None or result.safety_status != "passed":
         execution = "external_unavailable" if resolved_error in {"llm_generation_error", "query_plan_extraction_error"} else "failed"
         technical_message = message or (result.blocked_reason if result else None) or "Text2SQL 当前不可用。"
+        # ★ SQL Tool 的 `blocked` 表示本次查询不能继续产出 rows，不代表 Guard 拒绝。
+        # dialect repair 只认底层已经安全归一化的 closed-world issue code；不能要求
+        # `safety_status=passed`，也不能让 Controller 解析 driver 异常字符串猜错误类型。
         dialect_failure = bool(
-            sql
-            and "date_trunc" in sql.lower()
-            and resolved_error == "sql_execution_error"
+            resolved_error == "sql_execution_error"
             and result is not None
-            and result.safety_status == "passed"
+            and result.issue_code == "mysql_unsupported_date_trunc"
         )
         reason_code = "sql_dialect_incompatible" if dialect_failure else (resolved_error or "text2sql_failed")
         return ToolObservation(
@@ -240,8 +243,9 @@ def _sql_observation(
             trace_steps=tuple(trace_steps),
             diagnostics={
                 "technical_message": technical_message,
-                **({"issue_code": "mysql_unsupported_date_trunc"} if dialect_failure else {}),
+                **({"issue_code": result.issue_code} if dialect_failure and result is not None else {}),
             },
+            sql_repair_snapshot=repair_snapshot if dialect_failure else None,
             error_type=resolved_error or "text2sql_failed",
             sql_time_ms=result.sql_time_ms if result else 0.0,
             langfuse_trace_id=lifecycle.get("trace_id"),
@@ -320,9 +324,17 @@ def _build_answer(answer_hint: str, rows: list[dict[str, Any]]) -> str:
 class Text2SQLToolAdapter:
     """把新/legacy Text2SQL 封装成一个深 Tool；`force_new_pipeline` 不再绕过 Harness。"""
 
-    def __init__(self, *, db: Session, schema_vector_index: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        db: Session,
+        schema_vector_index: Any | None = None,
+        repair_strategy: SQLRepairStrategy = "deterministic_ast",
+    ) -> None:
         self._db = db
         self._schema_vector_index = schema_vector_index
+        # 这是服务端 assembly 配置，不来自 HarnessRequest/API request；未知值失败关闭。
+        self._repair_strategy = validate_sql_repair_strategy(repair_strategy)
 
     def run(self, request: HarnessRequest) -> ToolObservation:
         """执行选定 pipeline，并把其旧错误形状翻译为 M35 四轴。"""
@@ -341,7 +353,7 @@ class Text2SQLToolAdapter:
         return self.run(request)
 
     def run_repair(
-        self, request: HarnessRequest, *, candidate_sql: str, issue_code: str
+        self, request: HarnessRequest, *, snapshot: SQLRepairSnapshot
     ) -> ToolObservation:
         """受控 repair 仍走 QueryPlan validation、Guard、执行与 Evidence 构造。"""
 
@@ -351,7 +363,7 @@ class Text2SQLToolAdapter:
             raise ValueError("sql_repair_requires_new_pipeline")
         return self._run_new_pipeline(
             request,
-            repair_context=SQLRepairContext(candidate_sql=candidate_sql, issue_code=issue_code),
+            repair_context=snapshot,
         )
 
     def _run_new_pipeline(
@@ -368,6 +380,7 @@ class Text2SQLToolAdapter:
             schema_fusion_strategy=request.schema_fusion_strategy,
             schema_vector_index=self._schema_vector_index,
             repair_context=repair_context,
+            repair_strategy=self._repair_strategy,
         )
         semantic_request_rejection = any(
             step.name == "plan_validation"
@@ -393,6 +406,7 @@ class Text2SQLToolAdapter:
             },
             semantic_request_rejection=semantic_request_rejection,
             output_projection_rejection=output_projection_rejection,
+            repair_snapshot=result.repair_snapshot,
         )
 
     def _run_legacy_pipeline(self, request: HarnessRequest) -> ToolObservation:

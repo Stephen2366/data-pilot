@@ -44,7 +44,7 @@
 ## Trace / LangFuse
 
 - 本地 JSONL Trace 默认写入 `eval/traces/`；`/api/query` 主 Trace 为 `eval/traces/traces.jsonl`。
-- Trace 不保存 Document 正文、完整 SQL rows、private Evidence、raw DB error、Prompt、raw thread id/raw task id 或结构化 thread/task 参数副本；Agent task Trace 只增加安全 task lifecycle/state/delta/transition/node-context 与 B2 action/budget/termination/runtime 投影。
+- SQL 单路（含 agent task SQL）JSONL Trace 沿用历史兼容合同：可保存已经 SQL Guard 且已授权执行的 `columns/rows`，供本地排障与 Response/Trace 对账。Hybrid Trace 仍必须清空完整 SQL rows；所有 Trace 均不得保存 Document 正文、private Evidence、raw DB error、Prompt、raw thread id/raw task id 或结构化 thread/task 参数副本。Agent task 的 action Observation/node Context/Scenario artifact 也不得借此例外携带 rows。
 - LangFuse 默认关闭。只有显式任务才设置 `LANGFUSE_ENABLED=true`；Cloud 只是旁路增强，不能影响本地 EvalRun。
 - LangFuse 专项排障不放在本 runbook；需要时按 `AI_CONTEXT.md` 和历史索引进入对应资料。
 

@@ -60,6 +60,8 @@ class TraceRecord(BaseModel):
     answer: str
     sql: str | None = None
     columns: list[str] = Field(default_factory=list)
+    # SQL 单路的本地 JSONL 沿用历史兼容合同，可记录 Guarded rows；
+    # Hybrid 必须由 API projector 清空，action/Context/artifact 也不得复制该字段。
     rows: list[dict[str, Any]] = Field(default_factory=list)
     tables_used: list[str] = Field(default_factory=list)
     docs_used: list[dict[str, Any]] = Field(default_factory=list)

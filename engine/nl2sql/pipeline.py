@@ -18,7 +18,6 @@ from engine.nl2sql.generator import (
     QueryPlanExtractionError,
     SQLPlanContractError,
     generate_query_plan,
-    generate_sql_repair_from_plan_step,
     generate_sql_from_plan_step,
     get_default_llm_client,
     validate_sql_plan_contract,
@@ -27,6 +26,12 @@ from engine.nl2sql.llm_call import LLMCallEvidence
 from engine.nl2sql.planner import QueryPlan, validate_query_plan
 from engine.nl2sql.semantic_validation import validate_request_semantics
 from engine.nl2sql.schema_loader import DomainSchema, load_domain_schema
+from engine.nl2sql.sql_repair import (
+    SQLRepairSnapshot,
+    SQLRepairStrategy,
+    repair_sql_candidate,
+    validate_sql_repair_strategy,
+)
 from engine.schema_retrieval.graph import build_schema_graph
 from engine.schema_retrieval.objects import SchemaGraph, SchemaRetrievalResult
 from engine.schema_retrieval.retriever import retrieve_schema
@@ -73,6 +78,8 @@ class Text2SQLPipelineResult:
     langfuse_trace_url: str | None = None
     langfuse_write_status: str = "skipped"
     langfuse_span_mode: str = "post_hoc"
+    # 只交给同进程 Agent Loop 的 repair action；API/JSONL projector 没有读取入口。
+    repair_snapshot: SQLRepairSnapshot | None = field(default=None, repr=False, compare=False)
 
     @property
     def safety_status(self) -> str:
@@ -83,18 +90,8 @@ class Text2SQLPipelineResult:
         return "blocked" if self.blocked_reason else "passed"
 
 
-@dataclass(frozen=True)
-class SQLRepairContext:
-    """顶层 Controller 允许传入的最小修复事实；不承载 raw DB error。"""
-
-    candidate_sql: str
-    issue_code: str
-
-    def __post_init__(self) -> None:
-        if self.issue_code != "mysql_unsupported_date_trunc":
-            raise ValueError("sql_repair_issue_not_allowed")
-        if not self.candidate_sql.strip():
-            raise ValueError("sql_repair_candidate_missing")
+# 兼容既有 import 名称；实际语义已收紧为“原计划 + candidate + typed issue”不可变快照。
+SQLRepairContext = SQLRepairSnapshot
 
 
 def _blocked_result(
@@ -260,6 +257,7 @@ def run_text2sql_pipeline(
     schema_fusion_strategy: str = "weighted",
     schema_vector_index: VectorIndex | None = None,
     repair_context: SQLRepairContext | None = None,
+    repair_strategy: SQLRepairStrategy = "deterministic_ast",
 ) -> Text2SQLPipelineResult:
     """执行 M11 single-step Text2SQL pipeline。
 
@@ -267,6 +265,7 @@ def run_text2sql_pipeline(
     全量 schema prompt、模板 SQL 或 SQL 自动修复。
     """
 
+    selected_repair_strategy = validate_sql_repair_strategy(repair_strategy)
     active_domain_schema = domain_schema or load_domain_schema()
     trace_context = build_trace_context(trace_id=trace_id, question=question, user_role=user_role)
     answer_hint = "新 Text2SQL 查询结果"
@@ -393,12 +392,18 @@ def run_text2sql_pipeline(
     span = trace_context.start_span(name="query_plan")
     query_plan_call_evidence: list[LLMCallEvidence] = []
     try:
-        plan = generate_query_plan(
-            question=question,
-            schema_graph=schema_graph,
-            domain_schema=active_domain_schema,
-            llm_client=llm_client,
-            llm_evidence_sink=query_plan_call_evidence.append,
+        # ★ repair 的语义 authority 是首次已验证计划。这里仍用当前 SchemaGraph 重做本地
+        # validator，但绝不再请求 provider 生成第二份 QueryPlan。
+        plan = (
+            QueryPlan(steps=[repair_context.plan_step])
+            if repair_context is not None
+            else generate_query_plan(
+                question=question,
+                schema_graph=schema_graph,
+                domain_schema=active_domain_schema,
+                llm_client=llm_client,
+                llm_evidence_sink=query_plan_call_evidence.append,
+            )
         )
     except QueryPlanExtractionError as exc:
         span.fail(
@@ -458,6 +463,7 @@ def run_text2sql_pipeline(
                 }
                 for step in plan.steps
             ],
+            "repair_plan_reused": repair_context is not None,
             **_llm_success_metadata(query_plan_call_evidence),
         },
     )
@@ -517,10 +523,11 @@ def run_text2sql_pipeline(
             "llm_evidence_sink": sql_call_evidence.append,
         }
         generated_sql = (
-            generate_sql_repair_from_plan_step(
+            repair_sql_candidate(
                 **generation_args,
                 candidate_sql=repair_context.candidate_sql,
                 issue_code=repair_context.issue_code,
+                strategy=selected_repair_strategy,
             )
             if repair_context is not None
             else generate_sql_from_plan_step(**generation_args)
@@ -565,6 +572,10 @@ def run_text2sql_pipeline(
                 output_summary=str(exc),
                 metadata={
                     **_llm_error_metadata(exc),
+                    **_llm_success_metadata(sql_call_evidence),
+                    "generation_stage": generation_stage,
+                    "repair_issue_code": repair_context.issue_code if repair_context else None,
+                    "repair_strategy": selected_repair_strategy if repair_context else None,
                     "sql_guard_precheck_status": "passed",
                     "query_plan_step": plan_step.model_dump(mode="json"),
                     **exc.contract_result.to_trace_metadata(),
@@ -598,6 +609,7 @@ def run_text2sql_pipeline(
             "query_plan_step": plan_step.model_dump(mode="json"),
             "generation_stage": generation_stage,
             "repair_issue_code": repair_context.issue_code if repair_context else None,
+            "repair_strategy": selected_repair_strategy if repair_context else None,
             "sql_guard_precheck_status": "passed" if guard_precheck.is_allowed else "blocked",
             "sql_guard_precheck_reason": guard_precheck.blocked_reason,
             **(fidelity_result.to_trace_metadata() if fidelity_result is not None else {}),
@@ -617,6 +629,15 @@ def run_text2sql_pipeline(
     )
 
     if tool_result.safety_status != "passed":
+        issued_repair_snapshot = (
+            SQLRepairSnapshot(
+                candidate_sql=generated_sql.sql,
+                issue_code=tool_result.issue_code,
+                plan_step=plan_step,
+            )
+            if repair_context is None and tool_result.issue_code == "mysql_unsupported_date_trunc"
+            else None
+        )
         return _with_trace_snapshot(
             Text2SQLPipelineResult(
                 sql=generated_sql.sql,
@@ -627,6 +648,7 @@ def run_text2sql_pipeline(
                 blocked_reason=tool_result.blocked_reason,
                 error_type=tool_result.error_type,
                 tool_call=tool_result.tool_call,
+                repair_snapshot=issued_repair_snapshot,
             ),
             trace_context,
         )

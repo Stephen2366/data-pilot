@@ -4,6 +4,62 @@
 >
 > 主要问题：M43 的 Agent task 每个 accepted turn 仍只执行零或一次固定 Harness，无法在同一次运行中根据真实 Observation 判断缺失 Evidence、选择下一项已登记动作并以预算、进展或稳定原因停止
 
+## 2026-08-24 post-finish defect repair addendum
+
+本 addendum 只修复收工后真实 smoke 已证实的两个 M44 合同缺陷，不改变 B2 能力范围、G44-1～G44-4、默认模型、parent budget、数据库、Knowledge runtime 或 M45/B3 路线：
+
+- 修复真实 `run_sql_tool` 数据库错误形状与 Harness dialect classifier 的 `blocked/passed` 条件错位，使精确 `DATE_TRUNC`/MySQL 错误能安全归一化为既有 allowlisted issue，并进入至多一次的 `repair_sql_evidence`；generic DB error、timeout、Guard deny 仍不可 repair。
+- API Response 与 SQL 单路 JSONL Trace 可沿用历史兼容投影保存已经 Guard/授权的 `columns/rows`；action Observation、node Context、Scenario artifact 与 Hybrid Trace 不得携带完整 rows。所有公开/持久投影均不得包含底层驱动/SQLAlchemy 异常、stack 或凭据；详细异常只允许进入受控本地日志。
+- 增加 real-shape deterministic regression，必须使用与真实 `run_sql_tool` 一致的 `blocked/sql_execution_error` 输入，同时覆盖 dialect allowlist、generic error 排除和 Response/Trace 非泄漏。
+
+### Live Probe checkpoint
+
+- Probe ID：`M44-PFIX-1`。
+- 时点：**after defect code + focused deterministic tests / before broader regression and renewed finish-module**；它是本次重开开发的切片门，不把先前 post-module exploratory smoke 倒填为 Probe。
+- 场景：通过真实 `/api/query`、Qwen 与 MySQL 只执行 canonical T1→T2 一次；T1 建立 task，T2 触发双月比较。不得延伸到 T3～T5、RAG Eval、held-out 或 sealed reserve。
+- 观察：T2 是否得到 `120000/180000/60000` 或形成可解释安全失败、action/budget/usage 是否闭合，以及 Response/Trace 是否不含底层数据库异常文本。SQL 生成器已产出可信 MySQL 等价式时允许零 repair；只有真实执行形成 allowlisted typed dialect error 时才要求恰好一次 `repair_sql_evidence`，禁止为了展示 repair 故意执行无效 SQL。
+- 预算：首次 attempt 原为最多 6 provider calls、20000 observed tokens。首次失败后，用户于 2026-08-24 确认方案 A 并批准本次修复 Probe 的首次+最小重验累计上限调整为 10 calls、35000 observed tokens；只允许具体修复落盘后额外重验 T1→T2 一次。单次已开始响应意外越界时保留 usage 后停止，不继续重跑、不换模型/backend。
+- 决策：passed→`continue` 进入 broader regression；failed→`revise` 并先定位修复，只有具体修复落盘后才允许最小重验一次；依赖不可用→`inconclusive/stop`。所有 attempt 当时写入 notes。
+
+### PFIX-G1：月份方言窄等价（已确认方案 A）
+
+- 问题：首次 Probe 的 QueryPlan 使用 `DATE_TRUNC('month', processed_at)`，SQL generator 已正确翻译为 MySQL `DATE_FORMAT(processed_at, '%Y-%m-01')`，但 fidelity Gate 将其误判为排序表达式不等价，数据库与 repair 均未到达。
+- 方案 A（用户确认）：在 SQL fidelity 深 module 登记精确 `month_bucket_dialect_translation`。只允许同一已解析 base column、计划粒度严格为 `month`、候选格式严格为 `%Y-%m-01` 的 `DATE_TRUNC → DATE_FORMAT`；继续检查方向、顺序、LIMIT、输出投影与其他表达式。
+- 未选 B：故意保留无效 `DATE_TRUNC` 再等待数据库报错和 repair，会主动制造失败并浪费调用。
+- 未选 C：保持误杀会让 canonical 双月比较继续不可用。
+- 安全边界：这是窄等价登记，不是关闭 fidelity 或把 `sql_plan_contract_failed` 扩成 repair；不同 column/unit/format、额外函数或真实表达式变化必须继续 failed/indeterminate。
+
+### PFIX-G2：repair 候选 A/B（已授权受控比较）
+
+- 问题：第二次 Probe 已走到真实 `repair_sql_evidence`，但最小上下文 LLM 在修正 `DATE_TRUNC` 时删除了 `diff/change_rate`，随后被 projection Gate 正确拦截；不得通过放宽 Gate 或盲目重试解决。
+- 候选 A：本地确定性 AST dialect repair。只对 typed `mysql_unsupported_date_trunc` 和可解析的单条 MySQL SELECT 生效，把月粒度 `DATE_TRUNC` 编译为 MySQL 等价 AST，不产生 repair provider call；其余 SQL 结构保持不变，之后仍重走 fidelity、Guard 与执行。
+- 候选 B：增强 LLM repair prompt。除既有安全字段外，只增加已验证 QueryPlan 的 required output aliases，明确要求按原顺序保留；仍不得外发 raw DB error、rows、Schema、metric 或 join details，之后仍重走同一组 Gate。
+- 隔离方式：两种策略均由服务端 closed-world 配置注入，客户端不能选择；旧 `llm_minimal` 暂时保持 production 默认。候选真实验证完成前不自动切默认，也不根据“实现方便”宣称胜出。
+- 真实验证：A、B 各执行一次 canonical T1→T2，真实 `/api/query`、Qwen 与 MySQL、事务内官方 seed + rollback；不触碰 T3～T5、RAG、held-out、reserve，不换模型/backend，不为任一候选重复抽样。两次并非统计学 A/B，只用于发现真实链缺陷与比较工程行为。
+- 用户授权：2026-08-24 批准两种候选均实现并各验证一次；连同既有两次 attempt 的累计硬上限为 18 provider calls / 65000 observed tokens，已开始的单次响应若越界则保留 usage 后停止后续候选。最终 production 选择仍需用户根据证据确认。
+
+### PFIX-G3：收敛 repair 核心合同（已确认缩小版方案 A）
+
+- 用户确认：2026-08-24 选择缩小版方案 A。首次 SQL 执行形成不可变的私有 repair snapshot，至少绑定已验证 QueryPlanStep、candidate SQL 与 typed issue；repair 复用该 snapshot，不再次调用 QueryPlan provider，也不换一份新计划验收。
+- 默认选择：服务端 dialect repair 默认切为 `deterministic_ast`；客户端仍不能选择策略。`llm_minimal/llm_enriched` 只保留非默认候选代码，不继续真实抽样，不宣称质量胜出。
+- 观测修复：SQL 已生成后在 fidelity/Guard/output 等后置 Gate 失败时，必须把已发生的 LLM evidence 与实际 repair strategy 写入 Trace，使 B2 action budget 能按真实发生计数；不得因失败结果而漏账。
+- 明确不做：不为 canonical T2 硬编码 `diff/change_rate`，不建立通用 required-output 平台，不让 dialect repair 补业务计算或重写答案。QueryPlan 偶发少列是独立 planning 质量证据；本 addendum 只保证 repair 不再制造第二份漂移合同。
+- 验证边界：先完成 deterministic snapshot/reuse/default/usage tests 与受影响回归。既有真实调用额度已耗尽且 usage 发现不完整，本切片不再运行 provider；是否另行真实重验必须在计量修复后重新授权。
+
+### PFIX-G4：typed comparison completion（已确认方案 A）
+
+- 用户确认：2026-08-24 选择窄范围的服务端 typed comparison completion。它只消费可信 TaskState/Evidence requirement 中的 `purpose=metric_comparison` 与 SQL Tool 已验证的结构化结果，不解析用户关键词，也不允许客户端指定计算方式。
+- 完成合同：当且仅当结果能闭合为两个不同 period、同一数值 metric 时，确定性计算 absolute difference 与 change rate，并把这些派生事实纳入安全 Answer/Trace；输入不足、重复 period、非数值、基期为零或投影不匹配时保守停止/partial，不能仅因 requirement 已取得 EvidenceRef 就 `answer_ready`。
+- 边界：不要求 QueryPlan/SQL 强制生成 `diff/change_rate`，不修改 SQL repair，不建立任意 required-output DSL，不支持多期趋势、任意公式或自然语言自由计算。completion 只消费已验证 SQL rows 并新增最小 typed 派生事实；API 及 SQL 单路 Trace 仍沿用已有 rows 兼容投影，不新增绕过它的任意 rows 通道。
+- 验证：先用 deterministic tests 覆盖成功、形状错误、基期为零、安全投影、预算与 legacy 非比较路径；再跑受影响回归。新的真实 Probe 是否执行及额度仍需遵守 runbook，不能复用已结束 artifact 或自动重跑。
+
+#### Live Probe checkpoint（已执行并通过）
+
+- Probe ID：`M44-PFIX-G4-1`；时点为 **after G4 implementation + full deterministic regression / before renewed finish-module**。这是 G4 新增真实行为的开发门，不改写或复用已结束的 G3 artifact。
+- 场景：真实 `/api/query` canonical T1→T2 恰好一次，Qwen/MySQL、事务内官方 seed + rollback；只观察 typed comparison completion，不执行 T3～T5、RAG、held-out、reserve，不换模型/backend、不重跑。
+- 通过标准：T1=`120000`；T2 取得 `120000/180000` 并由服务端 completion 产生 `delta=60000/rate=0.5`，最终 Answer 同时表达差额与 50%，termination=`answer_ready`；API/Trace same-source、usage 完整、raw DB error 缺席、数据库恢复。依赖不可用记 inconclusive；任何语义/安全/计量失败均 failed/stop。
+- 用户已批准独立上限 ≤5 provider calls / ≤22000 observed tokens；实际 `4 calls / 15762 tokens`，T2 给出 `120000/180000/delta=60000/rate=0.5`、`answer_ready`，raw DB marker=0，数据库回滚恢复，Gate passed。
+
 ## 1. 模块定义与范围判断
 
 用户已冻结“B0–B6 各对应一个模块和一份 module plan”，因此 M44 完整对应 B2，并在模块内部按 M44-A～M44-G 形成一个可独立学习、演示和验收的纵向闭环，不再把 B2 拆成额外模块。
@@ -178,7 +234,7 @@ M44 完成后，`phase4b-agent-runtime-v1` 的 accepted task turn 仍只有一�
 - 输入：同一 TaskTurnResult/AgentLoopResult 的 delta/state/action attempts/observations/EvidenceDelta/budget/contexts/termination/runtime identity。
 - 成功输出：API、Trace、v3 artifact 同源；completed artifact 对 sequence/turn/action/execution/assertion、contract/seed/caller/knowledge/runtime/policy identity closed-world 校验。
 - 失败语义：缺/多/重复 Action、budget 不守恒、Observation 与 EvidenceDelta 不一致、评分侧重跑、private payload、identity 漂移或旧 artifact 被补字段时拒绝 completed。
-- 必须保持的不变量：raw task id、完整 rows、Document 正文、Prompt、凭据和 Thought 不落 Trace/artifact；M42 v1、M43 v2 和 M31–M40 legacy Gate 同时保留。
+- 必须保持的不变量：raw task id、Document 正文、Prompt、凭据和 Thought 不落 Trace/artifact；action Observation、node Context、Scenario artifact 和 Hybrid Trace 不保存完整 rows。SQL 单路 JSONL Trace 沿用已有的 Guarded rows 兼容合同；M42 v1、M43 v2 和 M31–M40 legacy Gate 同时保留。
 - 本模块不冻结的实现细节：report renderer 的排版；typed assertion 语义不能依赖 Markdown 文案。
 
 ## 6. 工作切片与执行顺序

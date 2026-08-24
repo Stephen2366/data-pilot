@@ -31,6 +31,7 @@ from engine.harness.hybrid import (
     validate_hybrid_claims,
 )
 from engine.phase4b.b2_contracts import load_b2_contract_bundle
+from engine.phase4b.comparison_completion import complete_metric_comparison
 from engine.phase4b.identity import canonical_hash
 from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolutionError, KnowledgeRuntimeResolver
 from engine.phase4b.loop_contracts import (
@@ -359,13 +360,9 @@ def _step_node(state: _LoopState, runtime: Runtime[AgentLoopRuntime]) -> dict[st
         elif action_id == "repair_sql_evidence":
             previous = _last_for(requirement, state)
             repair = getattr(runtime.context.sql_tool, "run_repair", None)
-            if previous is None or repair is None:
+            if previous is None or repair is None or previous.sql_repair_snapshot is None:
                 raise RuntimeError("sql_repair_adapter_unavailable")
-            observation = repair(
-                request,
-                candidate_sql=previous.sql or "",
-                issue_code="mysql_unsupported_date_trunc",
-            )
+            observation = repair(request, snapshot=previous.sql_repair_snapshot)
         else:
             observation = runtime.context.sql_tool.run_for_hybrid(request)
     except KnowledgeRuntimeResolutionError as exc:
@@ -603,6 +600,59 @@ def _single_route_result(
     )
 
 
+def _complete_comparison_if_required(
+    *, state: TaskState, observations: tuple[tuple[str, ToolObservation], ...],
+    termination: TerminationFact, covered: tuple[str, ...],
+) -> tuple[tuple[tuple[str, ToolObservation], ...], TerminationFact, Mapping[str, Any]]:
+    """在 answer_ready 前闭合 typed 两期比较；非比较任务完全旁路。"""
+
+    comparison_requirements = tuple(
+        item for item in state.evidence_requirements
+        if item.kind == "sql" and item.purpose == "metric_comparison"
+    )
+    constraints = dict(state.constraints)
+    periods = tuple(constraints.get("periods", ()))
+    if not comparison_requirements or len(periods) == 1:
+        return observations, termination, {"status": "not_applicable"}
+    if len(comparison_requirements) != 1:
+        stopped = _termination(
+            "no_progress", "comparison_requirement_ambiguous",
+            state.evidence_requirements, covered, observations,
+        )
+        return observations, stopped, {"status": "blocked", "reason_code": stopped.detail_code}
+
+    requirement = comparison_requirements[0]
+    matches = [
+        (index, observation) for index, (requirement_id, observation) in enumerate(observations)
+        if requirement_id == requirement.identity
+    ]
+    if len(matches) != 1:
+        stopped = _termination(
+            "no_progress", "comparison_observation_missing",
+            state.evidence_requirements, covered, observations,
+        )
+        return observations, stopped, {"status": "blocked", "reason_code": stopped.detail_code}
+
+    index, observation = matches[0]
+    completion = complete_metric_comparison(
+        requirement=requirement, constraints=constraints, observation=observation,
+    )
+    if completion.status == "complete":
+        updated = list(observations)
+        updated[index] = (requirement.identity, completion.observation)
+        return tuple(updated), termination, {
+            "status": "complete", "reason_code": completion.reason_code,
+            "identity": completion.fact.identity if completion.fact else None,
+        }
+    if completion.status == "not_applicable":
+        return observations, termination, {"status": "not_applicable"}
+    stopped = _termination(
+        "no_progress", completion.reason_code,
+        state.evidence_requirements, covered, observations,
+    )
+    return observations, stopped, {"status": "blocked", "reason_code": completion.reason_code}
+
+
 def run_agent_loop(
     *, request: HarnessRequest, state: TaskState, runtime: AgentLoopRuntime,
 ) -> AgentLoopResult:
@@ -641,6 +691,12 @@ def run_agent_loop(
         )
         output = {**initial, "termination": termination}
     observations = tuple(output.get("observations", ()))
+    _comparison_projection: Mapping[str, Any] = {"status": "not_applicable"}
+    if state.route == "sql":
+        observations, termination, _comparison_projection = _complete_comparison_if_required(
+            state=state, observations=observations, termination=termination,
+            covered=tuple(output.get("covered", ())),
+        )
     if state.route == "hybrid":
         result = _hybrid_result(
             request=request, observations=observations,

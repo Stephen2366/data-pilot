@@ -19,6 +19,34 @@
 
 ## 变更记录（新的在上）
 
+### [实验] M44 defect repair Live Dev Probe 与 SQL repair A/B（2026-08-24）
+
+- **范围**：M44 重开后先修复真实 MySQL 1305/DATE_TRUNC typed classification 与 API/Trace 脱敏，并登记精确 month bucket fidelity 等价；聚焦 deterministic `38 passed, 1 warning`。随后按用户授权比较服务端候选 A `deterministic_ast` 与候选 B `llm_enriched`，各运行一次真实 `/api/query` T1→T2、Qwen、MySQL 和事务内 Phase 4B seed；不触碰 T3～T5、RAG、held-out、reserve 或生产默认。
+- **A 结果**：真实 repair 被触发，本地 AST 将 DATE_TRUNC 编译为 MySQL SQL，fidelity/Guard/执行通过并返回 7 月 `120000`、8 月 `180000`；但本次上游 QueryPlan/candidate 只含 `month/net_refund_amount`，没有 `diff/change_rate/60000`，所以产品 Gate 仍 failed。报告用量 5 calls / 20721 tokens，含旧 attempts 的 runner 累计 13 / 50152；Trace `71265284...5dead`。
+- **B 结果**：初始 candidate 与增强 repair 都保留四列，但 repair action 重新生成的 QueryPlan 只要求两列，fidelity 将 `diff/change_rate` 判为 extra 并安全阻断。报告用量 5 calls / 21839 tokens，runner 累计 18 / 71991；最后已开始 response 越过 token cap 后未继续。Trace `2918edb5...b8f2`。这不是统计学 A/B，也不能把 B 归因为 prompt 不遵循；主要证据是 repair 前后计划合同漂移。
+- **安全与观测**：两项 Response/Trace 均无 raw DB error，数据库均完整 rollback。另发现 repair LLM 成功返回后若在 fidelity/output Gate 失败，error span 漏写 `LLMCallEvidence`，使 action/artifact 少计真实 repair request/tokens，runner 的 `strategy_exercised` 也出现假阴性；因此 18 / 71991 只是报告下界，不是可信预算闭合证据。
+- **路线影响**：production 仍保持 `llm_minimal`，A/B 均未切默认，M44 renewed finish 继续阻塞。下一步必须由用户决定是否扩展核心合同：repair 私有复用首次可信 QueryPlan/output snapshot、task comparison 注入服务端 required outputs，并补齐所有后置 Gate failure 的 usage/strategy Trace；确认前停止真实 provider 调用。artifact 位于 `.agent_work/temp/m44-pfix-candidate-{a,b}-20260824-01/`。
+
+> ⚠️ 注（同日用户决策与 G3 实现）：用户选择收敛后的方案 A，只让 repair 私有复用首次可信 QueryPlanStep/candidate/issue、把 `deterministic_ast` 切为服务端默认并补后置 Gate usage/strategy；明确不为 T2 硬编码四列、不建设通用 required-output 平台。deterministic 聚焦 `40 passed`、新增合同单文件 `13 passed`、受影响兼容 `86 passed, 1 warning`。由于 G3 发生在 A/B 真实运行之后，最终代码仍缺对应 Live Probe，renewed finish-module 阶段 0 已退回开发并等待新的精确运行授权。
+
+> ⚠️ 注（同日 G3 最终 Live Dev Probe）：用户另批 canonical T1→T2 一次、≤5 calls / ≤22000 tokens；实际 4 calls / 14298 tokens。T1 得到 `120000`；T2 正确 invalidation，并以合法 MySQL SQL 取得 `120000/180000`，但 QueryPlan 仍只要求 `month/net_refund_amount`，系统未计算 `60000` 就 `answer_ready`，故 Gate failed。初始 SQL 没有 dialect failure，repair 路径未触发而记 inconclusive；raw DB error 未泄漏、数据库 rollback。该重复结果把剩余问题收敛为独立 comparison completion 合同缺口；继续实现会改变 G3“不建设通用输出平台”的确认边界，用户决策前停止，不重复抽样。
+
+> ⚠️ 注（同日 G4 用户决策与实现）：用户选择方案 A，在 M44 内新增窄 typed comparison completion：只消费服务端 `metric_comparison` requirement、TaskState 两期/metric 与已验证 SQL rows，确定性派生 delta/rate；异常形状或零基期不准 `answer_ready`。它不改 QueryPlan、dialect repair 或 Evidence identity，也不扩成任意公式平台。另修复 Trace `tool_observation` 白名单投影缺 return。focused `19 passed`、受影响 `108 passed`、全仓 `553 passed, 1 warning`。M44 既有 standing/精确真实额度已经耗尽，新的 G4 canonical T1→T2 Probe 已预登记但待用户确认独立 ≤5 calls / ≤22000 tokens，确认前不运行。
+
+> ⚠️ 注（同日 G4 Live Dev Probe passed）：用户批准的新 `M44-PFIX-G4-1` 只运行 canonical T1→T2 一次，实际 4 calls / 15762 tokens。T2 API/Trace same-source 给出 120000/180000、delta=60000、rate=0.5 与 50% Answer，旧 Evidence invalidation、answer_ready、usage、raw-error 非泄漏和数据库 rollback 全部通过；Trace `6e2fc4a2...a54fa`，completion identity `41b577e...ecac9`。初始 SQL 已合法而没有自然触发 repair，故 G3 repair real path 仍记 inconclusive，不为展示 repair 追加调用。artifact 为 exploratory/baseline-ineligible，不登记长期基线。
+
+> ⚠️ 注（同日 renewed finish 安全合同确认）：审计发现 runbook/plan 的“Trace 不保存 rows”与长期实现不一致：SQL 单路一直投影 `response.rows`，只有 Hybrid 显式清空。用户确认方案 B，冻结现行兼容合同：本地 SQL/task SQL JSONL 可保存已经 Guard/授权的 `columns/rows`；Hybrid Trace、action Observation、node Context 和 Scenario artifact 仍禁止完整 rows，Document/private Evidence/raw DB error/prompt/stack 禁区不变。该决策不改代码运行行为，只消除错误的文档承诺。
+
+### [实验] M44 收工后 canonical task 真实 E2E smoke（2026-08-24）
+
+- **范围与身份**：用户明确授权 M44 收工后执行一条 T1→T5 canonical 产品链，经过真实 FastAPI `/api/query`、Qwen `qwen3.7-plus`、MySQL 与 task runtime；分类为 `exploratory / baseline-ineligible / not-development-probe`，不是 Formal RAG Eval，也不追溯冒充 M44 开发期 Probe。只运行一个 sequence，不换模型/backend、不自动重跑、不触碰 held-out 或 M46 sealed reserve。
+- **数据与用量**：因默认 `datapilot_dev` 没有 Phase 4B 8 月数据，runner 在同一未提交事务追加官方 profile seed，所有 turn 复用该 Session，结束后 rollback；新连接确认数据库前后均为 2026-07 30 rows / `19920` 且临时 Phase 4B rows=0。T1～T3 累计 8 provider calls / 32674 observed tokens；最后一个已开始的 T3 response 使累计 token 越过 30000，按纪律保留 usage 后停止，T4/T5 未运行。
+- **结果**：Gate failed。T1 单月 SQL 成功并得到 oracle `120000`；T2 的 constraint delta 和旧 Evidence invalidation 正常，但真实 Qwen 生成 MySQL 不支持的 `DATE_TRUNC` 后直接 `unrecoverable/sql_execution_error`；T3 的两次有界 SQL Evidence action 选择正确，却被同类错误阻断。不能据此判断 T4 business Knowledge、partial answer 或 T5 correction 的真实效果。
+- **根因与安全发现**：真实 `run_sql_tool` 对数据库异常返回 `safety_status=blocked/error_type=sql_execution_error`，Harness 的方言分类却要求 `safety_status=passed`，所以错误无法归一化为 allowlisted dialect issue，B2 repair seam 实际不可达。另发现 tool call 保留底层数据库异常文本，且 API Response 与 JSONL Trace 投影同一未脱敏对象，违反既有 raw DB error 禁止外露合同；此前 deterministic fake 只证明控制合同，没有覆盖真实 SQL Tool 错误形状。
+- **路线影响**：M44 deterministic 技术收工事实不改写，但 canonical T1→T5 真实产品链尚未闭合。M45 前应先另行授权一个聚焦 defect patch：统一真实 SQL 错误的安全 typed projection、接通 allowlisted repair、切断 API/Trace raw error，并增加 real-shape regression；代码修复后只重验最小受影响 T2/T3。报告见 `eval/reports/m44/m44-post-module-e2e-smoke-20260824-01.md`，原始 artifact 位于 `.agent_work/temp/m44-post-module-smoke-20260824-01/`，Trace SHA-256 `05fa65b9...e6e59`。
+
+> ⚠️ 注（同日 M44 repair Probe）：typed classification/repair bridge 与公开 API/Trace 脱敏已修复并通过真实链；后续 A/B 又暴露 repair 重新规划导致前后 output contract 漂移、comparison QueryPlan 输出不稳定和后置 Gate 漏计 repair usage。旧条目的修复建议已执行，但 canonical T2 仍未闭合。
+
 ### [小修] 开发期 Live Dev Probe 真实效果验证纪律（2026-08-24）
 
 - **影响面**：所有后续模块的 module plan、开发切片、真实调用授权、过程 notes 与 `finish-module` 门禁；不改变产品 runtime、默认模型或既有 Eval 基线。
@@ -35,10 +63,12 @@
 - **改动范围**：新增 additive B2 contract/manifest、TaskState v2、typed Requirement/Action/Budget/Consumption/EvidenceDelta/Progress/Termination、服务端 Knowledge Runtime Resolver、独立 task-only LangGraph Loop、Agent Scenario v3、rehearsal/report 和四组 M44 测试；task envelope 改接一次深 Loop invoke，legacy 非 task Harness、M42 v1 与 M43 v2 validator 保持兼容。B2 contract identity `a808b321...d485b`。
 - **用户决策与预算**：G44-1～G44-4 均选 A。普通 API 保持 M44A Enterprise semantic，task requirement 由服务端 closed-world scope 选择 business/external；next Action 完全确定性，decision model calls/tokens=0；父预算最多 3 Evidence actions/deep Tools、SQL 3、Knowledge 1、每 requirement repair 1、retrieval batch 1、candidate 5、selected/generation-visible 3、model calls 6、observed tokens 24000；SQL repair 使用独立最小 outbound purpose。未选的结构化模型 proposal 方案 B 只进入 `AI_CONTEXT` 防遗忘账本，不是 M44 未完成项。
 - **关键实现与修正**：Controller 在每次 action 前按 typed requirement/依赖、duplicate/no-progress 和实际消费重新裁决，超额消费保留账本后稳定停止。跨 turn active Evidence 覆盖旧 requirement；T3 由 reason Observation 的正向 Evidence 增量驱动 product SQL，T4 形成 SQL→business Document Hybrid，T5 correction 显式 invalidation 后重取 SQL/document。业务检索缺 required basic 时停止 `budget_exhausted/required_coverage_incomplete` 且不重复 query。精确 `DATE_TRUNC` 执行错误仅允许一次最小 repair，prompt 不含 Schema、raw DB error、rows 或 stack，修复结果重走 QueryPlan validation、SQL fidelity、Guard 与执行。
-- **安全投影与 Eval**：API、JSONL Trace 和 Scenario v3 从同一 Loop/turn facts 投影 action attempts、budget、termination、knowledge runtime 与 actual-node Context v2；不保存 raw task/thread ID、rows、正文、prompt、raw DB error、stack 或 Thought。v3 rehearsal artifact `63c9483...ac700`，T3/T4/T5、repair once、negative skip 共 6/6，external calls=0；它是 deterministic 控制/安全证据，不是质量基线。
+- **安全投影与 Eval**：API、JSONL Trace 和 Scenario v3 从同一 Loop/turn facts 投影 action attempts、budget、termination、knowledge runtime 与 actual-node Context v2；action/Context/v3 不保存 rows，SQL 单路 JSONL 则沿用 Guarded rows 兼容投影，Hybrid 清空完整 rows。raw task/thread ID、Document 正文、private Evidence、prompt、raw DB error、stack 或 Thought 均不保存。v3 rehearsal artifact `63c9483...ac700`，T3/T4/T5、repair once、negative skip 共 6/6，external calls=0；它是 deterministic 控制/安全证据，不是质量基线。
 - **参考与适配**：定点复核 ARAG conditional edge/state/nodes、DataAgent dispatcher/repair 回边和 LangGraph Runtime/conditional edge/recursion limit。借鉴 typed state 回边、固定 dispatcher、execution key 去重和实际 Context；适配为 DataPilot closed-world action、三层业务预算与 fail-closed Evidence；不照搬 LLM 自由 tool call、字符串 Observation、平台大状态、人审/Python executor 或用框架 recursion limit 冒充业务预算。精确坐标见 `docs/notes/m44-plan.md` 与 notes。
 - **验证快照**：最终聚焦 `57 passed, 1 warning`；deterministic rehearsal 6/6、external calls=0；后台全仓 `539 passed, 1 warning in 599.47s`，exit 0。compileall 与 `git diff --check` 在代码冻结点通过，技术档案写入后再次复核。warning 为既有 Starlette TestClient/httpx deprecation。
 - **边界与后续**：未运行真实 provider、真实 repair showcase、RAG Eval、held-out/all 或 sealed reserve；未实现 B3 recovery action、B4 RAG Subgraph、B5 durable state、B6 Compact。下一模块 M45/B3 只能基于已保存 Observation 诊断并准入预注册 action；M46 前 reserve 保持 sealed。数据库 schema/seed/指标、embedding/Milvus snapshot、业务 active release、默认模型与历史基线均未改变。
+
+> ⚠️ 注（2026-08-24 收工后真实 smoke 修正）：deterministic fake 证明了 repair 与安全投影的控制合同，但没有覆盖真实 `run_sql_tool` 的数据库错误形状。真实路径因 `blocked`/`passed` 条件错位无法进入 dialect repair，且 raw DB error 可进入 API/Trace；在聚焦修复和最小真实重验前，不能把本条外推为 canonical T1→T5 产品链闭合。详见本文件顶部同日 `[实验]`。
 
 ### [实验] M44A Enterprise semantic external dev Smoke（2026-08-24）
 

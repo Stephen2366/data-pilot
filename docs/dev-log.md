@@ -3351,24 +3351,23 @@ python -m uvicorn app.main:app --reload
    - **兼容边界**：普通非 task RAG 继续保持 M44A Enterprise semantic 默认；legacy Harness 的 SQL/RAG/Hybrid 拓扑也没有被改写。
    - **验证锚点**：M44 聚焦集同时覆盖 task resolver、M44A API 与前序 task/legacy 合同，最终 57 项全部通过。
 
-4. **只为一个明确的 MySQL 方言错误开放一次最小修复。**
+4. **真实探针暴露“测试会过、产品链会断”后，只对已证实的缺口做窄修复。**
 
-   M43 的真实 Qwen 运行曾生成 PostgreSQL 的 `DATE_TRUNC`，通过安全检查后在 MySQL 执行失败。M44 没有因此开放“任何错误都让模型重试”。
+   收工后的真实 API/Qwen/MySQL 链先后暴露了错误分类接不上 repair、raw DB error 可外露、repair 重新规划导致合同漂移，以及取到两个月数字却漏算差额。修复没有扩成通用重试或任意公式平台。
 
-   - **准入条件**：仅当候选 SQL 已通过安全门、执行错误精确映射为 `mysql_unsupported_date_trunc` 时，才允许一次 `sql_repair`。
-   - **最小出站**：repair prompt（修复提示）只带当前问题、MySQL 方言、稳定 issue code、安全候选 SQL 和输出格式；不发送 Schema、指标关系、原始数据库错误、结果行或调用栈。
-   - **纵深防御**：修复结果必须重新经过 QueryPlan validation（查询计划校验）、SQL fidelity（SQL 与计划一致性）、SQL Guard（只读与权限安全门）和真实执行。
-   - **未证明边界**：本模块用 deterministic fake（确定性替身）验证了 repair once，没有运行真实模型 repair showcase；timeout 和非法 QueryPlan 仍不会自动重试。
-   - **验证锚点**：rehearsal 的 repair once 和 negative skip 均通过，既证明精确错误可修，也证明不匹配的错误不会进入 repair。
+   - **修复边界**：真实 MySQL 1305 + `DATE_TRUNC` 才归一为 typed issue；详细异常只进本地日志。repair 复用首次已验证 QueryPlan 的私有快照，默认用 deterministic AST（确定性语法树）转换，并重走 fidelity、Guard 和执行。
+   - **比较补全**：只对服务端 `metric_comparison` 需求和两行已验证结果计算 `delta/rate`；行数、周期、数值或零基期不合法就停止，不把“查到两行”冒充“已完成比较”。
+   - **真实证据**：最终 Live Dev Probe（开发期真实探针）用 **4 calls / 15762 tokens** 跑通 T1→T2，返回 `120000/180000/60000/50%`、`answer_ready`，raw DB marker 为 0，临时 seed 已 rollback。全仓回归升为 **553 passed**。
+   - **未证明边界**：最终 Probe 的初始 SQL 已合法，deterministic repair 没有自然触发；这条真实路径仍是 inconclusive（证据不足），不为演示故意执行坏 SQL。
 
 5. **让 API、Trace 和 Agent Scenario v3 共用同一份事实。**
 
    系统先形成一份 `AgentLoopResult`，再由不同出口做安全投影，避免三套组件各自推断“发生了什么”。
 
    - **可审计字段**：action attempts、实际 budget、EvidenceDelta（证据增量）、progress、termination、knowledge runtime 和实际执行节点的 Context v2。
-   - **隐私边界**：不保存 raw task/thread ID、数据库 rows、文档正文、prompt、raw DB error、stack 或 Thought（模型思维过程）。
+   - **投影边界**：SQL 单路本地 JSONL Trace 沿用兼容合同，可保存已经 Guard/授权的 rows；Hybrid Trace、action Observation、node Context 和 Scenario artifact 不保存完整 rows。raw task/thread ID、Document 正文、private Evidence、prompt、raw DB error、stack 或 Thought（模型思维过程）仍是禁区。
    - **兼容方式**：新增 Scenario v3，不改签 M42 v1 和 M43 v2 validator；legacy Trace identity 继续保留。
-   - **验证证据**：v3 deterministic rehearsal 为 **6/6 checks、external calls=0**，artifact identity 为 `63c9483...ac700`；聚焦测试 **57 passed**，全仓测试 **539 passed**。这些证明控制、安全和兼容合同闭合，不代表真实模型或 36,417 篇文档的质量提升。
+   - **验证证据**：v3 deterministic rehearsal 为 **6/6 checks、external calls=0**，artifact identity 为 `63c9483...ac700`；后续修复后全仓为 **553 passed**，并有一次通过的真实 T1→T2 Probe。这些证明 B2 控制与双月比较产品链闭合，不代表 36,417 篇文档的 RAG 质量提升或 Formal Eval 基线。
 
 ### 新概念
 
@@ -3427,11 +3426,13 @@ python -m uvicorn app.main:app --reload
 
 2. **“预算不是配置文件里的数字，而是运行时守恒账。”** 系统同时约束父动作数、工具类型、修复次数、检索漏斗和模型调用；已经发生的超额消费仍保留，然后安全停止。这比只用 LangGraph recursion limit 更接近真实成本与审计需求。
 
-3. **“我只修复可证明安全的一类错误。”** `DATE_TRUNC` 必须来自已过 Guard 的候选 SQL，并精确命中稳定错误码；repair prompt 最小化，输出重新走全部安全门。这个设计展示了恢复能力与安全边界可以同时成立。
+3. **“我只修复可证明安全的一类错误。”** `DATE_TRUNC` 必须来自已过 Guard 的候选 SQL，并精确命中 MySQL 1305；repair 默认复用私有 QueryPlan 快照做 deterministic AST 转换，输出重新走 fidelity、Guard 和执行。这个设计展示了恢复能力与安全边界可以同时成立。
 
 4. **“请求不能决定自己查哪套知识库。”** business/external runtime 由服务端 typed requirement 解析，ACL、identity 或 readiness 不闭合就失败关闭，防止跨语料越权和静默 fallback 污染评测。
 
 5. **“API、Trace、Eval 从同一运行事实投影。”** response 能给用户看结果，Trace 能排障，Scenario v3 能做 closed-world 校验，但三者不重新计算状态；这解决了 Agent 系统最常见的“日志说做了，账本却对不上”问题。
+
+6. **“我用真实 Probe 推翻了 fake 测试带来的过度信心。”** 真实 T1→T2 先暴露 SQL 方言、错误脱敏、repair 合同漂移和 comparison completion 四层问题；我没有靠重跑粉饰，而是每次定位失败层、修复最小合同再重验，最终用 4 calls / 15762 tokens 得到 `120000/180000/60000/50%`。
 
 ### 面试官追问
 
@@ -3449,11 +3450,15 @@ python -m uvicorn app.main:app --reload
 
 4. **[工程/深挖追问] SQL repair 会不会让模型借重试绕过 SQL Guard？**
 
-   不会把原错误和全部 Schema 重新喂给模型自由生成。只有 safety-passed candidate 在 MySQL 执行时精确出现 `DATE_TRUNC` 方言错误才准入一次 repair；prompt 字段有 allowlist，修复结果还必须重新通过 QueryPlan validation、SQL fidelity、Guard 和执行。其他执行错误、timeout、非法计划都不会进入这条回边。
+   不会把原错误和全部 Schema 重新喂给模型自由生成。只有已通过 SQL Guard 的 candidate 在 MySQL 执行时同时命中 `DATE_TRUNC` 和 1305，才准入一次 repair；默认方案不调 repair 模型，而是复用首次已验证 QueryPlan 快照做 deterministic AST 转换。修复结果还必须重新通过 fidelity、Guard 和执行；其他执行错误、timeout、非法计划都不会进入这条回边。
 
 5. **[压力追问] 你的下一动作是规则写死的，场景也很窄，这真算 Agent 吗？**
 
-   这个质疑有合理部分：M44 不是开放世界规划器，也没有宣称能处理任意问法。它解决的是更基础但可验证的问题——一个任务能否根据 Observation 连续选择多个动作，同时守住预算、ACL、去重、停止和审计合同。6/6 rehearsal、57 个聚焦测试和 539 个全仓测试证明这个控制面成立；模型 proposal 只有在确定性理解形成稳定失败簇后才值得引入，否则只是用不可控性换“看起来更智能”，喵。
+   这个质疑有合理部分：M44 不是开放世界规划器，也没有宣称能处理任意问法。它解决的是更基础但可验证的问题——一个任务能否根据 Observation 连续选择多个动作，同时守住预算、ACL、去重、停止和审计合同。6/6 rehearsal、553 个全仓测试和一次真实 T1→T2 Probe 证明这个控制面与双月比较产品链成立；模型 proposal 只有在确定性理解形成稳定失败簇后才值得引入，否则只是用不可控性换“看起来更智能”，喵。
+
+6. **[压力追问] 你为什么不为了证明 repair 有效，故意造一条错 SQL 跑给我看？**
+
+   因为那只能证明我能安排一场演示，不能证明产品在真实输入下会自然走到该路径。最终 Probe 的初始 SQL 已是合法 MySQL，所以我把 repair 真实证据如实记为 inconclusive，只保留 AST、snapshot、零 repair provider 调用的 deterministic tests；这比为了亮眼数据人为触发失败更符合 Eval 可信性，喵。
 
 ### 验证与下一步
 

@@ -516,22 +516,29 @@ def generate_sql_repair_from_plan_step(
     issue_code: str,
     llm_client: LLMClient | None = None,
     llm_evidence_sink: LLMEvidenceSink | None = None,
+    include_required_outputs: bool = False,
 ) -> GeneratedSQL:
     """只修复已分类的 MySQL 方言错误；不重新规划，也不接受自由错误正文。"""
 
     if issue_code != "mysql_unsupported_date_trunc":
         raise ValueError("sql_repair_issue_not_allowed")
     client = llm_client or get_default_llm_client()
-    # G44-4 冻结了最小 outbound 内容：这些本地对象只在返回后做 validation，不能为了让
-    # repair 更“聪明”就把 Schema/metric/join details 一并外发。
-    del user_role, plan_step, schema_graph, domain_schema
+    # PFIX-G2 候选 B 只增加已验证 QueryPlan 的 output aliases；Schema/metric/join details
+    # 仍留在本地 Gate，不能为了让 repair 更“聪明”就一并外发。
+    required_outputs = tuple(plan_step.output_columns) if include_required_outputs else ()
+    del user_role, schema_graph, domain_schema
+    output_contract = (
+        "\n必须保留的输出列（名称与顺序）：" + json.dumps(required_outputs, ensure_ascii=False)
+        if required_outputs
+        else ""
+    )
     prompt = (
         "【受限修复任务】\n"
         "数据库方言固定为 MySQL 8。仅修复下列候选 SQL 的 DATE_TRUNC 方言不兼容；"
         "不得改变 QueryPlan、表、字段、过滤、聚合、排序、LIMIT 或输出列。\n"
         "只输出 JSON：{\"sql\": \"...\", \"tables_used\": [], \"confidence\": 0.0, "
         "\"reasoning_summary\": \"...\"}。\n"
-        f"当前问题：{question}\nissue_code: {issue_code}\n候选 SQL:\n{candidate_sql}"
+        f"当前问题：{question}\nissue_code: {issue_code}{output_contract}\n候选 SQL:\n{candidate_sql}"
     )
     raw_text = _complete_with_evidence(
         client,

@@ -205,6 +205,17 @@ def evaluate_sql_plan_fidelity(
                 # ★ ``* 1.0`` 在 MySQL/SQLite ratio 中是显式的小数类型提升。这里只接受
                 # 同一分母（且分母是 NULLIF(..., 0)）的单一乘法因子，绝不扩展成代数优化。
                 narrow_equivalences.append("ratio_numeric_type_promotion:*1.0")
+            elif planned_expr != observed_expr and _is_month_bucket_dialect_translation(
+                planned_expr,
+                observed_expr,
+                dialect=dialect,
+            ):
+                # ★ QueryPlan 可能保留 PostgreSQL 的 DATE_TRUNC，而 MySQL generator 已经
+                # 正确翻译为 DATE_FORMAT。这里只登记同一 base column、month 粒度和固定
+                # 首日格式的窄等价；不把一般日期函数转换伪装成“都差不多”。
+                narrow_equivalences.append(
+                    "month_bucket_dialect_translation:date_trunc_to_date_format"
+                )
             elif planned_expr != observed_expr:
                 issues.append(
                     FidelityIssue(
@@ -398,6 +409,66 @@ def _is_ratio_numeric_type_promotion(planned_sql: str, observed_sql: str, *, dia
     else:
         return False
     return planned.left.sql(dialect=dialect, normalize=True) == observed_base.sql(dialect=dialect, normalize=True)
+
+
+def _is_month_bucket_dialect_translation(
+    planned_sql: str,
+    observed_sql: str,
+    *,
+    dialect: str,
+) -> bool:
+    """识别 SQLGlot 对 month `DATE_TRUNC` 的精确 MySQL 翻译与 `DATE_FORMAT` 等价。
+
+    SQLGlot 会把计划侧 ``DATE_TRUNC('month', column)`` 在 MySQL dialect 下规范成
+    ``STR_TO_DATE(CONCAT(YEAR(column), ' ', MONTH(column), ' 1'), ...)``。候选侧常由模型直接
+    生成 ``DATE_FORMAT(column, '%Y-%m-01')``。两者作为非空业务时间列的月分桶排序键等价，
+    但返回类型并不完全相同，所以本 helper 只用于 ORDER BY fidelity 的窄登记，不做通用 AST
+    化简，也不改写 SQL。
+    """
+
+    try:
+        planned = sqlglot.parse_one(f"SELECT {planned_sql}", read=dialect).expressions[0]
+        observed = sqlglot.parse_one(f"SELECT {observed_sql}", read=dialect).expressions[0]
+    except sqlglot.errors.SqlglotError:
+        return False
+    if not isinstance(planned, exp.StrToDate) or not isinstance(observed, exp.TimeToStr):
+        return False
+    if not _literal_equals(planned.args.get("format"), "%Y %-m %-d"):
+        return False
+    if not _literal_equals(observed.args.get("format"), "%Y-%m-01"):
+        return False
+
+    concat = planned.this
+    if not isinstance(concat, exp.Concat) or len(concat.expressions) != 4:
+        return False
+    year, separator, month, first_day = concat.expressions
+    if not isinstance(year, exp.Year) or not isinstance(month, exp.Month):
+        return False
+    if not (_literal_equals(separator, " ") and _literal_equals(first_day, " 1")):
+        return False
+
+    planned_year_column = _single_column_sql(year, dialect=dialect)
+    planned_month_column = _single_column_sql(month, dialect=dialect)
+    observed_column = _single_column_sql(observed.this, dialect=dialect)
+    return bool(
+        planned_year_column
+        and planned_year_column == planned_month_column == observed_column
+    )
+
+
+def _literal_equals(expression: exp.Expression | None, value: str) -> bool:
+    """只接受一个精确字符串 literal，不把格式参数或拼接表达式当成可信常量。"""
+
+    return isinstance(expression, exp.Literal) and expression.is_string and expression.this == value
+
+
+def _single_column_sql(expression: exp.Expression, *, dialect: str) -> str | None:
+    """从允许的日期 wrapper 中取得唯一 base column；多列或无列都保守拒绝。"""
+
+    columns = list(expression.find_all(exp.Column))
+    if len(columns) != 1:
+        return None
+    return columns[0].sql(dialect=dialect, normalize=True)
 
 
 def _is_decimal_one(expression: exp.Expression | None) -> bool:

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
@@ -21,6 +22,12 @@ from app.schemas.agent import ToolCallTrace
 from engine.nl2sql.schema_loader import DomainSchema
 from engine.sql_guard.policy import extract_sql_access, validate_sql_policy
 from engine.trace.lifecycle import TraceContext
+
+
+logger = logging.getLogger(__name__)
+_SAFE_SQL_EXECUTION_MESSAGE = "SQL 执行失败。"
+_MYSQL_FUNCTION_NOT_FOUND = 1305
+_MYSQL_UNSUPPORTED_DATE_TRUNC = "mysql_unsupported_date_trunc"
 
 
 @dataclass(frozen=True)
@@ -39,6 +46,8 @@ class SQLToolResult:
     sql_time_ms: float = 0.0
     tool_call: ToolCallTrace | None = None
     error_type: str | None = None
+    # `issue_code` 是给上层 Controller 的 closed-world 技术分类，不承载 driver 原文。
+    issue_code: str | None = None
 
 
 def _jsonable(value: Any) -> Any:
@@ -55,6 +64,27 @@ def _row_to_dict(row: RowMapping) -> dict[str, Any]:
     """把 SQLAlchemy RowMapping 转成普通 dict，避免响应层依赖 SQLAlchemy 类型。"""
 
     return {key: _jsonable(value) for key, value in row.items()}
+
+
+def _classify_execution_issue(sql: str, exc: SQLAlchemyError) -> str | None:
+    """把真实 DBAPI 异常收敛成极窄的安全 code，禁止上层解析 raw error 文本。
+
+    ★ MySQL 1305 表示调用的函数不存在；只有候选 SQL 自身确实包含 `DATE_TRUNC` 时，
+    才能归类为 M44 已准入的一次修复场景。连接中断、权限错误或其他函数错误即使也执行
+    失败，都会保持 generic `sql_execution_error`，避免扩大自动重试边界。
+    """
+
+    if "date_trunc" not in sql.lower():
+        return None
+    original = getattr(exc, "orig", None)
+    arguments = getattr(original, "args", ())
+    if not arguments:
+        return None
+    try:
+        error_number = int(arguments[0])
+    except (TypeError, ValueError):
+        return None
+    return _MYSQL_UNSUPPORTED_DATE_TRUNC if error_number == _MYSQL_FUNCTION_NOT_FOUND else None
 
 
 def run_sql_tool(
@@ -133,11 +163,21 @@ def run_sql_tool(
         result = db.execute(text(sql), parameters)
     except SQLAlchemyError as exc:
         latency_ms = _elapsed_ms(started_at)
+        issue_code = _classify_execution_issue(sql, exc)
+        # 详细异常只进入受控本地日志；Response、Observation、Trace 一律使用下面的安全话术。
+        logger.exception(
+            "SQL 执行失败，公开投影已脱敏",
+            extra={"trace_id": trace_id, "tables_used": tables_used, "issue_code": issue_code},
+        )
         if execution_span is not None:
             execution_span.fail(
-                output_summary=f"SQL 执行失败：{exc}",
+                output_summary=_SAFE_SQL_EXECUTION_MESSAGE,
                 error_type="sql_execution_error",
-                metadata={"tables_used": tables_used, "latency_ms": latency_ms},
+                metadata={
+                    "tables_used": tables_used,
+                    "latency_ms": latency_ms,
+                    "issue_code": issue_code,
+                },
             )
         tool_call = ToolCallTrace(
             tool_name="sql_query",
@@ -146,15 +186,16 @@ def run_sql_tool(
             sql=sql,
             tables_used=tables_used,
             error_type="sql_execution_error",
-            message=str(exc),
+            message=_SAFE_SQL_EXECUTION_MESSAGE,
         )
         return SQLToolResult(
             tables_used=tables_used,
             safety_status="blocked",
-            blocked_reason=f"SQL 执行失败：{exc}",
+            blocked_reason=_SAFE_SQL_EXECUTION_MESSAGE,
             sql_time_ms=latency_ms,
             tool_call=tool_call,
             error_type="sql_execution_error",
+            issue_code=issue_code,
         )
 
     columns = list(result.keys())
