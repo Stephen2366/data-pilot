@@ -16,6 +16,8 @@
 
 口令映射：用户说“执行当前模块的 Probe / 开发期真实探针”，且当前 plan 已预注册 Probe ID 与场景时，按本文 standing authorization 直接执行；用户说 `smoke/core/reliability/held-out/eval` 等 selector 时，走 Formal Eval 精确授权。只说“跑个真实测试看看”但没有已注册 Probe 或范围不明时，先确定最小场景，不能解释成任意 Eval 授权。
 
+模块收工后的单次真实运行不追溯算作 Live Dev Probe；没有 Formal Eval selector 时也不是 Formal Eval。它必须由用户明确授权场景和预算，标记 `exploratory / baseline-ineligible / not-development-probe`，只执行一次、不自动重跑、不登记基线，并默认遵守 Live Dev Probe 的安全禁区；需要扩大禁区边界时另行确认。
+
 ## 公共环境
 
 - 默认模型：`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`
@@ -52,9 +54,10 @@
 
 Live Dev Probe 用少量真实 API、LLM、MySQL、Milvus/RAG 调用检查产品效果，防止只靠 pytest/fake 形成“合同通过但真实体验不可用”。本节是其 standing authorization、计数口径、默认额度、禁区、重验与 Formal Eval 分账的唯一事实源；满足下述边界时开发中无需逐次询问。
 
-1. **适用与设计**：module plan 必须先判断是否适用，并冻结 Probe ID、真实场景、产品入口、观察字段、三态标准、预算、停止条件和切片时点。修改真实 LLM、数据库、RAG/Milvus、API 多轮或外部 runtime 行为时原则上适用；纯静态合同/数据结构可说明理由后跳过。
+1. **适用与设计**：module plan 必须先判断是否适用，并冻结 Probe ID、真实场景、产品入口、观察字段、三态标准、预算、停止条件和切片时点。修改真实 LLM、数据库、RAG/Milvus、API 多轮或外部 runtime 行为时默认适用；纯静态合同/数据结构可说明理由后跳过。预注册 Probe 是计划基线而非上限。开发中出现计划外的真实失败、新假设或需要判别的最小场景时，可以动态追加 Probe：AI 必须主动向用户提出（场景、理由、真实链路、预计 calls/tokens、与 standing 额度及预注册清单的关系、停止条件），获得明确授权后才能执行，并按与预注册相同的口径记录三态、usage 与 `continue/revise/stop` 决定。不得因 token 成本自行放弃提案，也不得把未授权追加解释成 standing authorization。追加指新的最小判别场景，不是对同一场景重复抽样；重跑纪律仍按第 7 条。
+
 2. **开发时点与阻塞门**：第一条真实纵向链路可运行后执行首个 Probe；后续 Probe 在对应关键切片完成后、依赖其结果的下一切片开始前执行。notes 开工 checklist 要预登记 `after Mx-A / before Mx-B` 一类时点。Probe 必须先形成 `passed / failed / inconclusive` 观察结果和对应的 `continue / revise / stop` 开发决策；只有 `continue` 才能放行被它阻塞的下一切片，`revise` 必须先修复并按第 7 条最小重验，`stop` 暂停对应分支。禁止把所有 Probe 统一拖到代码冻结或 `finish-module`。
-3. **开发决策证据**：Probe 后立刻记录执行时间、当时代码阶段、HEAD/模块 dirty、命令/依赖、Response/Trace identity/usage、总体 Gate 和关键子能力三态，以及 `continue / revise / stop` 决定。失败或未触发时还要写首个失败层、当前根因假设和下一个最小判别动作；`not_exercised` 是子能力记为 `inconclusive` 的原因，不是第四种三态值。总体通过不得覆盖未触发分支；预登记的安全拒绝若精确命中负断言，该断言记 `passed`，不误记为场景失败。notes 中 Probe→决策→修改/重验必须保持时间顺序；HEAD 只是提交基线，高风险模块可再记限定范围的 diff hash。
+3. **开发决策证据**：Probe 后立刻记录执行时间、当时代码阶段、HEAD/模块 dirty、命令/依赖、Response/Trace identity/usage、总体 Gate 和关键子能力三态，以及 `continue / revise / stop` 决定；具体观察项见第 5 条。失败或未触发时还要写首个失败层、当前根因假设和下一个最小判别动作；`not_exercised` 是子能力记为 `inconclusive` 的原因，不是第四种三态值。总体通过不得覆盖未触发分支；预登记的安全拒绝若精确命中负断言，该断言记 `passed`，不误记为场景失败。notes 中 Probe→决策→修改/重验必须保持时间顺序；HEAD 只是提交基线，高风险模块可再记限定范围的 diff hash。
 4. **计数口径与默认额度**：一次 `provider call` 是一次真实出站尝试，不等于一个 turn/API 请求；chat、embedding、repair 和 retry 都逐次计数。出站只要发生，即使后续 Gate 失败也必须记实际 stage/strategy 和 usage；“已配置”不等于“已触发”。tokens 只用 `total_tokens` 或完整 input+output；否则标 `token_usage_observed=false`、不估算或记 0。默认每模块 2～4 个场景、每场景首次 1 次，累计 calls ≤ 8、tokens ≤ 30000；notes 持续记“本次/模块累计/授权来源与剩余”。精确扩额只对已确认的场景/能力生效，不自动延伸到新切片；预计扩额时先请用户确认，单次响应意外越界后如实记账并停止。
 5. **真实链路与 oracle**：优先经过 API → caller/task → Tool → MySQL/Milvus/LLM → Response/Trace。除 HTTP 和 rows，还要检查业务语义 oracle、安全负断言、runtime identity、实际 action/strategy、usage、Evidence/状态、termination 和失败层。需要测试数据时，plan 预先写明来源、事务/rollback 与前后恢复断言；恢复失败是独立的 `stop`。
 6. **数据与动作禁区**：自动探针只用 canonical、公开或 diagnostic/dev 场景。优先只读；plan 声明的事务内临时 seed 必须 rollback 并核对恢复。禁止 held-out、sealed reserve、`all/full`、Reliability 重复、大规模 generation、新数据出站类别、持久数据写入/reset、索引重建、active release/default 切换或其他有状态扩权。

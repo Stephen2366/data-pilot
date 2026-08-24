@@ -107,10 +107,11 @@ tests/                  # pytest 测试
 
 ## 开发期真实效果验证
 
-- 每个 module plan 必须判断是否需要 **Live Dev Probe（开发期真实探针）**：凡修改真实 LLM、真实数据库行为、RAG/Milvus、API 多轮或外部运行时行为即默认适用；纯静态合同、数据结构或文档模块写明“不适用”理由即可。
+- 每个 module plan 必须判断是否需要 Live Dev Probe（开发期真实探针）：凡修改真实 LLM、真实数据库行为、RAG/Milvus、API 多轮或外部运行时行为即默认适用；纯静态合同、数据结构或文档模块写明“不适用”理由即可。
 - Probe 必须嵌入开发切片：首条真实纵向链路可运行后执行首个 Probe，后续关键能力在对应切片完成后、依赖它的下一切片开始前执行；plan 每个相关切片要写 `Live Probe checkpoint` 及它阻塞的下一切片，禁止统一拖到 `finish-module`。
 - 开工 checklist 预登记 Probe ID 与预计时点；执行后立即记录执行时间、当时代码阶段、HEAD 与模块相关 dirty 文件、命令、Response/Trace/usage、三态结果和 `continue / revise / stop` 决定，不能凭最终代码倒填。只有 `continue` 才能放行被该 Probe 阻塞的下一切片。
 - 额度、计数口径、禁区、重验与 Formal Eval 分账以 `docs/state/runbook.md`「Live Dev Probe」为唯一事实源，plan 不复制公共政策。`finish-module` 只审计时点证据，缺失即以 `development_probe_missing` 退回开发；正式 Smoke/Core/Reliability/held-out/基线候选仍遵守 runbook 精确授权。
+- 预注册清单是基线不是上限：开发中遇计划外真实问题，主动向用户提出追加最小 Probe 并申请授权，不因 token 顾虑而自我设限。
 
 ## 代码风格
 

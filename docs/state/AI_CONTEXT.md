@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M44/B2 defect repair：G4 已通过 deterministic + Live Dev Probe，正在 renewed finish-module（2026-08-24） |
-| 当前 plan    | `docs/notes/m44-plan.md`                                     |
-| 当前 notes   | `docs/notes/m44-notes.md`                                    |
-| 待决事项     | 无新的 M44 核心方案待决；renewed finish-module 完成前不开始 M45/B3。M46 前 reserve 保持 sealed |
+| 当前活动模块 | M44/B2 defect repair 与 renewed finish 已完成；M45/B3 尚未制定 module plan |
+| 当前 plan    | 无（最近完成：`docs/notes/m44-plan.md`）                     |
+| 当前 notes   | 无（最近完成：`docs/notes/m44-notes.md`）                    |
+| 待决事项     | 下一步为 M45/B3 调查与计划；M46 前 reserve 保持 sealed       |
 | 更新时间     | 2026-08-24                                                   |
 
 ## 必读规则
@@ -33,20 +33,19 @@
 - 数据库：MySQL `datapilot_dev` + SQLAlchemy/Alembic；SQLite 仅用于测试、smoke 与 M27 deterministic oracle。
 - Phase 4B seed：默认仍为 legacy `sqlite_deterministic_seed`；只有显式选择 `profile_alias="phase4b"` 才加载 content-bound B0 profile，生成 7/8 月 oracle。不得把两个 profile 的 artifact 混算。
 - NL2SQL：普通 API 默认走 Harness 内的 `new_text2sql` 深 Tool（Schema Retrieval → QueryPlan → SQL Guard）；显式 `force_new_pipeline=false` 只选择 adapter 内部 legacy baseline，不能绕过顶层 Harness。
-- SQL dialect repair：服务端默认 `deterministic_ast`，只处理 typed MySQL month DATE_TRUNC；首次失败签发私有的原 QueryPlanStep/candidate/issue snapshot，repair 不重新调用 QueryPlan provider，结果仍重走 plan validator、fidelity、Guard 与执行。客户端不能选择策略；LLM repair 只保留非默认候选。
+- SQL dialect repair：服务端默认 `deterministic_ast`，只处理 typed MySQL month DATE_TRUNC；私有复用首次可信 QueryPlan/candidate/issue，不重新调用 QueryPlan provider，结果重走 validator、fidelity、Guard 与执行。客户端不能选策略，LLM repair 仅为非默认候选。
 - 默认模型：Qwen `qwen3.7-plus`（`LLM_PROVIDER=qwen`、`QWEN_MODEL=qwen3.7-plus`）；45s、retry0、backoff1；本机 `.env` 已覆盖 `LLM_TIMEOUT_SECONDS=120`（2026-08-23，Qwen 比较类 QueryPlan 实测 43~105s，45s 会误杀），config 默认仍为 45。
 - Schema Retrieval 默认：inmemory + deterministic + weighted；Milvus / DashScope embedding 仅在显式实验中开启。
-- Knowledge Retrieval 分账：22 条业务 release 仍默认 `knowledge-deterministic-lexical-v1`；EnterpriseRAG-Bench 产品 API/external Eval 默认 `knowledge-enterprise-milvus-semantic-v1`，lexical 只允许显式历史 baseline。两者与 Text2SQL Schema Retrieval 均为独立链路。
+- Knowledge/RAG 分账：22 条业务 release 默认 `knowledge-deterministic-lexical-v1`；EnterpriseRAG-Bench 产品 API/external Eval 默认 `knowledge-enterprise-milvus-semantic-v1`，lexical 只允许显式历史 baseline；两者与 Text2SQL Schema Retrieval 均为独立链路。
 - Harness：LangGraph `>=1.1.2,<2`；SQL/RAG 单路仍为 `route → tool → controller`、各至多一个深 Tool。M38 canonical Hybrid 为 `route → hybrid_sql_tool → hybrid_rag_tool → controller`，SQL/RAG 都 required、各至多一次、总计至多两个深 Tool；Router 只签发薄计划，RAG branch 只执行 retrieval + Gate，不生成子答案。未知 Hybrid 继续保守停止；M37 follow-up 仍只覆盖 SQL/RAG。
 - Thread checkpoint：方案 A，应用持有 `inprocess-bounded-thread-v2`，state `m37-thread-v2`，默认 TTL `900s`（`THREAD_CHECKPOINT_TTL_SECONDS`）。除 M36 一次结构化恢复外，成功 SQL/RAG 可在显式开启后签发一次 closed-world follow-up；owner 绑定 trusted caller + tenant/active role，同 version 原子单 claim，重启/多 worker 不恢复或共享。checkpoint 不保存旧 answer/rows/正文/citation。
 - Agent task boundary：应用另持有 `phase4b-in-memory-task-boundary-v1`，复用默认 TTL 900s，但与 thread checkpoint/state family 分离。它绑定 trusted caller+tenant、执行 version/TTL/原子 claim/commit/switch/cancel/clear；错 owner 与未知 task 统一失败。只保存通用 TaskState v2 与安全 EvidenceRef validity，不保存 rows/正文/完整历史答案；明确为 process-local non-durable，B5 前不得宣称跨进程恢复。
-- B2 Agent Loop：只有 accepted task turn 进入独立 `phase4b-agent-loop-v1`；一次 Graph invoke 内由确定性 Controller 按 typed requirement、依赖、duplicate/no-progress 和实际消费账本选择 closed-world Evidence action。父预算最多 3 次 Evidence action/deep Tool、1 次 Knowledge、每 requirement 1 次 repair、6 次 model call、24000 observed tokens；超额事实保留后停止。clarification/cancel/clear/pre-rejection 仍为零 Loop。legacy 非 task Harness 拓扑不变。
-- Task Knowledge runtime：服务端 requirement scope 只允许 `business_release/external_profile`，请求不能选 corpus/backend。business 使用 22 条 active release lexical，external 使用 M44A Enterprise semantic；identity/ACL/readiness 缺失时失败关闭且不跨账 fallback。普通非 task RAG 继续使用 M44A Enterprise semantic 默认。
+- B2 Agent Loop：只有 accepted task turn 进入独立 `phase4b-agent-loop-v1`，由确定性 Controller 选择 closed-world Evidence action；父预算最多 3 次 Evidence action/deep Tool、1 次 Knowledge、每 requirement 1 次 repair、6 次 model call、24000 observed tokens。clarification/cancel/clear/pre-rejection 为零 Loop，legacy 非 task Harness 拓扑不变。
+- Task Knowledge runtime：服务端 requirement scope 只允许 `business_release/external_profile`，请求不能选择 corpus/backend。business 使用 22 条 active release lexical，external 与普通非 task RAG 使用 Enterprise semantic；SQLite profile 是正文 authority，Milvus/identity/ACL/readiness 缺失时失败关闭且不跨账 fallback。完整 runtime identity 与 preflight 见 RAG/Milvus 专项 state。
 - Evidence follow-up：SQL 没有可靠业务 snapshot，永远重查；EnterpriseRAG-Bench external 永远重检索；只有业务 22-entry release 的同 requirement 解释动作可按当前 active authority/revision/content/anchor 重新加载并重新授权，随后签发新 run Evidence/ledger/citation。requirement/identity 变化重检索一次，ACL/用途拒绝零 retrieval 停止。
 - Caller：`local/demo/test` 使用明确标记的 fixture resolver，请求 `user_role` 只能选择 resolver 已解析的 role；其他环境没有 authenticated resolver 时在 Tool 前失败关闭。生产认证尚未建设。
-- M44A Enterprise 产品链：项目外 EnterpriseRAG-Bench v1.0.0 SQLite profile 是正文/Evidence authority；Milvus semantic snapshot `9aec12...e20` 是默认候选索引，collection `datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89`。应用不代管 Docker/Milvus；配置或索引不可用时 `/health/rag` 503、RAG 零 Evidence/Composer，不回退 lexical 或业务小语料，SQL 与 `/health` 仍可用。
 - LangFuse 默认关闭，JSONL trace 为主；SQL 安全为只读 AST + RBAC + 敏感字段策略。
-- Trace runtime identity：legacy SQL/RAG/Hybrid/澄清恢复/安全拒绝继续投影 `phase4-trace-runtime-v1`；task family 外层投影 `phase4b-agent-task-runtime-v1`，并以 `agent_loop_runtime`、action attempts、budget、termination 和 knowledge runtime 安全投影描述 B2。缺少安全 identity 只标 `unavailable`、不阻断业务。SQL 单路（含 task SQL）JSONL 沿用历史兼容合同，可保存已经 Guard/授权的 `columns/rows`；Hybrid Trace 清空完整 SQL rows，action Observation/node Context/artifact 不携带 rows。Trace 仍禁止 raw `thread_id`/raw `task_id`、结构化控制参数副本、文档正文、private Evidence、prompt、raw DB error 或 stack，并沿用既有用户可见 `answer` 保存合同。
+- Trace runtime identity：legacy family 投影 `phase4-trace-runtime-v1`，task family 投影 `phase4b-agent-task-runtime-v1`，并安全描述 B2 Loop/action/budget/termination/knowledge runtime；缺少安全 identity 只标 `unavailable`。SQL 单路 JSONL 沿用 Guarded `columns/rows` 兼容合同，Hybrid、action、Context 和 artifact 不携带完整 rows；其余安全禁区见 runbook。
 - 现有 Text2SQL chat/schema embedding 出站在 transport 前按 `phase4-outbound-v1` 精确登记；普通 Knowledge/RAG 与 LangFuse Cloud 继续默认拒绝。唯一例外是用户确认的 M41 显式 Eval CLI：`phase4-rag-eval-business-generation-outbound-v1` 只允许已通过 active release、caller/ACL/Gate 的政策/指标 generation context 发往 Qwen，security/未知类别网络前拒绝；该 policy 不进入普通 API。
 - 开发期真实验证：Live Dev Probe 是已获 standing authorization 的开发期真实验证；额度、计数口径、禁区、重验与 Formal Eval 分账见 `docs/state/runbook.md`。Probe 必须嵌入开发切片；`finish-module` 只审计时点证据，缺失时以 `development_probe_missing` 退回开发。
 
@@ -56,27 +55,25 @@
 
 | 日期 | 事实 |
 |---|---|
-| 2026-08-24 | M44 renewed finish 安全合同复核：用户确认方案 B，SQL 单路（含 task SQL）本地 JSONL Trace 沿用历史 Guarded `columns/rows` 兼容投影；Hybrid Trace 仍清空完整 rows，action Observation/node Context/Scenario artifact 仍禁止 rows，Document/private Evidence/raw DB error/prompt/stack 禁区不变。 |
 | 2026-08-24 | `M44-PFIX-G4-1` 真实 canonical T1→T2 passed：4 calls / 15762 tokens；T2 same-source Answer/rows/Trace 给出 120000/180000/60000/50%，completion identity `41b577e...ecac9`，raw DB marker=0，数据库 rollback。初始 SQL 合法而未触发 repair，故 G3 repair real path 仍 inconclusive；不为展示 repair 重跑。 |
-| 2026-08-24 | M44 完成 B2：contract `a808b32...d485b`、Agent Scenario v3 artifact `63c9483...ac700`；deterministic rehearsal 6/6、external calls=0。聚焦 `57 passed, 1 warning`，最终全仓 `539 passed, 1 warning in 599.47s`。新增确定性多动作 Loop、三层预算/稳定停止、task Knowledge resolver、T3/T4/T5、allowlisted 单次 DATE_TRUNC repair 和同源 API/Trace/v3；未运行真实 provider、held-out 或 sealed reserve，不登记质量基线。 |
-| 2026-08-24 | M44A semantic external dev Smoke 9 题一次 completed：artifact `4bfff9d...5346d`，Gate failed、required `92/16/0`，triage `5 passed / 4 retrieval`，9 provider responses / 19033 tokens；哈希复核后的人工 verdict `2 pass / 7 fail`。相对历史 lexical smoke，自动 candidate compare `1 win / 5 tie / 3 loss`，人工 `3/6→2/7`。两侧均单次 generation，不能归因成稳定 backend 因果或 Reliability；不登记长期基线、不触碰 held-out，semantic 产品默认不变。 |
-| 2026-08-24 | M44A 将 Enterprise 产品 API/external Eval 切为同源 semantic 默认，并补齐 lifespan、`/health/rag`、Milvus load/identity/unit-set 门和 fail-closed。全仓 `517 passed, 1 warning`。用户授权的 `qst_0386` 恰好一次真实 C6 completed：artifact `0a5bc40...c9647`，required `12/0/0`，semantic 漏斗 `5→3→3→1`，Qwen 2054 tokens，人工语义 pass；只证明单题产品链，不是 semantic 质量基线。 |
-| 2026-08-23 | M43 完成 B1：B1 contract `383fbf5...e9d32`、Scenario v2 artifact `cc9f696...b27c92`，deterministic rehearsal 8/8、external calls=0；canonical T2 会使旧 SQL Evidence invalidated 后重查，得到 7 月 120000、8 月 180000、差额 60000、增幅 50%。最终全仓 `500 passed, 3 skipped, 1 warning`。legacy/M42 v1、模型、RAG release、数据库 schema 均未改变。 |
-| 2026-08-23 | M42 完成 Phase 4B B0 前置包：B0 contract `6543883...aae6f`、seed profile `9c49407...00673`、SQL oracle `be813a8...57ef80`、Agent skeleton `b303d4d...52982`、sealed reserve `f70c5fc...e505`。首次 business retrieval 零 provider 且真实漏选 basic 政策，保留为 B3 输入；M43–M48 能力仍 unavailable。最终全仓 `487 passed, 3 skipped, 1 warning`，未改 legacy/active release/默认模型或任何长期基线。 |
-| 2026-08-23 | M41 post-fix external dev Smoke / Basic / Core 均已 completed，但 Gate 和人工语义 review 显示 lexical 漏召回仍是主要瓶颈；这些快照未登记正式基线，120 held-out 未运行。business 与 external 分账、一次精确授权、三态 Gate、review hash 和安全出站纪律继续生效；完整运行身份、数字与失败分层只在 `eval-baselines.md` 保存。 |
 
 ## 当前路线判断
 
 > 只保留仍然生效的路线和限制；已经完成的必须删除或改写。
 
-- (2026-08-24) M44 G4 已以窄 typed comparison completion 修复“取到双月数据却漏算 60000”：deterministic 全仓 553 passed，真实 T1→T2 以 4 calls / 15762 tokens 验证 120000/180000/60000/50%、same-source、脱敏与 rollback。现可 renewed finish-module；收工前仍不开始 M45/B3，M46/B4 reserve 保持 sealed。
 - (2026-08-24) M44A 仍是 B2 前置修复、不占 B milestone。business 小 catalog 与 external 180 题继续分账，120 held-out 保持停门；external 产品默认为 semantic，但历史 lexical artifact/正式 retrieval baseline 不改签，也没有证据宣称 semantic 质量更优。
 
 ## 防遗忘能力账本
 
 > 记录已经存在、但容易被“当前窄实现已完成”掩盖的能力缺口和重开门。优先级表示防遗忘/复核顺序，不自动决定下一模块；下一模块仍须按 roadmap、最新失败证据和独立 plan 裁决。原方案字母只在对应 module plan 内有效，禁止脱离具体方案写“以后从 A 升级 B”。
 
-下表为 M29–M40 的能力缺口相关记录，M41 及以后的需要新建一个表格来记录。
+M41 及以后的能力缺口：
+
+| 优先级 | 能力缺口                                                     | 当前结论与硬性重开门                                         | 路线归属              |
+| ------ | ------------------------------------------------------------ | ------------------------------------------------------------ | --------------------- |
+| P2     | M44 G44-2 未选方案 B：由结构化模型提出 next Action、再由确定性 Controller 审核 | M44 已确认方案 A，首版 next-action 完全确定性，decision model calls/tokens 固定为 0；这不代表永久排除模型 proposal。只有 required paraphrase 集形成稳定且不可接受的 deterministic clarification 失败簇，才能另立 module plan 评估结构化 proposal adapter；届时必须保留 closed-world Action allowlist、deterministic validator、Budget/ACL/outbound/duplicate/no-progress 硬门，并重新取得 decision purpose、数据类别和真实 E2E 的用户授权。不得仅因模型看起来更灵活就重开，也不得把它算作 M44 未完成项 | Phase 4B 后续质量候选 |
+
+M29–M40 的能力缺口：
 
 | 优先级 | 能力缺口 | 当前结论与硬性重开门 | 路线归属 |
 |---|---|---|---|
@@ -85,12 +82,6 @@
 | P1 | 当前只有 demo/test caller resolver，生产认证尚未建设 | 出现非本地部署、真实用户/tenant、JWT/OAuth/SSO 或企业目录需求时，必须在现有 `CallerResolver` seam 接正式认证 adapter；“所有环境手工注入 resolver”不等于生产认证 | Phase 4 后续部署门 |
 | P2 | M35/M38 deterministic Router 只覆盖 closed-world SQL/RAG 和两类 canonical Hybrid operator | 先建立开放问法/混合意图 decision set 并形成稳定失败簇，再比较规则扩充、受控模型 fallback 或远程 Router；不得以“LLM 更完善”为由无 Eval 切换 | P3/P5 后续质量 |
 | P1 | M37 checkpoint 仍为进程内，重启/多 worker 不恢复且 tombstone 不清扫 | Phase 4B 已把 durable task state 提升为最终硬交付；须在 TaskState/turn-boundary 稳定后建立新 state family、真正持久 adapter 与存储层条件更新，并覆盖 TTL/clear/多 worker/版本冲突。LangGraph `InMemorySaver` 仍是内存态，不能冒充持久化升级 | Phase 4B B5 |
-
-M41 及以后的能力缺口：
-
-| 优先级 | 能力缺口 | 当前结论与硬性重开门 | 路线归属 |
-|---|---|---|---|
-| P2 | M44 G44-2 未选方案 B：由结构化模型提出 next Action、再由确定性 Controller 审核 | M44 已确认方案 A，首版 next-action 完全确定性，decision model calls/tokens 固定为 0；这不代表永久排除模型 proposal。只有 required paraphrase 集形成稳定且不可接受的 deterministic clarification 失败簇，才能另立 module plan 评估结构化 proposal adapter；届时必须保留 closed-world Action allowlist、deterministic validator、Budget/ACL/outbound/duplicate/no-progress 硬门，并重新取得 decision purpose、数据类别和真实 E2E 的用户授权。不得仅因模型看起来更灵活就重开，也不得把它算作 M44 未完成项 | Phase 4B 后续质量候选 |
 
 ## 已知的坑（活跃列表）
 
@@ -104,6 +95,5 @@ M41 及以后的能力缺口：
 | `knowledge_docs` 物理表仍存在且是有损 legacy 投影 | 新调用者若绕过 source-backed catalog 读取旧表，会丢失 revision/authority/identity/完整 ACL，并重新制造旁路 | Text2SQL 已从 Schema/prompt/RBAC 双重隔离；seed 只从 staged catalog 派生，旧表不得作为 authority/runtime catalog。 |
 | Active Knowledge release 损坏时不会自动 fallback；当前虽有 previous，但旧 11-entry release 已不等于当前 authority | 自动复活旧正文可能绕过撤销/ACL，或丢失新增内容 | 启动失败关闭；显式 rollback 仍必须重新通过当前 authority/revision/policy 校验。 |
 | LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭且 M31 outbound 未放行 Cloud；重新启用前先做 allowlist/redaction 策略和用户决策。 |
-| 双月比较 QueryPlan 重复只要求 `month/net_refund_amount` | dialect repair 即使完全正确，也只会忠实保留两列；旧 Probe 取得 120000/180000 但漏 60000 | G4 已在 Agent 收口新增窄 typed completion；deterministic 与一次真实 canonical T1→T2 均证明可派生 60000/50%，异常失败关闭。不要把该窄合同扩成任意公式平台。 |
 | 最终 deterministic repair 真实路径仍未触发 | 最终 Probe 的初始 SQL 已是合法 MySQL，故没有 repair action；这不证明 repair 失败，也不能充当真实成功证据 | 保留 deterministic snapshot/reuse/provider=0 tests；禁止故意制造无效 SQL。只有以后自然出现 typed dialect failure 时才能补真实证据，不以此单独重复调用。 |
 | Enterprise semantic 依赖项目外 profile、DashScope embedding 与 Milvus | Docker 未启动、snapshot identity 漂移或 provider 不可用时 RAG 会明确 unavailable；启动加载/核验约 10 秒，当前单锁优先保证共享 client 安全而非吞吐 | 启动前按 `runbook-rag.md` 执行 preflight；应用不自动启动 Docker、不降级 lexical；用 `/health/rag` 判断 readiness，性能优化须另立候选与证据 |

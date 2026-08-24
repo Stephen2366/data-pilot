@@ -57,7 +57,7 @@ accept-module（最终门禁检查）
 
 5. 根据当前文件清单和 notes 新事实生成初步 `state impact map`，供验证阶段读取运行条件。阶段 4 再依据最终改动重新核对。
 
-6. 审计 Live Dev Probe 时点证据：对照 plan 的 Probe ID/checkpoint，确认 notes 在对应 `after Mx-A / before Mx-B` 时点已经记录执行时间、当时代码阶段、HEAD、模块相关 dirty 文件、命令、真实 Response/Trace identity/usage、三态结果和 `continue/revise/stop` 决定，并能从 Probe → 决策 → 后续修改/重验的顺序看出它确实影响了开发。HEAD 只代表提交基线，不能单独证明未提交工作树；最终代码下的一次性结果也不能反推成开发期证据。
+6. 审计 Live Dev Probe 时点证据：对照 plan 的 Probe ID/checkpoint，确认 notes 已记录计划/实际时点、被阻塞切片、执行时间、当时代码阶段、HEAD 与模块相关 dirty 文件、命令与真实依赖、本次/模块累计 calls/tokens 及授权来源/剩余、Response/Trace identity、总体与关键子能力三态、失败层/根因假设/最小判别动作、`continue/revise/stop` 决定和 exploratory/baseline-ineligible 边界，并能从 Probe → 决策 → 后续修改/重验的顺序看出它确实影响了开发。HEAD 只代表提交基线，不能单独证明未提交工作树；最终代码下的一次性结果也不能反推成开发期证据。
 
 7. 适用模块若缺少上述证据，立即在 notes 标记 `development_probe_missing`，声明本次 `finish-module 未完成` 并返回开发流程；不得继续到阶段 1–4，也不得在本 skill 内首次补跑后直接消除缺口。完成缺失 Probe、必要定位/修复和最小重验后，重新调用本 skill。按计划时点真实尝试但依赖不可用的 `inconclusive` 不算缺失，但必须有 contemporaneous（当时写入的）记录。
 
@@ -122,8 +122,7 @@ accept-module（最终门禁检查）
    - Live Dev Probe 的常规执行必须已发生在开发切片中；本阶段只复核其结果是否仍对应当前代码与运行条件，不把收工验证当作首次真实路试。开发期 Probe 后相关代码或真实条件发生实质变化时，退出本 skill，回到开发流程执行 plan 允许的最小重验，再重新收工。
    - 完成代码修改后，再按 plan 和 AGENTS 要求运行完整回归。
 3. Live Dev Probe 审计：
-   - 核对每个 Probe ID 的计划/实际时点、执行时间、当时代码阶段、HEAD、模块相关 dirty 文件、被阻塞切片和开发决定；至少首个 Probe 必须发生在第一条真实纵向链路可运行后、依赖结果的后续切片前。
-   - 核对 calls/tokens、Response/Trace、三态结果、exploratory/baseline-ineligible 和禁区边界；HTTP 200、最终代码下的补跑或只有 fake 证据都不能满足此门。
+   - 按阶段 0 第 6 条的字段清单逐 Probe 核对；另确认首个 Probe 发生在第一条真实纵向链路可运行后、依赖结果的后续切片前，并检查禁区边界。HTTP 200、最终代码下的补跑或只有 fake 证据都不能满足此门。
    - 若 Probe 当时触发 `revise`，必须看到对应问题定位、代码/配置修正、聚焦测试和额度内最小重验的时间顺序；失败 attempt 必须保留。
    - 若 plan 判断不适用，检查理由是否与代码真实影响面一致；若按时尝试但环境不可用，确认 `inconclusive`、preflight 和失败层已在当时记录。
    - 任一项缺失都按阶段 0 的 `development_probe_missing` 处理，不能继续技术收工。模块回复仍需提醒用户下一步是否值得执行哪一种 Formal Eval。
@@ -154,7 +153,7 @@ notes.md 必须包含以下小节：
 - **关键决策与取舍**：决策内容、决策原因、当时给出的选项、主要风险、推荐方案、用户最终选择（如果曾向用户确认过）
 - **阶段 1 注释小结**：检查范围、补写的缺失注释、深化的新概念或设计决策、修正的复杂处或过时注释，以及是否仍有缺失
 - **阶段 2 验证快照**：每条命令的结论（数字、输出要点）、warning 是否影响、失败原因与是否阻塞；不能只写"验证通过"
-- **Live Dev Probe 开发时间线**：是否适用及理由；适用时按 Probe ID 记录计划/实际切片时点、执行时间、当时代码阶段、HEAD、模块相关 dirty 文件、被阻塞切片、真实依赖、命令、calls/tokens、Response/Trace identity、三态结果、失败层、`continue/revise/stop` 决定、修复与最小重验时间线，以及 exploratory/baseline-ineligible 边界；仅收工时补跑必须标 `development_probe_missing`，不能省略
+- **Live Dev Probe 开发时间线**：是否适用及理由；适用时按阶段 0 第 6 条的字段清单逐 Probe 固化，并保留修复与最小重验的时间顺序；仅收工时补跑必须标 `development_probe_missing`，不能省略
 - **参考资料**：查了什么，借鉴了什么，没照搬什么；未查阅写"无"
 - **Handoff**：负责下一模块交接事实，不负责提前制定下一模块。至少包含：
   1. **已完成且可依赖**：已经实现并通过验证的能力、合同、接口和产物。
@@ -248,7 +247,7 @@ notes.md 必须包含以下小节：
 
 - [ ] 模块最终文件范围已与 Git 状态、起始 commit 和 notes 核对。
 - [ ] notes 已固化关键决策、注释小结、验证快照、参考资料、Handoff 和 State impact。
-- [ ] notes 已记录 Live Dev Probe 是否适用；适用时已有切片级计划/实际时点、真实 calls/tokens/Response/Trace/三态和开发决定时间线，或按计划时点发生的明确环境阻塞；不存在 `development_probe_missing`、收工补跑冒充开发期验证或 Formal Eval 混算。
+- [ ] notes 已按阶段 0 第 6 条记录 Live Dev Probe 是否适用及完整时间线，或按计划时点记录明确环境阻塞；不存在 `development_probe_missing`、收工补跑冒充开发期验证或 Formal Eval 混算。
 - [ ] 已读取 `CHANGELOG_INDEX.md`，并按索引写入完整模块记录。
 - [ ] `AI_CONTEXT.md` 已更新并清理失效、重复或仅具历史价值的内容。
 - [ ] 所有命中的专项 state 均已完整检查，并已更新或记录“无需修改”的理由。

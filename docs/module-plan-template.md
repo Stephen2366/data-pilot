@@ -141,12 +141,11 @@
 | P1 / after Mx-A、before Mx-B | <自然语言或多轮场景> | <API → Tool → DB/LLM/RAG> | <语义结果、identity、usage、Evidence/状态、失败层> | <三态判断标准> | <结果如何决定继续/修正/停止；阻塞哪个切片> |
 
 - standing authorization、计数口径、默认额度、禁区、重验和 Formal Eval 分账统一引用 `docs/state/runbook.md`「Live Dev Probe」，不要在 module plan 复制公共政策。本 plan 只写收紧项；需要扩大默认边界时进入第 7 节决策门并等待用户确认。
-- 每个 Probe 必须写明：业务语义 oracle 与安全负断言；总体 Gate 和关键子能力各自的三态；必须自然触发与允许未触发的分支。`not_exercised` 只是子能力 `inconclusive` 的原因，不是第四种结果；预期安全拒绝精确命中负断言时可记 `passed`。
+- 开发中出现计划外真实失败时，可提出追加 Probe（需用户授权）；追加与预注册同口径记录，但不改本 plan 已冻结的切片阻塞门。
+- 每个 Probe 必须写明业务语义 oracle、安全负断言、总体 Gate 与关键子能力，以及哪些分支必须自然触发、哪些允许未触发。
 - 需要测试数据时，还要冻结数据来源、是否写入、事务/rollback 和运行前后恢复断言；不得把 reset 或持久写入隐含在 runner 中。
-- 可以复用现有 Eval runner 的安全单 Scenario/dev 产品入口；本 plan 只需写清具体入口、exploratory / baseline-ineligible 证据落点，以及暴露问题后允许的最小重验对象。
-- 如果真实依赖不可用，记录 `inconclusive` 和失败层；不得用 fake 通过替代真实结论。
-- notes 开工 checklist 必须预登记每个 Probe ID、预计执行时点和被阻塞切片；执行后立刻记录代码阶段/HEAD/dirty、Response/Trace、本次与模块累计 usage、总体/子能力三态、首个失败层、根因假设、下一个最小判别动作和开发决策。后续实质修改 Probe 覆盖的行为时，必须重新判断证据是否失效。仅在 `finish-module` 首次补跑不能满足“开发期 Probe”完成门。
-- 模块级 Probe 完成门：所有预注册 Probe 已在计划切片时点执行并形成三态结果和开发决策，不存在未处理的 `revise`、`stop` 或 `development_probe_missing`；不适用时，理由必须与实际代码影响面一致。`inconclusive` 只有按本 plan 形成明确处置后才能满足此门，不能冒充 `passed`。
+- 可以复用现有 Eval runner 的安全单 Scenario/dev 产品入口；本 plan 只写具体入口、证据落点、模块额外收紧项，以及暴露问题后允许的最小重验对象。
+- notes 开工 checklist 预登记 Probe ID、预计时点和被阻塞切片；执行记录、三态语义、依赖不可用和证据时效均按 runbook，不在 plan 复制字段清单。模块完成门是所有 Probe 已按时执行并形成明确处置，不存在未处理的 `revise`、`stop` 或 `development_probe_missing`；不适用理由必须与实际影响面一致。
 - 模块完成后建议用户执行的 Formal Eval：<写明确 selector/partition/目的；无则写“当前无需正式 Eval”>。
 
 | 能力/合同 | 验证方式    | 通过标准     | 优先级   |

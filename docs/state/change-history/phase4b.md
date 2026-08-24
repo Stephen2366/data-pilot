@@ -21,7 +21,8 @@
 
 ### [小修] Live Dev Probe 诊断与证据时效口径（2026-08-24）
 
-- 根据 M44 多轮真实修复经验，在 `runbook.md` 和 module plan 模板精简补齐：总体/子能力三态、失败层→根因假设→最小判别动作、实际 strategy/usage 记账、模块累计额度、事务数据恢复、禁止人为触发故障，以及核心行为改变后旧 Probe 失效。未扩大 standing authorization、Formal Eval 或产品 runtime；`AGENTS.md`/`AI_CONTEXT.md` 继续只保留入口指针。
+- 根据 M44 多轮真实修复经验，在 `runbook.md` 和 module plan 模板精简补齐：总体/子能力三态、失败层→根因假设→最小判别动作、实际 strategy/usage 记账、模块累计额度、事务数据恢复、禁止人为触发故障，以及核心行为改变后旧 Probe 失效。后续复核又将 plan/`finish-module` 的公共字段清单收敛到各自事实源，并明确收工后单次真实运行须另获授权、标记 `not-development-probe` 且不登记基线；未扩大 Live Dev Probe standing authorization、Formal Eval 或产品 runtime。
+- 同日再补充“预注册为基线、允许授权追加”：runbook 第 1 条明确预注册 Probe 是计划基线而非上限，开发中计划外的真实失败/新假设可动态追加最小 Probe，但必须由 AI 主动向用户提出（场景/理由/链路/预算/额度关系/停止条件）并获授权后执行，同口径记录三态与开发决定；追加指新的最小判别场景，不是对同一场景重复抽样。`AGENTS.md` 增加对应短条款，plan 模板补追加口径。不改变 standing 额度、重跑禁令与 Formal Eval 分账。
 
 ### [实验] M44 defect repair Live Dev Probe 与 SQL repair A/B（2026-08-24）
 
