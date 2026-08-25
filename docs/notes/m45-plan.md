@@ -22,6 +22,8 @@ M45 只有两种合法终局：
 1. 两种动作都通过第 8 节 required Gate，且 external runtime 完成两类 Observation-driven 选择，则 B3 完成并允许制定 M46/B4 plan；
 2. 任一动作未通过、只能按 runtime 静态分摊，或 campaign 到达冻结边界仍证据不足，则进入 `review_required/no_go`。此时只表示调查按预算结束，**不得宣称 M45/B3 完成，不得运行 `finish-module` 把 B3 标为完成，也不得启动 M46**；必须由用户重新规划 B3 的真实 Scenario/corpus/排期或显式修改阶段最终范围。
 
+> **C5 review 后续（2026-08-25）**：首轮已按第 2 种终局形成不可变 no-go。用户随后选择效果优先的受控 A2，允许在 M45 内新增结构化 requirement/rewrite proposal 切片；旧 campaign、P1～P3 和 no-go artifact 不覆盖。只有新增 P4 与重新 qualification 全绿，终局才可变为第 1 种。
+
 ## 2. 当前事实与问题
 
 | 当前事实 | 导致的问题 | 事实来源 |
@@ -110,16 +112,16 @@ M45 完成后，系统拥有一个与产品 runtime 隔离、可复现的 B3 dia
 - 输入：预注册 Scenario/runtime、首次 retrieval 的 typed Observation、服务端 Evidence requirement、ACL/purpose 和 C3 campaign budget。
 - 成功输出：closed-world execution 记录 initial Observation identity、applicable/eligible/rejected action、chosen action、input/duplicate fingerprint、budget before/consumed/after、actual EvidenceDelta、progress/termination 与安全 runtime identity。
 - 失败语义：缺 initial Observation、额外/重复 action、identity 漂移、预算不守恒、从 gold 派生 runtime query、正文/私有 Evidence 进入仓库投影，均拒绝 completed。
-- 必须保持的不变量：一条 Scenario 只有一次 initial retrieval 和至多一个 recovery action；`stop` 始终 eligible；Response/Trace/Eval 不为评分重跑另一条 pipeline；repository artifact 不保存正文、raw query/gold、凭据或 Thought。
+- 必须保持的不变量：一条 Scenario 只有一次 initial retrieval；通常至多一个 recovery action，只有 external rewrite 已新增相关 fragment、原 requirement 仍未闭合且该 fragment 存在已授权同文档邻居时，才允许追加一次 expansion，链长至多 2、同 action 不得重复；`stop` 始终 eligible。Response/Trace/Eval 不为评分重跑另一条 pipeline；repository artifact 不保存正文、raw query/gold、凭据或 Thought。
 - 本模块不冻结的实现细节：diagnostic runner 文件结构，以及未来 B4 Subgraph state/edge 布局。
 
 ### C3：有界 diagnostic campaign 合同
 
 - 输入：固定 cohort：business T4；external semantic `qst_0420`、`qst_0431`、`qst_0461`。固定候选只有 B0 的 rewrite、expansion 与 stop。
-- 成功输出：Round 1 对四个 Scenario 各首次执行一次；每题在 initial Observation 后至多执行一项 eligible recovery action。Round 2 只允许在已确认“实现偏离冻结 card”并完成具体修复后，对受影响最小 Scenario 各重验一次；质量无增益、trigger 不成立或依赖不可用不构成自动重跑理由。
+- 成功输出：Round 1 对四个 Scenario 各首次执行一次；每题在 initial Observation 后执行一项 eligible recovery action。Round 2 只允许在已确认“实现偏离冻结 card”并完成具体修复后，对受影响最小 Scenario 各重验一次。G45-3 确认后，`qst_0420` 可在已完成的 Round 2 rewrite Evidence 上续接一次零 embedding expansion；它不是 initial/rewrite 重跑，也不得扩展为任意循环。
 - 失败语义：到达 Round 1/允许的最小重验、任一单动作预算或模块总边界后立即进入 C5 review；不继续找题、调参或换 backend。
 - 必须保持的不变量：四个 Scenario 是 `diagnostic/dev`、`exploratory`、`baseline-ineligible`；不运行 Composer generation；external 只使用现有 semantic snapshot，business 只使用 active 22-entry lexical；reserve/held-out 访问为零。
-- 本模块收紧预算：4 个 Scenario；每个 initial retrieval 1 次、recovery action 1 次；rewrite action 内至多包含 C4 允许的 2 个 child retrieval batches。模块首次尝试预计真实 provider calls ≤5（仅 external query embedding）、chat/model calls=0、observed chat tokens=0。若实现发现 embedding transport 实际调用数会超过 8，或需新增模型用途，必须先进入 G45-1，不得依赖 standing authorization 扩大。
+- 本模块收紧预算：4 个 Scenario；每个 initial retrieval 1 次；通常 recovery action 1 次，`qst_0420` 在 G45-3 条件满足时链长至多 2。rewrite 内至多 2 个 child retrieval batches；G45-4 sibling expansion 每个 seed 最多只读检查 8 个同文档 unit、最多 2 seeds、最终新增最多 4 条 Evidence，query embedding/retrieval/model/Composer calls 必须为 0。首次无修复 campaign 预计 provider attempts ≤5；包含已发生的一次实现修复重验后，模块累计硬上限为 8，当前 6，P3 两题各 initial 1 次后恰好到 8，不再留任何 provider 重验额度。
 - 本模块不冻结的实现细节：运行命令、run ID 与并行度；它们在 notes 开工清单中按 runbook 登记。
 
 ### C4：Recovery action card 与准入合同
@@ -127,7 +129,8 @@ M45 完成后，系统拥有一个与产品 runtime 隔离、可复现的 B3 dia
 - 输入：runtime/corpus、ACL/purpose、initial Observation、剩余子预算和本轮已执行 action/Evidence identity。
 - 成功输出：
   - `query_rewrite_candidate`：仅当首次 retrieval 后仍有**预检索已冻结的 typed requirement slot**未被 selected Evidence 支撑时 applicable；slot 来自服务端 requirement 分解，不能来自 gold document key/title 或运行后人工 verdict。动作采用 deterministic requirement split/focused rewrite，最多 2 个子问题、2 个额外 retrieval batches、每批最多 5 candidates，合并后最多 5 个 unique candidates/3 个 selected Evidence；model/Composer calls=0。至少在 business T4 与 external `qst_0420` 各新增一个原缺失且通过 ACL 的 EvidenceRef。
-  - `context_expansion_candidate`：仅 external；必须已有相关且已授权 seed Evidence，并由 unit coordinates 证明上下文是可扩展 fragment；最多消费 2 个 seed Evidence，每个至多补前/后各 1 个相邻 unit，新增最多 4 个 unique EvidenceRef，query embedding/retrieval/model calls=0。至少在 `qst_0431`、`qst_0461` 各新增与 unresolved requirement 相关且通过 ACL 的 EvidenceRef。
+  - `context_expansion_candidate`：仅 external；必须已有相关且已授权 seed Evidence，并由 unit coordinates 证明上下文是可扩展 fragment。按 G45-4，每个 seed 在同一 physical document 内按距离稳定排序，最多只读检查 8 个 sibling unit；每项先做 pre-selection ACL，使用 seed + sibling 的最小支持组合闭合 signed requirement，最终新增最多 4 个 unique EvidenceRef，并逐项做 pre-generation ACL。最多消费 2 个 seed，query embedding/retrieval/model calls=0。至少在 `qst_0431`、`qst_0461` 各新增与 unresolved requirement 相关且通过 ACL 的 EvidenceRef。
+  - `rewrite → expansion` 组合：只允许 `qst_0420` 的 rewrite 已产生来自当前 authority 的新 fragment、离线对账确认其属于缺失目标文档但 requirement 仍未闭合时使用；continuation 必须从该次不可变 Evidence identity 重新回查 SQLite authority、重新授权，再按 signed requirement 与已授权内容的通用相关度选至多 2 个 seed。不得读取 gold/title 作为 seed selector，不得重复 initial/rewrite，不得增加 embedding。组合链成功要求第二步新增 Evidence 补齐 rewrite 后仍 unsupported 的 requirement。
   - 两者都记录 expected/actual EvidenceDelta、latency、candidate/selected/context consumption、duplicate/no-progress 和 stop。
 - 失败语义：无 seed Evidence 时 expansion 不适用；所有 typed requirement slot 已由 selected Evidence 支撑时 rewrite 不因“也许有帮助”自动适用；ACL/identity/runtime unavailable、duplicate、无新 Evidence 或预算耗尽均停止，不能 fallback 到另一 corpus/backend。
 - 必须保持的不变量：requirement slot 在首次 retrieval 前签名并进入 Observation 对账；runtime trigger 不读取 gold、人工 verdict 或答案文本；rewrite 不使用 document key/title 作为隐藏 oracle；expansion 从 SQLite authority 重水化并重新授权；Progress 只看 Evidence gain，不成为 Answer Gate。
@@ -136,7 +139,7 @@ M45 完成后，系统拥有一个与产品 runtime 隔离、可复现的 B3 dia
 ### C5：B3 review point 与 M46 开工门合同
 
 - 输入：两张 completed C4 card、C3 完整预算账、external 同 runtime 选择证据、错误动作排除和安全/identity Gate。
-- 成功输出：只有两张 action card 全部 required 通过，且 external semantic runtime 在 `qst_0420` 选择 rewrite、在 `qst_0431/qst_0461` 选择 expansion，才输出 `go_for_M46`。
+- 成功输出：只有两张 action card全部 required 通过，且同一 external semantic runtime 在 `qst_0420` 先由 initial Observation 选择 rewrite、再由 rewrite 后的新 Observation 选择 expansion，在 `qst_0431/qst_0461` 由 initial Observation 直接选择 expansion，才输出 `go_for_M46`。
 - 失败语义：零/一种动作合格、动作只按 corpus 静态分摊、trigger 依赖 gold/答案、Evidence gain 不稳定、unsafe/duplicate/no-progress 未闭合或 campaign 越界，输出 `review_required/no_go`。
 - 必须保持的不变量：`no_go` 不改写 M39 为错误，也不等于 B3/B4 完成；不允许用一种动作+stop、business 固定 A/external 固定 B 或调低验收标准替代 roadmap 最终目标。
 - 本模块不冻结的实现细节：若 no-go 后用户选择新 Scenario/corpus，必须另行修订/替换 M45 plan；不会预留模糊的“以后优化”。
@@ -173,7 +176,7 @@ M45 完成后，系统拥有一个与产品 runtime 隔离、可复现的 B3 dia
 - 关键合同：C2–C4。
 - 交付物：expansion action prototype、neighbor/identity/ACL/duplicate/budget tests、external fixtures。
 - 验证方式：前后邻居、文档边界、跨 physical document 禁止、identity 漂移、revoked ACL、重复 unit、空/不可扩 seed、预算耗尽测试。
-- Live Probe checkpoint：`M45-P2` after M45-C / before M45-D，先在 external `qst_0420` 验证同 runtime 的 rewrite trigger；其 `continue` 才允许进入 expansion 实景。随后 `M45-P3` 在 `qst_0431/qst_0461` 验证 expansion，并阻塞 M45-D review。
+- Live Probe checkpoint：`M45-P2` 已证明 external rewrite 找到正确文档 fragment 但 coverage 未闭合；`M45-P2C` 如实保留 immediate-neighbor action 的 `failed/stop`。G45-4 后新增 `M45-P2D`，只从 P2 Round 2 immutable Evidence 验证 sibling expansion v2，零 embedding且不覆盖 P2C。P2D `continue` 才允许 `M45-P3` 在 `qst_0431/qst_0461` 验证 direct expansion，并阻塞 M45-D review。
 - 完成门：P2/P3 都已按时形成三态和处置；同一 external runtime 的两类 Observation、错误动作排除和 stop 均有同源证据。
 
 ### M45-D：action qualification、review point 与 B4 handoff
@@ -187,11 +190,55 @@ M45 完成后，系统拥有一个与产品 runtime 隔离、可复现的 B3 dia
 - Live Probe checkpoint：无新增 Probe；本切片只消费 P1–P3 已形成的真实证据，不在收工阶段补跑。
 - 完成门：只有 `go_for_M46` 才能完成 M45/B3 技术收工；`review_required/no_go` 必须停在用户 review，不得标模块完成。
 
+### M45-E：受控结构化 requirement/rewrite proposal（C5 review 后重开）
+
+- 输入：只复用 P3 immutable private artifact 的两道 public benchmark question、当次 initial selected Document Evidence（每题最多 3 个、每项正文最多 4000 字符）及安全 Evidence 序号；禁止 gold、参考答案、document title/key、reserve、历史 reviewer verdict 和 sibling 正文。
+- 模型职责：Qwen `qwen3.7-plus` 每题一次、temperature=0、thinking=false，只输出 closed-world JSON proposal；最多 5 个 requirement，每项只含稳定 `requirement_id`、不带答案值的 `focused_query`、bounded `support_marker_groups` 与 closed-world `value_shape`。模型的 supported/unsupported 判断即使返回也一律忽略。
+- 确定性 validator：严格字段、数量、长度、字符、重复、question/evidence anchor、数字/日期/货币答案值、gold/title/key、空 marker、unknown value shape 全部失败关闭；校验后才构造签名 `RequirementSlot`，coverage 仍由本地 Evidence 内容重算。
+- 出站：新增 diagnostic-only policy `phase4b-m45-rag-requirement-proposal-outbound-v1`；receiver=`qwen_chat`、purpose=`rag_requirement_proposal`、data class=`public_benchmark_question_with_authorized_evidence`、transport fields 仍精确为 `prompt/system_prompt/model`。不修改默认 outbound policy、普通 API、Composer 或产品 runtime。
+- 预算：新 proposal campaign 最多 2 chat provider attempts（每题 1、retry0）、每题 completion `max_tokens=1600`、模块新增 observed chat tokens 硬上限 8000；existing 8 embedding attempts 原样保留，模块累计 provider attempt 硬上限变为 10。provider unavailable/invalid schema/越界均 stop，不自动重跑或退回旧 deterministic slots。
+- 输出：proposal/prompt 明文只进项目外新版本 `phase4b-rag-action-diagnostics/v1.1.0`；仓库只保存 proposal schema/prompt/policy/model identity、token/call 数、requirement signatures、action/EvidenceDelta 与 hash，不保存 question/Evidence 正文或模型原文。
+- Live Probe checkpoint：`M45-P4` after M45-E / before M45-F。复用并核验 P3 safe/private identity 与文件 SHA，回 SQLite authority 重水化 initial Evidence 并重新 ACL；每题执行 proposal 1 次，随后用 proposal slots 重新 observe，允许 sibling expansion 但零新 embedding/retrieval/Composer。两题都必须选择 expansion、新增支持缺口的同文档 Evidence、wrong action rejected、budget/ACL/duplicate/no-progress/stop 全绿才 `continue`；否则恢复 `review_required/no_go`，不换题、模型或 prompt 重跑。
+
+> **P4 执行结果（2026-08-25）**：用户明确授权两题 question + authorized Evidence 后各调用 Qwen 一次；实际 2 calls / 3877 tokens、零新 embedding/retrieval/Composer。qst_0431 因 prompt 未声明 marker group 数量上限而被 strict validator 以 `proposal_marker_group_invalid` 拒绝；失败路径又未保存 raw JSON，无法离线重验。qst_0461 proposal 合法并识别 weekly schedule 缺口，但 proposal phrase 与真实 sibling 的语义等价表述不做字面全等，expansion preview=0。artifact `a374f0c0...cfac`，v2 review `ce0d7615...40af`，结论恢复 `review_required/no_go`。当前 plan 的 repair round=0，任何 prompt/匹配合同修订和最小重验必须再次经过用户 review，不能自动执行。
+
+### M45-F：重开后的 qualification 与收工门
+
+- 旧 v1 no-go 是 required lineage，不能删除或改成 passed；新 v2 review 必须同时解释“旧 deterministic trigger 为什么失败、structured proposal 如何改变 Observation”。
+- 两张 action card、P1/P2/P2C/P2D/P3/P4、旧/新 manifest hash、累计 8 embedding + 至多 2 chat usage、reserve sealed 和仓库安全投影全部闭合后，才允许输出 `go_for_M46`。
+- M46 handoff 增加 proposal adapter/policy/schema/budget：B4 不能绕过 proposal validator，也不能把模型 proposal 当安全事实或自由 Tool planner。P4 未通过时仍禁止 `finish-module`、M45 完成声明和 M46 开工。
+
+### M45-G：P4 最小 repair campaign（第二次 C5 review 后）
+
+- **已确认（2026-08-25）**：用户选择最小 repair 方案 A；P4/v2 no-go、2 calls/3877 tokens 与两题失败切片保持不可变。
+- 匹配修复只适用于 model-proposed `RequirementSlot`：新增 deterministic `token_overlap` mode；单词仍 exact，2 词必须全中，3 词以上至少命中三分之二且不少于 2 词；旧 deterministic slot 继续 `exact`，P1～P3 signature/行为不变。value-shape、同文档、ACL、scan8/add4、duplicate/no-progress/stop 门不放宽。
+- prompt 修复必须明示完整 closed-world 数量：requirements 1～5、marker groups 每 requirement 1～5、每 group 1～4 markers；validator 边界不因模型输出放宽。validation failure 的 raw response/prompt/usage 只写 external private artifact，仓库仍只保存 reason/hash。
+- additive v3 campaign 以 v2 review `ce0d7615...40af` 为 predecessor；旧 8 embedding + P4 2 chat 原样计入。repair 只允许 qst_0431 新增 1 chat call、retry0、沿用同 question/Evidence/model/purpose，新增调用 observed tokens 不得超过 v2 剩余额度 4123；模块累计 chat≤3、tokens≤8000、provider attempts≤11。
+- `M45-P4R` after repair / before final qualification：qst_0461 只用 P4 immutable raw response + P3 Evidence 离线重放，provider=0；只有它通过全部 expansion assertions 后才执行 qst_0431 唯一 proposal revalidation。qst_0431 之后不再重验。任一失败即第三次 no-go；两题全绿才建立 additive v3 review 并解除 finish/M46 阻塞。
+
+> **P4R 执行结果（2026-08-25）**：qst_0461 离线重放全绿后，qst_0431 唯一 Qwen call 已执行；transport 成功，但 proposal 经本地 coverage 重算后为 `proposal_no_unsupported_requirement`，未触发 action。P4R runner 又因未 catch 该 validator error 而 exit 1，raw/tokens 未落盘；call count=1、tokens=`unobserved`。按“不再重验”门，v3 必须 no-go，只能离线恢复不完整证据，不能补发。
+
+> **v3 最终 qualification（2026-08-25）**：recovered safe artifact `6426219b...a949` 与 external v1.2 manifest 已离线固化；review `8fb3cfad...14e4`=`review_required/no_go`。qst_0461 passed、qst_0431 failed，累计 `8 embedding + 3 chat = 11` provider attempts，P4R tokens 明确为 `unobserved`。因此 M45/B3 未完成、M46 与 `finish-module` 继续阻塞；当前 campaign 不得再调用 provider。
+
+### M45-H：procedure boundary continuation（第三次 C5 review 后）
+
+- **已确认（2026-08-25）**：用户为 demo 效果选择结构完整性方案 A。最终目标仍是完成 B3 两张 recovery action card；本切片只补 direct expansion 的准入缺口，不改产品 B2 Loop/API、retrieval/embedding/Composer、active runtime、sibling scan/add 预算或 M46。
+- 新增显式、默认关闭的 `procedure_boundary_v1` trigger。只有 signed focused requirement 表达 procedure/workflow/steps/checklist 类意图、当前 Document Evidence 带可信 context coordinates、且 SQLite authority 证明同一 physical document 存在紧邻的后续 unit 时，才允许 `context_expansion_candidate`。不读取 qst ID、gold、答案事实、title/document key、review verdict 或 reserve；普通 coverage trigger 与既有 artifact identity 不改签。
+- 结构动作只向后取紧邻 unit，仍逐项执行 bundle identity、同物理文档、pre-selection/pre-generation ACL、duplicate/no-progress 与 `scan8/add4` 现有硬门；不得把“文档较长”或任意 sibling 存在直接视作答案正确。Observation 安全投影新增 trigger reason，qualification 必须核验新增 Evidence 确实是 seed 的 forward continuation。
+- additive v4 campaign 以 v3 review `8fb3cfad...14e4` 为 predecessor。`M45-P5` 只重放 P3 qst_0431 immutable initial Evidence，并连接当前只读 Enterprise SQLite authority；provider/retrieval/embedding/chat/Composer 均为 0。先做 fake SQLite 合同测试，再执行一次离线真实 runtime replay；失败即第四次 no-go，不扩大 cue、seed 或 sibling budget，不追加 provider。
+- P5 只有在 structural trigger、expected action、forward same-document Evidence gain、ACL、budget、wrong action rejected、stop available 与零 provider 全绿时才 `continue`。随后 v4 review 还必须继承 qst_0461 P4R offline pass、v3 no-go 和累计 provider attempts=11，才能输出 `go_for_M46`；否则 M45/B3、`finish-module`、M46 继续阻塞。
+
+> **P5/v4 最终结果（2026-08-25）**：P5 safe `a3a4f7e8...4a72`=`passed/continue`，在 initial coverage 显示完整时由 `procedure_boundary_v1` 补入 2 条 forward same-document Evidence；retrieval/embedding/chat/Composer 全为 0。v4 review `949a3b03...fbb4`=`go_for_M46`，两张 action card 均 completed，模块累计 provider attempts 仍为 11。M45/B3 完成，M46 planning 门解除；产品接线、reserve A/B 与默认决策仍属于 M46。
+
 ## 7. 决策门
 
 ### G45-1：rewrite 是否引入模型用途
 
 **已确认决策（2026-08-25）**：采用方案 A。M45 首轮只实现 deterministic requirement split/focused rewrite；方案 B 不属于本模块默认实现或失败后的备用重跑路径，只按下述重开条件进入未来独立 module plan。
+
+> **执行结果（2026-08-25）**：P3 的 `qst_0431`、`qst_0461` 均出现 deterministic question-derived coverage 误判，且 P1/P2D 已证明 action seam 可行，因此下述方案 B 硬重开证据信号已经满足；本 plan 未授权模型用途、出站字段或新额度，所以当前只能停在 C5 `review_required/no_go`。是否修订 M45 引入方案 B，须由用户 review 后另行确认，不能把它当作本次 campaign 的 fallback。
+
+> **用户 review 决策（2026-08-25）**：用户选择继续 structured proposal，并明确 demo 以效果为先，采用“question + 当前已授权 Evidence 片段”的受控 A2；具体 receiver/purpose/data class/字段/模型/预算/P4 已冻结在 M45-E。它是带新 identity 的重开切片，不改写首轮 no-go，也不授权 gold/reserve 或普通产品出站。
 
 #### 方案 A：deterministic requirement split/focused rewrite（已选）
 
@@ -241,7 +288,29 @@ M45 完成后，系统拥有一个与产品 runtime 隔离、可复现的 B3 dia
 - 路径核对时点：M45-A 首次落盘长期 artifact 前，在开工 notes 登记绝对路径、版本、与 reserve 的分离断言及写入授权结果。
 - 重开决策的条件：安全投影已足以闭合全部 required review，或外部保留策略无法满足访问/清理要求。
 
-除 G45-1/G45-2 外，本模块无默认模型、embedding、release、active runtime、正式 case 或安全策略决策。C5 的 `go_for_M46/review_required` 是按冻结证据推导的 review point，不授权 M46 默认切换。
+### G45-3：rewrite 命中目标 fragment 但 coverage 未闭合时是否允许组合恢复
+
+**已确认决策（2026-08-25）**：用户在 P2 Round 2 真实证据形成后选择方案 A，允许把 M45 合同修订为有界 `rewrite → context expansion` 组合链；不更换 Scenario，不调 semantic 参数，不用答案事实改 query。
+
+- 最终目标：B3 同时证明 rewrite 与 expansion 两张 action card，并证明它们能由连续 Observation 组成安全、可停止的恢复链；不能把“找到正确文档的一个 fragment”冒充 coverage 已完成。
+- 当前缺口：P2 rewrite 新增 expected logical document 的首个 unit，但费率与 measurement 细节仍在同文档后续 unit；原合同的一 action 上限会在真实 Evidence gain 后过早停止。
+- 适配方式：保留 B0 两个 action identity；父级 scenario action chain 上限从 1 改为 2。第二步只能是 expansion，只消费第一步新增且重新授权的 Evidence coordinates，零 query embedding/retrieval/model/Composer；同 action 禁止重复，任一无增益/ACL/identity/budget failure 立即 stop。
+- 不照搬/不扩张：不实现开放循环、LLM planner、自动 rewrite 重试、跨文档 parent 索引、top-k 调参或产品 B2 Loop 接线；M46 仍负责把已合格合同实现为 Subgraph。
+- 历史续接 Probe：`M45-P2C` 已按 immediate-neighbor v1 执行并 `failed/stop`；其失败证据不得覆盖。G45-4 经用户确认后由新的 `M45-P2D` 验证 sibling v2，不再修改或重跑 P2C。
+- 后续模块：只有 P2D、P3、C5 全绿并完成 M45 收工/验收后，M46 才能以父 action budget=2 实现产品 Subgraph；最终验收仍要求两卡、组合停止/去重/预算和 sealed reserve 全部闭合。
+
+### G45-4：直接邻居不足时采用哪种 document context expansion
+
+**已确认决策（2026-08-25）**：P2C 证明目标费率位于同文档第 4 个 unit、超出 ±1 direct neighbor 后，用户选择方案 A：使用同一 physical document 内的有界 sibling 搜索，不采用为当前题写死的 ±3 hop。
+
+- 最终目标：expansion 能在大型真实文档中补齐被 chunk 边界分散的 requirement，同时仍保持同文档、ACL、Evidence identity、context budget 和 stop 可证明。
+- 当前缺口：immediate-neighbor v1 只能看到 seed 后第 1 个 unit；qst_0420 的 measurement 在 seed，EXP-002 概览在第 2 unit，rate 在第 4 unit，必须组合多个 sibling 才能闭合。
+- 新合同：每个 seed 最多检查 8 个同 physical document sibling identity，按与 seed 的 unit 距离稳定排序；每项 pre-selection 授权后才加载正文。用 signed requirement marker groups 对 `seed + sibling subset` 做 deterministic 最小组合搜索，最多 2 seeds、最终新增最多 4 Evidence；chosen 后逐项 pre-generation 重授权。
+- 禁止内容：不把 gold doc/title/答案值用于 selector，不跨 physical document，不扫描无限 sibling，不加入不贡献 coverage 的中间 unit，不增加 embedding/model/Composer，不建立 parent index，不连接产品 B2 Loop。
+- 新 Probe：`M45-P2D` 使用与 P2C 相同的 P2 Round 2 immutable lineage 验证 v2 action，provider calls=0；P2C 失败证据保留。P2D 是核心 action card 修订后的新 Probe，不伪装成 P2C 重验；失败即 C5 no-go，不再扩大 scan/add budget。
+- 后续条件：P2D passed/continue 才运行 P3；M46 只能消费 sibling v2 card，不能回退到已失败的 immediate-neighbor v1。
+
+除 G45-1/G45-2/G45-3/G45-4 外，本模块无默认模型、embedding、release、active runtime、正式 case 或安全策略决策。C5 的 `go_for_M46/review_required` 是按冻结证据推导的 review point，不授权 M46 默认切换。
 
 ## 8. 验证与验收矩阵
 
@@ -252,8 +321,10 @@ M45 完成后，系统拥有一个与产品 runtime 隔离、可复现的 B3 dia
 | Probe ID / 执行时点 | 探针场景 | 真实产品链路/依赖 | 需要观察的结果与 Trace 事实 | 通过/失败/不确定标准 | 决策与停止条件 |
 | --- | --- | --- | --- | --- | --- |
 | `M45-P1` / after M45-B、before M45-C | business T4：“如果最近质量问题退款明显增多，客服受理这类退款时可以直接按全额退款处理吗？需要哪些前提和材料？” | active 22-entry release → trusted `ops+customer_service` caller → Knowledge Tool initial lexical → diagnostic rewrite action；零模型 | initial 仍复现缺 basic/已有 quality 或如实记录当前 identity变化；rewrite 由 requirement/Observation 触发；新增 basic Evidence 且 quality 不丢；ACL 双检、EvidenceRef、budget、wrong expansion rejected、stop；零 gold/title runtime input | passed：缺失 Evidence 新增且所有安全/预算负断言通过；failed：trigger/增益/安全/身份确定失败；inconclusive：依赖/active identity 无法形成有效观察 | passed→continue M45-C；实现缺陷→revise 后最小重验一次；case 已自然取全或无恢复需要→inconclusive/stop，不能制造 failure，进入 C5 review |
-| `M45-P2` / after M45-C、before P3 | external `diagnostic_dev/qst_0420` | existing semantic profile/Milvus → SQLite authority → initial retrieval → diagnostic rewrite；不运行 Composer | 预检索已签名的多部分 requirement slot 中至少一项在 initial selected Evidence 后仍 unsupported；rewrite eligible、expansion rejected；新增缺失 Document Evidence；semantic/profile/unit-set identity、embedding calls、ACL、EvidenceDelta、duplicate/no-progress、子预算；gold 只在动作后离线评分 | 三态同 P1；passed 还要求新增 Evidence 来自当前 authority/ACL，且 trigger/query 不是 gold/title 驱动 | continue 才执行 P3；systemic identity/readiness failure立即 stop；不切 lexical、不换题、不自动重跑 |
-| `M45-P3` / after P2 continue、before M45-D | external `diagnostic_dev/qst_0431`、`qst_0461` 各首次一次 | existing semantic profile/Milvus initial retrieval → authorized seed Evidence → SQLite neighbor load/reauthorize；零额外 embedding/Composer | 两题均形成 fragment Observation；expansion eligible、rewrite rejected；每题新增有效相邻 Evidence；跨文档禁止、ACL/revision、EvidenceDelta、duplicate/no-progress、unit/context预算与 stop | passed：两题 required 均通过；任一确定失败则整体 failed；seed structure/依赖不可观察则对应 inconclusive且整体不得准入 action | 两题均 passed 才把 expansion card交 M45-D；否则进入 revise或 C5 no-go，不扩大窗口/换题 |
+| `M45-P2` / after M45-C | external `diagnostic_dev/qst_0420` | existing semantic profile/Milvus → SQLite authority → initial retrieval → diagnostic rewrite；不运行 Composer | 已形成 Round 1/修复 Round 2 不可变证据：rewrite trigger/action/ACL/identity/target-document fragment gain 通过，但 requirement coverage 未闭合 | Round 2 如实保留 `failed/revise`，不覆盖、不伪装为完整通过；它是 continuation 的 signed prior Evidence | 不再重跑 initial/rewrite |
+| `M45-P2C` / after G45-3 | 续接 qst_0420 Round 2 | immediate-neighbor v1，零 embedding | 已形成 `failed/stop`：direct neighbor 无法补到第 4 unit 的 rate | 保留失败 action card 历史，不参与 v2 qualification | 不重跑、不覆盖；由用户决定 G45-4 |
+| `M45-P2D` / after G45-4、before P3 | 续接 external `diagnostic_dev/qst_0420` Round 2 | 核验 P2 artifact → SQLite authority → bounded same-document sibling v2；零 embedding/Composer | prior identity/hash、seed relevance、最多 8 sibling scan、最小支持组合、ACL 双检、EvidenceDelta、duplicate/no-progress、chain budget 与 stop | passed：第二步补齐 unresolved rate/measurement Evidence且只新增支持组合；failed/inconclusive 同 P2C | passed→continue P3；否则 C5 no-go；禁止再扩 scan/add budget或重验 |
+| `M45-P3` / after P2D continue、before M45-D | external `diagnostic_dev/qst_0431`、`qst_0461` 各首次一次 | existing semantic profile/Milvus initial retrieval → authorized seed Evidence → SQLite sibling scan/reauthorize；零额外 embedding/Composer | 两题均形成 fragment Observation；expansion eligible、rewrite rejected；每题新增最小支持 sibling Evidence；跨文档禁止、ACL/revision、EvidenceDelta、duplicate/no-progress、scan/add预算与 stop | passed：两题 required 均通过；任一确定失败则整体 failed；seed structure/依赖不可观察则对应 inconclusive且整体不得准入 action | 两题均 passed 才把 expansion v2 card交 M45-D；否则进入 C5 no-go，不扩大预算/换题 |
 
 Probe 业务 oracle 与安全负断言：
 
@@ -261,7 +332,7 @@ Probe 业务 oracle 与安全负断言：
 - P2/P3 的 gold 只在 action 完成后离线评分 actual EvidenceDelta，不进入 runtime trigger/query；
 - 全部 Probe 禁止 Document 正文、raw query/gold、凭据、Prompt、Thought 进入 API/Trace/仓库 artifact；
 - 只读运行，不 reset、不写数据库/active release/索引；运行前后核对 release/profile/semantic/collection/unit-set/reserve access state 未变化；
-- 初次 campaign 最多 4 个 Scenario，external 每题 initial 1 次、recovery action 1 次；rewrite 内最多 2 个 child retrieval batches，因此预计 embedding provider attempts≤5、chat/model/Composer=0；任何意外越界如实记账并停止。
+- campaign 仍只有 4 个 Scenario、每题 initial 恰好 1 次；通常 recovery action 1 次，qst_0420 按 G45-3 链长至多 2。rewrite 内最多 2 个 child retrieval batches，continuation expansion 零 embedding。含修复 Round 2 的模块累计 provider attempts 硬上限 8、chat/model/Composer=0；任何越界如实记账并停止。
 
 模块完成后建议用户执行的 Formal Eval：**当前无需正式 Eval**。M45 只负责 diagnostic/dev action admission，不能解封 reserve；M46 完成 Subgraph 后才按其 plan 首次运行 sealed decision reserve Pipeline/Subgraph A/B。历史 M34/M41/M44A 仅作回归/诊断，不自动重跑。
 
@@ -270,8 +341,8 @@ Probe 业务 oracle 与安全负断言：
 | C1 failure funnel | scorer/projector tests + M39/M41/M44A frozen artifact replay | 六层三态和唯一首失败层正确；上游缺失传递 `not_observed`；不重跑 pipeline | 必须完成 |
 | C2 diagnostic artifact | completed artifact + 缺/多/重复 execution/action/assertion、identity/hash/budget 篡改 | 合法 artifact identity 可复算；所有 closed-world 反例失败关闭；仓库投影无正文/gold/private payload | 必须完成 |
 | C3 campaign boundary | selector/manifest/round/budget tests + notes/usage audit | 只有四个 Scenario；Round/重验符合合同；reserve/held-out访问为零；未换 backend/参数 | 必须完成 |
-| C4 rewrite card | deterministic tests + P1/P2 | business/external 各有实际 Evidence gain；external 错误 expansion 被拒；ACL/duplicate/no-progress/budget闭合 | 必须完成 |
-| C4 expansion card | deterministic tests + P3 | 两个 external Scenario 各新增有效相邻 Evidence；错误 rewrite、跨文档、ACL/identity/duplicate被拒 | 必须完成 |
+| C4 rewrite card | deterministic tests + P1/P2 | business 新增完整缺失 Evidence；external 新增目标文档 fragment 且 trigger/query 无 gold，随后由新 Observation 如实识别 coverage 未闭合；ACL/duplicate/no-progress/budget闭合 | 必须完成 |
+| C4 expansion card | deterministic tests + P2D/P3 | continuation 及两个 direct expansion Scenario 均新增最小支持 sibling Evidence；错误 rewrite、跨文档、ACL/identity/duplicate、scan/add越界被拒 | 必须完成 |
 | C5 same-runtime choice | qualification validator | external semantic 在不同 Observation 分别选择 rewrite/expansion；移除 Observation 后同一选择不再合法 | 必须完成 |
 | C5 M46 gate | go/no-go projector + tamper tests | 只有两卡全通过才输出 `go_for_M46`；零/一卡/静态分摊只能 `review_required/no_go` | 必须完成 |
 | legacy/默认不变 | M31–M44A RAG/Harness/Phase4B 回归 | legacy/agent 原 assertion 不改；B2 production budget/Loop、active release、semantic默认和API不变 | 必须完成 |
@@ -300,7 +371,7 @@ Probe 业务 oracle 与安全负断言：
 - RAG funnel projector/scorer、安全 triage 和 historical input hash manifest；
 - rewrite/expansion 隔离 diagnostic executor，不接产品 Loop；
 - closed-world diagnostic artifact、qualification validator 与 deterministic rehearsal；
-- 四个预注册 Scenario 的 Probe/usage/EvidenceDelta/action selection 证据；
+- 四个预注册 Scenario 的 P1/P2/P2C/P2D/P3 Probe、usage、EvidenceDelta 与 action-chain selection 证据；
 - 项目外 immutable diagnostic artifact 与仓库内 SHA-256/汇总/安全失败切片；
 - `go_for_M46` handoff 或正式 `review_required/no_go`，以及对应 notes/state/changelog 技术档案。
 
@@ -309,12 +380,12 @@ Probe 业务 oracle 与安全负断言：
 ## 10. 遗留与后续
 
 - 本模块完成但刻意不处理的内容：B4 Subgraph 实现/default/fallback、sealed reserve A/B、最终 Answer/Citation 净收益、B5 durable state、B6 Compact。
-- 下一模块可直接消费的产物：M46/B4 只在 C5 `go_for_M46` 后消费两张 action card、trigger/eligible set、child budget、Evidence merge/duplicate/no-progress、diagnostic artifact与 reserve protocol；不得重新用 reserve 调 action/Prompt/参数。
+- 下一模块可直接消费的产物：M46/B4 只在 C5 `go_for_M46` 后消费两张 action card、trigger/eligible set、父 chain budget=2、child budget、Evidence merge/duplicate/no-progress、diagnostic artifact与 reserve protocol；不得重新用 reserve 调 action/Prompt/参数。
 - 后续需要根据真实失败重新规划的内容：若 C5 no-go，用户必须在 M45/B3 内明确选择新的真实 Scenario/corpus、排期或阶段范围修订；在新 plan 通过前没有合法的 M46 开工条件。
 - 可能存在的风险：deterministic rewrite 过拟合 T4；external review failure 不一定可由 neighbor expansion 解释；现有 unit recipe 无天然 parent；semantic runtime readiness/延迟波动；安全投影不足以复核 context。对应控制是非 canonical external case、typed trigger、不新增 parent 假设、三态/usage、独立 immutable artifact。
 - 最终目标与缺口：M45 只完成 action admission，尚无产品 RAG Subgraph；Phase 4B 的最终 B4 标准仍要求 M46 实现同合同 Pipeline/Subgraph、父子预算、business T4、sealed reserve A/B 和 default/experimental/fallback 决策。M45 不得把 action prototype 写成 Agentic RAG 已完成。
 - 强制开工条件：M46 必须取得 C5 `go_for_M46`、两卡 required 全绿、同 external runtime 两动作选择证据、M45 技术收工/文档/人工检查/验收完成且 reserve access state 仍 sealed。
-- 最终验收标准：B3 以第 8 节全部必须项与 P1–P3 时点证据闭合为准；B4/Phase 4B 仍分别以 M46 plan 和 roadmap Definition of Done 为准。
+- 最终验收标准：B3 以第 8 节全部必须项与 P1/P2/P2C/P2D/P3 时点证据闭合为准；B4/Phase 4B 仍分别以 M46 plan 和 roadmap Definition of Done 为准。
 
 ## 11. 开工条件
 

@@ -19,6 +19,30 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M45 Phase 4B B3 RAG failure funnel 与 action-level Evidence admission（2026-08-25）
+
+- **改动范围**：起始 commit `7d254ff4...9ec9` 明确，期间无中间提交。新增四代 content-bound diagnostic campaign、RAG failure funnel/typed Observation、deterministic rewrite、same-document sibling expansion、受控 structured requirement proposal、procedure forward continuation、closed-world qualification/tamper validator、Probe/rehearsal、v1～v4 review 与 M45 tests；只在 `EnterpriseContextLoader` 增加只读 forward sibling identity seam。未接产品 B2 Loop/API、未改 active release、semantic/embedding/default、Composer、corpus/index 或 M46 reserve。
+- **关键记录与用户决策**：首轮 deterministic trigger no-go 后，用户为 demo 效果确认 question + authorized Evidence 的受控 proposal；P4/P4R 仍分别暴露 schema/literal matching 与“模型认为 coverage 完整”的失败。用户随后确认 M45-H 方案 A：不再追加模型调用，而以默认关闭的 `procedure_boundary_v1` 在 signed procedure intent + authority forward unit 同时成立时准入 expansion。它只证明需要补上下文，不把 sibling 当答案事实；仍受 2 seeds、scan8/add4、同物理文档、双 ACL、duplicate/no-progress 与 stop 约束。
+- **Probe 与证据**：P1 business rewrite passed；P2/P2C 失败推动 rewrite→expansion/sibling v2，P2D passed；P3/P4/P4R 的 no-go 全部保留。P4 使用 2 chat / 3877 observed tokens；P4R 另有 1 chat attempt，但 runner crash 导致 tokens/raw response=`unobserved`，未补发。P5 复用 P3 qst_0431 immutable Evidence，零 retrieval/embedding/chat/Composer，补入 2 条 forward same-document Evidence并 passed。模块累计 `8 embedding + 3 chat = 11` provider attempts。
+- **最终产物**：v4 campaign `15cda06e...e708`，P5 safe `a3a4f7e8...4a72`，external v1.3 manifest `2d369472...d0f6`，final review `949a3b03...fbb4`=`go_for_M46`；query rewrite/context expansion 两卡 completed，reserve sealed。项目外 v1.0～v1.3 保存 private evidence，仓库只保存安全 review/hash。
+- **参考资料**：定点复核 ARAG child/parent retrieval、conditional edge/去重与 DB-GPT structured references/evaluator。借鉴首次检索与恢复分权、identity 驱动 continuation、确定性 dispatcher；适配为 SQLite authority、typed EvidenceDelta、ACL 与预算。不照搬自由 LLM tool call、字符串 Observation、顺序 parent ID、默认全文展开、gold/title seed selector 或平台大状态。
+- **验证快照**：注释审计 13 个 Python 文件/126 个符号，补写 25 个 docstring；compileall 通过；聚焦 `29 passed`；受影响 `54 passed, 1 warning`；后台全仓 `582 passed, 1 warning in 665.44s`。warning 为既有 Starlette/httpx deprecation。manifest SHA、artifact identity、safe/private lineage 与 reserve sealed 对账通过。
+- **遗留/后续**：M45 只是 diagnostic action admission，不是产品 Agentic RAG，也未证明答案正确、总体质量或 Reliability。M46/B4 须另立 plan 接 Pipeline/Subgraph、父子预算与首次 sealed reserve A/B，并保留 proposal validator、procedure trigger、ACL/duplicate/no-progress/stop；当前不运行 Formal Eval。
+
+### [实验] M45/B3 diagnostic campaign 到达 C5 no-go（2026-08-25）
+
+- **范围与边界**：在隔离 diagnostic runtime 实现 B3 六层三态 funnel、deterministic focused rewrite、同物理文档 sibling expansion v2、action/budget/EvidenceDelta/qualification artifact 和离线复核脚本；没有接入产品 B2 Loop/API，没有修改 active release、Enterprise semantic 默认、embedding、Composer、corpus/index recipe，也没有读取 M46 sealed reserve。
+- **用户决策与演进**：G45-1/G45-2 采用方案 A；P2 暴露单 rewrite coverage 不足后，用户确认 G45-3 的 `rewrite → expansion` 两步链；P2C 证明 immediate neighbor 不足后，又确认 G45-4 的同文档 bounded sibling scan（每 seed 最多 8 个 identity、最多 2 seeds、最多新增 4 条 Evidence）。旧失败 artifact 全部保留，后续 Probe 不冒充重验或覆盖。
+- **真实 Probe 结果**：P1 business rewrite passed；P2 Round 2 找到 qst_0420 目标文档 fragment 但 rate/measurement coverage 未闭合；P2C immediate neighbor failed；P2D sibling v2 passed。P3 首次执行 qst_0431/qst_0461 时，两题 initial Evidence 都让 question-derived generic slots 显示完整，因而 expansion 不 eligible、rewrite 被拒且只允许 stop，均为 failed。campaign 累计 8 次 embedding provider attempt，零 chat/model/Composer、零 observed chat tokens；预算守卫阻止了 fallback 和额外调用。
+- **结论与路线影响**：离线 review artifact `33efaf8f...9ea9` 为 `review_required/no_go`；continuation expansion card 通过，但 direct expansion card 未完成，所以 M45/B3 未完成、不得调用 `finish-module` 做完成收工，M46 不得开工。结果满足 G45-1 结构化 requirement/rewrite proposal 的硬重开证据信号，但不自动授权模型；若继续，须先由用户确认修订 M45 的 receiver、purpose、出站字段、模型、预算和新 Probe，且禁止 gold/reserve/答案事实进入 proposal。
+- **证据与安全**：完整 probe 证据保存在项目外 `phase4b-rag-action-diagnostics/v1.0.0`，private manifest SHA-256 `467de737...c3ed3`；仓库只保存安全 review/failure slices/report。safe/private identity 与文件 hash、ACL 重授权、同文档边界、scan/add/chain budget、duplicate/no-progress 和 no-go tamper 均由 deterministic tests/rehearsal 核验；M46 reserve 仍 sealed。
+
+> ⚠️ 注（同日 structured proposal 重开与 P4）：用户为 demo 效果选择 question + authorized Evidence 的受控 A2，新增 diagnostic-only Qwen proposal、strict validator 和 additive v2 campaign。P4 两题各一次，共 2 calls / 3877 tokens、零新 retrieval/embedding/Composer，但仍 failed：qst_0431 暴露 prompt 未声明 marker group 上限且失败 raw 未保留；qst_0461 proposal 正确识别 schedule 缺口，却因整句 literal marker 未匹配 sibling 的语义等价表述而没有 expansion preview。v2 review `ce0d7615...40af` 仍为 no-go，累计 provider attempts=10；当前不得自动重跑或启动 M46。后续若继续，最小候选是 proposal-only token-overlap、qst_0461 immutable 离线重放和 qst_0431 唯一一次新 proposal，须用户另行确认新 campaign/Probe。
+
+> ⚠️ 注（同日 P4R 最小 repair 与 v3 最终 no-go）：用户确认 proposal-only token-overlap、完整 prompt schema、失败私有证据保留，以及 qst_0461 零 provider 离线重放后 qst_0431 唯一一次 revalidation。qst_0461 最终 expansion passed；qst_0431 transport 成功但本地 coverage validator 得到 `proposal_no_unsupported_requirement`，未执行 action。runner 未 catch 异常导致 raw response 与 token usage 未落盘，故只记已知 1 chat attempt、tokens=`unobserved`，禁止补发或估算为 0。recovered safe `6426219b...a949`，v3 review `8fb3cfad...14e4`=`review_required/no_go`，累计 `8 embedding + 3 chat = 11` provider attempts；M45/B3 未完成、M46/`finish-module` blocked。受影响回归 `50 passed, 1 warning`。后续若继续须由用户确认新的结构完整性 action trigger 与 plan 范围，不能把当前 campaign 再重验。
+
+> ⚠️ 注（同日 M45-H 最终修正）：用户确认的默认关闭 `procedure_boundary_v1` 用 P3 immutable qst_0431 Evidence 完成零 provider P5，新增 2 条 forward same-document Evidence；v4 review `949a3b03...fbb4`=`go_for_M46`。因此上述 v3 no-go 仍是不可变历史 lineage，但不再代表当前模块状态；M45/B3 已完成技术收工，产品 Subgraph/答案净收益仍留给 M46。
+
 ### [小修] Live Dev Probe 诊断与证据时效口径（2026-08-24）
 
 - 根据 M44 多轮真实修复经验，在 `runbook.md` 和 module plan 模板精简补齐：总体/子能力三态、失败层→根因假设→最小判别动作、实际 strategy/usage 记账、模块累计额度、事务数据恢复、禁止人为触发故障，以及核心行为改变后旧 Probe 失效。后续复核又将 plan/`finish-module` 的公共字段清单收敛到各自事实源，并明确收工后单次真实运行须另获授权、标记 `not-development-probe` 且不登记基线；未扩大 Live Dev Probe standing authorization、Formal Eval 或产品 runtime。

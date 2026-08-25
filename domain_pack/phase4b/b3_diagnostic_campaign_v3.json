@@ -1,0 +1,68 @@
+{
+  "schema_version": "phase4b-rag-action-diagnostic-campaign-v3",
+  "classification": "diagnostic_dev",
+  "baseline_eligible": false,
+  "predecessor_campaign_identity": "c86e38705382b03d9a99d4349a319be9561d6731b887f01307ad3ddda3f7eaea",
+  "round_limit": 1,
+  "repair_round_limit": 1,
+  "actions": [
+    "query_rewrite_candidate",
+    "context_expansion_candidate",
+    "stop"
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "qst_0461",
+      "runtime_scope": "external_profile",
+      "expected_action": "context_expansion_candidate",
+      "partition": "diagnostic_dev_immutable_replay"
+    },
+    {
+      "scenario_id": "qst_0431",
+      "runtime_scope": "external_profile",
+      "expected_action": "context_expansion_candidate",
+      "partition": "diagnostic_dev_minimal_revalidation"
+    }
+  ],
+  "budget": {
+    "max_scenarios": 2,
+    "max_embedding_provider_attempts": 0,
+    "max_chat_model_calls": 1,
+    "max_chat_tokens": 4123,
+    "predecessor_embedding_provider_attempts": 8,
+    "predecessor_chat_model_calls": 2,
+    "max_total_provider_attempts": 11,
+    "max_expansion_seeds": 2,
+    "max_sibling_units_scanned_per_seed": 8,
+    "max_added_expansion_evidence": 4
+  },
+  "proposal": {
+    "prompt_identity": "m45-e-evidence-aware-requirement-proposal-v1",
+    "outbound_policy_identity": "phase4b-m45-rag-requirement-proposal-outbound-v1",
+    "receiver": "qwen_chat",
+    "purpose": "rag_requirement_proposal",
+    "data_class": "public_benchmark_question_with_authorized_evidence",
+    "model": "qwen3.7-plus",
+    "max_evidence": 3,
+    "max_evidence_chars_each": 4000,
+    "max_completion_tokens_each": 1600
+  },
+  "repair": {
+    "offline_replay_scenario": "qst_0461",
+    "provider_revalidation_scenario": "qst_0431",
+    "marker_match_mode": "token_overlap",
+    "legacy_marker_match_mode": "exact",
+    "provider_retry_limit": 0
+  },
+  "historical_inputs": [
+    {
+      "path": "eval/reports/m45/m45-b3-reopened-review.json",
+      "sha256": "e95faa300ce1518c500928048f967f8109ce280c0ec346b750f543c28a00d361"
+    }
+  ],
+  "reserve": {
+    "manifest_path": "eval/cases/agent/phase4b_reserve_manifest.json",
+    "required_access_state": "sealed",
+    "first_unseal_module": "M46"
+  }
+}

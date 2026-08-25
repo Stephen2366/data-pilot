@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M44/B2（含 defect repair）已验收通过（2026-08-24）；M45/B3 plan 已冻结，尚未开工 |
+| 当前活动模块 | M45/B3 技术收工完成；v4 `go_for_M46`，等待 finish-docs / 人工检查 / accept-module |
 | 当前 plan    | `docs/notes/m45-plan.md`                                    |
-| 当前 notes   | 无（最近完成：`docs/notes/m44-notes.md`）                    |
-| 待决事项     | 下一步为 M45/B3 开工；首次长期写入前核对 external diagnostic store 绝对路径；M46 前 reserve 保持 sealed |
+| 当前 notes   | `docs/notes/m45-notes.md`                                   |
+| 待决事项     | 完成 M45 学习复盘与人工/accept-module 门后，再制定 M46/B4 plan；M46 plan 前 reserve 继续 sealed，不提前运行 A/B |
 | 更新时间     | 2026-08-25                                                   |
 
 ## 必读规则
@@ -55,6 +55,10 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-25 | M45-H/P5 最终 passed：显式默认关闭的 `procedure_boundary_v1` 在 qst_0431 initial coverage 显示完整、且 SQLite authority 证明存在 forward unit 时，准入 expansion 并新增 2 条同物理文档后续 Evidence；P5 retrieval/embedding/chat/Composer=0。v4 review `949a3b03...fbb4`=`go_for_M46`，两张 action card completed，累计 provider attempts 仍为 11；全仓 `582 passed, 1 warning`。M45/B3 技术完成，但它仍是 diagnostic admission，不是产品 RAG Subgraph。 |
+| 2026-08-25 | M45-P4R/v3 最终 no-go：qst_0461 用 P4 immutable proposal 离线重放后 expansion passed；qst_0431 唯一 Qwen revalidation transport 成功，但本地 coverage validator 判为 `proposal_no_unsupported_requirement`，未触发 action。runner 未 catch 异常导致 raw/token usage 丢失，故 tokens=`unobserved`，严禁估算为 0 或补发。recovered safe `6426219b...a949`，v3 review `8fb3cfad...14e4`，累计 provider attempts=`8 embedding + 3 chat = 11`；M45/B3 未完成、M46 blocked。 |
+| 2026-08-25 | M45-P4 受控 A2 真实 Probe failed：qst_0431 proposal schema 因 prompt 未声明 marker 数量上限被 validator 拒绝；qst_0461 正确提出 weekly schedule 缺口，但 literal phrase matcher 未命中语义等价 sibling，expansion 未准入。2 Qwen calls / 3877 tokens，零新 retrieval/embedding/Composer；累计 provider attempts=10。safe `a374f0c0...cfac`，v2 review `ce0d7615...40af`=`review_required/no_go`；不自动重跑，M46 blocked。 |
+| 2026-08-25 | M45 Live Dev Probe：P1 business rewrite passed；P2 Round 2 找到目标文档但 coverage 未闭合；P2C immediate neighbor failed；用户确认的 sibling v2 在 P2D passed；P3 的 qst_0431/qst_0461 均因 deterministic question-derived coverage 误判为完整而只允许 stop，未执行 recovery。campaign 共 8 embedding provider attempts、零 chat/model/Composer、零 observed chat tokens；review artifact `33efaf8f...9ea9`，结论 `review_required/no_go`，M46 不得开工。 |
 | 2026-08-24 | `M44-PFIX-G4-1` 真实 canonical T1→T2 passed：4 calls / 15762 tokens；T2 same-source Answer/rows/Trace 给出 120000/180000/60000/50%，completion identity `41b577e...ecac9`，raw DB marker=0，数据库 rollback。初始 SQL 合法而未触发 repair，故 G3 repair real path 仍 inconclusive；不为展示 repair 重跑。 |
 
 ## 当前路线判断
@@ -62,6 +66,7 @@
 > 只保留仍然生效的路线和限制；已经完成的必须删除或改写。
 
 - (2026-08-24) M44A 仍是 B2 前置修复、不占 B milestone。business 小 catalog 与 external 180 题继续分账，120 held-out 保持停门；external 产品默认为 semantic，但历史 lexical artifact/正式 retrieval baseline 不改签，也没有证据宣称 semantic 质量更优。
+- (2026-08-25) M45/B3 最终以 v4 `go_for_M46` 完成：rewrite、bounded sibling expansion 与 procedure forward continuation 两张 action card已闭合。P1～P4R 的失败/no-go 保留为 required lineage；P5 不调用 provider。M46 只能消费这些 diagnostic contracts，仍须另立 plan 接产品 Subgraph、父子预算和 sealed reserve A/B，不能把 M45 的 Evidence gain 外推为答案正确率或默认净收益。
 
 ## 防遗忘能力账本
 
@@ -73,7 +78,7 @@ M41 及以后的能力缺口：
 | ------ | ------------------------------------------------------------ | ------------------------------------------------------------ | --------------------- |
 | P2     | M44 G44-2 未选方案 B：由结构化模型提出 next Action、再由确定性 Controller 审核 | M44 已确认方案 A，首版 next-action 完全确定性，decision model calls/tokens 固定为 0；这不代表永久排除模型 proposal。只有 required paraphrase 集形成稳定且不可接受的 deterministic clarification 失败簇，才能另立 module plan 评估结构化 proposal adapter；届时必须保留 closed-world Action allowlist、deterministic validator、Budget/ACL/outbound/duplicate/no-progress 硬门，并重新取得 decision purpose、数据类别和真实 E2E 的用户授权。不得仅因模型看起来更灵活就重开，也不得把它算作 M44 未完成项 | Phase 4B 后续质量候选 |
 | P2     | G4 typed comparison completion 是“只消费服务端 metric_comparison requirement + 已验证 SQL rows”的窄合同 | 不扩成任意公式/required-output 平台：多期趋势、任意公式、自然语言自由计算、通用 required-output DSL 均不在授权内；只有用户确认新合同并另立 plan 才能扩展 | Phase 4B 后续质量候选 |
-| P2     | M45 G45-1 未选方案 B：由结构化模型生成 rewrite proposal，再由确定性 validator 审核 | M45 已确认方案 A，首轮只用 deterministic requirement split/focused rewrite，rewrite/decision model calls 与 observed chat tokens 固定为 0；方案 B 不是 M45 的备用重跑。只有方案 A 在预先冻结的非 canonical dev paraphrase 上形成稳定且不可接受的 understanding/rewrite failure cluster，且 retrieval action seam 已证明可行，才能另立 module plan 重开。届时必须保留 typed unsupported-slot trigger、closed-world proposal schema、deterministic validator、ACL/Budget/duplicate/no-progress/stop 硬门，并重新取得 receiver、rewrite purpose、数据字段和真实 E2E 额度授权；不得读取 gold/reserve 来生成 rewrite，也不得把该候选算作 M45 未完成项 | Phase 4B 后续质量候选 |
+| P2     | `procedure_boundary_v1` 只证明 forward context 值得补取，不证明后续正文一定改善最终答案 | M45-H 已以默认关闭、procedure-shaped intent + SQLite forward unit 的窄合同闭合 qst_0431；M46 接入产品 Subgraph 时必须保留该 trigger identity、ACL/同文档/budget/stop，并通过 Pipeline/Subgraph A/B 与人工语义 review 判断净收益。不得直接全局开启或把 Evidence gain 当 answer correctness | Phase 4B M46/B4 必审 |
 
 M29–M40 的能力缺口：
 

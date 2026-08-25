@@ -1,0 +1,20 @@
+{
+  "schema_version": "phase4b-m45-safe-failure-slices-v2",
+  "review_artifact_identity": "ce0d76153c1e2f599532aeb1f632be7ec3e623067612a1f91c56388657dc40af",
+  "slices": [
+    {
+      "scenario_id": "qst_0431",
+      "first_failure_layer": "proposal_validation",
+      "reason_code": "proposal_marker_group_invalid",
+      "status": "failed"
+    },
+    {
+      "scenario_id": "qst_0461",
+      "first_failure_layer": "action_admission",
+      "reason_code": "structured_marker_phrase_not_supported_by_sibling",
+      "status": "failed"
+    }
+  ],
+  "reserve_access_state": "sealed",
+  "artifact_identity": "c033214a7e2157b7e9f627922e8db77999d4509679bbde0ddbefdbc01f2a2c0a"
+}

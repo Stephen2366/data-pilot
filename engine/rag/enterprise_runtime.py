@@ -294,6 +294,82 @@ class EnterpriseContextLoader:
             coordinates=coordinates,
         )
 
+    def sibling_unit_identities(
+        self,
+        coordinates: DocumentContextCoordinates,
+        *,
+        max_units: int = 8,
+    ) -> tuple[str, ...]:
+        """按离 seed 的距离返回同一 physical document 内至多 8 个 sibling identity。
+
+        ★ 这里只返回 identity，不提前加载正文。M45 adapter 会先把 identity 回到同一 bundle、
+        执行 pre-selection ACL，再调用本 loader 水化；“同文档”不等于“有权读取”。距离相同
+        时前一个 unit 先于后一个，保证跨运行顺序稳定；不返回 seed 自身。
+        """
+
+        if not 1 <= max_units <= 8:
+            raise RetrievalAdapterError("retrieval_context_invalid", "sibling scan 上限必须在 1..8")
+        try:
+            with self._connection_lock:
+                rows = self._connection.execute(
+                    """
+                    SELECT unit_identity, normalized_start, normalized_end
+                    FROM units
+                    WHERE physical_source_identity = ?
+                    ORDER BY normalized_start ASC, normalized_end ASC, unit_identity ASC
+                    """,
+                    (coordinates.physical_source_identity,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise RetrievalAdapterError("retrieval_context_unavailable", str(exc)) from exc
+        identities = [str(row["unit_identity"]) for row in rows]
+        try:
+            index = identities.index(coordinates.unit_identity)
+        except ValueError as exc:
+            raise RetrievalAdapterError("retrieval_context_invalid", "seed unit 不属于当前 physical document") from exc
+        siblings: list[str] = []
+        distance = 1
+        while len(siblings) < max_units and (index - distance >= 0 or index + distance < len(identities)):
+            if index - distance >= 0:
+                siblings.append(identities[index - distance])
+                if len(siblings) >= max_units:
+                    break
+            if index + distance < len(identities):
+                siblings.append(identities[index + distance])
+            distance += 1
+        return tuple(siblings[:max_units])
+
+    def following_sibling_unit_identity(
+        self, coordinates: DocumentContextCoordinates,
+    ) -> str | None:
+        """返回同一 physical document 中紧邻 seed 的下一 unit；末 unit 返回 ``None``。
+
+        ★ procedure continuation 只能向后补正文，不能把前一片伪装成“缺失后续”。这里仍只
+        返回 opaque identity；调用方必须先做 ACL，再通过 ``__call__`` 校验正文和坐标。
+        """
+
+        try:
+            with self._connection_lock:
+                rows = self._connection.execute(
+                    """
+                    SELECT unit_identity, normalized_start, normalized_end
+                    FROM units
+                    WHERE physical_source_identity = ?
+                    ORDER BY normalized_start ASC, normalized_end ASC, unit_identity ASC
+                    """,
+                    (coordinates.physical_source_identity,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise RetrievalAdapterError("retrieval_context_unavailable", str(exc)) from exc
+        identities = [str(row["unit_identity"]) for row in rows]
+        try:
+            index = identities.index(coordinates.unit_identity)
+        except ValueError as exc:
+            raise RetrievalAdapterError(
+                "retrieval_context_invalid", "seed unit 不属于当前 physical document"
+            ) from exc
+        return identities[index + 1] if index + 1 < len(identities) else None
+
 
 class EnterpriseProfileRuntime:
     """封装同一只读连接上的 bundle、adapter、context loader 和现有回答链路。"""

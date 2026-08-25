@@ -1,0 +1,134 @@
+{
+  "schema_version": "phase4b-rag-action-diagnostic-review-v1",
+  "classification": "diagnostic_dev",
+  "baseline_eligible": false,
+  "campaign_identity": "469b5ec01eb78d839e2c621378f53bab0cd29cebc3488f78c9475b13bd2312fe",
+  "probe_lineage": {
+    "M45-P1": {
+      "probe_id": "M45-P1",
+      "artifact_identity": "0b2a488da7196590552dc0514211bc6a9b01135f21d53d7bbf3389860bda4416",
+      "campaign_identity": "2a2524fc5f16a53a87b454b88d42fbafffe166680fbc97a15060fa9a8ada39e2",
+      "gate": "passed",
+      "decision": "continue",
+      "usage": {
+        "retrieval_calls": 2,
+        "embedding_provider_attempts": 0,
+        "chat_model_calls": 0,
+        "composer_calls": 0,
+        "observed_chat_tokens": 0,
+        "token_usage_observed": true
+      },
+      "reserve_access_state": "sealed"
+    },
+    "M45-P2-R1": {
+      "probe_id": "M45-P2",
+      "artifact_identity": "0fe41644e4b55ca2fc8894b09f70ca045c0959d3c8e4839a9eb1b1a154ab4e1f",
+      "campaign_identity": "2a2524fc5f16a53a87b454b88d42fbafffe166680fbc97a15060fa9a8ada39e2",
+      "gate": "failed",
+      "decision": "revise",
+      "usage": {
+        "retrieval_calls": 3,
+        "embedding_provider_attempts": 3,
+        "chat_model_calls": 0,
+        "composer_calls": 0,
+        "observed_chat_tokens": 0,
+        "token_usage_observed": true
+      },
+      "reserve_access_state": "sealed"
+    },
+    "M45-P2-R2": {
+      "probe_id": "M45-P2",
+      "artifact_identity": "ae534a343df89b1c610a6b41b750f64027202b9e6dad0318270c8614a5f8ea22",
+      "campaign_identity": "2a2524fc5f16a53a87b454b88d42fbafffe166680fbc97a15060fa9a8ada39e2",
+      "gate": "failed",
+      "decision": "revise",
+      "usage": {
+        "retrieval_calls": 3,
+        "embedding_provider_attempts": 3,
+        "chat_model_calls": 0,
+        "composer_calls": 0,
+        "observed_chat_tokens": 0,
+        "token_usage_observed": true
+      },
+      "reserve_access_state": "sealed"
+    },
+    "M45-P2C": {
+      "probe_id": "M45-P2C",
+      "artifact_identity": "e8bda78c12cc5b1188b3059712a95774feee1f51ed869ed523d2e57dd27d6e6f",
+      "campaign_identity": "7ed3dbd3e5f937a61fd7ba48358ba2eac36a749a871c98b982d86bbdac85a1ed",
+      "gate": "failed",
+      "decision": "stop",
+      "usage": {
+        "retrieval_calls": 0,
+        "embedding_provider_attempts": 0,
+        "chat_model_calls": 0,
+        "composer_calls": 0,
+        "observed_chat_tokens": 0,
+        "token_usage_observed": true
+      },
+      "reserve_access_state": "sealed"
+    },
+    "M45-P2D": {
+      "probe_id": "M45-P2D",
+      "artifact_identity": "23eea7f1b57e616fc7ac2901d9c0f79d4ddd6f2898fdbe36b95f51cc87aee630",
+      "campaign_identity": "469b5ec01eb78d839e2c621378f53bab0cd29cebc3488f78c9475b13bd2312fe",
+      "gate": "passed",
+      "decision": "continue",
+      "usage": {
+        "retrieval_calls": 0,
+        "embedding_provider_attempts": 0,
+        "chat_model_calls": 0,
+        "composer_calls": 0,
+        "observed_chat_tokens": 0,
+        "token_usage_observed": true
+      },
+      "reserve_access_state": "sealed"
+    },
+    "M45-P3": {
+      "probe_id": "M45-P3",
+      "artifact_identity": "5c4592ed8f855bed02d7da3908248f6708a26e1c24b0ee000b210ea94ea4d38b",
+      "campaign_identity": "469b5ec01eb78d839e2c621378f53bab0cd29cebc3488f78c9475b13bd2312fe",
+      "gate": "failed",
+      "decision": "revise",
+      "usage": {
+        "retrieval_calls": 2,
+        "embedding_provider_attempts": 2,
+        "chat_model_calls": 0,
+        "composer_calls": 0,
+        "observed_chat_tokens": 0,
+        "token_usage_observed": true
+      },
+      "reserve_access_state": "sealed"
+    }
+  },
+  "external_artifact_manifest": {
+    "store_version": "phase4b-rag-action-diagnostics/v1.0.0",
+    "manifest_identity": "b10b8230267b3aefcf5586da48a37102b60ffe55ba5d282ed7adb1076052a243",
+    "sha256": "467de7373202161de7c6db29707bf8772f95cce382090dc3a685ef6fab7c3ed3",
+    "artifact_count": 5
+  },
+  "qualification": {
+    "decision": "review_required/no_go",
+    "required_checks": {
+      "campaign_current": true,
+      "all_scenarios_observed": true,
+      "reserve_still_sealed": true,
+      "provider_budget_closed": true,
+      "rewrite_card_complete": true,
+      "continuation_expansion_passed": true,
+      "direct_expansion_card_complete": false,
+      "expansion_card_complete": false
+    },
+    "action_cards": {
+      "query_rewrite_candidate": "completed",
+      "context_expansion_candidate": "failed"
+    },
+    "provider_attempts": 8,
+    "failure_reason_codes": [
+      "direct_expansion_trigger_not_observed:qst_0431",
+      "direct_expansion_trigger_not_observed:qst_0461"
+    ]
+  },
+  "reserve_access_state": "sealed",
+  "artifact_identity": "33efaf8f7cc2fe795957d2dee440ba54449f573c1c6130120ca2f9bc03c49ea9"
+}

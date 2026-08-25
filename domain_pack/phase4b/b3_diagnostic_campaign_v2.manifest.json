@@ -1,0 +1,8 @@
+{
+  "schema_version": "phase4b-rag-action-diagnostic-campaign-manifest-v1",
+  "campaign_file": "b3_diagnostic_campaign_v2.json",
+  "campaign_sha256": "8dec4b0a9829e659a59f8224db0b48d83dbfe7e499ccdf7fe3801cc6cf093b2a",
+  "campaign_identity": "c86e38705382b03d9a99d4349a319be9561d6731b887f01307ad3ddda3f7eaea",
+  "approval": "user_confirmed_effect_first_controlled_a2_2026-08-25",
+  "baseline_eligible": false
+}

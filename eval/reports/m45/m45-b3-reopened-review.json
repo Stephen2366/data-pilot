@@ -1,0 +1,63 @@
+{
+  "schema_version": "phase4b-rag-action-diagnostic-review-v2",
+  "classification": "diagnostic_dev",
+  "baseline_eligible": false,
+  "campaign_identity": "c86e38705382b03d9a99d4349a319be9561d6731b887f01307ad3ddda3f7eaea",
+  "predecessor_review_identity": "33efaf8f7cc2fe795957d2dee440ba54449f573c1c6130120ca2f9bc03c49ea9",
+  "p4_probe": {
+    "probe_id": "M45-P4",
+    "artifact_identity": "a374f0c05665d5220a7accb90dca4d00cfdb3329460c15e9b91c3d7527a6cfac",
+    "campaign_identity": "c86e38705382b03d9a99d4349a319be9561d6731b887f01307ad3ddda3f7eaea",
+    "gate": "failed",
+    "decision": "stop",
+    "usage": {
+      "retrieval_calls": 0,
+      "embedding_provider_attempts": 0,
+      "chat_model_calls": 2,
+      "composer_calls": 0,
+      "observed_chat_tokens": 3877,
+      "token_usage_observed": true
+    },
+    "reserve_access_state": "sealed"
+  },
+  "external_artifact_manifest": {
+    "store_version": "phase4b-rag-action-diagnostics/v1.1.0",
+    "manifest_identity": "bf69566db3c240faaa958ab1c505cf2d3f907592749a6252ae4cf2975c2cd337",
+    "sha256": "977ec285377f6e0f807e56e714c78c710969f28813772d858851e44517cd5724",
+    "artifact_count": 1
+  },
+  "qualification": {
+    "decision": "review_required/no_go",
+    "required_checks": {
+      "predecessor_campaign_linked": true,
+      "predecessor_no_go_preserved": true,
+      "p4_campaign_current": true,
+      "p4_probe_exact": false,
+      "p4_source_linked": true,
+      "p4_two_scenarios_observed": true,
+      "structured_direct_expansion_passed": false,
+      "proposal_call_budget_closed": true,
+      "proposal_token_budget_respected": true,
+      "p4_zero_extra_retrieval_embedding_composer": true,
+      "p4_safe_projection_only": true,
+      "total_provider_budget_closed": true,
+      "reserve_still_sealed": true
+    },
+    "action_cards": {
+      "query_rewrite_candidate": "completed",
+      "context_expansion_candidate": "failed"
+    },
+    "provider_attempts": {
+      "embedding": 8,
+      "chat": 2,
+      "total": 10
+    },
+    "observed_chat_tokens": 3877,
+    "failure_reason_codes": [
+      "structured_direct_expansion_not_qualified:qst_0431",
+      "structured_direct_expansion_not_qualified:qst_0461"
+    ]
+  },
+  "reserve_access_state": "sealed",
+  "artifact_identity": "ce0d76153c1e2f599532aeb1f632be7ec3e623067612a1f91c56388657dc40af"
+}

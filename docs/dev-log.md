@@ -2,7 +2,7 @@
 
 > 给"未来的我"读的：每个模块讲清楚做了什么、我该理解什么、面试怎么讲。当前进度看 `docs/state/AI_CONTEXT.md`「当前状态」；完整技术档案和历史实验统一从 `docs/state/CHANGELOG_INDEX.md` 进入，查 bug 时按需追溯。
 >
-> M0 ~ M28 的记录已被拆分到 `docs/dev-log(M0-M19).md`；本文件记录从 M29 开始。
+> M0 ~ M28 的记录已被拆分到 `docs/dev-log(M0-M28).md`；本文件记录从 M29 开始。
 
 ## ★ M29 Phase 4 入口盘点与合同冻结
 
@@ -3506,4 +3506,186 @@ python -m uvicorn app.main:app --reload
 打开 `http://127.0.0.1:8000/docs`，在 `POST /api/query` 先提交一个带 nested `task` 的 start 请求，再把响应中的 `task_id` 和最新 `task_version` 带入 continue 请求。可以从“查询 2026 年 7 月和 8 月实际净退款金额并比较”开始，再追问“分析增长原因和受影响商品”；重点观察响应中的 `action_attempts`、`agent_budget`、`agent_termination` 和 task Evidence validity。
 
 真实模型可能出现 timeout 或非法 QueryPlan；只有精确的 MySQL `DATE_TRUNC` 执行错误会进入一次 repair。若只想稳定复现冻结的 T3/T4/T5 路径，请使用上面的 deterministic rehearsal，不要为了演示改默认模型、放宽预算或切换知识后端。
+
+## ★ M45 Phase 4B B3：让 RAG 看见“证据还不够”，再选择受控补救动作
+
+（2026-08-25）
+
+**简述**：M45 为 RAG（检索增强生成）建立了 **failure funnel（失败漏斗）和 action-level Evidence admission（动作级证据准入）**：系统能区分“没检到、选少了、上下文被切断”等失败，并在隔离诊断链中受控选择 query rewrite（查询改写）或 context expansion（上下文扩展），最终形成 `go_for_M46` 的两张动作资格卡。
+
+### 先用大白话讲
+
+继续把系统想成一位企业资料室的调查员。以前他拿到三页材料后，只知道“有材料”，却不知道答案是不是被切在下一页，也不知道该重新换关键词找资料，还是沿着当前文档继续往后翻。
+
+M45 给他配了两样东西：一张**缺口检查表**和两张**受控补救卡**。如果当前材料明确缺少某项信息，就把问题拆成更聚焦的小问题再查；如果问题在问流程、步骤或清单，而当前页后面确实还有同一份文档的内容，就只向后补取有限几段。每次补取仍要重新检查文档身份、ACL（访问控制）、预算、重复和是否真的有进展。
+
+例如，退款费率问题先用聚焦查询找到目标文档开头，再在同一物理文档中寻找真正包含费率的后续片段；流程问题则可在“当前片段看似覆盖主题、但后面还有步骤”时触发 forward continuation（向后续接）。**最终价值**是：M46 不必让模型自由猜下一步，而可以消费已经验证过的诊断合同，把补救动作接进产品 RAG Subgraph（RAG 子图）。
+
+### 这次做了什么
+
+这次工作的核心矛盾是：**检索返回了若干文档，不等于证据足以回答；但放开模型自由扩搜，又会破坏权限、预算和评测可信度**。M45 先在隔离的 diagnostic runtime（诊断运行时）中保存真实失败、逐步验证两类动作，再用 closed-world qualification（闭集资格评审）决定它们是否够资格进入 M46，而没有提前改动产品 Agent Loop（智能体循环）。
+
+1. **把“RAG 答错了”拆成可定位、可传递的失败漏斗。**
+
+   系统先形成 typed Observation（类型化观察），再判断当前能否准入补救动作；上游事实没观察到时，下游不会被粗暴记成失败。
+
+   - **原问题**：旧报告能看到最终答案或 gold（参考文档）是否命中，却难以回答失败发生在检索、选择、上下文完整性、生成支持还是引用层。这样很容易对着最终错误盲目调 `top_k`（候选数量上限）或 prompt（提示词）。
+   - **解决方式**：六层三态 funnel 使用 `passed / failed / not_observed`，并固定唯一 first failure（首个失败层）。Observation 同时携带已覆盖和未覆盖的 requirement（证据需求）、允许动作、停止理由及实际证据身份。
+   - **重要取舍**：评分器只读取同一次执行保存的 Evidence（证据），不为评分重跑检索；历史 Evidence 只按 identity（内容身份）只读导入，避免不同运行结果被拼成一条漂亮但虚假的链路。
+   - **验证证据**：v1～v4 review（评审工件）均重算 lineage（血缘）、hash（哈希）、预算和 reserve sealed（封存评测集未打开）状态；篡改或缺项会失败关闭。
+
+2. **把 query rewrite 做成“服务端已知缺口的聚焦补查”，而不是让模型自由改题。**
+
+   deterministic rewrite（确定性改写）只从已签名的 requirement slots（需求槽位）生成最多两个 focused subquestions（聚焦子问题），并复用现有 Knowledge Tool（知识工具）、ACL 和 Evidence seam（证据接缝）。
+
+   - **原问题**：一次宽泛检索可能只命中政策的质量版，却漏掉基础版；如果直接让模型改写，它可能夹带参考答案、文档标题或评测 gold，导致看似提升、实则泄题。
+   - **解决方式**：改写输入只含问题实体、所求字段和通用完整性语义；gold ID、标题、答案值和 reserve selector（封存集选择器）都由静态校验拒绝。新结果还要经过 authority（权威原件）、ACL、去重和 no-progress（无进展）检查。
+   - **真实结果**：P1 的 business（业务知识）场景成功补回缺失的 basic Evidence（基础版证据）；P2 Round 2 找到正确 logical document（逻辑文档），但只拿到开头 fragment（片段），没有补齐费率事实。这证明改写动作可用，也证明“命中文档”仍不等于“上下文完整”。
+   - **未证明边界**：M45 没有把确定性改写直接接入普通 API（接口），也没有宣称它对任意自然语言都有效。
+
+3. **把上下文扩展限制在同一物理文档，并用小预算寻找最小支持组合。**
+
+   context expansion 不做整库再检索，而是从已经授权的 seed Evidence（种子证据）出发，在 SQLite authority（SQLite 权威正文）中寻找同一物理文档的 sibling units（兄弟片段）。
+
+   - **演进原因**：P2C 证明 immediate neighbor（直接相邻片段）窗口太窄：目标费率与种子相隔三个 unit。用户确认后，方案升级为 bounded sibling scan（有界同文档扫描），而不是为某道题写死“向后跳三段”。
+   - **预算与安全**：最多 2 个 seed，每个最多检查 8 个 sibling identity，最终最多新增 4 条 Evidence；加载正文前后都重新做 ACL，禁止跨物理文档、身份漂移、重复片段和无 coverage（覆盖贡献）的中间内容。
+   - **真实结果**：P2D 找到两段最小支持组合，补齐 qst_0420 的 rate 与 measurement basis（费率和计量依据），且 retrieval、embedding（向量化）、模型与 Composer（答案合成器）调用均为 0。
+   - **重要边界**：扩展动作证明的是“这些上下文值得加入”，不是“最终答案一定正确”；答案净收益必须留给 M46 的产品 A/B。
+
+4. **模型只负责提出结构化候选，本地规则继续掌握准入权。**
+
+   当确定性需求理解在两个真实场景中误判“材料已经完整”后，M45 按用户确认增加 structured proposal（结构化提案），但没有把 Qwen 变成自由 Controller（控制器）。
+
+   - **受控输入输出**：每题只发送公开 benchmark question（基准问题）和最多 3 条当前已授权 Evidence；模型只能返回 closed-world JSON（闭集 JSON），本地 validator（校验器）重新检查字段、数量、答案值泄漏、gold、预算和当前 coverage。
+   - **失败带来的修正**：P4 暴露 prompt 没写清 marker（语义标记）数量上限，以及 literal match（整句字面匹配）过窄；P4R 又暴露模型仍可能把缺口判断成已覆盖。系统保留三代 no-go（不放行）证据，没有靠反复调用模型刷出成功。
+   - **真实用量**：模块累计 **8 次 embedding + 3 次 chat（模型对话）= 11 次 provider attempt（外部服务调用尝试）**；P4 的两次 chat 共 3877 个已观测 token（模型计费单位），P4R 的最后一次调用因 runner（探针脚本）异常丢失 raw response（原始响应）和 token usage（用量），明确记为 `unobserved`（未观察到），没有估算成 0。
+   - **取舍结论**：模型擅长提出语言候选，但 Evidence 是否充分、能否扩展和是否停止仍由本地确定性合同决定。
+
+5. **用结构边界补上流程型文档的“下一页”，并产出 M46 开工资格。**
+
+   最终方案没有继续追着模型调 prompt，而是加入默认关闭的 `procedure_boundary_v1`（流程边界策略）：只有问题明确询问 procedure、workflow、steps 或 checklist，且权威存储证明当前片段后面仍有同文档 unit，才允许向后续接。
+
+   - **为什么有效**：流程文档常把标题、概览和详细步骤切成连续片段。即使词面 coverage 显示“主题已出现”，文档结构仍能提供“后续步骤尚未读完”的独立信号。
+   - **安全边界**：策略不能按题号、标题或 gold 选文档，只能 forward（向后），并继续受同文档、ACL、2 seed、scan 8、add 4、duplicate/no-progress 和 stop 约束；旧默认行为不变。
+   - **真实证据**：P5 复用 qst_0431 的不可变 Evidence，新增 2 条同物理文档后续证据，retrieval、embedding、chat 和 Composer 全为 0。v4 review `949a3b03...fbb4` 输出 `go_for_M46`，query rewrite 与 context expansion 两张 action card 均为 completed。
+   - **未证明边界**：这仍是隔离诊断准入，不是产品 RAG Subgraph；P5 是一次 Evidence gain（证据增加）验证，不是答案正确率、Reliability（重复稳定性）或默认质量提升证明。
+
+### 新概念
+
+- **Failure funnel（失败漏斗）**：把一次 RAG 失败按检索、选择、上下文完整性、生成支持、引用等层次拆开。像医院先判断是“没做检查、检查样本不够，还是医生解释错”，避免所有问题都归为“模型不行”。
+- **Action admission（动作准入）**：系统不是看到失败就随便重试，而是先证明某个动作满足触发条件、安全条件和预算，再允许执行。可以类比 Spring Security 的授权判断：候选动作存在，不代表当前请求有权运行它。
+- **EvidenceDelta（证据增量）**：一次动作实际新增了哪些证据，以及这些证据是否补上缺口。它让“工具调用成功”和“任务真的前进”成为两件可分别验证的事。
+- **Safe/private artifact（安全/私有工件分离）**：仓库只保存 identity、哈希、汇总和安全失败切片；问题正文、Evidence 内容、prompt 与 raw response 留在项目外隔离存储。两边通过 SHA-256（文件指纹）对账。
+- **Procedure boundary（流程边界）**：不靠答案词判断缺口，而用“用户在问步骤 + 当前文档确有后续片段”判断是否值得继续读。它是上下文补取信号，不是答案正确性证明。
+
+### 代码阅读路线
+
+1. **先看四代诊断合同如何冻结能力和预算**：`domain_pack/phase4b/b3_diagnostic_campaign*.json`
+   从 v1 到 v4 对照 scenario（场景）、两张 action card、provider 上限与 predecessor identity（前代身份）。重点不是背哈希，而是理解每次范围变化都会新建 additive contract（增量合同），旧失败证据不会被覆盖或改签。
+
+2. **再看 Observation、动作与停止的核心模型**：`engine/phase4b/rag_diagnostics.py`
+   从 requirement coverage、`RAGObservation`、`ContinuationPolicy` 读到 action eligibility（动作资格）和执行结果。这里是 B3 的深模块：外部只消费一个诊断/执行 seam，ACL、预算、重复、no-progress 与 stop 都藏在内部统一处理。
+
+3. **沿 Enterprise 适配链看同文档扩展**：`engine/phase4b/rag_enterprise_diagnostics.py`、`engine/rag/enterprise_runtime.py`
+   先看 adapter（适配器）如何选择 seed 和最小 sibling 组合，再看 loader（加载器）如何只返回同一 physical document 的 identity，并在水化正文时重做授权。`following_sibling_unit_identity` 是 P5 的 forward-only（只向后）入口；它证明结构位置，不替代正文支持判断。
+
+4. **看模型为何只是 proposal adapter**：`engine/phase4b/rag_requirement_proposal.py`
+   先看 outbound policy（出站策略）限定 receiver、purpose 和字段，再看 prompt schema、Qwen client 与本地 validator。阅读重点是“模型输出先当不可信候选”，答案值、gold、字段数量、coverage 和预算仍由服务端校验。
+
+5. **看工件怎样把失败历史和最终资格串起来**：`eval/rag_action_diagnostics.py`、`eval/reports/m45/`
+   builder（工件生成器）会重算 campaign、Probe lineage、provider usage、private manifest SHA 和两张卡状态。按 v1 no-go → v2 no-go → v3 no-go → v4 go 的顺序读，可以看到失败如何推动设计，而不是只看最终成功截图。
+
+6. **最后读真实 Probe 和确定性回放**：`scripts/probe_m45_b3*.py`、`scripts/rehearse_m45_b3*.py`、`tests/test_m45_rag_action_diagnostics.py`
+   Probe 负责真实 runtime 和受控 provider 调用；rehearsal（离线复演）只消费既有证据重建 review；测试覆盖篡改、ACL、跨文档、重复、预算和安全投影。这样能区分“真实效果证据”“离线资格复算”和“合同单测”各自证明什么。
+
+核心数据流：
+
+`initial authorized Evidence`
+→ `typed Observation / failure funnel`
+→ `query rewrite 或 context expansion eligibility`
+→ `ACL + authority + budget + duplicate/no-progress`
+→ `EvidenceDelta`
+→ `safe/private diagnostic artifact`
+→ `v4 qualification: go_for_M46`
+
+### 设计要点
+
+- **先诊断再接产品**：M45 在隔离 runtime 验证动作资格，不提前改 B2 Loop、API 或默认 Enterprise RAG；M46 才决定产品 Subgraph 拓扑和父子预算。
+- **失败证据不覆盖**：v1～v3 no-go 与 P4R 的不完整 usage 都永久保留，v4 成功只追加新 lineage，不重写历史。
+- **模型提议、本地裁决**：structured proposal 提升 demo 的语言理解，但不能越过 schema、coverage、ACL、预算和 stop。
+- **结构信号也要默认关闭**：`procedure_boundary_v1` 只在显式 policy 下生效，且只说明值得补取后续片段；在 M46 A/B 证明答案净收益前不得全局开启，汪。
+
+### 有面试价值的亮点
+
+1. **“我没有把 RAG 失败统一归因给模型，而是做了可执行的失败漏斗。”** 系统保存同一次运行的真实 Evidence，用三态区分未观察和真实失败，再把首失败层映射到允许的恢复动作；因此调试能从“答错了”推进到“为什么该 rewrite、为什么该 expansion”。
+
+2. **“我把上下文扩展做成受身份和预算约束的最小证据搜索。”** 动作只从已授权 seed 出发，在同一物理文档内扫描有限 identity，正文加载前后双 ACL，最终只加入对 requirement 有贡献的最小组合。这比直接把整篇 parent document 塞进上下文更可控、更可审计。
+
+3. **“模型只交 proposal，控制权不外包。”** Qwen 可以根据问题和当前 Evidence 提出结构化缺口，但本地 validator 重新验证 gold 泄漏、答案值、coverage、预算和 action eligibility。这样既利用模型的语言能力，又不让它决定安全事实。
+
+4. **“我把三次 no-go 当成工程证据，而不是失败记录删掉。”** P2C 证明直接邻居太窄，P3 证明确定性 coverage 会误判完整，P4/P4R 证明 proposal/schema 和语义匹配仍不稳定；每次只在用户确认后扩大一个最小合同，最终由零 provider 的结构信号闭合。
+
+5. **“我能区分 Evidence gain 和答案质量提升。”** M45 只给出两张 action card 与 `go_for_M46`，明确不宣称产品 Subgraph、正确率或 Reliability 完成；这让后续 sealed reserve A/B 仍然有可信的决策价值。
+
+### 面试官追问
+
+1. **[基础追问] 系统怎样决定应该改写查询，还是扩展当前文档？**
+
+   先用 typed requirements 检查当前 Evidence 缺什么。如果缺口能转成服务端签名的聚焦子问题，就允许 query rewrite；如果已有相关 seed，且同一物理文档内存在能补齐缺口的 sibling 组合，或显式 procedure policy 观察到 forward unit，就允许 context expansion。两类动作都不是必选项；触发、安全或预算不闭合时，唯一正确结果可以是 stop。
+
+2. **[工程/深挖追问] 为什么不直接把命中的整篇文档都放进上下文，省掉 sibling 搜索？**
+
+   整篇展开实现简单，但会让长文档迅速吃满 token，也容易把无关章节、旧版本内容或本来未授权的片段带进生成。M45 先按同文档 identity 枚举，再逐项 ACL，最后选择能覆盖 requirement 的最小组合；scan8/add4 是业务预算，不依赖 LangGraph 的步数限制。这样牺牲部分召回上限，换来可解释的成本和权限边界。
+
+3. **[工程/深挖追问] 既然用了 Qwen 判断缺口，怎么避免评测泄题和模型胡乱指挥？**
+
+   出站只包含公开问题和当前已授权 Evidence，不含 title/key、gold、参考答案、review verdict、sibling 或 reserve。模型输出必须符合闭集 JSON；本地再拒绝答案值、gold selector、字段超限和已经被单条 Evidence 覆盖的伪缺口。即使 proposal 合法，最终动作仍要经过 authority、ACL、预算、去重和 stop，模型没有 Controller 权限。
+
+4. **[工程/深挖追问] 你怎么证明最终的 go 不是对失败样本反复调到过拟合？**
+
+   我没有覆盖旧结果：四代 campaign 都有独立 content identity，P1～P4R 的 no-go、调用次数和失败原因都进入 lineage。最终 P5 不新增 provider，也不按题号、标题或 gold 选文档，而是验证一个可泛化但很窄的结构条件：procedure-shaped intent 与 authority forward unit 同时成立。它只能让两张动作卡达到 M46 开工门，真正的产品净收益仍要在 M46 的 sealed reserve A/B 中判断。
+
+5. **[压力追问] 你一共做了 11 次 provider 调用，最后却靠一个规则通过，这是不是前面的模型方案都白做了？**
+
+   这个质疑有合理部分：如果只看最终代码路径，前面的尝试确实显得曲折。但这些调用把问题从“RAG 效果不好”逐层收敛成三个可复现事实：rewrite 能命中文档却拿不全上下文、直接相邻窗口不足、模型 coverage 对流程缺口仍不稳定。最终规则不是拍脑袋补丁，而是用这些失败证据找到的独立结构信号；同时 11 次调用和 P4R 丢失的 token 观测都被如实保留，没有包装成低成本完美方案，喵。
+
+6. **[压力追问] 只有一个 P5 场景新增了两条 Evidence，你凭什么写 `go_for_M46`？**
+
+   `go_for_M46` 不是“质量已经上线”，而是“两个候选动作已经满足进入下一阶段做产品 A/B 的最低资格”。rewrite 有 P1 的真实增益，sibling expansion 有 P2D 的真实增益，P5 只补上流程型 direct admission 的缺口；ACL、预算、stop 和 lineage 也全部闭合。样本数量不足以证明答案正确率，所以 M45 明确不切默认、不接 API、不运行 sealed reserve，把统计和产品结论留给 M46，喵。
+
+### 验证与下一步
+
+**验证结果：**
+
+| 范围 | 真实结果 | 证明什么 |
+|---|---:|---|
+| M45 聚焦测试 | 29 passed | funnel、两类动作、proposal、v4 qualification 与 tamper（防篡改）边界闭合 |
+| 受影响回归 | 54 passed，1 warning | M34/M41/M44A Enterprise RAG 兼容未被破坏 |
+| 全仓 pytest | 582 passed，1 warning，665.44 秒 | 当前整仓 deterministic regression（确定性回归）通过 |
+| P5 | passed；新增 2 条 Evidence；provider=0 | procedure forward trigger 能在真实 authority 上产生受控增益 |
+| v4 qualification | `go_for_M46`；两张 card completed | M46/B4 的动作资格开工门成立 |
+
+warning（警告）是既有 Starlette/httpx deprecation。本模块的 Probe 全部是 **exploratory / baseline-ineligible（探索性、不可登记基线）**；没有运行 Formal Eval（正式评测）、held-out（留出集）或 M46 sealed reserve。P4R 的最后一次 chat token usage 永久为 `unobserved`，没有补发或估算。
+
+**下一步**：先完成人工检查和 `accept-module` 验收；随后为 M46/B4 单独制定 plan，把已验证的 Observation/action/EvidenceDelta 合同接入产品 RAG Subgraph，并在冻结 Pipeline（现有流水线）/Subgraph A/B、父子预算与解封协议后，才按精确授权运行 sealed decision reserve。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录，已激活项目 Python 环境。
+# 1. 复核 M45 合同、动作、安全投影与 v4 qualification；预计 29 项全部通过。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m45-devlog tests/test_m45_rag_action_diagnostics.py
+
+# 2. 查看离线复演的必填证据参数；只显示帮助，不写文件、不调用 provider，也不读取 sealed reserve。
+python -m scripts.rehearse_m45_b3_continuation --help
+
+# 3. 阅读仓库安全评审；预计 decision=go_for_M46、两张 action card=completed。
+Get-Content eval/reports/m45/m45-b3-continuation-review.json
+```
+
+环境未激活时，把 `python` 替换成 `AGENTS.md` 中项目学习环境的完整 Python 路径。第二条先展示参数说明，避免把项目外证据根目录填成 `probes/` 子目录；实际离线复演前应按 `docs/state/runbook-rag.md` 和 M45 notes 核对固定 profile 与 private root。
+
+**本地启动体验：**
+
+本模块**暂无独立可交互的产品入口**。原因是 M45 刻意只完成 diagnostic admission（诊断准入），没有把 recovery action 接入普通 `/api/query` 或 B2 Agent Loop；此时启动 FastAPI 看不到 M45 自动补救是符合边界的。当前最直观的体验方式是阅读 v4 review，或在不调用 provider 的前提下按上述命令查看离线复演入口。真正可从 Swagger 触发的 Agentic RAG 效果属于 M46/B4。
 
