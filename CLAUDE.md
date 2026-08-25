@@ -33,7 +33,7 @@ alembic/                # 数据库迁移
 
 engine/                 # 通用引擎，换行业不用改
   harness/              # 顶层 LangGraph Harness 与有界 turn/thread 控制（M35–M37）
-  phase4b/              # Phase 4B 版本化前置合同、identity、seed profile 与最小 caller（M42+）
+  phase4b/              # Phase 4B 版本化合同、task state、runtime resolver 与 bounded Decision Loop（M42+）
   router/               # 意图路由（SQL / RAG / 混合）（暂无此文件夹）
   nl2sql/               # NL2SQL 流水线
   sql_guard/            # SQL 沙箱安全
@@ -52,6 +52,8 @@ domain_pack/            # 业务配置，换行业只换这里
 
 eval/                   # EvalOps-lite（评测前置），完整评测平台在独立项目 eval-bench
   agent_scenario_contracts.py # Phase 4B 多 turn Agent Scenario artifact family（M42+）
+  agent_scenario_v2_contracts.py # M43 task state/transition/context additive artifact
+  agent_scenario_v3_contracts.py # M44 action/budget/progress/termination closed-world artifact
   agent_reserve_contracts.py  # sealed decision reserve、污染状态机与外部 artifact 对账
   cases/                # YAML 测试用例
     agent/              # Phase 4B Agent Eval 的仓库安全 manifest；逐题 reserve 位于项目外
@@ -101,7 +103,15 @@ tests/                  # pytest 测试
 
 - 开始较完整的模块开发时，先在 `docs/notes/<module>-notes.md` 写几条 implementation checklist。
 - 开发中遇到关键决策/踩坑/验证素材/临时取舍/判断与修正/实验结论/新发现等，先把素材写入 `docs/notes/<module>-notes.md`。提前记录素材是为了供收工流程复用，防止后面记录日志时只能根据代码来。
-- 模块开发完成后调用`finish-module` 收工。
+- 模块开发完成后调用 `finish-module` 收工。
+
+## 开发期真实效果验证
+
+- 每个 module plan 必须判断是否需要 Live Dev Probe（开发期真实探针）：凡修改真实 LLM、真实数据库行为、RAG/Milvus、API 多轮或外部运行时行为即默认适用；纯静态合同、数据结构或文档模块写明“不适用”理由即可。
+- Probe 必须嵌入开发切片：首条真实纵向链路可运行后执行首个 Probe，后续关键能力在对应切片完成后、依赖它的下一切片开始前执行；plan 每个相关切片要写 `Live Probe checkpoint` 及它阻塞的下一切片，禁止统一拖到 `finish-module`。
+- 开工 checklist 预登记 Probe ID 与预计时点；执行后立即记录执行时间、当时代码阶段、HEAD 与模块相关 dirty 文件、命令、Response/Trace/usage、三态结果和 `continue / revise / stop` 决定，不能凭最终代码倒填。只有 `continue` 才能放行被该 Probe 阻塞的下一切片。
+- 额度、计数口径、禁区、重验与 Formal Eval 分账以 `docs/state/runbook.md`「Live Dev Probe」为唯一事实源，plan 不复制公共政策。`finish-module` 只审计时点证据，缺失即以 `development_probe_missing` 退回开发；正式 Smoke/Core/Reliability/held-out/基线候选仍遵守 runbook 精确授权。
+- 预注册清单是基线不是上限：开发中遇计划外真实问题，主动向用户提出追加最小 Probe 并申请授权，不因 token 顾虑而自我设限。
 
 ## 代码风格
 

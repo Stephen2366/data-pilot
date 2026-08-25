@@ -3469,6 +3469,7 @@ python -m uvicorn app.main:app --reload
 | M44 最终聚焦 | 57 passed，1 warning | B2 contract、Loop、v3、API/Trace、前序兼容和 repair 安全边界闭合 |
 | Deterministic rehearsal | 6/6 checks，external calls=0 | T3/T4/T5、repair once 和 negative skip 的同源 artifact 可复现 |
 | 全仓 pytest | 539 passed，1 warning，599.47 秒 | legacy、M42/M43/M44A 与 M44 B2 整仓回归通过 |
+| 全仓 pytest（G4 修复后） | 553 passed，1 warning | comparison completion 与 repair 收口后的最终整仓回归 |
 | 静态交付门 | compileall、`git diff --check` 通过 | 语法和补丁格式无错误 |
 
 warning（警告）是既有 Starlette TestClient/httpx deprecation。本模块**没有运行**真实 provider、真实 SQL repair showcase、RAG Eval、120 held-out 或 M46 sealed reserve；这些结果证明控制合同，不证明真实模型稳定性或 RAG 质量提升。
