@@ -8,11 +8,11 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M44/B2（含 defect repair）已验收通过（2026-08-24）；M45/B3 尚未制定 module plan |
-| 当前 plan    | 无（最近完成：`docs/notes/m44-plan.md`）                     |
+| 当前活动模块 | M44/B2（含 defect repair）已验收通过（2026-08-24）；M45/B3 plan 已冻结，尚未开工 |
+| 当前 plan    | `docs/notes/m45-plan.md`                                    |
 | 当前 notes   | 无（最近完成：`docs/notes/m44-notes.md`）                    |
-| 待决事项     | 下一步为 M45/B3 调查与计划；M46 前 reserve 保持 sealed       |
-| 更新时间     | 2026-08-24                                                   |
+| 待决事项     | 下一步为 M45/B3 开工；首次长期写入前核对 external diagnostic store 绝对路径；M46 前 reserve 保持 sealed |
+| 更新时间     | 2026-08-25                                                   |
 
 ## 必读规则
 
@@ -72,6 +72,8 @@ M41 及以后的能力缺口：
 | 优先级 | 能力缺口                                                     | 当前结论与硬性重开门                                         | 路线归属              |
 | ------ | ------------------------------------------------------------ | ------------------------------------------------------------ | --------------------- |
 | P2     | M44 G44-2 未选方案 B：由结构化模型提出 next Action、再由确定性 Controller 审核 | M44 已确认方案 A，首版 next-action 完全确定性，decision model calls/tokens 固定为 0；这不代表永久排除模型 proposal。只有 required paraphrase 集形成稳定且不可接受的 deterministic clarification 失败簇，才能另立 module plan 评估结构化 proposal adapter；届时必须保留 closed-world Action allowlist、deterministic validator、Budget/ACL/outbound/duplicate/no-progress 硬门，并重新取得 decision purpose、数据类别和真实 E2E 的用户授权。不得仅因模型看起来更灵活就重开，也不得把它算作 M44 未完成项 | Phase 4B 后续质量候选 |
+| P2     | G4 typed comparison completion 是“只消费服务端 metric_comparison requirement + 已验证 SQL rows”的窄合同 | 不扩成任意公式/required-output 平台：多期趋势、任意公式、自然语言自由计算、通用 required-output DSL 均不在授权内；只有用户确认新合同并另立 plan 才能扩展 | Phase 4B 后续质量候选 |
+| P2     | M45 G45-1 未选方案 B：由结构化模型生成 rewrite proposal，再由确定性 validator 审核 | M45 已确认方案 A，首轮只用 deterministic requirement split/focused rewrite，rewrite/decision model calls 与 observed chat tokens 固定为 0；方案 B 不是 M45 的备用重跑。只有方案 A 在预先冻结的非 canonical dev paraphrase 上形成稳定且不可接受的 understanding/rewrite failure cluster，且 retrieval action seam 已证明可行，才能另立 module plan 重开。届时必须保留 typed unsupported-slot trigger、closed-world proposal schema、deterministic validator、ACL/Budget/duplicate/no-progress/stop 硬门，并重新取得 receiver、rewrite purpose、数据字段和真实 E2E 额度授权；不得读取 gold/reserve 来生成 rewrite，也不得把该候选算作 M45 未完成项 | Phase 4B 后续质量候选 |
 
 M29–M40 的能力缺口：
 
@@ -82,13 +84,6 @@ M29–M40 的能力缺口：
 | P1 | 当前只有 demo/test caller resolver，生产认证尚未建设 | 出现非本地部署、真实用户/tenant、JWT/OAuth/SSO 或企业目录需求时，必须在现有 `CallerResolver` seam 接正式认证 adapter；“所有环境手工注入 resolver”不等于生产认证 | Phase 4 后续部署门 |
 | P2 | M35/M38 deterministic Router 只覆盖 closed-world SQL/RAG 和两类 canonical Hybrid operator | 先建立开放问法/混合意图 decision set 并形成稳定失败簇，再比较规则扩充、受控模型 fallback 或远程 Router；不得以“LLM 更完善”为由无 Eval 切换 | P3/P5 后续质量 |
 | P1 | M37 checkpoint 仍为进程内，重启/多 worker 不恢复且 tombstone 不清扫 | Phase 4B 已把 durable task state 提升为最终硬交付；须在 TaskState/turn-boundary 稳定后建立新 state family、真正持久 adapter 与存储层条件更新，并覆盖 TTL/clear/多 worker/版本冲突。LangGraph `InMemorySaver` 仍是内存态，不能冒充持久化升级 | Phase 4B B5 |
-
-M41 及以后的能力缺口：
-
-| 优先级 | 能力缺口 | 当前结论与硬性重开门 | 路线归属 |
-|---|---|---|---|
-| P2 | M44 G44-2 未选方案 B：由结构化模型提出 next Action、再由确定性 Controller 审核 | M44 已确认方案 A，首版 next-action 完全确定性，decision model calls/tokens 固定为 0；这不代表永久排除模型 proposal。只有 required paraphrase 集形成稳定且不可接受的 deterministic clarification 失败簇，才能另立 module plan 评估结构化 proposal adapter；届时必须保留 closed-world Action allowlist、deterministic validator、Budget/ACL/outbound/duplicate/no-progress 硬门，并重新取得 decision purpose、数据类别和真实 E2E 的用户授权。不得仅因模型看起来更灵活就重开，也不得把它算作 M44 未完成项 | Phase 4B 后续质量候选 |
-| P2 | G4 typed comparison completion 是“只消费服务端 metric_comparison requirement + 已验证 SQL rows”的窄合同 | 不扩成任意公式/required-output 平台：多期趋势、任意公式、自然语言自由计算、通用 required-output DSL 均不在授权内；只有用户确认新合同并另立 plan 才能扩展 | Phase 4B 后续质量候选 |
 
 ## 已知的坑（活跃列表）
 
