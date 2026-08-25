@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M45/B3 技术收工完成；v4 `go_for_M46`，等待 finish-docs / 人工检查 / accept-module |
+| 当前活动模块 | M45/B3 已验收通过（accept-module，2026-08-25）；v4 `go_for_M46`，M46/B4 可开始规划 |
 | 当前 plan    | `docs/notes/m45-plan.md`                                    |
 | 当前 notes   | `docs/notes/m45-notes.md`                                   |
-| 待决事项     | 完成 M45 学习复盘与人工/accept-module 门后，再制定 M46/B4 plan；M46 plan 前 reserve 继续 sealed，不提前运行 A/B |
+| 待决事项     | M45 学习复盘 / 人工检查 / accept-module 门全部通过；下一步制定 M46/B4 plan；M46 plan 前 reserve 继续 sealed，不提前运行 A/B |
 | 更新时间     | 2026-08-25                                                   |
 
 ## 必读规则

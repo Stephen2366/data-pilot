@@ -19,6 +19,10 @@
 
 ## 变更记录（新的在上）
 
+### [验收] M45/B3 accept-module 验收通过（2026-08-25）
+
+- 9 项门禁全部通过：废弃口径清零；目录地图一致且 AGENTS/CLAUDE 内容同步；进度状态一致；最新 changelog/dev-log 结构完整；注释合规（引擎/核心文件逐个通读、其余抽样，无 ❌ 标准命中）；单一事实源抽查（C2/C4/C5 代码合同、B0 候选卡、reserve sealed）闭合；裁剪验证 `106 passed, 1 warning in 3.71s`；AI_CONTEXT 事实快照同步；state 文档交叉一致。M45 已在 AI_CONTEXT 记录为"已验收通过"，M46/B4 可进入 plan 制定；M46 reserve 继续 sealed。
+
 ### [模块任务] M45 Phase 4B B3 RAG failure funnel 与 action-level Evidence admission（2026-08-25）
 
 - **改动范围**：起始 commit `7d254ff4...9ec9` 明确，期间无中间提交。新增四代 content-bound diagnostic campaign、RAG failure funnel/typed Observation、deterministic rewrite、same-document sibling expansion、受控 structured requirement proposal、procedure forward continuation、closed-world qualification/tamper validator、Probe/rehearsal、v1～v4 review 与 M45 tests；只在 `EnterpriseContextLoader` 增加只读 forward sibling identity seam。未接产品 B2 Loop/API、未改 active release、semantic/embedding/default、Composer、corpus/index 或 M46 reserve。
