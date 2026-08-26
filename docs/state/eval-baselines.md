@@ -2,7 +2,7 @@
 
 > 本文是评测数字、分母、artifact、实验状态与可比性规则的唯一详细账本。`rag-current-state.md` 只保留 RAG 当前运行口径和结论摘要；两处出现同一 profile identity 时，以本文判断“能否比较”，以 `rag-current-state.md` 判断“当前运行使用什么”。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
-更新时间：2026-08-26
+更新时间：2026-08-27
 
 ## 当前状态
 
@@ -10,6 +10,7 @@
 - **当前 Text2SQL 合同**：`m27-v3`；延续 v2 的 `external_unavailable / not_observed` 语义，并把 Schema Context 的物理字段、metric key、输出 alias 分开静态校验；`orders_wide` 的业务月份统一按 `paid_at`，`snapshot_at/batch_id` 只表示快照版本。
 - **当前 Text2SQL catalog**：28 个 Scenario；分类为 Core / Stress / Manual Lab。Smoke、Reliability、Database Exception 是 selector，不是复制题面的独立题集。
 - **当前 Text2SQL 真实 LLM 基线**：尚未登记正式长期基线；现有真实运行均为 v2，只能作为修复前过渡证据，不能与 v3 直接比较。该结论不适用于上方已经登记的 M34 RAG 真实 Qwen Answer Eval。
+- **Phase 4B B6 deterministic artifact**：M48 Scenario v6 identity=`53dde9550b9e10c8565bdb4f6b6224cc6bfbb594140fa99ddd6fe5df8767beaf`，Phase 4B assurance identity=`4084e4289b0cee7e8cb9cabaf139f41eba761a4d111a90ce6d5705ba271ca22b`。它们证明 B0～B6 technical integration、Context Compact/continuity 与 closed-world safety checks，不是 RAG/LLM 正确率、Reliability 或生产认证；reserve 仍 sealed/not-run。
 - **默认运行配置**：仍以 [runbook.md](runbook.md) 为准；M27 没有切换模型、检索、embedding、数据库、oracle、timeout 或 retry。
 - **M38 Hybrid 合同**：`phase4-harness-hybrid-v1` 是独立 deterministic 控制/安全 artifact（5 Scenario / 25 required），不与 M27 或 M34 的真实质量/长期数字混算；完整能力边界见 `rag-current-state.md` 和 Phase 4 changelog。
 - **M39 P6 readiness audit**：只读取六份冻结 M34 输入并校验 SHA-256 / identity / split / runtime；它不是新的 retrieval 或 Answer Eval，也不新增质量基线。audit `324ec7f8...b726c6` 的严格 `no_go`、dev 分层计数与重开缺口见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
@@ -63,6 +64,12 @@ M41 `phase4-rag-e2e-review-v1` 同样绑定 artifact 与逐 execution checkpoint
 ## 当前有效实验快照
 
 这里保留仍能帮助判断当前路线的真实运行；它们未必已成为正式长期 baseline，也未必能作严格对照。每条都必须写清楚证据状态和解释边界。Smoke、运行事故、中断和外部服务异常不作为独立记录进入本账本。
+
+### M48 Agent Scenario v6 Context Compact artifact（2026-08-27）
+
+- additive `phase4b-agent-scenario-artifact-v6` 从同源真实 MySQL P2 安全摘要投影 10 类 required Scenario：continuous T1→T5+extended、turn/budget trigger、restart resume、fallback、Evidence revalidation、role drift、version conflict、Subgraph parent/child budget 与 private payload rejection；v1～v5 均保持 `unchanged_readable`。
+- Scenario v6 完成 identity=`53dde9550b9e10c8565bdb4f6b6224cc6bfbb594140fa99ddd6fe5df8767beaf`；B0～B6 assurance identity=`4084e4289b0cee7e8cb9cabaf139f41eba761a4d111a90ce6d5705ba271ca22b`。真实 P2 的版本链为 `1→3→5→7→9→11`，Compact identity=`d7a5fcf3664b6cab4d998f82f02ba727f47a18e2fd1ec82524c0c4d89c63d098`、source=`1..5`，provider calls/tokens=`0/0`。
+- P1/P2 均为开发期 `exploratory / baseline-ineligible` 证据；v6/assurance 是可复演技术 artifact，不登记正式长期质量基线，不改变 Pipeline default/Subgraph experimental、M46 quality no-go 或 reserve sealed/read0/not-run。
 
 ### M47 Agent Scenario v5 durable control artifact（2026-08-26）
 

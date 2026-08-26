@@ -1,0 +1,124 @@
+{
+  "contract_version": "phase4b-b6-contracts-v1",
+  "predecessor_contract_identity": "260e819a4539ffc6c6b509dcf1520122d21f418a1e094fb6bb88a8198cf1a02e",
+  "runtime_identity": "phase4b-task-context-runtime-v1",
+  "state_schema_version": "phase4b-task-state-v2",
+  "context_schema_version": "phase4b-task-context-window-v1",
+  "compact_schema_version": "phase4b-task-compact-v1",
+  "event_schema_version": "phase4b-task-boundary-event-v2",
+  "node_context_version": "phase4b-agent-node-context-v3",
+  "trigger": {
+    "committed_turns": 5,
+    "candidate_budget_ratio": 0.75,
+    "recent_raw_turn_count": 2,
+    "recent_raw_turn_max_bytes": 2048,
+    "strategy": "turn_count_or_candidate_node_budget"
+  },
+  "storage": {
+    "shape": "checkpoint_additive_context_payload",
+    "atomicity": "same_claim_compare_and_set_transaction",
+    "active_ttl_seconds": 900,
+    "max_context_bytes": 65536,
+    "scrub_statuses": ["cleared", "cancelled", "switched", "expired"],
+    "probe_database": "datapilot_m48_test"
+  },
+  "compact_fields": [
+    "goal",
+    "constraints",
+    "pending_questions",
+    "requirements",
+    "evidence",
+    "last_action_attempts",
+    "last_budget",
+    "last_termination",
+    "high_risk_references",
+    "source_turn_range",
+    "source_version_range",
+    "source_identities",
+    "source_watermark",
+    "trigger"
+  ],
+  "event_v2_fields": [
+    "delta_category",
+    "transition_identity",
+    "action_count",
+    "termination_reason",
+    "turn_ordinal",
+    "state_identity",
+    "constraint_keys",
+    "requirement_identities",
+    "active_evidence_identities",
+    "budget_identity",
+    "context_identity",
+    "compact_identity"
+  ],
+  "reason_codes": [
+    "task_compact_not_triggered",
+    "task_compact_committed",
+    "task_compact_fallback_uncompacted",
+    "task_compact_source_incomplete",
+    "task_compact_identity_mismatch",
+    "task_context_schema_incompatible",
+    "task_context_payload_too_large",
+    "task_context_budget_exceeded",
+    "task_context_field_denied",
+    "task_evidence_revalidation_failed"
+  ],
+  "forbidden_payload_fields": [
+    "raw_answer",
+    "sql_rows",
+    "document_body",
+    "retrieved_chunks",
+    "prompt",
+    "thought",
+    "authorization_header",
+    "credential",
+    "secret",
+    "token"
+  ],
+  "artifact_versions": {
+    "agent_scenario": "phase4b-agent-scenario-artifact-v6",
+    "phase_assurance": "phase4b-assurance-artifact-v1",
+    "predecessor_agent_scenario": "phase4b-agent-scenario-artifact-v5"
+  },
+  "scenarios": [
+    "CONTINUOUS_T1_T5_EXTENDED",
+    "COMPACT_TURN_TRIGGER",
+    "COMPACT_BUDGET_TRIGGER",
+    "COMPACT_RESTART_RESUME",
+    "COMPACT_FALLBACK",
+    "EVIDENCE_REVALIDATION",
+    "ROLE_DRIFT",
+    "VERSION_CONFLICT",
+    "SUBGRAPH_PARENT_CHILD_BUDGET",
+    "PRIVATE_PAYLOAD_REJECTION"
+  ],
+  "compatibility": {
+    "legacy_artifacts": "v1_v5_unchanged_readable",
+    "legacy_event_v1": "readable_source_incomplete",
+    "legacy_non_task_runtime": "unchanged",
+    "pipeline_default": true,
+    "subgraph_rollout": "server_controlled_experimental",
+    "automatic_strategy_fallback": false,
+    "reserve": "sealed_not_run"
+  },
+  "capability_matrix": {
+    "implemented": [
+      "deterministic_task_compact",
+      "bounded_recent_turn_window",
+      "dual_compact_trigger",
+      "atomic_context_commit",
+      "node_context_builder",
+      "behavioral_equivalence",
+      "agent_scenario_v6",
+      "phase4b_assurance"
+    ],
+    "excluded": [
+      "llm_summary",
+      "long_term_memory",
+      "graph_program_counter_resume",
+      "production_certification",
+      "rag_quality_claim"
+    ]
+  }
+}

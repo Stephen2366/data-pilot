@@ -105,6 +105,7 @@ class _LoopState(TypedDict, total=False):
     contexts: tuple[AgentNodeContext, ...]
     knowledge_runtimes: tuple[Mapping[str, str], ...]
     termination: TerminationFact
+    task_context: Mapping[str, Any]
 
 
 def _budget_profile(*, b4_enabled: bool = False) -> BudgetProfile:
@@ -478,10 +479,12 @@ def _step_node(state: _LoopState, runtime: Runtime[AgentLoopRuntime]) -> dict[st
         "input_fingerprint": input_fingerprint, "budget_before_identity": canonical_hash(before),
         "runtime_scope": requirement.runtime_scope,
     }
+    if state.get("task_context"):
+        context_payload["task_context"] = state["task_context"]
     context = AgentNodeContext(
         "document_action" if requirement.kind == "document" else "sql_action",
         (state["task_state"].identity, requirement.identity),
-        context_payload, tuple(context_payload), 5, 512,
+        context_payload, tuple(context_payload), len(context_payload), 512,
     )
     output: dict[str, Any] = {
         "task_state": next_task_state,
@@ -699,6 +702,7 @@ def _complete_comparison_if_required(
 
 def run_agent_loop(
     *, request: HarnessRequest, state: TaskState, runtime: AgentLoopRuntime,
+    task_context: Mapping[str, Any] | None = None,
 ) -> AgentLoopResult:
     """运行一次编译图并返回同源事实；业务停止应先于 recursion limit。"""
 
@@ -708,9 +712,11 @@ def run_agent_loop(
         "budget_profile_identity": _budget_profile(b4_enabled=runtime.b4_enabled).identity,
         "controller_identity": "phase4b-deterministic-controller-v1",
     }
+    if task_context:
+        decision_payload["task_context"] = dict(task_context)
     decision_context = AgentNodeContext(
         "decision", (state.identity,),
-        decision_payload, tuple(decision_payload), 4, 768,
+        decision_payload, tuple(decision_payload), len(decision_payload), 768,
     )
     initial: _LoopState = {
         "request": request, "task_state": state, "requirements": state.evidence_requirements,
@@ -723,6 +729,7 @@ def run_agent_loop(
         "duplicate_keys": (),
         "budget": BudgetLedger(_budget_profile(b4_enabled=runtime.b4_enabled)), "contexts": (decision_context,),
         "knowledge_runtimes": (),
+        "task_context": dict(task_context) if task_context else {},
     }
     try:
         output = DEFAULT_AGENT_LOOP.invoke(initial, context=runtime, config={"recursion_limit": 12})
@@ -763,19 +770,23 @@ def run_agent_loop(
             "termination_reason": termination.reason,
             "synthesizer_identity": (runtime.hybrid_synthesizer or DeterministicHybridSynthesizer()).identity,
         }
+        if task_context:
+            synthesis_payload["task_context"] = dict(task_context)
         contexts = (*contexts, AgentNodeContext(
             "hybrid_synthesis",
             tuple(item.requirement_identity for item in attempts),
-            synthesis_payload, tuple(synthesis_payload), 3, 768,
+            synthesis_payload, tuple(synthesis_payload), len(synthesis_payload), 768,
         ))
     controller_payload = {
         "termination": termination.safe_projection(), "action_count": len(attempts),
         "budget_identity": canonical_hash(budget.safe_projection()), "route": result.route,
     }
+    if task_context:
+        controller_payload["task_context"] = dict(task_context)
     contexts = contexts + (
         AgentNodeContext(
             "controller_response", (output.get("task_state", state).identity,),
-            controller_payload, tuple(controller_payload), 4, 768,
+            controller_payload, tuple(controller_payload), len(controller_payload), 768,
         ),
     )
     committed = replace(

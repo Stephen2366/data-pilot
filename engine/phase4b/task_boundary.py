@@ -15,6 +15,7 @@ from typing import Any, Callable, Literal, Mapping, Protocol
 from uuid import uuid4
 
 from engine.governance import TrustedCaller
+from engine.phase4b.task_context import TaskContextWindow
 from engine.phase4b.task_runtime import TaskState
 
 
@@ -39,11 +40,17 @@ class TaskProjection:
     expires_at: datetime
     # ★ 单次 claim capability 只在进程内传给 commit，永不进入 API/Trace。
     claim_token: str | None = field(default=None, repr=False, compare=False)
+    context: TaskContextWindow | None = field(default=None, repr=False)
 
     def safe_projection(self) -> dict[str, object]:
         """省略单次 claim token，只公开 owner 可见 task 快照。"""
 
-        return {"task_id": self.task_id, "task_version": self.task_version, "state": self.state.safe_projection(), "status": self.status, "expires_at": self.expires_at.isoformat()}
+        return {
+            "task_id": self.task_id, "task_version": self.task_version,
+            "state": self.state.safe_projection(), "status": self.status,
+            "expires_at": self.expires_at.isoformat(),
+            "context": self.context.safe_projection() if self.context else None,
+        }
 
 
 @dataclass(frozen=True)
@@ -76,11 +83,33 @@ class TaskBoundaryEvent:
     transition_identity: str | None = None
     action_count: int | None = None
     termination_reason: str | None = None
+    turn_ordinal: int | None = None
+    state_identity: str | None = None
+    constraint_keys: tuple[str, ...] = ()
+    requirement_identities: tuple[str, ...] = ()
+    active_evidence_identities: tuple[str, ...] = ()
+    budget_identity: str | None = None
+    context_identity: str | None = None
+    compact_identity: str | None = None
+    schema_version: str = "phase4b-task-boundary-event-v1"
 
     def safe_projection(self) -> dict[str, object]:
         """投影 event ledger 允许的最小 turn 字段。"""
 
-        return {"delta_category": self.delta_category, "transition_identity": self.transition_identity, "action_count": self.action_count, "termination_reason": self.termination_reason}
+        base = {
+            "delta_category": self.delta_category, "transition_identity": self.transition_identity,
+            "action_count": self.action_count, "termination_reason": self.termination_reason,
+        }
+        if self.schema_version == "phase4b-task-boundary-event-v1":
+            return base
+        return {
+            **base, "turn_ordinal": self.turn_ordinal, "state_identity": self.state_identity,
+            "constraint_keys": list(self.constraint_keys),
+            "requirement_identities": list(self.requirement_identities),
+            "active_evidence_identities": list(self.active_evidence_identities),
+            "budget_identity": self.budget_identity, "context_identity": self.context_identity,
+            "compact_identity": self.compact_identity,
+        }
 
 
 class TaskBoundaryPort(Protocol):
@@ -88,11 +117,11 @@ class TaskBoundaryPort(Protocol):
 
     @property
     def runtime_identity(self) -> Mapping[str, object]: ...
-    def start(self, *, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
+    def start(self, *, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
     def claim(self, *, task_id: str, expected_version: int, caller: TrustedCaller | None, active_role: str | None = None) -> TaskProjection: ...
-    def commit(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, terminal_status: str | None = None, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
+    def commit(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, terminal_status: str | None = None, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
     def clear(self, *, task_id: str, expected_version: int, caller: TrustedCaller | None, active_role: str | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
-    def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
+    def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
     def lifecycle_rejection(self, task_id: str, reason_code: str) -> TaskLifecycleFact: ...
     @staticmethod
     def owner_ref(caller: TrustedCaller | None) -> str: ...
@@ -111,6 +140,7 @@ class _Checkpoint:
     state: TaskState | None
     expires_at: datetime
     claim_token_hash: str | None = None
+    context: TaskContextWindow | None = None
 
 
 class TaskBoundary:
@@ -130,14 +160,17 @@ class TaskBoundary:
 
         return {"identity": "phase4b-in-memory-task-boundary-v1", "durability": "process_local_non_durable", "ttl_seconds": self._ttl_seconds, "atomic_claim_commit": True}
 
-    def start(self, *, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
+    def start(self, *, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """为可信 owner 签发一个 version=1 的新 task。"""
 
         owner, tenant, role = self.owner_scope(caller, active_role)
         if state.owner_ref != owner:
             raise TaskBoundaryError("task_owner_mismatch", "state owner 与 caller 不一致", safety_status="blocked")
         now = self._now()
-        item = _Checkpoint(uuid4().hex, owner, tenant, role, 1, "active", state, now + timedelta(seconds=self._ttl_seconds))
+        item = _Checkpoint(
+            uuid4().hex, owner, tenant, role, 1, "active", state,
+            now + timedelta(seconds=self._ttl_seconds), context=context or TaskContextWindow.empty(),
+        )
         with self._lock:
             self._items[item.task_id] = item
         return self._projection(item), self._fact(item, "started", "task_started", None)
@@ -149,7 +182,7 @@ class TaskBoundary:
         with self._lock:
             item = self._owned(task_id, owner, tenant, role)
             if self._now() >= item.expires_at:
-                self._items[task_id] = replace(item, status="expired", state=None, claim_token_hash=None)
+                self._items[task_id] = replace(item, status="expired", state=None, claim_token_hash=None, context=None)
                 raise TaskBoundaryError("task_expired", "task 已过期")
             if item.status != "active":
                 raise TaskBoundaryError("task_not_active", "task 已结束")
@@ -160,7 +193,7 @@ class TaskBoundary:
             self._items[task_id] = claimed
         return self._projection(claimed, claim_token=token)
 
-    def commit(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, terminal_status: str | None = None, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
+    def commit(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, terminal_status: str | None = None, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """只提交仍为当前版本的 claim；失败时绝不覆盖其他 turn。"""
 
         owner, tenant, role = self.owner_scope(caller, active_role)
@@ -169,14 +202,18 @@ class TaskBoundary:
         with self._lock:
             item = self._owned(claim.task_id, owner, tenant, role)
             if self._now() >= item.expires_at:
-                self._items[item.task_id] = replace(item, status="expired", state=None, claim_token_hash=None)
+                self._items[item.task_id] = replace(item, status="expired", state=None, claim_token_hash=None, context=None)
                 raise TaskBoundaryError("task_expired", "claim 已过期")
             token_hash = sha256((claim.claim_token or "").encode()).hexdigest()
             if item.status != "claimed" or item.version != claim.task_version or not item.claim_token_hash or not secrets.compare_digest(item.claim_token_hash, token_hash):
                 raise TaskBoundaryError("task_version_conflict", "claim 已失效")
             status = terminal_status if terminal_status in {"cancelled", "switched", "cleared"} else "active"
-            committed = replace(item, version=item.version + 1, status=status, state=state, expires_at=self._now() + timedelta(seconds=self._ttl_seconds), claim_token_hash=None)
-            self._items[item.task_id] = committed if status == "active" else replace(committed, state=None)
+            committed = replace(
+                item, version=item.version + 1, status=status, state=state,
+                expires_at=self._now() + timedelta(seconds=self._ttl_seconds), claim_token_hash=None,
+                context=context if context is not None else claim.context,
+            )
+            self._items[item.task_id] = committed if status == "active" else replace(committed, state=None, context=None)
         return self._projection(committed), self._fact(committed, status, f"task_{status}", claim.task_version - 1)
 
     def clear(self, *, task_id: str, expected_version: int, caller: TrustedCaller | None, active_role: str | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
@@ -191,7 +228,7 @@ class TaskBoundary:
         state = replace(claim.state, status="cleared", termination="cleared_by_caller", evidence=evidence)
         return self.commit(claim=claim, caller=caller, state=state, terminal_status="cleared", active_role=active_role)
 
-    def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
+    def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """在同一把锁内终止旧 task 并签发新 task，避免出现只完成半边的切换。"""
 
         owner, tenant, role = self.owner_scope(caller, active_role)
@@ -201,7 +238,7 @@ class TaskBoundary:
         with self._lock:
             old = self._owned(claim.task_id, owner, tenant, role)
             if self._now() >= old.expires_at:
-                self._items[old.task_id] = replace(old, status="expired", state=None, claim_token_hash=None)
+                self._items[old.task_id] = replace(old, status="expired", state=None, claim_token_hash=None, context=None)
                 raise TaskBoundaryError("task_expired", "switch claim 已过期")
             token_hash = sha256((claim.claim_token or "").encode()).hexdigest()
             if old.status != "claimed" or old.version != claim.task_version or not old.claim_token_hash or not secrets.compare_digest(old.claim_token_hash, token_hash):
@@ -212,8 +249,11 @@ class TaskBoundary:
                 for item in old.state.evidence
             )
             retired_state = replace(old.state, status="switched", termination="switched_by_caller", evidence=retired_evidence)
-            self._items[old.task_id] = replace(old, version=old.version + 1, status="switched", state=None, claim_token_hash=None)
-            new = _Checkpoint(uuid4().hex, owner, tenant, role, 1, "active", state, now + timedelta(seconds=self._ttl_seconds))
+            self._items[old.task_id] = replace(old, version=old.version + 1, status="switched", state=None, claim_token_hash=None, context=None)
+            new = _Checkpoint(
+                uuid4().hex, owner, tenant, role, 1, "active", state,
+                now + timedelta(seconds=self._ttl_seconds), context=context or TaskContextWindow.empty(),
+            )
             self._items[new.task_id] = new
         lifecycle = TaskLifecycleFact(
             self.safe_ref(new.task_id), "switched", "task_switched", claim.task_version - 1, new.version,
@@ -266,7 +306,10 @@ class TaskBoundary:
 
         if item.state is None:
             raise TaskBoundaryError("task_not_active", "task payload 已清理")
-        return TaskProjection(item.task_id, item.version, item.state, item.status, item.expires_at, claim_token)
+        return TaskProjection(
+            item.task_id, item.version, item.state, item.status, item.expires_at,
+            claim_token=claim_token, context=item.context,
+        )
 
     def _fact(self, item: _Checkpoint, action: str, reason: str, before: int | None) -> TaskLifecycleFact:
         """从 checkpoint 派生同源 lifecycle fact。"""

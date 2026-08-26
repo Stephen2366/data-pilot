@@ -111,6 +111,9 @@ class TraceRecord(BaseModel):
     knowledge_runtimes: list[dict[str, str]] = Field(default_factory=list)
     agent_loop_runtime: dict[str, Any] | None = None
     agent_scenario_source_identity: str | None = None
+    # M48：只记录 Context/Compact 的安全身份、范围、计数与 trigger 结果。
+    task_context: dict[str, Any] | None = None
+    compact_decision: dict[str, Any] | None = None
 
 
 class TraceBackend(Protocol):

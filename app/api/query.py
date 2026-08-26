@@ -269,6 +269,8 @@ def _record_trace(
         knowledge_runtimes=[dict(item) for item in task_turn.agent_loop.knowledge_runtimes] if task_turn and task_turn.agent_loop else [],
         agent_loop_runtime=dict(task_turn.agent_loop.runtime_identity) if task_turn and task_turn.agent_loop else None,
         agent_scenario_source_identity=response.agent_scenario_source_identity,
+        task_context=task_turn.task.context.safe_projection() if task_turn and task_turn.task and task_turn.task.context else None,
+        compact_decision=task_turn.compact_decision.safe_projection() if task_turn and task_turn.compact_decision else None,
     )
     path = _trace_path(request)
     if path is None:
@@ -390,6 +392,8 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
                 )
                 if task_turn.agent_loop else None
             ),
+            "task_context": task_turn.task.context.safe_projection() if task_turn.task and task_turn.task.context else None,
+            "compact_decision": task_turn.compact_decision.safe_projection() if task_turn.compact_decision else None,
         })
         _record_trace(request=request, request_body=request_body, response=response, turn=compatible_turn, task_turn=task_turn)
         return response

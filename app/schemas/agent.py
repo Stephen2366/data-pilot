@@ -153,6 +153,7 @@ class TaskView(BaseModel):
     status: Literal["claimed", "active", "cancelled", "switched", "cleared"]
     expires_at: str
     state: dict[str, Any]
+    context: dict[str, Any] | None = None
 
 
 class TaskControlResponse(BaseModel):
@@ -245,3 +246,6 @@ class AgentResponse(BaseModel):
     agent_loop_runtime: dict[str, Any] | None = None
     # M46：API/Trace/Agent Scenario v4 对同一安全父子账投影的不可逆对账值。
     agent_scenario_source_identity: str | None = None
+    # M48：只投影 Compact/Context 的 safe identity/range/count，不返回 recent raw 或完整 payload。
+    task_context: dict[str, Any] | None = None
+    compact_decision: dict[str, Any] | None = None

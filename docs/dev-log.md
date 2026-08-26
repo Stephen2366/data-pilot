@@ -4086,3 +4086,228 @@ python -m uvicorn app.main:app --reload
 
 正常情况下，新进程会从数据库恢复任务并返回更高版本；若 owner、tenant、active role、版本、TTL 或 schema 不匹配，则会在深 Tool 前安全停止。这里的答案内容仍取决于当前模型、数据库和 RAG/SQL 运行条件，M47 只保证 durable task boundary 的控制与安全语义。
 
+## ★ M48 Phase 4B B6：给长任务做一份可核验的“压缩档案”
+
+（2026-08-27）
+
+**简述**：M48 为 Agent task（智能体任务）加入 **deterministic typed Compact（确定性的类型化压缩档案）**。同一任务连续执行多轮后，系统能把已经提交的目标、约束、证据和动作账本压成有来源、有身份、可跨进程恢复的有界 Context（上下文），同时保留最近两轮短期原话，并让 API（接口）、Trace（追踪）和 Eval（评测）从同一事实解释压缩前后发生了什么。
+
+### 先用大白话讲
+
+M47 已经把任务卷宗放进 MySQL，但卷宗如果每办一步都把全部原话、结果和过程继续往里塞，迟早会变成一个越来越厚、越来越难核对的纸箱。简单把旧内容写成一段“摘要”也不够：摘要可能把“2026 年 7 月”写成“最近一个月”，漏掉一次更正，甚至把已经失效的 Evidence（证据）继续当真。
+
+M48 给档案室增加了一位**档案整理员**：
+
+- 它每隔 5 个已提交业务轮次，或在下一节点上下文达到预算的 75% 时，整理一次旧材料。
+- 它不自由发挥，只把系统已经确认的目标、月份、待办问题、Evidence 身份、动作、预算和终止原因按固定表格归档。
+- 它保留最近 2 个 user turn（用户轮次）的原话，方便理解“这个”“还是按刚才的渠道”一类短指代；每条最多 2048 bytes（字节）。
+- 它给每份档案计算 content identity（内容身份）。来源缺页、顺序断裂或身份对不上时，系统会在调用深 Tool（深层工具）前停止，不会靠猜测补齐。
+
+这样，任务既能**跨进程继续**，又不会靠无限聊天历史维持“记忆”；更重要的是，Compact 只是整理过的档案，不会取代原始 Evidence、权限和业务数据源。
+
+### 这次做了什么
+
+M48 处理的核心矛盾是：**长任务需要压缩上下文，但压缩不能改变业务事实、权限结果或 Agent 的控制行为**。最终方案把“怎样压”“存到哪里”“哪些节点能看什么”“怎么证明没压坏”做成了一个完整闭环。
+
+1. **把上下文压缩从自由文本摘要改成可验证的类型化档案。**
+
+   Task Compact（任务压缩档案）不是让大模型重新讲一遍历史，而是从已提交的 TaskState（任务状态）和连续 typed turns（类型化轮次事实）确定性派生。
+
+   - **原问题**：自由摘要容易改写时间、金额、否定条件和政策例外，也很难证明某条 Evidence 为什么仍然有效。
+   - **解决方式**：Compact 精确保留 goal（目标）、constraints（约束）、pending questions（待澄清问题）、requirements（证据需求）、Evidence identity/validity（证据身份与有效性）、动作/预算/终止摘要、来源轮次与高风险原始 reference（引用）。相同输入一定得到相同 identity。
+   - **重要取舍**：Compact 永远不是新的业务 authority（权威来源）。SQL 仍要重查，Document Evidence（文档证据）仍要按当前 authority、revision（修订版）、ACL（访问控制）和 purpose（用途）重新授权。
+   - **验证证据**：strict codec（严格编解码器）会拒绝未知字段、轮次缺号、版本倒序、high-risk 对账不一致和 identity 篡改；P2 还真实验证了 source gap（来源缺口）与 corruption（持久数据损坏）都在深执行前停止。
+
+2. **让 Context Window 有明确触发器、短期原话窗口和失败状态机。**
+
+   Context Window（上下文窗口）可以理解为“上一份 Compact + 尚未压缩的结构化轮次 + 最近两条原话”。它既不是完整聊天记录，也不是只有一段摘要。
+
+   - **双触发**：下一个 accepted turn（被接受的业务轮次）执行前，只要距上次 Compact 已有 5 个 committed turns（已提交轮次），或任一候选 node Context（节点上下文）达到 token budget（词元预算）的 75%，就触发整理。
+   - **有界保留**：只保留最近 2 条 user turns，每条最多 2048 UTF-8 bytes；整个 Context payload（上下文载荷）还有独立的 65536 bytes 上限。
+   - **失败处理**：构建失败但旧窗口仍在安全预算内时，可以保留原窗口并明确标记 fallback（回退）；来源不完整、身份漂移或已超安全上限时则阻断，不会一边丢事实一边继续调用 Tool。
+   - **未证明边界**：这套窗口服务于 900 秒 TTL（生存时间）的同一任务，不是长期聊天记忆，也没有证明任意开放问法都能靠最近两轮解决指代。
+
+3. **把 Context 作为任务边界的一部分原子写入 MySQL。**
+
+   M48 没有新建第三张上下文表，而是在 M47 的 checkpoint（任务检查点）上追加 context schema、identity、payload 和 source watermark（来源水位）四列。
+
+   - **原子提交**：TaskState、Context 和 typed event v2（类型化事件 v2）使用同一个 claim（领取权）与事务提交；旧 worker（工作进程）不能用过期 fencing token（栅栏令牌）覆盖新 Compact。
+   - **生命周期**：terminal（终态）、clear（清除）和 expiry（过期）会同时 scrub（擦除）state/context payload；raw recent turns（最近原始轮次）不会旁路写进 append-only event ledger（只追加事件账本）。
+   - **兼容策略**：旧 event v1 仍可读，但缺少完整 typed source 时只会标记 source incomplete（来源不完整），不会猜历史并生成一个看似合法的 Compact。
+   - **真实验证**：P1 在隔离 MySQL `datapilot_m48_test` 验证唯一 CAS（比较并设置）胜者、event 故障整笔回滚、clear/expiry/purge、0005 downgrade→0004→upgrade，并在结束时把 Agent synthetic rows（智能体合成行）清到 `0/0`。
+
+4. **用统一 Context Builder 给每个节点发“最小资料包”。**
+
+   Context Builder（上下文构建器）是这一模块最重要的深接口：上层任务流程只问它“这个节点现在允许看到什么”，不自己拼接历史或直接查询数据库列。
+
+   - **最小权限**：Turn Understanding（轮次理解）、Decision（决策）、SQL、Knowledge（知识检索）、RAG Subgraph（检索子图）、Synthesizer（综合器）和 Controller（控制器）分别有 allowlist（字段白名单）与 token budget。
+   - **可回查性**：每份节点输入都记录 source identities（来源身份）与 actual-input fingerprint（实际输入指纹），API/Trace 只投影 safe identity、触发原因和 source range（来源范围），不投影最近原话、文档正文、rows、Prompt、Thought 或凭据。
+   - **生命周期隔离**：`switch` 会用旧任务完成 owner/version claim 和原子退役，但新任务的 Context 从自己的 T1/version=1 开始。全仓首次回归正是靠 M43 旧测试发现了旧 Context 被错误带入新任务的问题，修复后没有放宽 strict codec。
+   - **兼容边界**：没有 task envelope（任务信封）的 legacy API（旧接口）不获得 Compact；Pipeline 仍是默认 RAG 策略，Subgraph 仍只由服务端控制为 experimental（实验能力）。
+
+5. **用同一条真实任务链证明“压缩后还能继续”，再把 B0～B6 收口。**
+
+   P2 不是手工塞一份 Compact 做单元测试，而是让两个独立进程共同跑完同一 task lineage（任务版本链）。
+
+   | 证据 | 最终结果 | 证明范围 |
+   |---|---:|---|
+   | 真实 MySQL 版本链 | `1→3→5→7→9→11` | 连续提交、Compact、跨进程恢复仍属于同一任务 |
+   | Compact | identity=`d7a5fcf3...d098`；source=`T1..T5` | 五轮来源闭合，extended turn（扩展轮次）真实消费 |
+   | 业务 oracle（标准答案） | `120000 / 180000 / 60000 / 50%` | SQL Guard（SQL 安全门）和比较结果没有因 Compact 漂移 |
+   | Subgraph 与安全负例 | answer-ready；role/version/source/corruption 均按合同拒绝 | 父子预算、Evidence 重授权、零越权深执行 |
+   | Provider 用量 | calls/tokens=`0/0` | 该 Probe 隔离验证控制语义，不冒充真实 LLM/RAG 质量 |
+   | Scenario v6 / assurance | `53dde955...beaf` / `4084e428...a22b` | B0～B6 technical capability（技术能力）可统一回查 |
+   | 最终全仓 | `662 passed, 1 warning` | 新 B6 与历史模块在同一次完整回归中兼容 |
+
+   **证据边界**：P1/P2 是 exploratory / baseline-ineligible（探索性、不可登记基线）的开发探针。它们证明 Context Compact、数据库事务、控制行为和安全投影闭合，不证明 RAG 答案正确率、生产吞吐、HA（高可用）或真实认证体系。
+
+### 新概念
+
+- **Task Compact（任务压缩档案）**：从已提交结构化事实确定性生成的有界派生物。它像把多页卷宗整理成字段固定的索引卡，而不是请人凭印象写一段故事；索引卡可以帮助查找，但不能取代原始证据。
+- **Context Window（上下文窗口）**：本轮节点能使用的有限资料集合，由上一 Compact、尚未覆盖的 typed turns、最近两条原话和当前输入组成。可以类比 Redis 的有界热点缓存：只保留当前任务最需要的材料，但 authority 仍在数据库和知识原件。
+- **Source watermark（来源水位）**：表示这份 Context 已经完整覆盖到第几个 committed turn。它类似 Kafka offset（消息偏移量）或数据库同步位点；缺 3 号却声称到 5 号，会被 strict codec 拒绝。
+- **Behavioral equivalence（行为等价）**：不要求压缩前后的回答逐字一样，而是要求 goal、约束、路由、eligible action（可执行动作）、Evidence validity、权限、预算和 termination（终止结果）不发生不合理漂移。
+- **Content binding（内容绑定）**：payload 内部 identity 与数据库的 schema/identity/watermark 索引列必须交叉一致。只改一列或只改 JSON 都会被发现，避免“表面索引说一套、真实内容是另一套”。
+
+### 代码阅读路线
+
+1. **先看 B6 冻结了哪些不可变规则**：`domain_pack/phase4b/b6_contracts.json`、`engine/phase4b/b6_contracts.py`
+   从 5-turn/75% trigger、2×2048 bytes recent window、schema identities、closed-world reasons（闭集原因码）和 v1～v5 兼容矩阵开始。这里解决“代码、配置、Eval 各说一套”的问题，不需要先死抠 hash 计算细节。
+
+2. **再读 Compact 的值对象和 strict codec**：`engine/phase4b/task_context.py`
+   先看 `TypedTurnFact`、`TaskCompact`、`TaskContextWindow`，再看 `TaskContextCodec` 与 `TaskContextBuilder`。重点理解连续 ordinal/version、high-risk exact 对账、双 trigger、fallback 和 node projection 为什么集中在一个接口里。
+
+3. **看任务流程怎样真正消费 Context**：`engine/phase4b/task_turn.py`
+   从 claim 后取得 `base_context` 开始，依次看执行前 `prepare()`、节点投影、Agent Loop 调用和执行后 `append_committed_turn()`。这里还展示 `switch` 为什么必须开启一条全新的 Context lineage。
+
+4. **进入持久化与并发边界**：`engine/phase4b/task_boundary.py`、`engine/phase4b/mysql_task_boundary.py`
+   前者定义 memory/MySQL 共用的小 interface，后者负责 payload/索引列 content binding、CAS/fencing、state/context/event 原子提交和 lifecycle scrub。阅读时把它类比成 Spring Service + Repository 的事务边界会更直观。
+
+5. **看数据库形状和产品装配**：`app/models/agent_task_checkpoint.py`、`alembic/versions/20260827_0005_m48_task_context_compact.py`、`app/core/config.py`、`app/main.py`
+   0005 只给 checkpoint 加四列，没有新增第三张表；配置增加独立 Context 大小门，应用仍装配同一个 task boundary。这一层回答“数据放哪、上限多大、进程启动时怎样接上”。
+
+6. **看 API/Trace 怎样只暴露安全摘要**：`app/api/query.py`、`app/schemas/agent.py`、`engine/trace/recorder.py`
+   顺着 Response 和 JSONL Trace 查看 compact decision、identity、source range 与 node contexts；重点确认原始 recent turns、文档正文、rows 和 private payload 没有通过可观测性旁路泄漏。
+
+7. **最后看同源证据和演示链**：`scripts/probe_m48_phase4b_continuity.py`、`eval/agent_scenario_v6_contracts.py`、`eval/phase4b_assurance.py`、`eval/reports/m48/`
+   Probe 证明真实 MySQL/跨进程行为，Scenario v6 把 10 类 required case（必需场景）投影成可验证 artifact（工件），assurance 再把 B0～B6 和 rollout/quality/reserve 边界汇总。三层证据用途不同，不能用离线报告代替真实 Probe。
+
+核心数据流：
+
+`POST /api/query + task envelope`
+→ `MySQLTaskBoundary.claim()`
+→ `TaskContextCodec.decode()`
+→ `TaskContextBuilder.prepare()`
+→ `per-node minimal Context`
+→ `Agent Loop / SQL / Knowledge / Subgraph`
+→ `append committed typed turn`
+→ `state + context + event atomic commit`
+→ `Response / Trace / Scenario v6 同源投影`
+
+**模块闭环**：M42～M47 分别提供 B0 合同、B1 多轮 TaskState、B2 Decision Loop、B3 Evidence 恢复动作、B4 RAG Subgraph 和 B5 durable boundary；M48 把这些能力放进同一条连续、可压缩、可跨进程的任务链，并生成 B0～B6 assurance。这里的“闭环”是 **technical integration completed（技术集成完成）**，最终验收仍要经过人工演示与 `accept-module`。
+
+### 设计要点
+
+- **不让摘要拥有业务权力**：Compact 只做 deterministic typed projection，Evidence、ACL、revision 和 freshness 每次使用前仍按当前 authority 复核。
+- **不把无限历史换个名字继续保存**：recent raw 严格限制为两条，完整答案、rows、正文、Prompt、Thought 和 Graph/Subgraph program counter 都不进入 Context payload。
+- **压缩与任务提交共用事务**：避免 TaskState 已更新但 Compact 没更新，或 event 记录了新水位而 payload 仍停在旧版本。
+- **失败可见，不靠静默 fallback 掩盖**：source gap、identity mismatch、预算越界和旧 worker 提交都有稳定 reason code，并在深 Tool 前停止。
+- **旧能力不为新模块让路**：legacy API、v1～v5 artifact、Pipeline 默认、Subgraph experimental、no-auto-fallback 和 reserve sealed 全部保持原语义，汪。
+
+### 有面试价值的亮点
+
+1. **“我没有把上下文压缩做成一段不可验证的 LLM 摘要。”** 我把目标、约束、Evidence、动作预算和来源轮次做成 deterministic typed Compact；相同输入得到相同 identity，关键时间金额和否定条件可以 exact 对账，Compact 也没有 authority。
+
+2. **“我把压缩、并发和数据库事务放进同一个任务边界。”** state/context/event 共用 claim、version 和 fencing token 原子提交；多 worker 竞争、进程重启、过期清理和数据损坏都能用同一套协议解释，而不是在业务层拼三套补丁。
+
+3. **“每个 Agent 节点只拿最小资料包。”** 统一 Context Builder 按节点签发 allowlist、token budget、source identity 和 input fingerprint，既控制 token，也把最小权限与可观测性做成可测试合同。
+
+4. **“我用真实连续任务证明压缩被消费，而不是只测压缩函数。”** 两个进程跑出 `1→3→5→7→9→11` 版本链，Compact 覆盖 T1..T5，扩展轮次继续完成 SQL、Knowledge 和 Subgraph；同时用 role drift、版本竞争、source gap 和 corruption 验证失败路径零越权执行。
+
+5. **“我把技术完成和质量声明分开。”** Scenario v6 与 assurance 可以证明 B0～B6 控制链 available，但我没有借此宣称 Subgraph 质量胜出、生产就绪或 reserve 已验证；Pipeline 默认和 sealed reserve 状态明确保留。
+
+### 面试官追问
+
+1. **[基础追问] 为什么不能只截断旧消息，或者让模型生成一段 summary？**
+
+   截断会直接丢来源，模型 summary 又可能改写时间、金额、否定条件和 Evidence validity。M48 要解决的不只是 token 过长，而是压缩后控制行为仍可信，所以使用 typed Compact 保存可核验事实，最近两轮原话只负责短指代，真正的权限和 Evidence 使用前仍重新校验。
+
+2. **[工程/深挖追问] 你怎样证明 Compact 没把任务语义压坏？**
+
+   我不比较答案字符串，而比较 behavioral equivalence：goal、constraints、TaskDelta、route/action、Evidence validity、权限、预算和 termination。P2 还在同一真实任务中核对 7/8 月退款 `120000/180000`、差额 `60000`、变化率 `50%`，并让压缩后的新进程重新取得 business policy Evidence。
+
+3. **[工程/深挖追问] 数据库里的 context JSON 自己算出来 identity 正确，但旁边的索引列被改了，会怎样？**
+
+   claim 事务会先 strict decode payload，再把 context schema、identity 和 source watermark 三类索引列与值对象交叉校验。任一漂移返回 `task_compact_identity_mismatch`，claim 更新回滚，Agent Loop 和 Tool 都不会执行。这个缺口正是 P2 的真实 corruption 测试发现并修复的。
+
+4. **[工程/深挖追问] Compact 构建失败时为什么有时 fallback、有时直接 blocked？**
+
+   关键是旧 source 是否仍完整且在安全预算内。如果只是新 Compact 构建失败，旧窗口还能安全支撑本轮，就保留 source 并显式标 `fallback_uncompacted`；如果来源已经缺失、identity 不闭合或原窗口已超预算，再继续就只能靠猜，所以必须在深 Tool 前 blocked。
+
+5. **[工程/深挖追问] 为什么 `switch` 不能复用旧 Context？旧任务的信息不是可能有用吗？**
+
+   `switch` 的合同是退休旧任务并建立新任务。旧 task 仍参与 owner/version claim 和原子退役，但新任务 version 从 1 开始；若把旧 T1/T2 Context 接过去，会形成 version `1/3/1` 的倒序 lineage，也把旧约束带进新目标。跨任务记忆若未来需要，必须设计独立授权和数据合同，不能偷渡进 switch。
+
+6. **[压力追问] 你做了这么复杂的 Compact，但 provider 调用是 0，这能证明真实 Agent 好用吗？**
+
+   不能，0 provider 恰恰说明这组证据只隔离验证 Context、事务、控制和安全语义。我能证明的是同一任务跨进程压缩后仍保持 frozen oracle、Subgraph 账本和权限行为，并且全仓 662 项回归兼容；我没有把它包装成开放问法正确率或 RAG 质量提升。若要回答“真实 Agent 好不好用”，需要另行设计真实 Qwen 的代表性场景、分母和质量评审，不能拿 B6 控制测试替代喵。
+
+### 验证与下一步
+
+**验证结果：**
+
+| 范围 | 真实结果 | 证明什么 |
+|---|---:|---|
+| M48 focused | 21 passed | B6 contract、codec、boundary、API/Trace、v6/assurance 主合同闭合 |
+| switch 修复跨模块回归 | 6 passed，1 个既有 warning | 新 task 独立 Context lineage 与 M43 生命周期兼容 |
+| Phase 4B M42～M48 | 185 passed | B0～B6 受影响合同未漂移 |
+| legacy M31～M41 | 237 passed | 旧 Evidence/RAG/Harness/Eval 行为保持 |
+| MySQL/Alembic | 0005 head；check 无新操作；downgrade/upgrade 对称 | ORM、migration、真实存储形状一致 |
+| Scenario v6 / assurance | `53dde955...beaf` / `4084e428...a22b` | continuous task 与 B0～B6 技术能力可回查 |
+| 最终全仓 | 662 passed，1 warning，589.75s | 修复后同一次完整仓库验证零失败 |
+
+warning 是既有 Starlette TestClient/httpx deprecation。P1/P2 最终都为 `passed→continue`，Agent synthetic checkpoint/event 行清理为 `0/0`，provider calls/tokens=`0/0`；这些数字只说明开发 Probe 没有产生模型调用。
+
+**下一步**：按 `eval/reports/m48/m48-continuous-rehearsal.md` 完成人工连续演示，再运行 `accept-module`。没有 M49 用来补 B6 必须项；只有未来出现稳定指代失败簇、payload/事务反例、生产隐私要求或新的 RAG quality candidate（质量候选）时，才另立有编号计划。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录，已激活项目 Python 环境；以下命令不调用真实 provider。
+# 1. 复核 M48 合同、Context、boundary、API 与 assurance；预计全部通过。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m48-devlog tests/test_m48_b6_contracts.py tests/test_m48_task_context.py tests/test_m48_task_boundary_context.py tests/test_m48_api_context.py tests/test_m48_v6_assurance.py
+
+# 2. 只读查看已生成的 continuous rehearsal，不会重新执行 MySQL Probe。
+Get-Content eval/reports/m48/m48-continuous-rehearsal.md
+
+# 3. 只读查看 B0～B6 assurance artifact。
+Get-Content eval/reports/m48/m48-phase4b-assurance.json
+```
+
+环境未激活时，把 `python` 替换为 `AGENTS.md` 中项目学习环境的完整 Python 路径。真实 P1/P2 会写隔离测试库，**不要仅为阅读复盘重复运行**。
+
+**本地启动体验：**
+
+当前本机 `datapilot_dev` **尚未迁移到 0005**。先确认 `DATABASE_URL` 指向你明确允许修改的开发库并做好必要备份，再按 runbook 检查和升级；不要把测试库或生产库名称靠猜测填入命令。
+
+```powershell
+# 1. 只读检查当前 migration 版本；预计产品 task runtime 需要 20260827_0005。
+python -m alembic current
+
+# 2. 仅在确认 DATABASE_URL 和备份后执行迁移。
+python -m alembic upgrade head
+
+# 3. 启动 FastAPI。
+python -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs`，用 `POST /api/query` 连续提交严格 task envelope。首轮示例：
+
+```json
+{"question":"查询 2026 年 7 月实际净退款金额。","user_role":"ops","task":{"action":"start"}}
+```
+
+后续每轮都把响应中的 `task_id` 和最新 `task_version` 原样填回 `continue`；连续到第六个 accepted turn 时，可在响应的 `compact_decision` 与 `task_context` 中观察 trigger、Compact identity、source range=`1..5` 和 uncovered turn count。停止并重启服务后再继续同一 task，可检查 MySQL durable resume。
+
+体验时应重点看**控制与可追溯结果**，不要把本地回答文字当成 M48 的质量验收：模型、业务数据库和 Knowledge runtime 的真实可用性仍服从各自 runbook 与当前环境。
+

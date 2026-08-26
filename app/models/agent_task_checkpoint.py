@@ -21,6 +21,11 @@ class AgentTaskCheckpoint(Base):
     state_version: Mapped[str] = mapped_column(String(64), nullable=False)
     state_identity: Mapped[str | None] = mapped_column(String(64), nullable=True)
     state_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # M48：Context 与 state 同行、同 CAS transaction 更新；旧 0004 行允许为空。
+    context_schema_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    context_identity: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    context_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    context_source_watermark: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     claim_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     expires_at_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
     purge_after_us: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

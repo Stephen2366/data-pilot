@@ -22,6 +22,7 @@ from app.db.base import Base as _Base  # noqa: F401
 from app.models.agent_task_checkpoint import AgentTaskCheckpoint, AgentTaskEvent
 from engine.governance import TrustedCaller
 from engine.phase4b.identity import canonical_hash
+from engine.phase4b.task_context import TaskContextCodec, TaskContextError, TaskContextWindow
 from engine.phase4b.task_boundary import (
     TaskBoundary, TaskBoundaryError, TaskBoundaryEvent, TaskLifecycleFact, TaskProjection,
 )
@@ -38,7 +39,8 @@ class MySQLTaskBoundary:
 
     def __init__(
         self, engine: Engine, *, ttl_seconds: int = 900, tombstone_retention_seconds: int = 86400,
-        max_state_bytes: int = 65536, clock: Callable[[], datetime] | None = None,
+        max_state_bytes: int = 65536, max_context_bytes: int = 65536,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         """注入共享 Engine、TTL/retention 上限与可控时钟。"""
 
@@ -46,6 +48,7 @@ class MySQLTaskBoundary:
         self._ttl_seconds = ttl_seconds
         self._retention_seconds = tombstone_retention_seconds
         self._codec = TaskStateCodec(max_bytes=max_state_bytes)
+        self._context_codec = TaskContextCodec(max_bytes=max_context_bytes)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     @property
@@ -57,15 +60,19 @@ class MySQLTaskBoundary:
             "backend": self._engine.dialect.name, "ttl_seconds": self._ttl_seconds,
             "tombstone_retention_seconds": self._retention_seconds,
             "atomic_claim_commit": True, "state_schema_version": self._codec.schema_version,
+            "context_runtime_identity": "phase4b-task-context-runtime-v1",
+            "context_schema_version": self._context_codec.schema_version,
         }
 
-    def start(self, *, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
+    def start(self, *, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """在一个短事务内签发 version=1 checkpoint 与 started event。"""
 
         owner, tenant, role = TaskBoundary.owner_scope(caller, active_role)
         if state.owner_ref != owner:
             raise TaskBoundaryError("task_owner_mismatch", "state owner 与 caller 不一致", safety_status="blocked")
         payload = self._encode(state)
+        active_context = context or TaskContextWindow.empty()
+        context_payload = self._encode_context(active_context)
         now_us = self._now_us()
         for _ in range(3):
             task_id = uuid4().hex
@@ -74,6 +81,9 @@ class MySQLTaskBoundary:
                 "task_key": key, "task_safe_ref": TaskBoundary.safe_ref(task_id), "owner_ref": owner, "tenant_ref": tenant, "active_role": role,
                 "version": 1, "status": "active", "state_version": state.state_version,
                 "state_identity": state.identity, "state_payload": payload, "claim_token_hash": None,
+                "context_schema_version": active_context.context_version,
+                "context_identity": active_context.identity, "context_payload": context_payload,
+                "context_source_watermark": active_context.source_watermark,
                 "expires_at_us": now_us + self._ttl_seconds * 1_000_000, "purge_after_us": None,
                 "created_at_us": now_us, "updated_at_us": now_us,
             }
@@ -82,7 +92,7 @@ class MySQLTaskBoundary:
                 with self._engine.begin() as connection:
                     connection.execute(insert(_CHECKPOINT).values(**row))
                     self._append_event(connection, key, fact, event, now_us)
-                return self._projection(task_id, row, state), fact
+                return self._projection(task_id, row, state, context=active_context), fact
             except SQLAlchemyError as exc:
                 if "unique" not in str(exc).lower() and "duplicate" not in str(exc).lower():
                     raise self._storage_error(exc) from exc
@@ -98,6 +108,8 @@ class MySQLTaskBoundary:
         try:
             failure: TaskBoundaryError | None = None
             row = None
+            state = None
+            context = None
             with self._engine.begin() as connection:
                 result = connection.execute(
                     update(_CHECKPOINT).where(
@@ -111,18 +123,22 @@ class MySQLTaskBoundary:
                     failure = self._classify_claim_failure(connection, key, owner, tenant, role, expected_version, now_us, task_id)
                 else:
                     row = connection.execute(select(_CHECKPOINT).where(_CHECKPOINT.c.task_key == key)).mappings().one()
+                    # ★ payload 自身 hash 正确还不够：独立列是 CAS/审计查询依赖的索引事实，
+                    # 必须与 payload 的 schema/identity/watermark 同事务对账。解码放在事务内，
+                    # 任一 tamper 失败都会回滚 claim UPDATE，不能把合法 task 卡在 claimed。
+                    state = self._decode(row["state_payload"])
+                    context = self._decode_context_row(row)
                     self._append_event(connection, key, self._fact(task_id, "claimed", "task_claimed", expected_version, expected_version + 1, row["state_identity"]), None, now_us)
             if failure is not None:
                 raise failure
-            assert row is not None
-            state = self._decode(row["state_payload"])
-            return self._projection(task_id, row, state, claim_token=token)
+            assert row is not None and state is not None and context is not None
+            return self._projection(task_id, row, state, claim_token=token, context=context)
         except TaskBoundaryError:
             raise
         except SQLAlchemyError as exc:
             raise self._storage_error(exc) from exc
 
-    def commit(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, terminal_status: str | None = None, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
+    def commit(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, terminal_status: str | None = None, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """仅允许未过期、版本/token 都匹配的 winner 提交下一版本。"""
 
         owner, tenant, role = TaskBoundary.owner_scope(caller, active_role)
@@ -130,6 +146,8 @@ class MySQLTaskBoundary:
             raise TaskBoundaryError("task_owner_mismatch", "state owner 与 caller 不一致", safety_status="blocked")
         status = terminal_status if terminal_status in {"cancelled", "switched", "cleared"} else "active"
         payload = self._encode(state)
+        active_context = context or claim.context or TaskContextWindow.legacy_incomplete()
+        context_payload = self._encode_context(active_context)
         token_hash = sha256((claim.claim_token or "").encode()).hexdigest()
         now_us = self._now_us()
         after = claim.task_version + 1
@@ -139,9 +157,18 @@ class MySQLTaskBoundary:
             "claim_token_hash": None, "updated_at_us": now_us,
         }
         if status == "active":
-            values.update(state_payload=payload, expires_at_us=now_us + self._ttl_seconds * 1_000_000, purge_after_us=None)
+            values.update(
+                state_payload=payload, context_schema_version=active_context.context_version,
+                context_identity=active_context.identity, context_payload=context_payload,
+                context_source_watermark=active_context.source_watermark,
+                expires_at_us=now_us + self._ttl_seconds * 1_000_000, purge_after_us=None,
+            )
         else:
-            values.update(state_payload=None, purge_after_us=now_us + self._retention_seconds * 1_000_000)
+            values.update(
+                state_payload=None, context_schema_version=None, context_identity=None,
+                context_payload=None, context_source_watermark=None,
+                purge_after_us=now_us + self._retention_seconds * 1_000_000,
+            )
         try:
             failure: TaskBoundaryError | None = None
             with self._engine.begin() as connection:
@@ -163,7 +190,10 @@ class MySQLTaskBoundary:
         except SQLAlchemyError as exc:
             raise self._storage_error(exc) from exc
         projection_row = {**values, "expires_at_us": values.get("expires_at_us", int(claim.expires_at.timestamp() * 1_000_000))}
-        return self._projection(claim.task_id, projection_row, state), fact
+        return self._projection(
+            claim.task_id, projection_row, state,
+            context=active_context if status == "active" else None,
+        ), fact
 
     def clear(self, *, task_id: str, expected_version: int, caller: TrustedCaller | None, active_role: str | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """以 claim→terminal commit 复用同一 fencing，并立即擦除持久 payload。"""
@@ -173,13 +203,15 @@ class MySQLTaskBoundary:
         state = replace(claim.state, status="cleared", termination="cleared_by_caller", evidence=evidence)
         return self.commit(claim=claim, caller=caller, state=state, terminal_status="cleared", active_role=active_role)
 
-    def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
+    def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """同一事务原子退休旧 task 并创建新 task。"""
 
         owner, tenant, role = TaskBoundary.owner_scope(caller, active_role)
         if state.owner_ref != owner:
             raise TaskBoundaryError("task_owner_mismatch", "state owner 与 caller 不一致", safety_status="blocked")
         payload, now_us = self._encode(state), self._now_us()
+        active_context = context or TaskContextWindow.empty()
+        context_payload = self._encode_context(active_context)
         token_hash = sha256((claim.claim_token or "").encode()).hexdigest()
         new_id, new_key = uuid4().hex, ""
         try:
@@ -192,6 +224,8 @@ class MySQLTaskBoundary:
                     _CHECKPOINT.c.status == "claimed", _CHECKPOINT.c.claim_token_hash == token_hash,
                     _CHECKPOINT.c.expires_at_us > now_us,
                 ).values(version=claim.task_version + 1, status="switched", state_payload=None,
+                         context_schema_version=None, context_identity=None, context_payload=None,
+                         context_source_watermark=None,
                          state_identity=claim.state.identity, claim_token_hash=None, updated_at_us=now_us,
                          purge_after_us=now_us + self._retention_seconds * 1_000_000))
                 if result.rowcount != 1:
@@ -202,6 +236,9 @@ class MySQLTaskBoundary:
                         task_key=new_key, task_safe_ref=TaskBoundary.safe_ref(new_id), owner_ref=owner, tenant_ref=tenant, active_role=role,
                         version=1, status="active", state_version=state.state_version,
                         state_identity=state.identity, state_payload=payload, claim_token_hash=None,
+                        context_schema_version=active_context.context_version,
+                        context_identity=active_context.identity, context_payload=context_payload,
+                        context_source_watermark=active_context.source_watermark,
                         expires_at_us=now_us + self._ttl_seconds * 1_000_000, purge_after_us=None,
                         created_at_us=now_us, updated_at_us=now_us,
                     ))
@@ -213,7 +250,10 @@ class MySQLTaskBoundary:
             raise
         except SQLAlchemyError as exc:
             raise self._storage_error(exc) from exc
-        return TaskProjection(new_id, 1, state, "active", self._from_us(now_us + self._ttl_seconds * 1_000_000)), fact
+        return TaskProjection(
+            new_id, 1, state, "active", self._from_us(now_us + self._ttl_seconds * 1_000_000),
+            context=active_context,
+        ), fact
 
     def purge_tombstones(self, *, limit: int = 100) -> int:
         """每次只清理有限行，避免维护事务长期占锁。"""
@@ -247,6 +287,8 @@ class MySQLTaskBoundary:
                         _CHECKPOINT.c.task_key == row["task_key"], _CHECKPOINT.c.version == row["version"],
                         _CHECKPOINT.c.status == row["status"],
                     ).values(status="expired", state_payload=None, claim_token_hash=None,
+                             context_schema_version=None, context_identity=None, context_payload=None,
+                             context_source_watermark=None,
                              purge_after_us=row["expires_at_us"] + self._retention_seconds * 1_000_000,
                              updated_at_us=now_us))
                     if result.rowcount == 1:
@@ -285,7 +327,10 @@ class MySQLTaskBoundary:
                 _CHECKPOINT.c.task_key == key, _CHECKPOINT.c.status == row["status"],
                 _CHECKPOINT.c.version == row["version"],
             ).values(
-                status="expired", state_payload=None, claim_token_hash=None, purge_after_us=row["expires_at_us"] + self._retention_seconds * 1_000_000, updated_at_us=now_us,
+                status="expired", state_payload=None, claim_token_hash=None,
+                context_schema_version=None, context_identity=None, context_payload=None,
+                context_source_watermark=None,
+                purge_after_us=row["expires_at_us"] + self._retention_seconds * 1_000_000, updated_at_us=now_us,
             ))
             if result.rowcount == 1:
                 self._append_event(connection, key, fact, None, now_us)
@@ -308,6 +353,8 @@ class MySQLTaskBoundary:
                 _CHECKPOINT.c.task_key == key, _CHECKPOINT.c.status == "claimed",
                 _CHECKPOINT.c.version == row["version"],
             ).values(status="expired", state_payload=None, claim_token_hash=None,
+                     context_schema_version=None, context_identity=None, context_payload=None,
+                     context_source_watermark=None,
                      purge_after_us=row["expires_at_us"] + self._retention_seconds * 1_000_000,
                      updated_at_us=now_us))
             if result.rowcount == 1:
@@ -319,9 +366,10 @@ class MySQLTaskBoundary:
         """在 checkpoint 同一事务追加最小 typed event。"""
 
         payload = event.safe_projection() if event else TaskBoundaryEvent().safe_projection()
+        event_schema_version = event.schema_version if event else "phase4b-task-boundary-event-v1"
         identity = canonical_hash({"fact": fact.safe_projection(), "event": payload, "nonce": uuid4().hex})
         connection.execute(insert(_EVENT).values(
-            event_schema_version="phase4b-task-boundary-event-v1", event_identity=identity,
+            event_schema_version=event_schema_version, event_identity=identity,
             task_key=key, task_safe_ref=fact.task_safe_ref, action=fact.action,
             reason_code=fact.reason_code, version_before=fact.version_before,
             version_after=fact.version_after, state_identity=fact.state_identity,
@@ -344,10 +392,56 @@ class MySQLTaskBoundary:
         except TaskStateCodecError as exc:
             raise TaskBoundaryError(exc.reason_code, str(exc), safety_status="blocked") from exc
 
-    def _projection(self, task_id: str, row: Mapping[str, Any], state: TaskState, *, claim_token: str | None = None) -> TaskProjection:
+    def _encode_context(self, context: TaskContextWindow) -> dict[str, Any]:
+        """把 Context codec 错误映射成 boundary 的稳定 fail-closed reason。"""
+
+        try:
+            return self._context_codec.encode(context)
+        except TaskContextError as exc:
+            raise TaskBoundaryError(exc.reason_code, str(exc), safety_status="blocked") from exc
+
+    def _decode_context(self, payload: Any) -> TaskContextWindow:
+        """旧 0004 null payload 显式标记 source incomplete，其余严格恢复。"""
+
+        if payload is None:
+            return TaskContextWindow.legacy_incomplete()
+        try:
+            return self._context_codec.decode(payload)
+        except TaskContextError as exc:
+            raise TaskBoundaryError(exc.reason_code, str(exc), safety_status="blocked") from exc
+
+    def _decode_context_row(self, row: Mapping[str, Any]) -> TaskContextWindow:
+        """把 checkpoint 的 Context 索引列与 strict payload 做 content binding。"""
+
+        payload = row["context_payload"]
+        if payload is None:
+            if any(row[name] is not None for name in (
+                "context_schema_version", "context_identity", "context_source_watermark",
+            )):
+                raise TaskBoundaryError(
+                    "task_compact_identity_mismatch", "null context payload 与索引列不一致",
+                    safety_status="blocked",
+                )
+            return TaskContextWindow.legacy_incomplete()
+        context = self._decode_context(payload)
+        if (
+            row["context_schema_version"] != context.context_version
+            or row["context_identity"] != context.identity
+            or row["context_source_watermark"] != context.source_watermark
+        ):
+            raise TaskBoundaryError(
+                "task_compact_identity_mismatch", "context payload 与索引列不一致",
+                safety_status="blocked",
+            )
+        return context
+
+    def _projection(self, task_id: str, row: Mapping[str, Any], state: TaskState, *, claim_token: str | None = None, context: TaskContextWindow | None = None) -> TaskProjection:
         """把数据库行收窄为合法 owner 可见投影。"""
 
-        return TaskProjection(task_id, int(row["version"]), state, str(row["status"]), self._from_us(int(row["expires_at_us"])), claim_token)
+        return TaskProjection(
+            task_id, int(row["version"]), state, str(row["status"]),
+            self._from_us(int(row["expires_at_us"])), claim_token=claim_token, context=context,
+        )
 
     @staticmethod
     def _task_key(task_id: str) -> str:

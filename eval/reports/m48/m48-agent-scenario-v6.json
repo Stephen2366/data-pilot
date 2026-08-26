@@ -1,0 +1,222 @@
+{
+  "artifact_version": "phase4b-agent-scenario-artifact-v6",
+  "status": "completed",
+  "run_spec": {
+    "run_id": "m48-b6-p2-same-source",
+    "predecessor_artifact_version": "phase4b-agent-scenario-artifact-v5",
+    "context_schema_version": "phase4b-task-context-window-v1",
+    "compact_schema_version": "phase4b-task-compact-v1",
+    "event_schema_version": "phase4b-task-boundary-event-v2",
+    "source_execution_identity": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+    "contract_identity": "052c72b7fd6481c84c0f2355dc7977821d1ae24d0aba6b89cbce049f98a86b42"
+  },
+  "run_spec_identity": "abcacfa450ff7c591203bfa6b84cf5d387483e445c202edb28e364c335c3dcc7",
+  "legacy_artifacts": {
+    "v1": "unchanged_readable",
+    "v2": "unchanged_readable",
+    "v3": "unchanged_readable",
+    "v4": "unchanged_readable",
+    "v5": "unchanged_readable"
+  },
+  "cases": [
+    {
+      "scenario_id": "CONTINUOUS_T1_T5_EXTENDED",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "versions": [
+          1,
+          3,
+          5,
+          7,
+          9,
+          11
+        ],
+        "restart_continuation": "passed",
+        "oracle": {
+          "july": 120000,
+          "august": 180000,
+          "delta": 60000,
+          "growth": "50%"
+        }
+      },
+      "assertions": [
+        [
+          "required:continuous_t1_t5_extended",
+          "passed"
+        ]
+      ],
+      "source_identity": "eedc1675124c1d5b45723269b25e13eea0204535b1598e25c61ef2de580a2142"
+    },
+    {
+      "scenario_id": "COMPACT_TURN_TRIGGER",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "compact_identity": "d7a5fcf3664b6cab4d998f82f02ba727f47a18e2fd1ec82524c0c4d89c63d098",
+        "source_turn_range": [
+          1,
+          5
+        ],
+        "trigger": "committed_turns"
+      },
+      "assertions": [
+        [
+          "required:compact_turn_trigger",
+          "passed"
+        ]
+      ],
+      "source_identity": "85f223dc776aa0dd43e52e88024d90f0157803e70bc00267a5a463e60759825f"
+    },
+    {
+      "scenario_id": "COMPACT_BUDGET_TRIGGER",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "trigger": "candidate_node_budget",
+        "threshold": 0.75
+      },
+      "assertions": [
+        [
+          "required:compact_budget_trigger",
+          "passed"
+        ]
+      ],
+      "source_identity": "4d061d0148040fab92d10008256b297ee7dfb6848a02ab776badb7d5854f73b9"
+    },
+    {
+      "scenario_id": "COMPACT_RESTART_RESUME",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "processes": 2,
+        "restart_continuation": "passed",
+        "compact_identity": "d7a5fcf3664b6cab4d998f82f02ba727f47a18e2fd1ec82524c0c4d89c63d098"
+      },
+      "assertions": [
+        [
+          "required:compact_restart_resume",
+          "passed"
+        ]
+      ],
+      "source_identity": "f86e69d7e75a015d5b2580ba0b8a601cfb77fb6efc48bc3e39af7c33007f282d"
+    },
+    {
+      "scenario_id": "COMPACT_FALLBACK",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "outcome": "fallback_uncompacted",
+        "source_retained": true
+      },
+      "assertions": [
+        [
+          "required:compact_fallback",
+          "passed"
+        ]
+      ],
+      "source_identity": "bdf813ade6c2498bcb2cbd64e2b9ada023c45756a6629f507018545403a3c1b0"
+    },
+    {
+      "scenario_id": "EVIDENCE_REVALIDATION",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "sql_guard": "passed",
+        "business_subgraph_termination": "answer_ready",
+        "extended_reacquired": true
+      },
+      "assertions": [
+        [
+          "required:evidence_revalidation",
+          "passed"
+        ]
+      ],
+      "source_identity": "d5c5d1ec4bc3f699542afb1691835d63c17730760bedfe65b5edfe3e0dafb744"
+    },
+    {
+      "scenario_id": "ROLE_DRIFT",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "reason_code": "task_unavailable",
+        "invocations": 0
+      },
+      "assertions": [
+        [
+          "required:role_drift",
+          "passed"
+        ]
+      ],
+      "source_identity": "8e724c81b881cd24703cd23ca209265e664b230cf75259368e80201db19b15f5"
+    },
+    {
+      "scenario_id": "VERSION_CONFLICT",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "stale": {
+          "reason_code": "task_version_conflict",
+          "invocations": 0
+        },
+        "competition": [
+          {
+            "action": "continue",
+            "reason_code": "comparison_projection_mismatch",
+            "invocations": 1
+          },
+          {
+            "action": "rejected",
+            "reason_code": "task_version_conflict",
+            "invocations": 0
+          }
+        ]
+      },
+      "assertions": [
+        [
+          "required:version_conflict",
+          "passed"
+        ]
+      ],
+      "source_identity": "d102ec9d41f576db24a7e963ccd6a8f8b1b496b2da1ea766b8f77ac85a89c1bd"
+    },
+    {
+      "scenario_id": "SUBGRAPH_PARENT_CHILD_BUDGET",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "termination": "answer_ready",
+        "consumption": {
+          "initial_retrieval_batches": 1,
+          "rewrite_retrieval_batches": 1,
+          "expansion_candidates_scanned": 0,
+          "expansion_evidence_added": 0,
+          "candidates_examined": 3,
+          "unique_merged_evidence": 3,
+          "selected": 3,
+          "generation_visible": 0,
+          "proposal_calls": 0,
+          "model_calls": 0,
+          "total_tokens": 0,
+          "token_usage_observed": true,
+          "retrieval_attempts_observed": true,
+          "latency_ms": 6.286
+        }
+      },
+      "assertions": [
+        [
+          "required:subgraph_parent_child_budget",
+          "passed"
+        ]
+      ],
+      "source_identity": "3c63763dd488875e7800fed83c9b92fa876e89833ad449b8790c9fbf6428bb2d"
+    },
+    {
+      "scenario_id": "PRIVATE_PAYLOAD_REJECTION",
+      "source": "b932e58e8eaddb3592ff995742a26f7ea824adedbdf027192f5b12b738ea699c",
+      "observations": {
+        "response_trace_redaction": "passed",
+        "provider_calls": 0
+      },
+      "assertions": [
+        [
+          "required:private_payload_rejection",
+          "passed"
+        ]
+      ],
+      "source_identity": "204ea667a80daef241b90b15fbf2efb93e13779d69e97a0616e4fa5046fd090a"
+    }
+  ],
+  "artifact_identity": "53dde9550b9e10c8565bdb4f6b6224cc6bfbb594140fa99ddd6fe5df8767beaf"
+}

@@ -1,0 +1,74 @@
+{
+  "artifact_version": "phase4b-assurance-artifact-v1",
+  "status": "completed",
+  "scenario_artifact_identity": "53dde9550b9e10c8565bdb4f6b6224cc6bfbb594140fa99ddd6fe5df8767beaf",
+  "capability_matrix": [
+    {
+      "milestone": "B0",
+      "module": "M42",
+      "status": "available",
+      "contract_identity": "6543883ce708d4d38ec770516fc1d633486dac4a4ff6088544994851736aae6f",
+      "evidence_identity": "6543883ce708d4d38ec770516fc1d633486dac4a4ff6088544994851736aae6f"
+    },
+    {
+      "milestone": "B1",
+      "module": "M43",
+      "status": "available",
+      "contract_identity": "383fbf51016c1baf525657552eb14dbb507edce5ba1d566c1557d3ac6f7e9d32",
+      "evidence_identity": "383fbf51016c1baf525657552eb14dbb507edce5ba1d566c1557d3ac6f7e9d32"
+    },
+    {
+      "milestone": "B2",
+      "module": "M44",
+      "status": "available",
+      "contract_identity": "a808b321ba8cae63ef0adaed3815d4becdfd650c37e2b30e9f1402ed8ecd485b",
+      "evidence_identity": "a808b321ba8cae63ef0adaed3815d4becdfd650c37e2b30e9f1402ed8ecd485b"
+    },
+    {
+      "milestone": "B3",
+      "module": "M45",
+      "status": "available",
+      "contract_identity": "15cda06ec378b8a200e5aa6edd1b38e3af23cc256269fc07629873def36be708",
+      "evidence_identity": "15cda06ec378b8a200e5aa6edd1b38e3af23cc256269fc07629873def36be708"
+    },
+    {
+      "milestone": "B4",
+      "module": "M46",
+      "status": "available",
+      "contract_identity": "ebb06f82a919ab009ea10eea27ed06c7dcb709b03f8ee414682485d3fc03f164",
+      "evidence_identity": "ebb06f82a919ab009ea10eea27ed06c7dcb709b03f8ee414682485d3fc03f164"
+    },
+    {
+      "milestone": "B5",
+      "module": "M47",
+      "status": "available",
+      "contract_identity": "260e819a4539ffc6c6b509dcf1520122d21f418a1e094fb6bb88a8198cf1a02e",
+      "evidence_identity": "260e819a4539ffc6c6b509dcf1520122d21f418a1e094fb6bb88a8198cf1a02e"
+    },
+    {
+      "milestone": "B6",
+      "module": "M48",
+      "status": "available",
+      "contract_identity": "052c72b7fd6481c84c0f2355dc7977821d1ae24d0aba6b89cbce049f98a86b42",
+      "evidence_identity": "53dde9550b9e10c8565bdb4f6b6224cc6bfbb594140fa99ddd6fe5df8767beaf"
+    }
+  ],
+  "compatibility": {
+    "legacy_artifacts": "v1_v5_unchanged_readable",
+    "legacy_event_v1": "readable_source_incomplete",
+    "legacy_non_task_runtime": "unchanged",
+    "pipeline_default": true,
+    "subgraph_rollout": "server_controlled_experimental",
+    "automatic_strategy_fallback": false,
+    "reserve": "sealed_not_run"
+  },
+  "claim_boundary": {
+    "technical_integration": "completed",
+    "pipeline_default": true,
+    "subgraph": "server_controlled_experimental",
+    "rag_quality_claim": "not_claimed",
+    "production_certification": "not_claimed",
+    "reserve": "sealed_not_run"
+  },
+  "artifact_identity": "4084e4289b0cee7e8cb9cabaf139f41eba761a4d111a90ce6d5705ba271ca22b"
+}

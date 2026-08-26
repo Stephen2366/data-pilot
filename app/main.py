@@ -240,6 +240,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
             build_engine(settings.database_url), ttl_seconds=settings.task_checkpoint_ttl_seconds,
             tombstone_retention_seconds=settings.task_tombstone_retention_seconds,
             max_state_bytes=settings.task_state_max_bytes,
+            max_context_bytes=settings.task_context_max_bytes,
         )
     # M44A：lifespan 在配置闭合时注入 Enterprise product factory；None 表示 fail-closed，
     # endpoint 不再构造业务小语料。Eval/测试仍可在进入 lifespan 前显式覆盖深 seam。

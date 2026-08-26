@@ -98,6 +98,23 @@ class TaskState:
     last_termination: Mapping[str, Any] | None = None
     state_version: str = TASK_STATE_VERSION
 
+    def __post_init__(self) -> None:
+        """规范化 JSON array 型 constraint，保证 MySQL restart 前后 Python 语义一致。
+
+        ★ JSON 没有 tuple；如果只在 decode 端修复，直接构造的测试/调用方仍会分叉。
+        因此在 TaskState 的唯一值对象入口把 list 递归冻结为 tuple。该规范化不改变
+        ``safe_projection`` 的 canonical JSON，也不改签 TaskState v2 identity。
+        """
+
+        def freeze(value: Any) -> Any:
+            if isinstance(value, list):
+                return tuple(freeze(item) for item in value)
+            if isinstance(value, tuple):
+                return tuple(freeze(item) for item in value)
+            return value
+
+        object.__setattr__(self, "constraints", tuple((key, freeze(value)) for key, value in self.constraints))
+
     @property
     def identity(self) -> str:
         return canonical_hash(self.safe_projection())

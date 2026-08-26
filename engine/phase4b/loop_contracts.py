@@ -198,31 +198,52 @@ class AgentNodeContext:
     field_budget: int
     token_budget: int
     context_version: str = "phase4b-agent-node-context-v2"
+    # M48：v3 Context 可以携带仅供节点消费的短期字段；safe_projection 只投影 hash。
+    private_fields: tuple[str, ...] = ()
     identity: str = field(init=False)
     estimated_tokens: int = field(init=False)
 
     def __post_init__(self) -> None:
         if set(self.payload) - set(self.allowed_fields) or len(self.payload) > self.field_budget:
             raise ValueError("agent_node_context_fields_invalid")
+        if set(self.private_fields) - set(self.payload):
+            raise ValueError("agent_node_context_private_fields_invalid")
+        if self.private_fields and self.context_version != "phase4b-agent-node-context-v3":
+            raise ValueError("agent_node_context_private_version_invalid")
         estimated = max(1, (len(str(dict(self.payload))) + 3) // 4)
         if estimated > self.token_budget:
             raise ValueError("agent_node_context_token_budget_exceeded")
         object.__setattr__(self, "estimated_tokens", estimated)
-        object.__setattr__(self, "identity", canonical_hash({
+        identity_payload = {
             "context_version": self.context_version, "purpose": self.purpose,
             "source_identities": self.source_identities, "payload": self.payload,
             "allowed_fields": self.allowed_fields, "field_budget": self.field_budget,
             "token_budget": self.token_budget,
-        }))
+        }
+        # v2 identity 必须逐字兼容；只有 additive v3 才把 private allowlist 绑定进 hash。
+        if self.private_fields:
+            identity_payload["private_fields"] = self.private_fields
+        object.__setattr__(self, "identity", canonical_hash(identity_payload))
 
     def safe_projection(self) -> dict[str, Any]:
-        return {
+        public_payload = {
+            key: (
+                {"redacted": True, "value_identity": canonical_hash(value),
+                 "item_count": len(value) if isinstance(value, (list, tuple)) else None}
+                if key in self.private_fields else value
+            )
+            for key, value in self.payload.items()
+        }
+        result = {
             "context_version": self.context_version, "purpose": self.purpose,
-            "source_identities": list(self.source_identities), "payload": dict(self.payload),
+            "source_identities": list(self.source_identities), "payload": public_payload,
             "allowed_fields": list(self.allowed_fields), "field_budget": self.field_budget,
             "token_budget": self.token_budget, "estimated_tokens": self.estimated_tokens,
             "input_fingerprint": self.identity,
         }
+        if self.private_fields:
+            result["private_fields"] = list(self.private_fields)
+        return result
 
 
 @dataclass(frozen=True)

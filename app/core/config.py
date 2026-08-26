@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     task_checkpoint_ttl_seconds: int = Field(default=900, gt=0, alias="TASK_CHECKPOINT_TTL_SECONDS")
     task_tombstone_retention_seconds: int = Field(default=86400, gt=0, alias="TASK_TOMBSTONE_RETENTION_SECONDS")
     task_state_max_bytes: int = Field(default=65536, ge=1024, alias="TASK_STATE_MAX_BYTES")
+    task_context_max_bytes: int = Field(default=65536, ge=4096, alias="TASK_CONTEXT_MAX_BYTES")
 
     # LLM 通用配置 =============================================================================
     # LLM 是大语言模型。这里先保留一个通用入口，后续 generator 可以按 provider 选择模型。

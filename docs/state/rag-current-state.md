@@ -2,7 +2,7 @@
 
 > 本文是知识库的当前运行状态入口，作用类似 `database-current-state.md`：只记录续接开发需要立刻知道的语料、active identity、运行接线、当前结论和活跃风险。评测数字、分母、artifact 与可比性规则统一以 `eval-baselines.md` 为准；本文不建立第二份评测账本。涉及知识原件、active release、外部 corpus、Knowledge Tool 或 M34 运行状态时必须先读本文。
 
-**更新时间：2026-08-26**
+**更新时间：2026-08-27**
 
 ## 一句话结论
 
@@ -126,6 +126,7 @@ semantic snapshot 已完成全部 139,214 个 unique unit，并在 M44A 后成�
 - **能力范围**：M38 已把两类 canonical SQL + Document Hybrid 接入同一 Harness，但不是自由多轮或开放跨来源研究。第二次追问、Hybrid follow-up、optional branch、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
 - **M46 B4 rollout**：bounded RAG Subgraph已实现并保留为server-controlled experimental，Pipeline继续作为产品默认和显式baseline；客户端不能选择策略，也不启用自动跨策略fallback。当前candidate未达到historical晋级门，Phase 4B reserve `f70c5fc...e505`保持sealed/read0/not-run；未来以新假设、新candidate和新授权进入下一轮评审。
+- **M48 B6 integration**：Context Compact 已能跨进程承接 business Subgraph 的 typed Evidence/父子预算 identity，并在 extended turn 重新加载、重新授权 Evidence；它没有改变 Knowledge runtime、active release、Pipeline/Subgraph rollout、质量结论或 reserve 状态，也不把 Compact 当作文档 authority。
 - **M41/M44A 后续真实运行门**：历史 business Smoke、lexical external dev 与 M44A semantic 单题 C6 均已按各自授权完成。external selector 默认 dev，产品 retrieval 默认 semantic；120 held-out/all 仍须明确说出。任何真实运行都只授权一次，不得自动重跑、扩大 suite 或在 semantic 失败后换 lexical 冒充同次授权。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **Phase 4B reserve 污染门**：只有historical支持正式冻结的新candidate、闭集review和用户精确授权同时成立，才可读取逐题内容并运行一次decision set；不得用reserve调参。提前访问/调参时必须按访问状态机标记retired，不能继续充当decision set。M34/M41现有180题只作historical regression，不与该60题reserve合并。

@@ -2,7 +2,7 @@
 
 > DataPilot 的公共运行入口。运行任何项目命令前先读本文，再按任务进入 Text2SQL 或 RAG 专用 runbook。当前状态见 `AI_CONTEXT.md`，评测数字见 `eval-baselines.md`；本文不保存历史实验和基线数字。
 
-更新时间：2026-08-26
+更新时间：2026-08-27
 
 ## 先选链路
 
@@ -37,11 +37,13 @@
 - clear：`DELETE /api/query/threads/{thread_id}?user_role=<role>&expected_version=<version>`。
 - 进程内 thread checkpoint 默认 TTL：`THREAD_CHECKPOINT_TTL_SECONDS=900`；重启或多 worker 不恢复、不共享。
 - M43 Agent task family 仍走同一 `POST /api/query`，只有请求携带严格 nested envelope 才启用：start 为 `"task":{"action":"start"}`；continue/switch/cancel 必须同时提交服务端上一响应的 `task_id` 与 `expected_version`。task envelope 与 legacy thread/follow-up payload 互斥，客户端不得提交 delta/state/route/Evidence/runtime 字段。
-- task clear：`DELETE /api/query/tasks/{task_id}?user_role=<role>&expected_version=<version>`。M47 后产品 task boundary 默认 `TASK_BOUNDARY_BACKEND=mysql`，使用 MySQL durable checkpoint + typed event ledger；`TASK_CHECKPOINT_TTL_SECONDS=900`、`TASK_TOMBSTONE_RETENTION_SECONDS=86400`、`TASK_STATE_MAX_BYTES=65536`。memory 仅允许 `APP_ENV=test` 显式选择。该 family 与仍为进程内的 legacy thread checkpoint 分离；产品启动前数据库必须处于 Alembic `20260826_0004` head，否则 task storage 失败关闭。
+- task clear：`DELETE /api/query/tasks/{task_id}?user_role=<role>&expected_version=<version>`。M47/M48 后产品 task boundary 默认 `TASK_BOUNDARY_BACKEND=mysql`，使用 MySQL durable checkpoint + typed event ledger + bounded Context payload；`TASK_CHECKPOINT_TTL_SECONDS=900`、`TASK_TOMBSTONE_RETENTION_SECONDS=86400`、`TASK_STATE_MAX_BYTES=65536`、`TASK_CONTEXT_MAX_BYTES=65536`。memory 仅允许 `APP_ENV=test` 显式选择。该 family 与仍为进程内的 legacy thread checkpoint 分离；产品启动前数据库必须处于 Alembic `20260827_0005` head，否则 task storage 失败关闭。
+- M48 Context Compact 在下一 accepted turn 执行前按“距上次 Compact 已提交 5 个业务 turn”或“任一候选 node Context 达到其 token budget 的 75%”双触发；只保留最近 2 个原始 user turns、每条最多 2048 UTF-8 bytes。Compact 只保存 typed facts/provenance/high-risk refs，不是 Evidence、权限或业务 authority；source 缺失/identity 漂移在 Tool 前失败关闭。`switch` 会退役旧 task，但新 task Context 从 T1/version=1 独立起步。
 - M47 lifecycle maintenance 通过 `MySQLTaskBoundary.expire_stale(limit=...)` 与 `purge_tombstones(limit=...)` 的受限 seam 执行：两者均 bounded，只返回处理数量，不暴露 task 内容；purge 会先处理已到期 active/claimed 并立即 scrub，再删除已满 24h 的 tombstone。当前没有常驻 scheduler，部署方必须以受控运维入口周期调用；不得用业务 seed/reset 代替 maintenance。
 - B1 零 provider rehearsal：`python -m scripts.rehearse_m43_b1`。它只复核 B1 contract、TaskState/Evidence invalidation、node Context、Scenario v2 和冻结 SQL oracle，输出到 `eval/reports/m43/`；不运行真实 LLM、embedding、数据库或 sealed reserve。
 - M44 B2 task 使用独立 bounded Decision Loop：客户端仍只提交自然语言与严格 task envelope，不能提交 Action、budget、knowledge scope/runtime 或 repair 指令。Response/Trace 会增量返回安全的 `action_attempts`、`agent_budget`、`agent_termination`、`knowledge_runtimes` 与 `agent_loop_runtime`；普通非 task API 仍保持 M44A Enterprise RAG 默认。
 - B2 零 provider rehearsal：`python -m scripts.rehearse_m44_b2`。它复核 T3 Observation 驱动的原因→商品动作、T4 business Hybrid、T5 correction/reauthorization、单次 dialect repair、negative no-extra-action 与 Agent Scenario v3，输出到 `eval/reports/m44/`；external calls 固定为 0。
+- B6/Phase 4B 零 provider continuous rehearsal：`python scripts/rehearse_m48_b6.py --probe-result .agent_work/temp/m48/probe-p2/result.json`。它从同源 P2 安全摘要生成/复核 Scenario v6、B0～B6 assurance 与 `eval/reports/m48/` 演示链；不读取 sealed reserve，也不产生 RAG/LLM 质量分数。真实 MySQL P1/P2 的执行与清理命令、时点证据见 `docs/notes/m48-notes.md`，不得把 rehearsal 冒充真实 Probe。
 - SQL repair 仅由服务端将 `sql_dialect_incompatible` + `mysql_unsupported_date_trunc` 准入一次，并使用独立 `sql_repair` outbound purpose；timeout、provider unavailable、generic DB error 和 Guard deny 均不自动 retry。真实 provider repair showcase 仍须按本 runbook 的真实运行纪律单独授权。
 
 ## Trace / LangFuse

@@ -4,17 +4,18 @@
 >
 > **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍统一从 `docs/state/CHANGELOG_INDEX.md` 进入。
 
-更新时间：2026-08-26
+更新时间：2026-08-27
 
 ## 一句话结论
 
-DataPilot 当前 schema 有 **14 张业务物理表 + 2 张 Agent task 状态基础设施表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs` 和两张基础设施表。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。M47 Probe 只在隔离库 `datapilot_m47_test` 验证了 0004；本机 `datapilot_dev` 按用户禁区仍未迁移，产品 task runtime 启动前必须正常升级。
+DataPilot 当前 schema 有 **14 张业务物理表 + 2 张 Agent task 状态基础设施表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs` 和两张基础设施表。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。M48 Probe 只在隔离库 `datapilot_m48_test` 验证了 0005、Context 原子提交与清理；本机 `datapilot_dev` 按用户禁区仍未迁移，产品 task runtime 启动前必须正常升级到 0005。
 
 ## 关键入口
 
 - 基础升级迁移：`alembic/versions/20260722_0002_database_upgrade_14_tables.py`
 - 审查后 polish 迁移：`alembic/versions/20260722_0003_phase27_database_polish.py`
 - M47 durable task state：`alembic/versions/20260826_0004_m47_durable_task_state.py`
+- M48 task Context/Compact：`alembic/versions/20260827_0005_m48_task_context_compact.py`
 - Seed 主逻辑：`scripts/seed_data.py`
 - ORM 模型：`app/models/`
 - Alembic metadata 注册：`app/db/base.py`
@@ -55,10 +56,10 @@ M47 另增加两张不进入 Text2SQL schema、RBAC 表集或业务 seed 的基�
 
 | 表 | 当前职责 | 关键边界 |
 |---|---|---|
-| `agent_task_checkpoints` | 保存当前 task lifecycle、owner/tenant/active-role binding、version/claim token/TTL 与 closed-world TaskState payload | terminal/clear/expiry 立即 scrub；不保存 rows、正文、答案、Prompt、凭据、Thought 或 program counter |
-| `agent_task_events` | 保存按 task/version 排序的 typed lifecycle/action 安全摘要，供审计与 M48 Compact 消费 | 只保存不可逆 safe ref 和 allowlisted typed summary，不作为正文/Trace 旁路 |
+| `agent_task_checkpoints` | 保存当前 task lifecycle、owner/tenant/active-role binding、version/claim token/TTL、closed-world TaskState 与 bounded Context/Compact payload | state/context/event 同 claim 原子提交；terminal/clear/expiry 立即 scrub；不保存 rows、正文、答案、Prompt、凭据、Thought 或 program counter |
+| `agent_task_events` | 保存按 task/version 排序的 typed lifecycle/action 安全摘要；M48 新写 event v2，旧 v1 仍可读但不能冒充完整 Compact source | 只保存不可逆 safe ref 和 allowlisted typed summary，不保存 raw recent turn，也不作为正文/Trace 旁路 |
 
-这两张表由 0004 migration 管理，不属于 `EXPECTED_SEED_COUNTS` 的 14 张业务表；模型回归分别核对业务表集合与基础设施表集合。真实 MySQL Probe 仅在 `datapilot_m47_test` 创建并清空 synthetic 行，没有访问业务表。
+两张表由 0004 创建，0005 只给 checkpoint additive 增加 context schema/identity/payload/source watermark 四列，表数量不变；它们不属于 `EXPECTED_SEED_COUNTS` 的 14 张业务表，模型回归分别核对业务表集合与基础设施表集合。M48 真实 MySQL Probe 只在 `datapilot_m48_test` 创建 Agent synthetic 行并最终清零；为 SQL oracle 写入的 Phase 4B deterministic business seed按授权保留，未访问 `datapilot_dev`。
 
 ## 兼容字段和新旧口径
 
