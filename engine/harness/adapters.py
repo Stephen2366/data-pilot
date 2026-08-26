@@ -644,5 +644,15 @@ class RAGToolAdapter:
                 **prepared.diagnostics.safe_projection(),
                 "knowledge_runtime_kind": self._knowledge_runtime_kind,
                 "hybrid_rag_mode": "evidence_gate_only",
+                # M46：B4 child timeline 只在 task Loop 的安全 Observation 中汇总；它不包含
+                # question、正文、slot marker、Prompt 或 raw provider response。
+                **(
+                    {"b4_subgraph": prepared.evidence_validity["subgraph"]}
+                    if "subgraph" in prepared.evidence_validity else {}
+                ),
+                **(
+                    {"acquisition_strategy_identity": prepared.evidence_validity["acquisition_strategy_identity"]}
+                    if "acquisition_strategy_identity" in prepared.evidence_validity else {}
+                ),
             },
         )

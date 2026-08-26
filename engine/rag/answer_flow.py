@@ -20,7 +20,6 @@ from typing import Any, Callable, Literal, Mapping, Protocol
 from engine.governance import (
     DOCUMENT_AUTHORIZATION_POLICY_IDENTITY,
     OUTBOUND_POLICY_IDENTITY,
-    AuthorizationDecision,
     TrustedCaller,
     authorize_document,
     document_safe_ref,
@@ -37,19 +36,18 @@ from engine.rag.evidence import (
     ValidatedCitation,
     allocate_citation_slot,
     validate_citations,
-    make_document_evidence,
+)
+from engine.rag.evidence_acquisition import (
+    DocumentEvidenceAcquirer,
+    PipelineEvidenceAcquirer,
 )
 from engine.rag.knowledge_tool import (
-    ExecutionOutcome as RetrievalExecutionOutcome,
     KnowledgeBundleView,
-    KnowledgeRequest,
     KnowledgeTool,
     RetrievalOutcome,
-    RetrievalDiagnostics,
-    RetrievalReason,
 )
 from engine.rag.release import ActivePointer, ReleaseBundle, ReleaseError, load_active_release
-from engine.rag.retrieval import RetrievalBudget, query_fingerprint
+from engine.rag.retrieval import RetrievalBudget
 
 RouteStatus = Literal["rag"]
 ExecutionStatus = Literal["completed", "external_unavailable", "failed"]
@@ -522,6 +520,7 @@ class RAGAnswerFlow:
         composer: EvidenceComposer | None = None,
         active_loader: ActiveLoader = _default_active_loader,
         retrieval_snapshot: Mapping[str, Any] | None = None,
+        evidence_acquirer: DocumentEvidenceAcquirer | None = None,
     ) -> None:
         """注入本地依赖便于故障测试；外部调用者仍只使用 ``run`` interface。
 
@@ -533,6 +532,12 @@ class RAGAnswerFlow:
         self._composer = composer or DeterministicEvidenceComposer()
         self._active_loader = active_loader
         self._retrieval_snapshot = dict(retrieval_snapshot or {})
+        # ★ Pipeline 与 B4 Subgraph 都在这条 seam 后返回同一 RetrievalOutcome；Gate、Composer
+        # 和 Citation 因而不会为了多步检索复制第二份安全逻辑。
+        self._evidence_acquirer = evidence_acquirer or PipelineEvidenceAcquirer(
+            knowledge_tool=self._knowledge_tool,
+            active_loader=self._active_loader,
+        )
 
     def run(self, request: RAGAnswerRequest) -> RAGAnswerResult:
         """★ 执行一次取证、Gate、Composer、citation 和四轴投影。
@@ -768,190 +773,12 @@ class RAGAnswerFlow:
         *,
         started_at: float,
     ) -> tuple[RetrievalOutcome, dict[str, Any]]:
-        """执行 M37 窄 B：仅业务 release 的等价 action 可跳过 retrieval。"""
+        """通过 C1 acquisition seam 获取 Evidence；AnswerFlow 不读取策略内部 state。"""
 
-        def retrieve(reason: str) -> tuple[RetrievalOutcome, dict[str, Any]]:
-            """统一执行至多一次 Knowledge Tool，并记录为什么必须重新取证。"""
-
-            outcome = self._knowledge_tool.retrieve(
-                KnowledgeRequest(
-                    question=request.question,
-                    caller=request.caller,
-                    purpose=request.purpose,
-                    run_id=request.run_id,
-                    budget=request.retrieval_budget,
-                    confirmed_conditions=request.confirmed_conditions,
-                )
-            )
-            return outcome, {
-                "runtime_kind": request.knowledge_runtime_kind,
-                "requirement_equivalent": request.requirement_equivalent,
-                "decision": "reacquired",
-                "reason": reason,
-                "old_new_relation": "not_comparable",
-            }
-
-        if not request.prior_evidence_refs:
-            return retrieve("initial_or_no_prior_evidence")
-        if request.knowledge_runtime_kind == "external_profile":
-            return retrieve("external_profile_always_retrieves")
-        if not request.requirement_equivalent:
-            return retrieve("requirement_changed")
-
-        # 业务专用 locator 只读取当前 active bundle；没有正文缓存，也不接受 external profile。
-        try:
-            _pointer, bundle = self._active_loader()
-        except ReleaseError:
-            outcome = self._empty_rehydrate_outcome(
-                request=request,
-                started_at=started_at,
-                bundle=None,
-                reason_code="active_release_unavailable",
-                execution_outcome="external_unavailable",
-            )
-            return outcome, {
-                "runtime_kind": "business_release",
-                "requirement_equivalent": True,
-                "decision": "unavailable",
-                "reason": "active_release_unavailable",
-                "old_new_relation": "unavailable",
-            }
-
-        current_entries = tuple(bundle.entries)
-        located: list[CatalogEntry] = []
-        for ref in request.prior_evidence_refs:
-            matches = [
-                entry
-                for entry in current_entries
-                if entry.authority_ref == ref.authority_identity
-                and entry.revision == ref.revision
-                and entry.content_identity == ref.content_identity
-                and entry.anchor == ref.anchor
-                and entry.status == "active"
-            ]
-            if len(matches) != 1:
-                return retrieve("document_identity_changed")
-            located.append(matches[0])
-
-        candidates: list[Evidence] = []
-        generation_auth: list[tuple[str, AuthorizationDecision]] = []
-        for entry in located:
-            pre_selection = authorize_document(
-                caller=request.caller,
-                entry=entry,
-                purpose=request.purpose,
-                phase="pre_selection",
-            )
-            if not pre_selection.allowed:
-                outcome = self._empty_rehydrate_outcome(
-                    request=request,
-                    started_at=started_at,
-                    bundle=bundle,
-                    reason_code="no_authorized_evidence",
-                    execution_outcome="completed",
-                )
-                return outcome, {
-                    "runtime_kind": "business_release",
-                    "requirement_equivalent": True,
-                    "decision": "denied",
-                    "reason": "reauthorization_denied",
-                    "old_new_relation": "undisclosed",
-                }
-            evidence = make_document_evidence(
-                run_id=request.run_id,
-                release_identity=bundle.release_identity,
-                entry=entry,
-                purpose=request.purpose,
-                authorization=pre_selection,
-                runtime_ref="rehydrate:business-active-identity-v1",
-            )
-            pre_generation = authorize_document(
-                caller=request.caller,
-                entry=entry,
-                purpose=request.purpose,
-                phase="pre_generation",
-            )
-            if not pre_generation.allowed:
-                outcome = self._empty_rehydrate_outcome(
-                    request=request,
-                    started_at=started_at,
-                    bundle=bundle,
-                    reason_code="no_authorized_evidence",
-                    execution_outcome="completed",
-                )
-                return outcome, {
-                    "runtime_kind": "business_release",
-                    "requirement_equivalent": True,
-                    "decision": "denied",
-                    "reason": "reauthorization_denied",
-                    "old_new_relation": "undisclosed",
-                }
-            candidates.append(evidence)
-            generation_auth.append((evidence.ref.evidence_id, pre_generation))
-
-        ledger = EvidenceLedger.from_candidates(run_id=request.run_id, evidence=tuple(candidates))
-        ledger = ledger.transition(
-            evidence_ids=tuple(item.ref.evidence_id for item in candidates), to_stage="selected"
-        )
-        outcome = RetrievalOutcome(
-            execution_outcome="completed",
-            reason_code="evidence_retrieved",
-            selected_evidence=tuple(candidates),
-            ledger=ledger,
-            pre_generation_authorizations=tuple(generation_auth),
-            diagnostics=RetrievalDiagnostics(
-                run_ref="run:" + sha256(request.run_id.encode("utf-8")).hexdigest()[:20],
-                query_fingerprint=query_fingerprint(request.question, request.confirmed_conditions),
-                release_identity=bundle.release_identity,
-                corpus_identity=bundle.corpus_identity,
-                adapter_identity="knowledge-business-rehydrate-v1",
-                recipe_identity="business-active-identity-locator-v1",
-                adapter_calls=0,
-                authorized_entry_count=len(candidates),
-                candidate_count=len(candidates),
-                selected_count=len(candidates),
-                elapsed_ms=round((perf_counter() - started_at) * 1000, 3),
-            ),
-        )
-        return outcome, {
-            "runtime_kind": "business_release",
-            "requirement_equivalent": True,
-            "decision": "rehydrated",
-            "reason": "current_identity_and_acl_confirmed",
-            "old_new_relation": "unchanged_current",
-        }
-
-    @staticmethod
-    def _empty_rehydrate_outcome(
-        *,
-        request: RAGAnswerRequest,
-        started_at: float,
-        bundle: KnowledgeBundleView | None,
-        reason_code: RetrievalReason,
-        execution_outcome: RetrievalExecutionOutcome,
-    ) -> RetrievalOutcome:
-        """构造零泄露重水化失败；ACL deny 不允许转去 retrieval 猜测文档存在性。"""
-
-        return RetrievalOutcome(
-            execution_outcome=execution_outcome,
-            reason_code=reason_code,
-            selected_evidence=(),
-            ledger=EvidenceLedger.from_candidates(run_id=request.run_id, evidence=()),
-            pre_generation_authorizations=(),
-            diagnostics=RetrievalDiagnostics(
-                run_ref="run:" + sha256(request.run_id.encode("utf-8")).hexdigest()[:20],
-                query_fingerprint=query_fingerprint(request.question, request.confirmed_conditions),
-                release_identity=bundle.release_identity if bundle else None,
-                corpus_identity=bundle.corpus_identity if bundle else None,
-                adapter_identity="knowledge-business-rehydrate-v1",
-                recipe_identity="business-active-identity-locator-v1",
-                adapter_calls=0,
-                authorized_entry_count=0,
-                candidate_count=0,
-                selected_count=0,
-                elapsed_ms=round((perf_counter() - started_at) * 1000, 3),
-            ),
-        )
+        acquired = self._evidence_acquirer.acquire(request=request, started_at=started_at)
+        validity = dict(acquired.evidence_validity)
+        validity["acquisition_strategy_identity"] = acquired.strategy_identity
+        return acquired.outcome, validity
 
     def _gate(
         self,

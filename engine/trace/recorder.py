@@ -110,6 +110,7 @@ class TraceRecord(BaseModel):
     agent_termination: dict[str, Any] | None = None
     knowledge_runtimes: list[dict[str, str]] = Field(default_factory=list)
     agent_loop_runtime: dict[str, Any] | None = None
+    agent_scenario_source_identity: str | None = None
 
 
 class TraceBackend(Protocol):

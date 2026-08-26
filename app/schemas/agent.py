@@ -243,3 +243,5 @@ class AgentResponse(BaseModel):
     agent_termination: dict[str, Any] | None = None
     knowledge_runtimes: list[dict[str, str]] = Field(default_factory=list)
     agent_loop_runtime: dict[str, Any] | None = None
+    # M46：API/Trace/Agent Scenario v4 对同一安全父子账投影的不可逆对账值。
+    agent_scenario_source_identity: str | None = None

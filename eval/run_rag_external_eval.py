@@ -15,6 +15,9 @@ from engine.rag.enterprise_product_runtime import (
     load_enterprise_product_runtime,
 )
 from engine.rag.enterprise_semantic import KNOWLEDGE_GENERATION_POLICY
+from engine.phase4b.rag_enterprise_diagnostics import EnterpriseSiblingExpansionAdapter
+from engine.phase4b.rag_recovery_requirement_proposal import make_b4_qwen_requirement_proposal_client
+from engine.phase4b.rag_strategy import configure_external_acquisition
 from eval.rag_e2e_contracts import RAGResolvedRuntime
 from eval.rag_e2e_runner import run_rag_eval
 from eval.rag_e2e_runtime import ComposerRuntimeMetadata, FixedRAGEvalRouter, RAGProductExecutor
@@ -31,11 +34,12 @@ def build_external_resolved_runtime(
     composer: Any,
     model: str,
     timeout_seconds: float,
+    runtime_family: str = "phase4-rag-external-product-harness-fixed-route-v1",
 ) -> RAGResolvedRuntime:
     """把共用 resolver identity 投影为 artifact 合同，避免 CLI 另拼一套 backend 事实。"""
 
     return RAGResolvedRuntime(
-        runtime_family="phase4-rag-external-product-harness-fixed-route-v1",
+        runtime_family=runtime_family,
         answer_flow_identity=ANSWER_FLOW_RUNTIME_IDENTITY,
         composer_identity=composer.identity,
         model=model,
@@ -96,6 +100,11 @@ def main() -> None:
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--triage", type=Path)
     parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument(
+        "--phase4b-strategy",
+        choices=("pipeline", "subgraph"),
+        help="M46 paired arm；省略时保持 M41 legacy runtime identity。客户端请求仍无开关。",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--checkpoint-dir", type=Path, default=PROJECT_ROOT / ".agent_work/temp/m41-rag-external-checkpoints")
     parser.add_argument("--artifact-dir", type=Path, default=PROJECT_ROOT / "eval/reports/m41-rag-external-artifacts")
@@ -152,7 +161,53 @@ def main() -> None:
             composer=composer,
             model=settings.qwen_model or "qwen3.7-plus",
             timeout_seconds=args.timeout,
+            runtime_family=(
+                f"phase4b-b4-external-product-harness:{args.phase4b_strategy}:v1"
+                if args.phase4b_strategy
+                else "phase4-rag-external-product-harness-fixed-route-v1"
+            ),
         )
+
+        def answer_flow_factory() -> RAGAnswerFlow:
+            """M41 legacy 与 M46 arm 共用产品组装；strategy 只来自本次可信 RunSpec。"""
+
+            knowledge_tool = external.knowledge_tool()
+            retrieval_snapshot = identity.safe_projection()
+            if args.phase4b_strategy is None:
+                return RAGAnswerFlow(
+                    knowledge_tool=knowledge_tool,
+                    composer=composer,
+                    active_loader=external.active_loader,
+                    retrieval_snapshot=retrieval_snapshot,
+                )
+            proposal_transport = None
+            expansion_adapter = None
+            if args.phase4b_strategy == "subgraph":
+                proposal_transport = make_b4_qwen_requirement_proposal_client(
+                    api_key=settings.dashscope_api_key,
+                    base_url=settings.dashscope_base_url,
+                    model=settings.qwen_model or "qwen3.7-plus",
+                    timeout=args.timeout,
+                )
+                expansion_adapter = EnterpriseSiblingExpansionAdapter(external)
+            configured = configure_external_acquisition(
+                strategy=args.phase4b_strategy,
+                knowledge_tool=knowledge_tool,
+                active_loader=external.active_loader,
+                proposal_transport=proposal_transport,
+                expansion_adapter=expansion_adapter,
+            )
+            return RAGAnswerFlow(
+                knowledge_tool=knowledge_tool,
+                composer=composer,
+                active_loader=external.active_loader,
+                evidence_acquirer=configured.acquirer,
+                retrieval_snapshot={
+                    **retrieval_snapshot,
+                    "acquisition_strategy": configured.safe_projection(),
+                },
+            )
+
         executor = RAGProductExecutor(
             composer=composer,
             runtime_metadata=ComposerRuntimeMetadata(
@@ -161,12 +216,7 @@ def main() -> None:
                 generation_outbound_policy_identity=KNOWLEDGE_GENERATION_POLICY.identity,
             ),
             trace_root=args.checkpoint_dir / args.run_id / "traces",
-            answer_flow_factory=lambda: RAGAnswerFlow(
-                knowledge_tool=external.knowledge_tool(),
-                composer=composer,
-                active_loader=external.active_loader,
-                retrieval_snapshot=identity.safe_projection(),
-            ),
+            answer_flow_factory=answer_flow_factory,
             resolved_runtime_override=resolved,
             router=FixedRAGEvalRouter(),
             knowledge_runtime_kind="external_profile",

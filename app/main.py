@@ -18,6 +18,12 @@ from engine.harness.caller import build_default_caller_resolver
 from engine.harness.thread import ThreadCheckpointManager
 from engine.harness.adapters import RAGToolAdapter
 from engine.phase4b.task_boundary import TaskBoundary
+from engine.phase4b.rag_enterprise_diagnostics import EnterpriseSiblingExpansionAdapter
+from engine.phase4b.rag_recovery_requirement_proposal import make_b4_qwen_requirement_proposal_client
+from engine.phase4b.rag_strategy import (
+    configure_business_acquisition,
+    configure_external_acquisition,
+)
 from engine.rag.answer_flow import RAGAnswerFlow
 from engine.rag.enterprise_generation import make_qwen_evidence_composer
 from engine.rag.enterprise_product_runtime import (
@@ -27,6 +33,7 @@ from engine.rag.enterprise_product_runtime import (
 )
 from engine.rag.retrieval import RetrievalAdapterError
 from engine.rag.release import ReleaseError, load_active_release
+from engine.rag.knowledge_tool import KnowledgeTool
 
 
 logger = logging.getLogger(__name__)
@@ -78,20 +85,42 @@ def _lifespan(settings: Settings):
                 )
 
             def product_rag_tool_factory() -> RAGToolAdapter:
-                """每请求新建轻量 Composer；共享的只有只读 profile/SQLite/Milvus runtime。"""
+                """每请求新建轻量控制对象；只共享只读 profile/SQLite/Milvus runtime。"""
 
                 assert product is not None
+                knowledge_tool = product.runtime.knowledge_tool()
                 composer = make_qwen_evidence_composer(
                     api_key=settings.dashscope_api_key,
                     base_url=settings.dashscope_base_url,
                     model=settings.qwen_model or "qwen3.7-plus",
                     timeout=settings.llm_timeout_seconds,
                 )
+                proposal_transport = None
+                expansion_adapter = None
+                if settings.phase4b_rag_strategy == "subgraph":
+                    proposal_transport = make_b4_qwen_requirement_proposal_client(
+                        api_key=settings.dashscope_api_key,
+                        base_url=settings.dashscope_base_url,
+                        model=settings.qwen_model or "qwen3.7-plus",
+                        timeout=settings.llm_timeout_seconds,
+                    )
+                    expansion_adapter = EnterpriseSiblingExpansionAdapter(product.runtime)
+                configured = configure_external_acquisition(
+                    strategy=settings.phase4b_rag_strategy,
+                    knowledge_tool=knowledge_tool,
+                    active_loader=product.runtime.active_loader,
+                    proposal_transport=proposal_transport,
+                    expansion_adapter=expansion_adapter,
+                )
                 flow = RAGAnswerFlow(
-                    knowledge_tool=product.runtime.knowledge_tool(),
+                    knowledge_tool=knowledge_tool,
                     composer=composer,
                     active_loader=product.runtime.active_loader,
-                    retrieval_snapshot=product.identity.safe_projection(),
+                    evidence_acquirer=configured.acquirer,
+                    retrieval_snapshot={
+                        **product.identity.safe_projection(),
+                        "acquisition_strategy": configured.safe_projection(),
+                    },
                 )
                 return RAGToolAdapter(
                     answer_flow=flow,
@@ -100,11 +129,18 @@ def _lifespan(settings: Settings):
 
             installed_factory = product_rag_tool_factory
             application.state.rag_tool_factory = installed_factory
+            strategy_projection = {
+                "strategy": settings.phase4b_rag_strategy,
+                "strategy_identity": f"phase4b-rag-acquisition-strategy:{settings.phase4b_rag_strategy}:v1",
+            }
             application.state.rag_runtime_status = {
                 "status": "ready",
                 "retrieval_mode": product.identity.retrieval_mode,
                 "reason_code": None,
-                "runtime_identity": product.identity.safe_projection(),
+                "runtime_identity": {
+                    **product.identity.safe_projection(),
+                    "acquisition_strategy": strategy_projection,
+                },
             }
             logger.info(
                 "Enterprise RAG ready: mode=%s adapter=%s collection=%s semantic=%s",
@@ -194,10 +230,32 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     application.state.rag_tool_factory = None
     # M44：task business requirement 的可信 registry seam。它与普通 API 的 Enterprise
     # 默认完全分离，不能由请求体选择；测试可显式替换 factory 但不能改 scope。
-    application.state.business_rag_tool_factory = lambda: RAGToolAdapter()
+    def business_rag_tool_factory() -> RAGToolAdapter:
+        """business 与 external 共用同一 server strategy，不允许请求按 corpus 单独选臂。"""
+
+        knowledge_tool = KnowledgeTool()
+        configured = configure_business_acquisition(
+            strategy=settings.phase4b_rag_strategy,
+            knowledge_tool=knowledge_tool,
+            active_loader=load_active_release,
+        )
+        return RAGToolAdapter(
+            answer_flow=RAGAnswerFlow(
+                knowledge_tool=knowledge_tool,
+                active_loader=load_active_release,
+                evidence_acquirer=configured.acquirer,
+                retrieval_snapshot={"acquisition_strategy": configured.safe_projection()},
+            ),
+            knowledge_runtime_kind="business_release",
+        )
+
+    application.state.business_rag_tool_factory = business_rag_tool_factory
     try:
         _pointer, business_bundle = load_active_release()
-        application.state.business_rag_runtime_identity = f"business-release:{business_bundle.release_identity}"
+        application.state.business_rag_runtime_identity = (
+            f"business-release:{business_bundle.release_identity}:"
+            f"strategy:{settings.phase4b_rag_strategy}"
+        )
     except ReleaseError:
         application.state.business_rag_runtime_identity = "business-release:unavailable"
     application.state.rag_runtime_status = _unavailable_rag_status(
@@ -206,6 +264,9 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     )
     # M43 deterministic rehearsal seam；请求体不能选择或替换 Tool。
     application.state.sql_tool_factory = None
+    # M46：B4 子图只允许由 server assembly 显式启用。请求体没有开关，默认仍走 B2
+    # Pipeline，避免把实验/Probe 策略变成客户端可选能力。
+    application.state.b4_task_enabled = settings.phase4b_rag_strategy == "subgraph"
     # 仅供显式 Eval 临时注入 Router seam；None 时普通 API 仍使用 Harness 的 deterministic 默认。
     application.state.harness_router = None
     register_request_logging_middleware(application)
@@ -237,6 +298,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
             "llm_provider": settings.llm_provider,
             "llm_model": settings.llm_model,
             "enterprise_rag_retrieval_mode": settings.enterprise_rag_retrieval_mode,
+            "phase4b_rag_strategy": settings.phase4b_rag_strategy,
             "enterprise_rag_status": str(application.state.rag_runtime_status.get("status")),
         }
 

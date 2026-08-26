@@ -1,0 +1,55 @@
+{
+  "schema_version": "phase4b-m46-d0-live-probe-v1",
+  "probe_id": "M46-P0",
+  "classification": "exploratory",
+  "baseline_eligible": false,
+  "probe_scenario": "qst_0420",
+  "executed_at": "2026-08-25T16:35:39.281713+00:00",
+  "initial": {
+    "execution_outcome": "completed",
+    "reason_code": "evidence_retrieved",
+    "selected_count": 3,
+    "diagnostics": {
+      "run_ref": "run:4db6979221c17274c791",
+      "query_fingerprint": "query:87869538bf4e2c3721cb39eb1ab85f47a0f96187ccba6c05c9058c75f57c6478",
+      "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+      "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+      "adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+      "recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+      "adapter_calls": 1,
+      "elapsed_ms": 1164.761
+    }
+  },
+  "formation": {
+    "formation_identity": "phase4b-b4-external-requirement-formation-v1",
+    "decision": "structured_supplier_failed",
+    "reason_code": "formation_no_grounded_evidence_anchor",
+    "requirements": [],
+    "usage": {
+      "model": "none",
+      "calls": 0,
+      "total_tokens": 0,
+      "token_usage_observed": false
+    },
+    "prompt_fingerprint": "not_observed",
+    "response_fingerprint": "not_observed"
+  },
+  "observation": null,
+  "recovery_action_executions": 0,
+  "runtime_identity": {
+    "retrieval_mode": "semantic",
+    "profile_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+    "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+    "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+    "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+    "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+    "semantic_identity": "9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20",
+    "semantic_manifest_identity": "22c573755257c47c6264218ba1bbe2e1182ccc7ad91a15bc889e3e8da56be97b",
+    "embedding_provider": "dashscope",
+    "embedding_model": "qwen3.7-text-embedding",
+    "embedding_dimensions": 1024,
+    "milvus_collection": "datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89",
+    "unit_set_identity": "17d5af0b197ab3e4a069703d2095813f4727f1315a1e12bc06e631a9b793905f"
+  },
+  "reserve_access_state": "sealed"
+}

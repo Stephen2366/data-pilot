@@ -6,6 +6,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -74,6 +75,11 @@ class Settings(BaseSettings):
     enterprise_rag_profile_identity: str = Field(default="", alias="ENTERPRISE_RAG_PROFILE_IDENTITY")
     enterprise_rag_semantic_root: Path | None = Field(default=None, alias="ENTERPRISE_RAG_SEMANTIC_ROOT")
     enterprise_rag_semantic_identity: str = Field(default="", alias="ENTERPRISE_RAG_SEMANTIC_IDENTITY")
+    # M46-E：只允许服务端启动配置选择 acquisition strategy。默认 Pipeline 是已验证基线；
+    # Subgraph 需要显式开启，HTTP 请求体没有对应字段。
+    phase4b_rag_strategy: Literal["pipeline", "subgraph"] = Field(
+        default="pipeline", alias="PHASE4B_RAG_STRATEGY"
+    )
 
     # 可观测性配置 =============================================================================
     # Phase 3B 只把 LangFuse 作为“旁路观测系统”：默认关闭，不影响 JSONL 主链路。

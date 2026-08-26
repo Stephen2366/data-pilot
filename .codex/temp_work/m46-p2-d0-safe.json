@@ -1,0 +1,136 @@
+{
+  "schema_version": "phase4b-m46-live-probe-v1",
+  "probe_id": "M46-P2",
+  "probe_scenario": "qst_0420",
+  "executed_at": "2026-08-25T16:59:55.377899+00:00",
+  "available": true,
+  "result_four_axes": {
+    "route_status": "rag",
+    "execution_status": "completed",
+    "safety_status": "passed",
+    "answer_status": "complete",
+    "reason_code": "answer_completed"
+  },
+  "answer_fingerprint": "b9fdaaf56fab4c10807fa2c8b355c3678f1d6c1bcce119b0e9eecfaa6438f20c",
+  "claim_count": 2,
+  "citation_count": 2,
+  "docs_used_count": 2,
+  "answer_flow_diagnostics": {
+    "runtime_identity": "rag-answer-flow-local-v1",
+    "composer_identity": "rag-qwen-evidence-support-nonthinking-unbounded-v4",
+    "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+    "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+    "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+    "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+    "authorization_policy_identity": "document-authorization-v1",
+    "outbound_policy_identity": "phase4-outbound-v1",
+    "knowledge_tool_calls": 1,
+    "gate_calls": 1,
+    "composer_calls": 1,
+    "validator_calls": 1,
+    "context_count": 3,
+    "context_characters": 4441,
+    "elapsed_ms": 23704.862,
+    "retrieval_snapshot": {
+      "retrieval_mode": "semantic",
+      "profile_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+      "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+      "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+      "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+      "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+      "semantic_identity": "9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20",
+      "semantic_manifest_identity": "22c573755257c47c6264218ba1bbe2e1182ccc7ad91a15bc889e3e8da56be97b",
+      "embedding_provider": "dashscope",
+      "embedding_model": "qwen3.7-text-embedding",
+      "embedding_dimensions": 1024,
+      "milvus_collection": "datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89",
+      "unit_set_identity": "17d5af0b197ab3e4a069703d2095813f4727f1315a1e12bc06e631a9b793905f"
+    }
+  },
+  "child_termination": "contract_failure",
+  "child_detail_code": "subgraph_runtime_failure",
+  "child_admission_decision": "structured_question_obligations",
+  "child_admission_reason_code": "eligible",
+  "child_formed_requirements": [
+    {
+      "slot_signature": "b7e7cfebc9b2f2664bcdb6ca67a962e8a1b263aed882adc913377c4da9b82661",
+      "focused_query_fingerprint": "17e4b7e7ffaacdc94ce3a2cde9d0d80ed4da749bd87600ea90158f45da46c2b8",
+      "support_group_count": 4,
+      "supplier_identity": "phase4b-b4-question-obligation-supplier-v1",
+      "formation_reason_category": "requested_fact",
+      "allowed_recovery_actions": [
+        "query_rewrite_candidate",
+        "context_expansion_candidate"
+      ],
+      "coverage_semantics": "single_authorized_document_all_groups_v1"
+    },
+    {
+      "slot_signature": "6c1c152a760eb3e46fc66db124bdf6956982e79d238bbdf849c9c319cbf7eade",
+      "focused_query_fingerprint": "9b02be647ff335616f5d832a0454ef321a40c042af16275f296d123f391ac42b",
+      "support_group_count": 4,
+      "supplier_identity": "phase4b-b4-question-obligation-supplier-v1",
+      "formation_reason_category": "requested_fact",
+      "allowed_recovery_actions": [
+        "query_rewrite_candidate",
+        "context_expansion_candidate"
+      ],
+      "coverage_semantics": "single_authorized_document_all_groups_v1"
+    }
+  ],
+  "child_attempts": [],
+  "child_consumption": {
+    "initial_retrieval_batches": 1,
+    "rewrite_retrieval_batches": 0,
+    "expansion_candidates_scanned": 0,
+    "expansion_evidence_added": 0,
+    "candidates_examined": 5,
+    "unique_merged_evidence": 3,
+    "selected": 3,
+    "generation_visible": 0,
+    "proposal_calls": 1,
+    "model_calls": 1,
+    "total_tokens": 1594,
+    "token_usage_observed": true,
+    "latency_ms": 926.269
+  },
+  "provider_usage": {
+    "embedding_attempts": 1,
+    "formation_calls": 1,
+    "formation_tokens": 1594,
+    "composer_calls": 1,
+    "composer_tokens": 1837,
+    "total_attempts": 3,
+    "total_observed_tokens": 3431,
+    "token_usage_observed": true,
+    "composer_token_usage_observed": true,
+    "composer_successful_responses": 1
+  },
+  "composer_attempt": {
+    "status": "succeeded",
+    "error_subtype": null,
+    "elapsed_ms": 6073.924,
+    "usage_delta": {
+      "request_count": 1,
+      "successful_response_count": 1,
+      "prompt_tokens": 1545,
+      "completion_tokens": 292,
+      "total_tokens": 1837
+    }
+  },
+  "runtime_identity": {
+    "retrieval_mode": "semantic",
+    "profile_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+    "release_identity": "e8783fe0b3eb738132f11b701ed2fadedfd7da2c0958d88c2755863a17875fa2",
+    "corpus_identity": "380d0511e737a774cc3c476dcfec2e85ec52003e21270bd869d012dcdc8ec29f",
+    "retrieval_adapter_identity": "knowledge-enterprise-milvus-semantic-v1",
+    "retrieval_recipe_identity": "qwen-dense-cosine-dedup-physical-v1",
+    "semantic_identity": "9aec12c8d05db192cf041b89d04f880267a7c1200f5130caf4915c436b9a0e20",
+    "semantic_manifest_identity": "22c573755257c47c6264218ba1bbe2e1182ccc7ad91a15bc889e3e8da56be97b",
+    "embedding_provider": "dashscope",
+    "embedding_model": "qwen3.7-text-embedding",
+    "embedding_dimensions": 1024,
+    "milvus_collection": "datapilot_knowledge_enterprise_9aec12c8d05db192cf041b89",
+    "unit_set_identity": "17d5af0b197ab3e4a069703d2095813f4727f1315a1e12bc06e631a9b793905f"
+  },
+  "reserve_access_state": "sealed"
+}

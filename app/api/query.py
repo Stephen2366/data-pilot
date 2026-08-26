@@ -28,12 +28,15 @@ from engine.phase4b.task_turn import TaskTurnRequest, TaskTurnResult, clear_task
 from engine.phase4b.task_runtime import B1_CONTRACT_IDENTITY
 from engine.phase4b.agent_loop import AgentLoopRuntime
 from engine.phase4b.b2_contracts import load_b2_contract_bundle
+from engine.phase4b.b4_contracts import load_b4_contract_bundle
 from engine.phase4b.identity import canonical_hash
 from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver, KnowledgeRuntimeSpec
+from engine.phase4b.scenario_projection import agent_scenario_source_identity
 
 
 router = APIRouter(prefix="/api", tags=["query"])
 B2_BUNDLE = load_b2_contract_bundle()
+B4_BUNDLE = load_b4_contract_bundle()
 _SAFE_SQL_EXECUTION_MESSAGE = "SQL 执行失败。"
 
 
@@ -192,11 +195,16 @@ def _record_trace(
     )
     runtime_identity = deep_runtime_identity
     if task_turn is not None:
+        # B4 是父 Agent Loop 的一次 server-owned 执行策略；Task envelope 仍与 B2
+        # 相同，但 Trace 必须明确到底冻结了哪份上游合同，不能默默写成 B2。
+        b4_enabled = bool(task_turn.agent_loop and task_turn.agent_loop.runtime_identity.get("b4_enabled"))
+        task_contract = B4_BUNDLE.content_identity if b4_enabled else B2_BUNDLE.content_identity
+        task_predecessor = B2_BUNDLE.content_identity if b4_enabled else B1_CONTRACT_IDENTITY
         runtime_identity = {
             "format": "phase4b-agent-task-runtime-v1",
             "status": "complete",
-            "contract_identity": B2_BUNDLE.content_identity,
-            "predecessor_contract_identity": B1_CONTRACT_IDENTITY,
+            "contract_identity": task_contract,
+            "predecessor_contract_identity": task_predecessor,
             "task_state_version": task_turn.task.state.state_version if task_turn.task else None,
             "turn_understanding_identity": task_turn.delta.source_identity if task_turn.delta else None,
             "task_boundary": task_turn.task_runtime,
@@ -264,6 +272,7 @@ def _record_trace(
         agent_termination=task_turn.agent_loop.termination.safe_projection() if task_turn and task_turn.agent_loop else None,
         knowledge_runtimes=[dict(item) for item in task_turn.agent_loop.knowledge_runtimes] if task_turn and task_turn.agent_loop else [],
         agent_loop_runtime=dict(task_turn.agent_loop.runtime_identity) if task_turn and task_turn.agent_loop else None,
+        agent_scenario_source_identity=response.agent_scenario_source_identity,
     )
     path = _trace_path(request)
     if path is None:
@@ -339,6 +348,8 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             sql_tool=sql_tool,
             knowledge_resolver=KnowledgeRuntimeResolver(tuple(runtime_specs)),
             hybrid_synthesizer=runtime.hybrid_synthesizer,
+            # 只读取 server state；客户端请求不能选择 B4 或绕过它的固定合同/预算。
+            b4_enabled=bool(getattr(request.app.state, "b4_task_enabled", False)),
         )
         task_turn = run_task_turn(
             request=TaskTurnRequest(
@@ -374,6 +385,15 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
             "agent_termination": task_turn.agent_loop.termination.safe_projection() if task_turn.agent_loop else None,
             "knowledge_runtimes": [dict(item) for item in task_turn.agent_loop.knowledge_runtimes] if task_turn.agent_loop else [],
             "agent_loop_runtime": dict(task_turn.agent_loop.runtime_identity) if task_turn.agent_loop else None,
+            "agent_scenario_source_identity": (
+                agent_scenario_source_identity(
+                    actions=[item.safe_projection() for item in task_turn.agent_loop.attempts],
+                    budget=task_turn.agent_loop.budget.safe_projection(),
+                    termination=task_turn.agent_loop.termination.safe_projection(),
+                    runtime_identity=dict(task_turn.agent_loop.runtime_identity),
+                )
+                if task_turn.agent_loop else None
+            ),
         })
         _record_trace(request=request, request_body=request_body, response=response, turn=compatible_turn, task_turn=task_turn)
         return response

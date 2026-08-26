@@ -31,6 +31,7 @@ from engine.harness.hybrid import (
     validate_hybrid_claims,
 )
 from engine.phase4b.b2_contracts import load_b2_contract_bundle
+from engine.phase4b.b4_contracts import load_b4_contract_bundle
 from engine.phase4b.comparison_completion import complete_metric_comparison
 from engine.phase4b.identity import canonical_hash
 from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolutionError, KnowledgeRuntimeResolver
@@ -50,6 +51,7 @@ from engine.rag.answer_flow import AnswerEvidenceRequirement
 from engine.rag.evidence import DocumentEvidencePayload
 
 B2_BUNDLE = load_b2_contract_bundle()
+B4_BUNDLE = load_b4_contract_bundle()
 AGENT_LOOP_RUNTIME_IDENTITY = str(B2_BUNDLE.payload["runtime_identity"])
 
 
@@ -60,6 +62,8 @@ class AgentLoopRuntime:
     sql_tool: Text2SQLTool
     knowledge_resolver: KnowledgeRuntimeResolver
     hybrid_synthesizer: HybridSynthesizer | None = None
+    # B4 只由服务端组装层开启；请求体没有也不能新增这个开关。B2 默认仍使用旧 profile。
+    b4_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,17 +105,24 @@ class _LoopState(TypedDict, total=False):
     termination: TerminationFact
 
 
-def _budget_profile() -> BudgetProfile:
-    """从已验证 B2 bundle 构造唯一 production budget profile。"""
+def _budget_profile(*, b4_enabled: bool = False) -> BudgetProfile:
+    """按 runtime family 选择只读 B2 或 additive B4 parent profile。"""
 
-    values = dict(B2_BUNDLE.payload["budget_profile"])
+    values = dict(B4_BUNDLE.payload["parent_budget"] if b4_enabled else B2_BUNDLE.payload["budget_profile"])
     return BudgetProfile(**values)
 
 
-def _declared_cost(action_id: str) -> ResourceConsumption:
+def _declared_cost(action_id: str, *, b4_enabled: bool = False) -> ResourceConsumption:
     """执行前保守声明本次 Action 可能占用的 hard dimensions。"""
 
     if action_id == "collect_document_evidence":
+        if b4_enabled:
+            # ★ 这是一次父 Action 的最坏 child grant，不是把 recovery 伪装成第二个顶层
+            # Knowledge action。实际值仍由子图结束后的 timeline 汇总并再次守恒检查。
+            return ResourceConsumption(
+                actions=1, deep_tools=1, knowledge_actions=1, retrieval_batches=3,
+                candidates=15, selected=3, generation_visible=3, model_calls=1,
+            )
         return ResourceConsumption(
             actions=1, deep_tools=1, knowledge_actions=1, retrieval_batches=1,
             candidates=5, selected=3, generation_visible=3,
@@ -202,6 +213,7 @@ def _safe_observation(observation: ToolObservation, *, runtime_identity: str | N
             "outbound_policy_identity", "knowledge_tool_calls", "composer_calls", "candidate_count",
             "selected_count", "context_count", "quality_increment_positive", "issue_code",
             "hybrid_rag_mode", "provider_usage",
+            "b4_subgraph", "acquisition_strategy_identity",
         }
     }
     if runtime_identity is not None:
@@ -249,12 +261,28 @@ def _consumption(observation: ToolObservation, *, action_id: str) -> ResourceCon
             total_tokens += int(provider_usage.get("total_tokens", 0) or 0)
         else:
             token_observed = False
-    candidates, selected, generation_visible = (0, 0, 0)
+    candidates, selected, generation_visible, batches = (0, 0, 0, 0)
     if observation.route == "rag":
+        batches = 1
         candidates, selected, generation_visible = _stage_counts(observation)
         candidates = int(observation.diagnostics.get("candidate_count", candidates) or candidates)
         selected = int(observation.diagnostics.get("selected_count", selected) or selected)
         generation_visible = int(observation.diagnostics.get("context_count", generation_visible) or generation_visible)
+        # B4 的实际 child ledger 来自同一 acquisition facts。这里仅把可与父账守恒的数字
+        # 汇总进旧 ResourceConsumption；完整 child timeline 仍留在安全 Observation，供 v4
+        # artifact 投影，不能靠反向解析 answer 或 Trace 猜测。
+        b4 = observation.diagnostics.get("b4_subgraph")
+        if isinstance(b4, dict) and isinstance(b4.get("consumption"), dict):
+            child = b4["consumption"]
+            batches = int(child.get("initial_retrieval_batches", 0) or 0) + int(
+                child.get("rewrite_retrieval_batches", 0) or 0
+            )
+            candidates = int(child.get("candidates_examined", candidates) or candidates)
+            selected = int(child.get("selected", selected) or selected)
+            generation_visible = int(child.get("generation_visible", generation_visible) or generation_visible)
+            model_calls = int(child.get("model_calls", model_calls) or model_calls)
+            total_tokens = int(child.get("total_tokens", total_tokens) or total_tokens)
+            token_observed = bool(child.get("token_usage_observed", token_observed))
     latency = sum(float(call.latency_ms) for call in observation.tool_calls)
     timeout = int("timeout" in str(observation.error_type or observation.reason_code).lower())
     return ResourceConsumption(
@@ -262,7 +290,7 @@ def _consumption(observation: ToolObservation, *, action_id: str) -> ResourceCon
         sql_actions=1 if observation.route == "sql" else 0,
         knowledge_actions=1 if observation.route == "rag" else 0,
         repairs=1 if action_id == "repair_sql_evidence" else 0,
-        retrieval_batches=1 if observation.route == "rag" else 0,
+        retrieval_batches=batches if observation.route == "rag" else 0,
         candidates=candidates, selected=selected, generation_visible=generation_visible,
         model_calls=model_calls, total_tokens=total_tokens,
         token_usage_observed=token_observed, timeouts=timeout, latency_ms=round(latency, 3),
@@ -324,7 +352,7 @@ def _step_node(state: _LoopState, runtime: Runtime[AgentLoopRuntime]) -> dict[st
     action_id, requirement = choice
     attempts = state.get("attempts", ())
     ledger = state["budget"]
-    declared = _declared_cost(action_id)
+    declared = _declared_cost(action_id, b4_enabled=runtime.context.b4_enabled)
     if not ledger.allows(declared, repair_count_for_requirement=_repair_count(requirement, attempts)):
         return {"termination": _termination(
             "budget_exhausted", "next_action_precheck", requirements, covered, state.get("observations", ())
@@ -661,7 +689,7 @@ def run_agent_loop(
     decision_payload = {
         "requirement_identities": [item.identity for item in state.evidence_requirements],
         "active_evidence_ids": [item.ref.get("evidence_id") for item in state.evidence if item.validity == "active"],
-        "budget_profile_identity": _budget_profile().identity,
+        "budget_profile_identity": _budget_profile(b4_enabled=runtime.b4_enabled).identity,
         "controller_identity": "phase4b-deterministic-controller-v1",
     }
     decision_context = AgentNodeContext(
@@ -677,7 +705,7 @@ def run_agent_loop(
             item.requirement_identity for item in state.evidence if item.validity == "active"
         )),
         "duplicate_keys": (),
-        "budget": BudgetLedger(_budget_profile()), "contexts": (decision_context,),
+        "budget": BudgetLedger(_budget_profile(b4_enabled=runtime.b4_enabled)), "contexts": (decision_context,),
         "knowledge_runtimes": (),
     }
     try:
@@ -740,11 +768,13 @@ def run_agent_loop(
         last_budget=budget.safe_projection(), last_termination=termination.safe_projection(),
     )
     runtime_identity = {
-        "format": AGENT_LOOP_RUNTIME_IDENTITY, "contract_identity": B2_BUNDLE.content_identity,
+        "format": str(B4_BUNDLE.payload["runtime_identity"]) if runtime.b4_enabled else AGENT_LOOP_RUNTIME_IDENTITY,
+        "contract_identity": B4_BUNDLE.content_identity if runtime.b4_enabled else B2_BUNDLE.content_identity,
         "task_state_version": committed.state_version,
         "controller_identity": "phase4b-deterministic-controller-v1",
         "budget_profile_identity": budget.profile.identity,
         "knowledge_resolver_identity": runtime.knowledge_resolver.identity,
+        "b4_enabled": runtime.b4_enabled,
     }
     return AgentLoopResult(
         result, committed, attempts, budget, contexts, termination,

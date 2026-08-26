@@ -1,0 +1,122 @@
+{
+  "contract_version": "phase4b-b4-contracts-v1",
+  "predecessor_contract_identity": "a808b321ba8cae63ef0adaed3815d4becdfd650c37e2b30e9f1402ed8ecd485b",
+  "b3_campaign_identity": "15cda06ec378b8a200e5aa6edd1b38e3af23cc256269fc07629873def36be708",
+  "runtime_identity": "phase4b-bounded-rag-subgraph-v1",
+  "strategies": [
+    "pipeline",
+    "subgraph"
+  ],
+  "parent_budget": {
+    "identity": "phase4b-b4-parent-knowledge-action-v1",
+    "max_actions": 3,
+    "max_deep_tools": 3,
+    "max_sql_actions": 3,
+    "max_knowledge_actions": 1,
+    "max_repairs_per_requirement": 1,
+    "max_retrieval_batches": 3,
+    "max_candidates": 15,
+    "max_selected": 3,
+    "max_generation_visible": 3,
+    "max_model_calls": 6,
+    "max_total_tokens": 24000
+  },
+  "child_budget": {
+    "identity": "phase4b-b4-rag-child-budget-v1",
+    "max_recovery_actions": 2,
+    "max_initial_retrieval_batches": 1,
+    "max_rewrite_retrieval_batches": 2,
+    "max_total_retrieval_batches": 3,
+    "max_candidates_per_batch": 5,
+    "max_total_candidates": 15,
+    "max_unique_merged_evidence": 10,
+    "max_selected": 3,
+    "max_generation_visible": 3,
+    "max_expansion_seeds": 2,
+    "max_sibling_units_scanned_per_seed": 8,
+    "max_added_expansion_evidence": 4,
+    "max_proposal_calls": 1,
+    "max_model_calls": 1,
+    "max_total_tokens": 24000
+  },
+  "actions": [
+    "query_rewrite_candidate",
+    "context_expansion_candidate",
+    "stop"
+  ],
+  "terminations": [
+    "answer_ready",
+    "insufficient_coverage",
+    "no_progress",
+    "budget_exhausted",
+    "unsafe",
+    "external_unavailable",
+    "contract_failure"
+  ],
+  "proposal": {
+    "enabled_for": "external_profile_only",
+    "purpose": "rag_recovery_requirement_proposal",
+    "data_class": "public_benchmark_question_with_authorized_evidence",
+    "schema_version": "phase4b-b4-question-obligation-proposal-v1",
+    "prompt_identity": "phase4b-b4-question-obligation-prompt-v2",
+    "outbound_policy_identity": "phase4b-b4-recovery-requirement-proposal-outbound-v1",
+    "max_slots": 2,
+    "business_outbound": "denied"
+  },
+  "external_requirement_formation": {
+    "identity": "phase4b-b4-external-requirement-formation-v2",
+    "enabled_for": "external_profile_only",
+    "precedence": ["procedure_boundary_v1", "structured_question_obligations", "typed_stop"],
+    "input_fields": ["question", "authorized_document_evidence", "max_requirements"],
+    "max_requirements": 2,
+    "question_grounding": "exact_source_spans",
+    "qualifier_validation": "server_downgrade_unsupported_current_authority_to_none",
+    "evidence_grounding": "server_question_document_meaningful_token_overlap",
+    "answer_value_policy": "question_values_are_constraints_model_values_denied",
+    "focused_query_owner": "deterministic_server_assembler",
+    "coverage_owner": "deterministic_single_authorized_document_validator",
+    "formed_requirement_fields": [
+      "slot_signature",
+      "supplier_identity",
+      "formation_reason_category",
+      "allowed_recovery_actions",
+      "coverage_semantics"
+    ]
+  },
+  "reserve": {
+    "source_manifest": "phase4b-agent-decision-reserve-v1",
+    "source_identity": "f70c5fcafa3d7601d2700a5d98dc2a2647532c236dd1a56e6a48008fa100e505",
+    "first_unseal_module": "M46",
+    "source_ledger_mutable": false,
+    "paired_arms": [
+      "pipeline",
+      "subgraph"
+    ]
+  },
+  "artifact_versions": {
+    "agent_scenario": "phase4b-agent-scenario-artifact-v4",
+    "reserve_run_ledger": "phase4b-b4-reserve-run-ledger-v1"
+  },
+  "scenarios": [
+    "T4",
+    "EXTERNAL_REWRITE_EXPANSION",
+    "EXTERNAL_DIRECT_EXPANSION",
+    "NO_PROGRESS",
+    "BUDGET_STOP",
+    "ACL_DENY",
+    "EXTERNAL_UNAVAILABLE"
+  ],
+  "capability_matrix": {
+    "implemented": [
+      "document_evidence_acquisition_interface",
+      "pipeline_baseline",
+      "bounded_rag_subgraph",
+      "parent_child_budget",
+      "agent_scenario_v4"
+    ],
+    "reserved": [
+      "durable_task_state",
+      "context_compact"
+    ]
+  }
+}

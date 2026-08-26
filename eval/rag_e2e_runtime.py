@@ -37,6 +37,7 @@ from eval.rag_e2e_contracts import (
     RAG_E2E_RUNTIME_FAMILY,
     RAGEvalContractError,
 )
+from eval.rag_b4_projection import project_b4_eval_diagnostics
 
 
 @dataclass(frozen=True)
@@ -185,6 +186,21 @@ class RAGProductExecutor:
             str(key): int(usage_after.get(key, 0)) - int(usage_before.get(key, 0))
             for key in set(usage_after) | set(usage_before)
         }
+        # ★ M41 顶层 artifact schema 保持不变；只有明确的 M46 runtime 才在既有
+        # diagnostics/provider_usage 容器中追加 child ledger 与分项账本。
+        runtime_family = self.resolved_runtime().runtime_family
+        trace_validity = (
+            (trace_observation.get("diagnostics") or {}).get("evidence_validity")
+            if isinstance(trace_observation.get("diagnostics"), dict)
+            else None
+        )
+        diagnostics, usage = project_b4_eval_diagnostics(
+            runtime_family=runtime_family,
+            rag_diagnostics=diagnostics,
+            result_evidence_validity=result.evidence_validity if result is not None else None,
+            trace_evidence_validity=trace_validity if isinstance(trace_validity, dict) else None,
+            composer_usage=usage,
+        )
         return RAGExecutionEvidence(
             scenario_id=scenario.scenario_id,
             replicate=replicate,
