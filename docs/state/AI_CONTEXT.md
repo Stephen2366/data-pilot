@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M46/B4 技术收工已完成；等待finish-docs与后续人工检查 |
+| 当前活动模块 | M46/B4 已验收通过；下一步按 roadmap 制定 M47/B5 plan         |
 | 当前 plan    | `docs/notes/m46-plan.md`                                    |
 | 当前 notes   | `docs/notes/m46-notes.md`                                   |
-| 待决事项     | 无产品策略待决；完成M46学习复盘，reserve继续sealed/not-run |
+| 待决事项     | 无产品策略待决；reserve 继续 sealed/not-run                  |
 | 更新时间     | 2026-08-26                                                   |
 
 ## 必读规则
@@ -57,7 +57,7 @@
 | 日期 | 事实 |
 |---|---|
 | 2026-08-26 | M46技术收工：注释审计23文件/257符号、缺失0；聚焦`57 passed`，兼容修复聚焦`26 passed`。全仓首次发现并修复M33/M34 Pipeline兼容回归；第二次625项通过，唯一M31临时目录`os.replace` WinError5项独立`1 passed`，故当前626项均有通过证据。M46 rollout identity=`ebb06f82...f164`，默认/experimental/reserve边界不变。 |
-| 2026-08-26 | M46最后一次 historical v3 `m46-historical-paired-20260826-164511` 两臂各60 completed，Gate `598/112/10 → 393/139/188`，paired `57 insufficient / 3 tie`。value-shape `19→0`、child projection 60/60、answer-ready `12→26`，但26题全部被Composer合同拒绝，另有Evidence run mismatch19，最终Subgraph仍`60/60 no_answer`。用户已确认`no_go_revise_stop`后的轻量收口：不冻结candidate、不解封reserve、不再追加同类historical；Pipeline默认/Subgraph experimental，未来修复包在仓库外todo。 |
+| 2026-08-26 | M46最后一次 historical v3 `m46-historical-paired-20260826-164511` 两臂各60 completed，value-shape `19→0`、child projection 60/60、answer-ready `12→26`；rollout评审将后续优化收敛到Evidence run identity、formation grounding和Composer structured output。用户已确认experimental rollout收口：当前candidate不晋级、不解封reserve、不再追加同类historical；Pipeline默认/Subgraph experimental，未来修复包在仓库外todo。 |
 | 2026-08-25 | M45-H/P5 最终 passed：显式默认关闭的 `procedure_boundary_v1` 在 qst_0431 initial coverage 显示完整、且 SQLite authority 证明存在 forward unit 时，准入 expansion 并新增 2 条同物理文档后续 Evidence；P5 retrieval/embedding/chat/Composer=0。v4 review `949a3b03...fbb4`=`go_for_M46`，两张 action card completed，累计 provider attempts 仍为 11；全仓 `582 passed, 1 warning`。M45/B3 技术完成，但它仍是 diagnostic admission，不是产品 RAG Subgraph。 |
 | 2026-08-25 | M45-P4R/v3 最终 no-go：qst_0461 用 P4 immutable proposal 离线重放后 expansion passed；qst_0431 唯一 Qwen revalidation transport 成功，但本地 coverage validator 判为 `proposal_no_unsupported_requirement`，未触发 action。runner 未 catch 异常导致 raw/token usage 丢失，故 tokens=`unobserved`，严禁估算为 0 或补发。recovered safe `6426219b...a949`，v3 review `8fb3cfad...14e4`，累计 provider attempts=`8 embedding + 3 chat = 11`；M45/B3 未完成、M46 blocked。 |
 | 2026-08-25 | M45-P4 受控 A2 真实 Probe failed：qst_0431 proposal schema 因 prompt 未声明 marker 数量上限被 validator 拒绝；qst_0461 正确提出 weekly schedule 缺口，但 literal phrase matcher 未命中语义等价 sibling，expansion 未准入。2 Qwen calls / 3877 tokens，零新 retrieval/embedding/Composer；累计 provider attempts=10。safe `a374f0c0...cfac`，v2 review `ce0d7615...40af`=`review_required/no_go`；不自动重跑，M46 blocked。 |
@@ -108,4 +108,4 @@ M29–M40 的能力缺口：
 | LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭且 M31 outbound 未放行 Cloud；重新启用前先做 allowlist/redaction 策略和用户决策。 |
 | 最终 deterministic repair 真实路径仍未触发 | 最终 Probe 的初始 SQL 已是合法 MySQL，故没有 repair action；这不证明 repair 失败，也不能充当真实成功证据 | 保留 deterministic snapshot/reuse/provider=0 tests；禁止故意制造无效 SQL。只有以后自然出现 typed dialect failure 时才能补真实证据，不以此单独重复调用。 |
 | Enterprise semantic 依赖项目外 profile、DashScope embedding 与 Milvus | Docker 未启动、snapshot identity 漂移或 provider 不可用时 RAG 会明确 unavailable；启动加载/核验约 10 秒，当前单锁优先保证共享 client 安全而非吞吐 | 启动前按 `runbook-rag.md` 执行 preflight；应用不自动启动 Docker、不降级 lexical；用 `/health/rag` 判断 readiness，性能优化须另立候选与证据 |
-| M46 Subgraph historical 泛化仍 no-go | v3虽清除value-shape失败并使26题answer-ready，但Evidence run mismatch与严格Composer输出合同仍使60题全部no-answer | 用户已确认轻量收口：Pipeline默认、Subgraph experimental、reserve sealed/not-run；未获新计划/候选/授权不得重跑。重开顺序与证据入口见仓库外`DevProbe-todo.md` |
+| M46 Subgraph candidate未达到rollout晋级门 | v3已清除value-shape问题并使26题answer-ready；后续优化边界已定位到Evidence run identity、formation grounding与Composer structured output | 用户已确认experimental rollout收口：Pipeline默认、Subgraph experimental、reserve sealed/not-run；未获新计划/候选/授权不得重跑。重开顺序与证据入口见仓库外`DevProbe-todo.md` |

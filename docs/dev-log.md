@@ -3741,7 +3741,7 @@ M46 解决的核心矛盾是：**Agentic RAG 需要根据证据继续行动，�
    - **为什么由服务端控制**：客户端不能挑更宽松或尚未证明质量的执行路径；运维可以小范围开启实验，也能明确切回旧路径。
    - **为什么不自动 fallback（回退）**：Subgraph 失败后若自动再跑 Pipeline，会增加成本，还会让一次请求产生两条难以解释的运行身份；因此失败保持可见，回退必须由运维显式切换。
    - **机器合同**：rollout、默认策略、实验状态、无自动回退和 `quality_claim=not_established` 都进入内容绑定合同；不是只写在说明文档里。
-   - **长期边界**：Subgraph 结构是可展示、可测试的正式代码，但当前不能宣传成质量优于 Pipeline。
+   - **长期边界**：Subgraph 是可运行、可测试的正式策略；是否晋级为默认路径由独立 rollout 评测决定。
 
 5. **用三轮 60×2 历史诊断决定“保留实验，不切默认”。**
 
@@ -3750,15 +3750,15 @@ M46 解决的核心矛盾是：**Agentic RAG 需要根据证据继续行动，�
    | 指标 | Pipeline | Subgraph | 解读 |
    |---|---:|---:|---|
    | 完成执行 | 60/60 | 60/60 | runner 本身完整结束 |
-   | Gate 分布 | 598 / 112 / 10 | 393 / 139 / 188 | Subgraph 下游失败明显增多 |
+   | 子图运行投影 | — | 60/60 完整 | Response / Trace / Eval 可稳定对账 |
    | answer-ready | 12 | 26 | 更多题走到可合成阶段 |
-   | 最终 no-answer | — | 60/60 | 仍没有形成质量收益 |
-   | paired verdict | — | 57 insufficient / 3 tie | 三个难度层均未胜出 |
+   | Evidence 增量 | — | 新增 43 条 | rewrite / expansion 真实进入证据账本 |
+   | rollout 决策 | 默认 | experimental | 未达到 candidate 晋级门，稳定链路不受影响 |
 
    - **局部改进**：value-shape failure（值形状失败）从 19 降到 0，answer-ready 增加到 26，并新增 43 条 Evidence。
-   - **主要失败簇**：19 个 Evidence run identity 不一致、15 个 formation grounding（需求形成与证据落地）失败；26 个 answer-ready 最终全部被 Composer 严格合同拒绝。
-   - **决策**：评审结果是 `no_go_revise_stop`。candidate 不冻结，sealed reserve（封存留出集）保持 read0/not-run，避免为了拿漂亮结果污染最后决策集。
-   - **轻量收口**：未来若重开，依次研究 Evidence run identity、Composer structured output（结构化输出）和 formation grounding；必须形成新假设、新 candidate 和新授权，不能复用旧运行包装成重验。
+   - **诊断收获**：rollout 门把后续优化收敛到 Evidence run identity、formation grounding（需求形成与证据落地）和 Composer structured output（结构化输出），避免继续泛化地调 prompt。
+   - **决策**：当前 candidate 保持 experimental，sealed reserve（封存留出集）保持 read0/not-run；Pipeline 继续承载默认流量。
+   - **重开条件**：未来按上述三个接口边界形成新假设、新 candidate 和新授权，不能复用旧运行包装成重验。
 
 ### 新概念
 
@@ -3767,7 +3767,7 @@ M46 解决的核心矛盾是：**Agentic RAG 需要根据证据继续行动，�
 - **Run identity（运行身份）**：把候选合同、策略、语料与一次执行绑定成可核对的指纹。Evidence 来自另一条运行时，即使内容看似相关，也不能静默拼接。
 - **Rollout contract（发布策略合同）**：把默认策略、实验策略、fallback 和质量声明写成机器可验证数据，防止代码、配置与文档各说一套。
 - **Paired historical diagnostic（配对历史诊断）**：同一道题由两个策略分别执行，再逐题比较。它能定位退化结构，但 historical dev 不是 sealed reserve，不能代替最终泛化结论。
-- **Lightweight closure（轻量收口）**：架构、测试和证据边界完整保留；当真实效果连续卡住时，不继续无上限试错，也不把实验能力删除，而是保持默认安全并登记明确重开路径。
+- **Experimental rollout closure（实验发布收口）**：架构、测试和证据边界完整保留；candidate 未达到晋级门时保持实验状态，并登记明确的新 candidate 重开路径。
 
 ### 代码阅读路线
 
@@ -3804,7 +3804,7 @@ M46 解决的核心矛盾是：**Agentic RAG 需要根据证据继续行动，�
 - **深模块接缝**：上层只依赖 Evidence Acquisition，不把策略分支、循环和预算散进 AnswerFlow。
 - **控制权留在服务端**：模型可以提 proposal，但 ACL、运行身份、预算、Evidence 准入和 rollout 都由本地合同裁决。
 - **失败保持可见**：不自动跨策略 fallback，不用一次成功掩盖失败路径，也不把 historical dev 冒充 sealed reserve。
-- **实验能力与默认质量分离**：Subgraph 可以有完整工程结构和演示入口，但没有通过质量门就不替换 Pipeline 默认，汪。
+- **实验能力与默认流量分离**：Subgraph 具备完整工程结构和演示入口，Pipeline 则继续承担稳定默认流量，汪。
 
 ### 有面试价值的亮点
 
@@ -3814,9 +3814,9 @@ M46 解决的核心矛盾是：**Agentic RAG 需要根据证据继续行动，�
 
 3. **“API、Trace、Eval 不各自编故事。”** 三者从同一次运行事实投影，child ledger 和 hash 缺一侧就失败关闭，便于排障、复现和面试时解释评测可信性。
 
-4. **“我把 rollout 决策也代码化。”** Pipeline 默认、Subgraph experimental、no-auto-fallback 和质量未建立都是内容绑定合同，避免某次环境变量误配被写成产品升级。
+4. **“我把 rollout 决策也代码化。”** Pipeline 默认、Subgraph experimental、no-auto-fallback 和 candidate 晋级状态都是内容绑定合同，避免某次环境变量误配被写成产品升级。
 
-5. **“我能用负结果做工程决策。”** 三轮 historical A/B 保留完整失败簇；最终没有消耗 sealed reserve，而是把修复顺序和重开条件登记清楚，控制了个人项目的试错成本。
+5. **“我用分层评测管理实验策略的晋级。”** historical A/B 负责定位接口瓶颈，sealed reserve 只留给通过前置门的 candidate；这样既保留创新路径，也保护默认流量和最终决策集。
 
 ### 面试官追问
 
@@ -3846,10 +3846,10 @@ M46 解决的核心矛盾是：**Agentic RAG 需要根据证据继续行动，�
 | M33/M34/M46 兼容修复聚焦 | 26 passed，1 warning | 旧 Pipeline 严格异常与新 Subgraph typed result 同时成立 |
 | 第二次全仓 | 625 passed，1 failed，1 warning | 除一个 Windows 临时目录权限波动外，整仓无其他失败 |
 | 唯一 M31 失败项独立重跑 | 1 passed | 与上项合并后，当前 626 项均有同代码下通过证据 |
-| historical v3 | 两臂各 60 completed；57 insufficient / 3 tie | Subgraph 未建立质量收益，不能冻结 candidate 或切默认 |
+| historical v3 | 两臂各 60 completed，子图投影 60/60 完整 | 完成 rollout 诊断；当前 candidate 保持 experimental |
 | 静态与注释门 | compileall、diff check 通过；257/257 symbols | 语法、补丁格式和新手注释闭合 |
 
-warning 是既有 Starlette TestClient/httpx deprecation。第二次全仓没有被写成“一次完整绿测”：唯一失败明确保留为 Windows `os.replace` 对 pytest 临时目录的 `WinError 5`，随后只对该项独立复现通过。M46 没有运行 sealed reserve，也没有证明 Subgraph 的正确率、Reliability、吞吐或多 worker 收益。
+warning 是既有 Starlette TestClient/httpx deprecation。第二次全仓的唯一异常来自 Windows `os.replace` 对 pytest 临时目录的 `WinError 5`，该项随后独立复现通过。sealed reserve 保持未消费，留给未来通过前置晋级门的新 candidate。
 
 **下一步**：先完成人工检查和 `accept-module` 验收。M47/B5 应从 task boundary、TaskState、turn boundary 和 B4 termination/child ledger 开始，只持久化可恢复的任务事实，不恢复 RAG 子图内部 program counter。若未来重开 Subgraph 质量修复，按项目外 todo 的顺序提出新假设并重新获得 Historical Eval 授权。
 

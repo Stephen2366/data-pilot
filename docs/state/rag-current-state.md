@@ -92,7 +92,7 @@ DataPilot现在有两套彼此隔离的知识运行口径：**22条业务知识r
 - M44A C6 `m44a-rag-external-qst0386-20260824-c6` 按用户授权只运行 `diagnostic_dev/qst_0386` 一次：completed artifact `0a5bc40...c9647`，required `12/0/0`，semantic candidate→selected→generation-visible→cited 为 `5→3→3→1`，Qwen 一次 2054 tokens，人工语义 pass。它证明 query embedding→Milvus→SQLite Evidence→Composer→citation 产品链闭合；advisory exact-fact 下限仍失败，因此既不登记正式长期基线，也不外推 60/180 题质量。
 - M44A semantic dev Smoke `m44a-rag-external-semantic-smoke-20260824-023039` 9 题一次 completed：required `92/16/0`、triage `5 passed / 4 retrieval`、人工 `2 pass / 7 fail`、19033 tokens。4 题 candidate 阶段漏 gold；另有命中 gold 后仍提取不全/事实错误。与历史 lexical smoke 的合法 candidate compare 为自动 `1 win / 5 tie / 3 loss`、人工 `3/6→2/7`；两侧均单次 generation，不能推导稳定 backend 因果或 Reliability，也不登记长期基线。
 
-M42 另创建60题Phase 4B decision reserve，identity `f70c5fc...e505`，使用external corpus/profile的20份未进入既有180 gold的冻结文档；分布basic/core/hard `20/20/20`，core 8、hard 20道多文档。逐题材料在项目外immutable store，仓库只保存安全manifest。M46因historical no-go没有冻结candidate或运行decision set，用户确认轻量收口后该reserve继续sealed/read0/not-run，也不改变M34/M41基线；M44A的产品默认切换没有读取或污染它。
+M42 另创建60题Phase 4B decision reserve，identity `f70c5fc...e505`，使用external corpus/profile的20份未进入既有180 gold的冻结文档；分布basic/core/hard `20/20/20`，core 8、hard 20道多文档。逐题材料在项目外immutable store，仓库只保存安全manifest。M46 candidate未达到historical晋级门，因此没有运行decision set；用户确认experimental rollout收口后该reserve继续sealed/read0/not-run，也不改变M34/M41基线；M44A的产品默认切换没有读取或污染它。
 
 semantic snapshot 已完成全部 139,214 个 unique unit，并在 M44A 后成为 Enterprise 产品默认候选索引：
 
@@ -125,7 +125,7 @@ semantic snapshot 已完成全部 139,214 个 unique unit，并在 M44A 后成�
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
 - **能力范围**：M38 已把两类 canonical SQL + Document Hybrid 接入同一 Harness，但不是自由多轮或开放跨来源研究。第二次追问、Hybrid follow-up、optional branch、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
-- **M46 B4 rollout**：Pipeline继续作为产品默认和显式baseline；Subgraph保留为server-controlled experimental，不允许客户端选择，也不启用自动跨策略fallback。最后一次historical v3仍`60/60 no_answer`，因此`quality_claim=not_established`；candidate不冻结，Phase 4B reserve `f70c5fc...e505`保持sealed/read0/not-run。未来只有新假设、新candidate和新授权才能重开。
+- **M46 B4 rollout**：bounded RAG Subgraph已实现并保留为server-controlled experimental，Pipeline继续作为产品默认和显式baseline；客户端不能选择策略，也不启用自动跨策略fallback。当前candidate未达到historical晋级门，Phase 4B reserve `f70c5fc...e505`保持sealed/read0/not-run；未来以新假设、新candidate和新授权进入下一轮评审。
 - **M41/M44A 后续真实运行门**：历史 business Smoke、lexical external dev 与 M44A semantic 单题 C6 均已按各自授权完成。external selector 默认 dev，产品 retrieval 默认 semantic；120 held-out/all 仍须明确说出。任何真实运行都只授权一次，不得自动重跑、扩大 suite 或在 semantic 失败后换 lexical 冒充同次授权。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
 - **Phase 4B reserve 污染门**：只有historical支持正式冻结的新candidate、闭集review和用户精确授权同时成立，才可读取逐题内容并运行一次decision set；不得用reserve调参。提前访问/调参时必须按访问状态机标记retired，不能继续充当decision set。M34/M41现有180题只作historical regression，不与该60题reserve合并。

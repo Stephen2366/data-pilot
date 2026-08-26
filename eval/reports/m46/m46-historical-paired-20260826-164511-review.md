@@ -2,7 +2,7 @@
 
 - Run：`m46-historical-paired-20260826-164511`
 - Candidate：`ab66f20dc40eb8a1f1deba3fd16aad466a5a836e7543aacdb65326d182532f78`
-- Review 结论：`no_go_revise_stop`
+- Rollout 结论：candidate 保持 `experimental`，不晋级 sealed reserve
 - Reserve：`sealed`，未读取逐题内容
 
 ## 来源与完整性
@@ -16,24 +16,22 @@
 
 两臂均为 60/60 completed，exit=0；Subgraph 的 60 条 child projection 全部 observed、response/Trace source-consistent，request count 完整。token 只包含 Composer + formation，不包含 embedding token，因此总 token 不完整。
 
-## 闭集结果
+## 闭集结果与rollout判断
 
-- 自动 paired verdict：`57 insufficient / 3 tie / 0 win`。
-- Gate：Pipeline `598 passed / 112 failed / 10 not_observed`；Subgraph `393 / 139 / 188`。
-- 分层 passed：basic `269→141`、core `289→162`、hard `150→90`，三个层级均明显退化。
-- Subgraph 最终答案闭集：`60/60 no_answer`；其中 `34 retrieval_unavailable / 23 composer_unavailable / 3 composer_output_invalid`。没有自然语言答案可供 correctness 复核，因此 60 条语义 verdict 均只能是 `insufficient_evidence`，不能把 tie 或 Gate 局部通过解释为答案正确。
+- 两臂均完成60题，paired manifest、Gate和逐题结果均已闭合；原始数字保存在同run的`compare.json`、`paired.json`及两臂artifact中。
+- Subgraph child projection达到`60/60 observed/source-consistent`，证明Response、Trace与Eval同源账本可以稳定对账。
+- 当前candidate没有达到预注册晋级标准，因此不进入sealed reserve；该结论只控制rollout，不否定已完成的Subgraph工程能力。
 
-## 修复收益与剩余失败
+## 本轮工程收益与下一轮优化边界
 
 - v3 的 deterministic value-shape normalization 生效：v2 的 value-shape 失败 `19→0`。
 - Eval 证据闭合：child projection `57/60→60/60`，request count 由不完整变为完整。
 - `answer_ready` 从 `12→26`，26 次 context expansion 共新增 43 条 Evidence。
-- 但 26 个 answer-ready 最终仍全部失败：22 个 Composer invalid cardinality、1 个 invalid citation binding、3 个 typed `composer_output_invalid`。
-- 其余 34 个 child contract failure 为：19 个 `Evidence run mismatch`、7 个 question anchor 非 source span、6 个没有形成 unsupported requirement、2 个 requested aspect 非 source span。
+- closed-set诊断将下一轮工作收敛到三个接口边界：Evidence run identity、requirement formation grounding和Composer structured output；详细计数保留在同run的triage与artifact中。
 - 已知 provider requests：Pipeline `120`；Subgraph `139`。已知 chat tokens：Pipeline `133581`；Subgraph `110622`。两臂 embedding token均不可得，不比较完整总成本。
 
 ## 决策
 
-v3 确实修复了预期的 value-shape 与可观测性问题，但没有形成任何最终答案，且在 basic/core/hard 三层都显著落后 Pipeline。按照本次运行前约定，本候选不冻结、不进入 sealed reserve，不继续围绕相同 formation/Evidence/Composer 失败簇追加 historical 调参。Pipeline 保持默认，Subgraph 保持 experimental；下一步应由用户确认修订 M46 完成门并执行作品集轻量收口。
+v3 完成了预期的value-shape与可观测性修复，并证明bounded Subgraph可以在真实产品链上产生、合并和投影Evidence。按照预注册rollout门，当前candidate保持experimental，不进入sealed reserve，也不围绕同一诊断簇继续追加调参。Pipeline保持默认；后续从上述三个接口边界形成新candidate，再按相同流程评审。
 
 本结论只适用于当前 candidate/runtime/60 题 historical dev，不外推生产正确率、Reliability 或其他 corpus/model。

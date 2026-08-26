@@ -33,7 +33,7 @@
 
 **Phase 4 — Trustworthy Multi-Evidence Agent**
 
-当前已完成 **M40 / P7 technical assurance**，SQL、RAG、Hybrid、澄清恢复和安全拒绝等主路径已经进入统一 Agent Harness、Evidence 与 Trace 合同。
+当前已完成 **M46 / Phase 4B B4**，SQL、RAG、Hybrid、任务状态和有界 Agentic RAG 等主路径已经进入统一 Agent Harness、Evidence、预算与 Trace 合同。
 
 ```text
 Phase 2        Basic NL2SQL / API / SQL Guard
@@ -48,19 +48,20 @@ Phase 4
     ├── P3  LangGraph Agent Harness
     ├── P4  bounded clarification / resume / follow-up
     ├── P5  SQL + RAG Hybrid Evidence
-    ├── P6  Agentic-RAG readiness audit → NO-GO
+    ├── P6  Agentic-RAG readiness audit
     └── P7  cross-route Trace & runtime assurance   ✅
+    ↓
+Phase 4B      TaskState + bounded Decision Loop + RAG Subgraph  ✅
 ```
 
 Latest deterministic regression snapshot:
 
 ```text
-447 passed
-3 skipped
+626 tests with current-code pass evidence
 1 warning
 ```
 
-> P7 technical assurance means the current contracts and deterministic rehearsal pass.
+> M46 technical closure means the current contracts, focused verification and repository regression evidence are complete.
 > It **does not** mean production authentication, distributed conversation persistence, universal intent routing, or production certification are complete.
 
 ------
@@ -352,34 +353,25 @@ RAG 另外使用 EnterpriseRAG-Bench external profile 做 retrieval / answer / c
 
 ------
 
-## Why No Agentic RAG Subgraph?
+## Bounded Agentic RAG
 
-Phase 4 曾预留进一步构建 Observation-driven Agentic RAG Subgraph 的能力。
-
-在 M39 中，项目先对已有 RAG failure evidence 做 readiness audit，而不是直接增加：
+DataPilot 已实现 Observation-driven bounded RAG Subgraph，并通过统一的 `DocumentEvidenceAcquirer` 与原 Pipeline 隔离：
 
 ```text
-retrieve → observe → rewrite → retrieve → rerank → ...
+observe → rewrite / expand → re-authorize Evidence → stop / compose
 ```
 
-审计结果没有证明：
-
-1. 当前失败存在明确的、可通过额外 Observation-driven Evidence action 修复的稳定失败簇；
-2. 增加 Tool budget 后能够形成公平、可比较的收益证明。
-
-因此 P6 最终做出：
+子图具备父子预算、动作闭集、Evidence 增量、去重、no-progress 停止以及 API / Trace / Eval 同源账本。策略由服务端控制：
 
 ```text
-NO-GO
+PHASE4B_RAG_STRATEGY=pipeline|subgraph
 ```
 
-当前继续保留更简单的 deterministic retrieval pipeline。
-
-这是一个刻意的工程决策：
+Pipeline 是稳定默认，Subgraph 是可显式启用的实验策略；两者不会在同一次请求中自动跨策略重跑。historical paired diagnostic 用于决定 candidate 是否晋级，而不是决定代码结构是否存在。
 
 > **复杂度必须由 Eval 证据证明，而不是因为 Agent 框架支持循环就增加循环。**
 
-如果未来新的未污染 dev evidence 证明需要额外 Evidence action，P6 才会重新打开。
+当前 candidate 未进入 sealed decision reserve。后续优化将围绕运行身份一致性、Composer 结构化输出和 requirement grounding 形成新 candidate，再通过同一晋级流程评审。
 
 ------
 
@@ -547,7 +539,7 @@ data-pilot/
 | Conversation state | 单进程内存 checkpoint；重启 / 多 worker 不共享               |
 | Router             | closed-world deterministic route 为主，开放式混合意图仍较保守 |
 | RAG retrieval      | 当前 lexical baseline 优于已测试 semantic candidate          |
-| Agentic RAG        | P6 readiness audit 为 NO-GO，未实现 RAG Subgraph             |
+| Agentic RAG        | bounded RAG Subgraph 已实现；Pipeline 默认，Subgraph 服务端实验 |
 | Hybrid             | canonical controlled operators，不是开放式 research Agent    |
 | Milvus             | adapter 已实现，但不是默认 runtime                           |
 | LangFuse           | optional observability side path，默认本地 JSONL Trace       |

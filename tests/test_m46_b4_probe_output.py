@@ -91,7 +91,7 @@ def test_probe_cli_requires_private_output_inside_temp_boundary() -> None:
         sys.argv = [
             "probe_m46_b4_external",
             "--scenario", "qst_0420",
-            "--output", ".codex/temp_work/safe.json",
+            "--output", "docs/notes/safe.json",
             "--private-output", "docs/notes/raw-answer.json",
         ]
         try:
