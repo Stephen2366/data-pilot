@@ -54,9 +54,13 @@ class ConfiguredRAGAcquisition:
 
     @property
     def strategy_identity(self) -> str:
+        """返回稳定策略身份，避免只凭可变配置字符串对账。"""
+
         return f"phase4b-rag-acquisition-strategy:{self.strategy}:v1"
 
     def safe_projection(self) -> dict[str, str]:
+        """输出可进入 readiness/Trace 的白名单组装事实。"""
+
         return {
             "strategy": self.strategy,
             "strategy_identity": self.strategy_identity,
@@ -67,6 +71,8 @@ class ConfiguredRAGAcquisition:
 
 
 def _validate_strategy(strategy: str) -> RAGStrategyName:
+    """按 B4 闭集合同校验并规范化 acquisition strategy。"""
+
     value = strategy.strip().lower()
     if value not in set(B4_BUNDLE.payload["strategies"]):
         raise RAGStrategyConfigurationError("rag_acquisition_strategy_invalid")

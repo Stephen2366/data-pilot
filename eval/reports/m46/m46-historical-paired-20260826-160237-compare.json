@@ -1,0 +1,962 @@
+{
+  "format": "phase4-rag-e2e-compare-v2",
+  "comparison_mode": "candidate",
+  "strictly_comparable": false,
+  "experiment_contract": {
+    "allowed_runtime_differences": [
+      "runtime_family"
+    ],
+    "actual_runtime_differences": [
+      "runtime_family"
+    ],
+    "shared_catalog_identity": "c19270c0f911131d5488868ffe9ae9bfec8a6453eb35b0502729c9a8ffeabe21",
+    "shared_selector_identity": "c145008a928df78e6cab73043fd6d6e5563bef6d4cecf6a7df1fc5a3c1fed1fe",
+    "shared_scorer_identity": "phase4-rag-funnel-scorer-v1",
+    "identity": "6ae826ea53fc6fef7e400eb43515abf5860476ed11ab8691c20bcc34f0cd0c7b"
+  },
+  "left": {
+    "run_id": "m46-historical-paired-20260826-160237-pipeline",
+    "artifact_identity": "b01fa4e34384ae7b93cc0dc62ae354cf5193671576674857e97de08aa3dbbfc4",
+    "gate": {
+      "status": "failed",
+      "passed": 571,
+      "failed": 112,
+      "not_observed": 37
+    },
+    "assertions": {
+      "passed": 675,
+      "failed": 180,
+      "not_observed": 45
+    }
+  },
+  "right": {
+    "run_id": "m46-historical-paired-20260826-160237-subgraph",
+    "artifact_identity": "7eb33e64466b3c0c47ca294c7942a18f800ac66a5d325c4e81dcb5fa4856dc8a",
+    "gate": {
+      "status": "failed",
+      "passed": 375,
+      "failed": 126,
+      "not_observed": 219
+    },
+    "assertions": {
+      "passed": 375,
+      "failed": 291,
+      "not_observed": 234
+    }
+  },
+  "delta": {
+    "passed": -300,
+    "failed": 111,
+    "not_observed": 189
+  },
+  "paired_summary": {
+    "insufficient": 60
+  },
+  "paired_executions": [
+    {
+      "record_id": "qst_0016:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0019:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0022:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 3,
+        "passed->failed": 4,
+        "passed->not_observed": 1,
+        "passed->passed": 6
+      },
+      "primary_transition": "selection->product_runtime"
+    },
+    {
+      "record_id": "qst_0023:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "not_observed->failed": 1,
+        "not_observed->not_observed": 1,
+        "not_observed->passed": 1,
+        "passed->failed": 1,
+        "passed->not_observed": 3,
+        "passed->passed": 5
+      },
+      "primary_transition": "product_runtime->product_runtime"
+    },
+    {
+      "record_id": "qst_0029:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0031:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->not_observed": 2,
+        "passed->failed": 3,
+        "passed->not_observed": 1,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0045:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0047:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0050:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0059:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0062:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0079:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0086:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0091:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0116:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0117:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0118:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->not_observed": 1,
+        "passed->failed": 3,
+        "passed->not_observed": 2,
+        "passed->passed": 9
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0122:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 3,
+        "passed->passed": 6
+      },
+      "primary_transition": "citation->product_runtime"
+    },
+    {
+      "record_id": "qst_0151:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0155:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->not_observed": 1,
+        "passed->failed": 3,
+        "passed->not_observed": 2,
+        "passed->passed": 9
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0157:r1",
+      "difficulty": "basic",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->not_observed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 5,
+        "passed->passed": 5
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0181:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0186:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0198:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0199:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0200:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0211:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->not_observed": 5,
+        "passed->failed": 4,
+        "passed->not_observed": 1,
+        "passed->passed": 5
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0215:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0216:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0233:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0236:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0248:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->not_observed": 2,
+        "passed->passed": 5
+      },
+      "primary_transition": "selection->product_runtime"
+    },
+    {
+      "record_id": "qst_0252:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0268:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->not_observed": 1,
+        "passed->failed": 3,
+        "passed->not_observed": 2,
+        "passed->passed": 9
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0272:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0279:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0282:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0283:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0289:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0318:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0338:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 3,
+        "passed->passed": 6
+      },
+      "primary_transition": "citation->product_runtime"
+    },
+    {
+      "record_id": "qst_0341:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->not_observed": 2,
+        "passed->failed": 3,
+        "passed->not_observed": 1,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0353:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0384:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->passed": 1,
+        "not_observed->failed": 1,
+        "not_observed->not_observed": 4,
+        "not_observed->passed": 1,
+        "passed->failed": 1,
+        "passed->passed": 4
+      },
+      "primary_transition": "product_runtime->product_runtime"
+    },
+    {
+      "record_id": "qst_0386:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0387:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->passed": 1,
+        "not_observed->failed": 1,
+        "not_observed->not_observed": 4,
+        "not_observed->passed": 1,
+        "passed->failed": 1,
+        "passed->passed": 4
+      },
+      "primary_transition": "product_runtime->product_runtime"
+    },
+    {
+      "record_id": "qst_0388:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0389:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->passed": 1,
+        "not_observed->not_observed": 3,
+        "not_observed->passed": 3,
+        "passed->passed": 5
+      },
+      "primary_transition": "product_runtime->product_runtime"
+    },
+    {
+      "record_id": "qst_0393:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 3,
+        "passed->passed": 6
+      },
+      "primary_transition": "citation->product_runtime"
+    },
+    {
+      "record_id": "qst_0400:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0408:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->passed": 1,
+        "not_observed->not_observed": 3,
+        "not_observed->passed": 3,
+        "passed->passed": 5
+      },
+      "primary_transition": "product_runtime->product_runtime"
+    },
+    {
+      "record_id": "qst_0420:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->not_observed": 2,
+        "passed->failed": 3,
+        "passed->not_observed": 1,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0428:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "failed->not_observed": 4,
+        "passed->failed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0431:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->not_observed": 1,
+        "passed->failed": 3,
+        "passed->not_observed": 2,
+        "passed->passed": 9
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0433:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->not_observed": 2,
+        "passed->failed": 3,
+        "passed->not_observed": 1,
+        "passed->passed": 6
+      },
+      "primary_transition": "retrieval->product_runtime"
+    },
+    {
+      "record_id": "qst_0442:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->passed": 1,
+        "not_observed->failed": 3,
+        "not_observed->not_observed": 3,
+        "passed->passed": 5
+      },
+      "primary_transition": "product_runtime->product_runtime"
+    },
+    {
+      "record_id": "qst_0447:r1",
+      "difficulty": "hard",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->passed": 1,
+        "not_observed->failed": 3,
+        "not_observed->not_observed": 3,
+        "passed->passed": 5
+      },
+      "primary_transition": "product_runtime->product_runtime"
+    },
+    {
+      "record_id": "qst_0457:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 3,
+        "failed->passed": 1,
+        "not_observed->failed": 1,
+        "not_observed->not_observed": 4,
+        "not_observed->passed": 1,
+        "passed->failed": 1,
+        "passed->passed": 4
+      },
+      "primary_transition": "product_runtime->product_runtime"
+    },
+    {
+      "record_id": "qst_0461:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    },
+    {
+      "record_id": "qst_0462:r1",
+      "difficulty": "core",
+      "verdict": "insufficient",
+      "assertion_transitions": {
+        "failed->failed": 1,
+        "passed->failed": 4,
+        "passed->not_observed": 4,
+        "passed->passed": 6
+      },
+      "primary_transition": "passed->product_runtime"
+    }
+  ],
+  "primary_failure_transitions": {
+    "citation->product_runtime": 3,
+    "passed->product_runtime": 25,
+    "product_runtime->product_runtime": 8,
+    "retrieval->product_runtime": 22,
+    "selection->product_runtime": 2
+  },
+  "difficulty_assertions": {
+    "basic": {
+      "left": {
+        "passed": 269,
+        "failed": 43,
+        "not_observed": 3
+      },
+      "right": {
+        "passed": 131,
+        "failed": 101,
+        "not_observed": 83
+      },
+      "delta": {
+        "passed": -138,
+        "failed": 58,
+        "not_observed": 80
+      }
+    },
+    "core": {
+      "left": {
+        "passed": 272,
+        "failed": 85,
+        "not_observed": 18
+      },
+      "right": {
+        "passed": 154,
+        "failed": 119,
+        "not_observed": 102
+      },
+      "delta": {
+        "passed": -118,
+        "failed": 34,
+        "not_observed": 84
+      }
+    },
+    "hard": {
+      "left": {
+        "passed": 134,
+        "failed": 52,
+        "not_observed": 24
+      },
+      "right": {
+        "passed": 90,
+        "failed": 71,
+        "not_observed": 49
+      },
+      "delta": {
+        "passed": -44,
+        "failed": 19,
+        "not_observed": 25
+      }
+    }
+  },
+  "provider_usage": {
+    "left": {
+      "b4_composer_requests": 60,
+      "b4_composer_total_tokens": 132841,
+      "b4_formation_requests": 0,
+      "b4_formation_total_tokens": 0,
+      "b4_projection_observed": 60,
+      "b4_provider_requests_known_total": 113,
+      "b4_provider_tokens_known_total": 132841,
+      "b4_retrieval_attempts_observed": 60,
+      "b4_retrieval_requests_known": 53,
+      "completion_tokens": 23169,
+      "prompt_tokens": 109672,
+      "request_count": 60,
+      "successful_response_count": 60,
+      "total_tokens": 132841
+    },
+    "right": {
+      "b4_composer_requests": 15,
+      "b4_composer_total_tokens": 7309,
+      "b4_formation_requests": 51,
+      "b4_formation_total_tokens": 95213,
+      "b4_projection_observed": 57,
+      "b4_provider_requests_known_total": 123,
+      "b4_provider_tokens_known_total": 102522,
+      "b4_retrieval_attempts_observed": 57,
+      "b4_retrieval_requests_known": 57,
+      "completion_tokens": 908,
+      "prompt_tokens": 6401,
+      "request_count": 15,
+      "successful_response_count": 15,
+      "total_tokens": 7309
+    },
+    "delta": {
+      "b4_composer_requests": -45,
+      "b4_composer_total_tokens": -125532,
+      "b4_formation_requests": 51,
+      "b4_formation_total_tokens": 95213,
+      "b4_projection_observed": -3,
+      "b4_provider_requests_known_total": 10,
+      "b4_provider_tokens_known_total": -30319,
+      "b4_retrieval_attempts_observed": -3,
+      "b4_retrieval_requests_known": 4,
+      "completion_tokens": -22261,
+      "prompt_tokens": -103271,
+      "request_count": -45,
+      "successful_response_count": -45,
+      "total_tokens": -125532
+    }
+  },
+  "answer_flow_latency": {
+    "left": {
+      "count": 53,
+      "mean_ms": 8909.843,
+      "p50_ms": 7802.227,
+      "p95_ms": 13016.23
+    },
+    "right": {
+      "count": 57,
+      "mean_ms": 5088.67,
+      "p50_ms": 4888.883,
+      "p95_ms": 7383.752
+    },
+    "delta": {
+      "mean_ms": -3821.173,
+      "p50_ms": -2913.344,
+      "p95_ms": -5632.478
+    }
+  },
+  "interpretation_boundary": "paired verdict 只描述自动 assertion 迁移；自然语言 correctness 仍需并列人工 review。",
+  "m46_provider_usage": {
+    "pipeline": {
+      "composer_requests": 60,
+      "composer_total_tokens": 132841,
+      "formation_requests": 0,
+      "formation_total_tokens": 0,
+      "retrieval_requests_known": 53,
+      "provider_requests_known_total": 113,
+      "provider_tokens_known_total": 132841,
+      "execution_count": 60,
+      "projected_execution_count": 60,
+      "request_count_complete": true,
+      "token_count_complete": false,
+      "source_consistent": true
+    },
+    "subgraph": {
+      "composer_requests": 15,
+      "composer_total_tokens": 7309,
+      "formation_requests": 51,
+      "formation_total_tokens": 95213,
+      "retrieval_requests_known": 57,
+      "provider_requests_known_total": 123,
+      "provider_tokens_known_total": 102522,
+      "execution_count": 60,
+      "projected_execution_count": 57,
+      "request_count_complete": false,
+      "token_count_complete": false,
+      "source_consistent": false
+    },
+    "interpretation_boundary": "requests 在 projection/retrieval observed 时可闭合；tokens 不含 embedding token，只表示 Composer + formation 的已知总量。"
+  }
+}

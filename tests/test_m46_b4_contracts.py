@@ -36,13 +36,14 @@ def test_b4_bundle_binds_b2_b3_and_user_confirmed_proposal_boundary() -> None:
         "business_outbound": "denied",
     }
     assert bundle.payload["external_requirement_formation"] == {
-        "identity": "phase4b-b4-external-requirement-formation-v2",
+        "identity": "phase4b-b4-external-requirement-formation-v3",
         "enabled_for": "external_profile_only",
         "precedence": ["procedure_boundary_v1", "structured_question_obligations", "typed_stop"],
         "input_fields": ["question", "authorized_document_evidence", "max_requirements"],
         "max_requirements": 2,
         "question_grounding": "exact_source_spans",
         "qualifier_validation": "server_downgrade_unsupported_current_authority_to_none",
+        "value_shape_validation": "server_normalize_to_deterministic_expected_shape",
         "evidence_grounding": "server_question_document_meaningful_token_overlap",
         "answer_value_policy": "question_values_are_constraints_model_values_denied",
         "focused_query_owner": "deterministic_server_assembler",
@@ -54,6 +55,21 @@ def test_b4_bundle_binds_b2_b3_and_user_confirmed_proposal_boundary() -> None:
             "allowed_recovery_actions",
             "coverage_semantics",
         ],
+    }
+    assert bundle.payload["rollout"] == {
+        "identity": "phase4b-b4-rollout-decision-v1",
+        "decision": "pipeline_default_subgraph_experimental",
+        "decision_basis": "historical_no_go_portfolio_lightweight_closure",
+        "historical_run_id": "m46-historical-paired-20260826-164511",
+        "historical_candidate_identity": "ab66f20dc40eb8a1f1deba3fd16aad466a5a836e7543aacdb65326d182532f78",
+        "historical_review": "eval/reports/m46/m46-historical-paired-20260826-164511-review.md",
+        "reserve_state": "sealed",
+        "reserve_decision_run": "not_run",
+        "default_strategy": "pipeline",
+        "subgraph_status": "server_controlled_experimental",
+        "automatic_cross_strategy_fallback": False,
+        "quality_claim": "not_established",
+        "reopen_policy": "new_hypothesis_new_candidate_new_authorization",
     }
 
 

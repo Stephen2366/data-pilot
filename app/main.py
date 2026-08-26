@@ -55,6 +55,8 @@ def _lifespan(settings: Settings):
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        """进入时安装共享 RAG runtime，退出时恢复注入状态并释放资源。"""
+
         # Eval/合同测试会在进入 TestClient 前显式注入 factory。lifespan 只承认这条深 seam，
         # 不猜测请求体；退出后仍由注入方恢复自己的 factory。
         if getattr(application.state, "rag_tool_factory", None) is not None:

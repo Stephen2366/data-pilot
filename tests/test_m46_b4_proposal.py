@@ -194,8 +194,8 @@ def test_model_cannot_invent_answer_value_or_non_question_constraint() -> None:
     assert result.usage.calls == 1
 
 
-def test_weak_anchor_and_downgraded_value_shape_are_rejected() -> None:
-    """exact source span 仍需有意义；明显的 rate 不能被模型降成无需数值证据。"""
+def test_weak_anchor_is_rejected_and_value_shape_is_server_normalized() -> None:
+    """exact span 仍需有意义；rate 被模型降成 none 时由服务端恢复 numeric 要求。"""
 
     weak_anchor = (
         '{"obligations":[{"reason_category":"requested_fact","question_anchor":"the",'
@@ -215,7 +215,11 @@ def test_weak_anchor_and_downgraded_value_shape_are_rejected() -> None:
     downgraded_result = ExternalRequirementFormer(
         structured_supplier=B4QuestionObligationSupplier(_ObligationTransport(downgraded))
     ).form(_input(content="The EXP-002 egress catalog overview."))
-    assert downgraded_result.reason_code == "formation_value_shape_not_question_grounded"
+    assert downgraded_result.reason_code == "eligible"
+    assert downgraded_result.requirements[0].slot.value_shape == "numeric"
+    assert not downgraded_result.requirements[0].slot.supported_by(
+        _input(content="The EXP-002 egress cost rate overview has no numeric value.").current_evidence
+    )
 
 
 def test_unrelated_evidence_fails_closed_without_free_query() -> None:

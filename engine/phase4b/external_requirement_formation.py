@@ -26,7 +26,7 @@ QualifierCategory = Literal["none", "current_authority"]
 RecoveryAction = Literal["query_rewrite_candidate", "context_expansion_candidate"]
 ValueShape = Literal["none", "numeric", "duration", "schedule", "ordered_steps"]
 
-FORMATION_IDENTITY = "phase4b-b4-external-requirement-formation-v2"
+FORMATION_IDENTITY = "phase4b-b4-external-requirement-formation-v3"
 PROCEDURE_SUPPLIER_IDENTITY = "phase4b-b4-procedure-supplier-v1"
 QUESTION_SUPPLIER_IDENTITY = "phase4b-b4-question-obligation-supplier-v1"
 OBLIGATION_SCHEMA_VERSION = "phase4b-b4-question-obligation-proposal-v1"
@@ -72,6 +72,8 @@ class FormationUsage:
     token_usage_observed: bool = True
 
     def safe_projection(self) -> dict[str, Any]:
+        """公开计账数字与模型名，不保存 prompt 或 provider 响应。"""
+
         return {
             "model": self.model,
             "calls": self.calls,
@@ -104,6 +106,8 @@ class AtomicObligation:
 
 @dataclass(frozen=True)
 class AtomicObligationBatch:
+    """Supplier 的原子义务批次及其可核对 usage/fingerprint。"""
+
     obligations: tuple[AtomicObligation, ...]
     usage: FormationUsage
     prompt_fingerprint: str
@@ -121,7 +125,7 @@ class FormedRequirement:
     coverage_semantics: str = "single_authorized_document_all_groups_v1"
 
     def safe_projection(self) -> dict[str, Any]:
-        """安全投影只保存枚举、identity/hash 与 action facts。"""
+        """仅公开控制面事实，不把形成阶段的自由文本写入 artifact。"""
 
         return {
             # 模型产生的 obligation identity 可能携带题意，不能复用 M45 diagnostic 的旧
@@ -150,6 +154,8 @@ class RequirementFormationResult:
     failure_reason: str | None = None
 
     def safe_projection(self) -> dict[str, Any]:
+        """输出 formation 决策、usage 与不可逆指纹的安全投影。"""
+
         return {
             "formation_identity": FORMATION_IDENTITY,
             "decision": self.decision,
@@ -166,7 +172,10 @@ class AtomicObligationSupplier(Protocol):
 
     identity: str
 
-    def propose(self, formation_input: ExternalRequirementFormationInput) -> AtomicObligationBatch: ...
+    def propose(self, formation_input: ExternalRequirementFormationInput) -> AtomicObligationBatch:
+        """根据公开问题与已授权 Evidence 提议有限个原子义务。"""
+
+        ...
 
 
 def _document_text(evidence: tuple[Evidence, ...]) -> tuple[str, ...]:
@@ -187,6 +196,8 @@ def _is_source_span(*, question: str, value: str) -> bool:
 
 
 def _question_tokens(value: str) -> tuple[str, ...]:
+    """抽取去重后的问题 token，供 source-span 与最低信息量校验。"""
+
     return tuple(dict.fromkeys(_WORD_PATTERN.findall(value.casefold())))
 
 
@@ -219,6 +230,8 @@ class B4QuestionObligationSupplier:
         self._transport = transport
 
     def propose(self, formation_input: ExternalRequirementFormationInput) -> AtomicObligationBatch:
+        """执行一次 bounded Qwen 调用并解析为尚未获授权的义务提案。"""
+
         prompt = _build_prompt(formation_input)
         before_calls = self._transport.request_count
         before_tokens = self._transport.total_tokens
@@ -336,7 +349,10 @@ def _validate_obligation_payload(
             raise RequirementFormationError("formation_value_shape_invalid")
         expected_shape = _expected_value_shape(aspect=aspect, reason=reason)
         if value_shape != expected_shape:
-            raise RequirementFormationError("formation_value_shape_not_question_grounded")
+            # value shape 和 qualifier 一样只是模型的闭集标签；真正的 Evidence 形状要求由
+            # 服务端从题面 aspect/reason 确定。规范化不会放宽 Gate，rate→numeric 反而阻止
+            # 模型把数值问题降级成无需数值证据。
+            value_shape = expected_shape
         identity_payload = {
             'reason': reason,
             'aspect': aspect.casefold(),

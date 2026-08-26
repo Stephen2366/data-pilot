@@ -242,3 +242,42 @@ def test_product_executor_projects_same_b4_child_into_checkpoint_evidence(tmp_pa
     assert projection["source_consistent"] is True
     assert projection["child_ledger"]["termination"] == "answer_ready"
     assert evidence.provider_usage["b4_provider_requests_known_total"] == 4
+
+    class _InvalidComposer(_Composer):
+        """模拟真实 run 中 provider 返回后 support 合同失败的三题。"""
+
+        def compose(
+            self, *, context: GenerationContext, question: str,
+            confirmed_conditions: tuple[str, ...], max_claims: int,
+        ) -> tuple[ClaimDraft, ...]:
+            del question, confirmed_conditions, max_claims
+            self.request_count += 1
+            self.total_tokens += 10
+            self.attempts.append({"status": "success"})
+            item = context.evidence[0]
+            return (ClaimDraft(
+                text="unsupported",
+                support_text="not in evidence",
+                evidence_id=item.ref.evidence_id,
+                anchor=item.ref.anchor,
+            ),)
+
+    invalid_composer = _InvalidComposer()
+    invalid_executor = RAGProductExecutor(
+        composer=invalid_composer,
+        runtime_metadata=metadata,
+        trace_root=tmp_path / "invalid-traces",
+        answer_flow_factory=lambda: RAGAnswerFlow(
+            composer=invalid_composer,
+            evidence_acquirer=_B4FixtureAcquirer(),
+        ),
+        resolved_runtime_override=replace(
+            baseline,
+            runtime_family="phase4b-b4-external-product-harness:subgraph:v1",
+        ),
+    )
+    invalid = invalid_executor.execute(scenario=scenario, replicate=1)
+
+    assert invalid.reason_code == "composer_output_invalid"
+    assert invalid.rag_diagnostics["b4_acquisition"]["projection_status"] == "observed"
+    assert invalid.rag_diagnostics["b4_acquisition"]["source_consistent"] is True

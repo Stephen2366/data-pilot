@@ -17,6 +17,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """以稳定 UTF-8 格式写入可复核的 paired-run JSON。"""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -77,6 +79,8 @@ def _migrate_launch_failure(manifest: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
+    """校验冻结候选后，按同一 logical run 顺序执行两条 historical 臂。"""
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--profile-root", type=Path, required=True)

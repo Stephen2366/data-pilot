@@ -92,6 +92,8 @@ class AgentLoopResult:
 
 
 class _LoopState(TypedDict, total=False):
+    """LangGraph 内部状态；所有可持久化事实仍由显式合同对象承载。"""
+
     request: HarnessRequest
     task_state: TaskState
     requirements: tuple[EvidenceRequirement, ...]
@@ -162,11 +164,15 @@ def _dependency_status(requirement: EvidenceRequirement, observations: tuple[tup
 
 
 def _last_for(requirement: EvidenceRequirement, state: _LoopState) -> ToolObservation | None:
+    """返回某 requirement 最近一次观察，供 bounded loop 判断能否修复。"""
+
     matches = [item for req_id, item in state.get("observations", ()) if req_id == requirement.identity]
     return matches[-1] if matches else None
 
 
 def _repair_count(requirement: EvidenceRequirement, attempts: tuple[ActionAttempt, ...]) -> int:
+    """统计同一 requirement 已消费的 SQL 修复次数，防止无界重试。"""
+
     return sum(
         1 for item in attempts
         if item.requirement_identity == requirement.identity and item.action_id == "repair_sql_evidence"
@@ -228,6 +234,8 @@ def _safe_observation(observation: ToolObservation, *, runtime_identity: str | N
 
 
 def _stage_counts(observation: ToolObservation) -> tuple[int, int, int]:
+    """从安全 ledger 投影汇总候选、入选和生成可见 Evidence 数量。"""
+
     ledger = observation.ledger_projection or {}
     entries = ledger.get("evidence", []) if isinstance(ledger, dict) else []
     if not isinstance(entries, list):
@@ -308,6 +316,8 @@ def _document_keys(observation: ToolObservation) -> set[str]:
 
 
 def _requirement_covered(requirement: EvidenceRequirement, observation: ToolObservation) -> bool:
+    """只依据 typed Observation 判断单项 requirement 是否真正闭合。"""
+
     if observation.execution_status != "completed" or observation.safety_status != "passed":
         return False
     if requirement.kind == "sql":
@@ -318,6 +328,8 @@ def _requirement_covered(requirement: EvidenceRequirement, observation: ToolObse
 
 
 def _has_future_action(state: _LoopState) -> bool:
+    """判断当前状态是否仍存在一项合法且未消费的后续 Action。"""
+
     return _choose_action(state) is not None
 
 
@@ -328,6 +340,8 @@ def _termination(
     covered: tuple[str, ...],
     observations: tuple[tuple[str, ToolObservation], ...] = (),
 ) -> TerminationFact:
+    """构造稳定的终止事实，并区分 active 与 unresolved requirements。"""
+
     active = tuple(
         item.identity for item in requirements
         if _dependency_status(item, observations) is not False
@@ -514,6 +528,8 @@ def _step_node(state: _LoopState, runtime: Runtime[AgentLoopRuntime]) -> dict[st
 
 
 def _continue_or_end(state: _LoopState) -> Literal["step", "end"]:
+    """LangGraph 条件边：一旦生成 termination 就结束，否则继续一步。"""
+
     return "end" if "termination" in state else "step"
 
 

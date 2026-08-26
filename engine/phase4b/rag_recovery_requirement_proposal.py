@@ -33,7 +33,10 @@ class B4ProposalTransport(Protocol):
     request_count: int
     total_tokens: int
 
-    def complete(self, *, prompt: str, system_prompt: str | None = None, node_purpose: str) -> str: ...
+    def complete(self, *, prompt: str, system_prompt: str | None = None, node_purpose: str) -> str:
+        """执行一次关闭 thinking 的严格 JSON proposal 调用。"""
+
+        ...
 
 
 def make_b4_qwen_requirement_proposal_client(

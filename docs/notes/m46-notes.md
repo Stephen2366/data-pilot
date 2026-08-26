@@ -1,6 +1,6 @@
 # M46 Phase 4B B4 Bounded Agentic RAG 开发记录
 
-> 状态：开发中。本文只记录实施过程的事实、决策和验证证据；完整合同与验收口径见 `m46-plan.md`。
+> 状态：技术收工与 `finish-docs` 学习复盘均已完成，等待后续人工检查。本文只记录实施过程的事实、决策和验证证据；完整合同与验收口径见 `m46-plan.md`。
 
 ## Implementation checklist
 
@@ -10,9 +10,9 @@
 - [x] M46-D0：独立闭环 external requirement formation；方案 A、离线 replay 与补偿 `M46-P0R=continue` 已闭合。
 - [x] M46-D：external rewrite→expansion、procedure direct expansion、非 canonical direct expansion 与重授权的本地实现/回归已闭合；P2R/P3 真实 Probe 按用户指示暂缓并登记在项目外 todo。
 - [x] M46-E：已接入服务端 experimental strategy、API/Trace/Eval 同源投影、Agent Scenario v4 与 deterministic rehearsal；Pipeline 仍为默认/显式 baseline。
-- [ ] M46-F：在另行精确授权后运行 historical dev 60×2，冻结 candidate 与 reserve preflight。
-- [ ] M46-G：在第二次精确授权后首次解封 reserve，运行 60×2 paired A/B，并由用户决定默认策略。
-- [ ] M46-H：按 `finish-module` 审计 Probe、注释、验证、notes、state/changelog 与 B5 handoff。
+- [x] M46-F：historical v1/v2/v3 60×2 均已完成，最终 review=`no_go_revise_stop`；按用户确认的止损门不冻结 candidate。
+- [x] M46-G：按用户确认改为轻量 rollout；reserve 保持 sealed/not-run，Pipeline 默认，Subgraph server-controlled experimental。
+- [x] M46-H：按 `finish-module` 审计 Probe、注释、验证、notes、state/changelog 与 B5 handoff。
 
 ## 预注册 Live Dev Probe
 
@@ -135,12 +135,136 @@
 
 - 2026-08-26 16:03 M46-F historical v2 Formal Eval 已后台启动：hidden PowerShell PID=`52160`，logical run_id=`m46-historical-paired-20260826-160237`；使用 preflight v2 candidate=`26636b5c...68c8`、`diagnostic_dev/full`、arm order=`pipeline→subgraph`、timeout=120、retry0，并只在子进程设置代理 `127.0.0.1:7897`。运行根目录=`.agent_work/temp/m46-historical-paired/m46-historical-paired-20260826-160237/`；stdout=`runner.stdout.log`、stderr=`runner.stderr.log`、退出码=`runner.exitcode.txt`、完成标记=`runner.done`、paired manifest=`manifest.json`。当前状态：**运行中，待检查**；先看本次 done/exitcode，再读 manifest/checkpoint/artifact，不从旧 run marker判断、不换ID重跑。reserve仍应保持sealed，结果尚未产生。
 
+- 2026-08-26 M46-F historical v2 双臂完成、进入只读review：后台 exit=`0`，Pipeline/Subgraph inner各60 completed，paired manifest=`completed_pending_review`，无残留 active `failed_arm`，reserve=`sealed`。Pipeline artifact=`b01fa4e3...bfc4`、Gate=`571 passed / 112 failed / 37 not_observed`；Subgraph artifact=`7eb33e64...dc8a`、Gate=`375 / 126 / 219`；paired=`88e263f4...a622`、comparison=`4bfcea7d...e5bf`。60个paired verdict仍全部`insufficient`；三档passed为 basic `269→131`、core `272→154`、hard `134→90`。runner stderr只有两次既有TestClient deprecation，无Traceback/ERROR。
+- 2026-08-26 M46-F historical v2 child/usage review：formation v2 已把旧 run 的28个 unsupported current qualifier失败降到0，证明本轮修复越过原首个阻塞；child projection=`57 observed+same-source / 3 not_observed`，termination=`45 contract_failure / 12 answer_ready`，admission=`26 structured_supplier_failed / 21 structured_question_obligations / 6 deterministic_procedure / 4 typed_stop`。新失败簇为 value-shape不受题面支持19、observe Evidence contract15、question anchor非source span5、requested aspect非source span2、no unsupported requirement4；仍只有12次action且全部context expansion，没有rewrite。12个answer-ready随后均被Composer合同拒绝（11 invalid cardinality、1 invalid citation binding）；另3个Composer response通过transport后在AnswerFlow claim validation抛出`composer_output_invalid`，因没有形成`RAGAnswerResult`而同时丢失child Eval投影。最终60题仍全部no_answer：45 retrieval_unavailable、12 composer_unavailable、3 composer_output_invalid。
+- 2026-08-26 M46-F historical v2 usage边界：Pipeline known requests=`113`（53 retrieval+60 Composer）、known chat tokens=`132841`，request count闭合；Subgraph known lower bound=`123`（57 retrieval+51 formation+15 Composer）、known chat tokens=`102522`（formation95213+Composer7309），但3个execution child投影缺失，所以request count仍不完整；两臂embedding token均不可得，token total明确不完整。当前run足以证明 formation qualifier修复有效，也仍是总体historical no-go/revise；在补齐3个Composer异常投影和定位observe contract前，不冻结candidate、不申请reserve。
+
+- 2026-08-26 M46-F historical v2 后的有界本地修复决定：先修两个无需新真实调用即可确定的合同问题。其一，`RAGAnswerFlow._validate_claim_drafts()` 的 `composer_output_invalid` 改为形成 typed `RAGAnswerResult`，保留同次 Gate/child/evidence_validity/usage，再由既有 Adapter公开同一 reason；不放宽 support/citation validator。其二，19个 value-shape失败与已修 qualifier 属于同类模型闭集标签误分类：服务端已有 `_expected_value_shape()`，因此对合法枚举但与题面确定性 shape 不一致的值规范化为 server expected shape，而不是拒绝整批；这会把模型把 rate写成none的情况纠正为numeric，反而保留更强数值Evidence要求。未知枚举、source-span、answer-value、Evidence grounding、action/预算仍严格拒绝。15个observe Evidence contract failure当前安全artifact只有family、没有reason；不为定位擅自补发真实检索，先在本地异常投影中增加allowlisted Evidence reason供未来合法运行观察。
+
+- 2026-08-26 historical v2 后本地修复结果：`composer_output_invalid` 现由 AnswerFlow 返回完整 typed result，真实 API/Trace/Eval fixture证明 child projection仍为`observed/source_consistent=true`；support/citation拒绝不变。formation升为v3：合法但错误的value-shape标签由服务端规范化为deterministic expected shape，测试证明rate→none会恢复为numeric且无数值Evidence仍不算supported；B4 contract identity=`df8a96c4...1afe`。generic Subgraph catch 对 EvidenceContractError 只允许投影固定reason allowlist，未知reason收敛为`unknown`，不泄漏message/正文。聚焦=`35 passed, 1 existing warning`，M46全组+M41 Eval兼容=`61 passed, 1 existing warning in 3.15s`，compile/diff check通过。零provider preflight v3 candidate=`ab66f20d...2f78`、reserve仍sealed；它是新候选，historical v2只属于candidate `26636b5c...68c8`，不得继承授权或自动运行v3。
+
+- 2026-08-26 16:45 M46-F historical v3 最后一次候选运行前 checkpoint：用户明确授权按原计划继续，并将 candidate `ab66f20d...2f78` 作为最后一次 historical 60×2；若结果仍整体不佳，则停止围绕同一能力反复调参，转为待用户确认的作品集轻量收口。logical run_id=`m46-historical-paired-20260826-164511`，B4 contract=`df8a96c4...1afe`，profile=`e8783fe0...75fa2`、semantic=`9aec12c8...e20`，固定 `diagnostic_dev/full` 60题×Pipeline/Subgraph两臂、arm order=`pipeline→subgraph`、retry0、timeout120。结构上限 Pipeline120/Subgraph300/合计420 provider attempts，observed token ceiling≤2,880,000；不访问 held-out/all/逐题 reserve，不自动重跑、换ID、改candidate或切默认。启动前 HEAD=`417a7888911f`，M46相关dirty文件为本模块代码、合同、测试、报告和状态文档；已有验证=`61 passed, 1 existing warning`、compile/diff check通过，preflight v3=`ready_for_historical_authorization`、provider calls=0、reserve read=0/sealed。完成后必须先读 done/exit/manifest/artifact再作结论，`completed_pending_review`不等于质量通过。
+
+- 2026-08-26 16:46 M46-F historical v3 已后台启动：hidden PowerShell PID=`54088`；运行根目录=`.agent_work/temp/m46-historical-paired/m46-historical-paired-20260826-164511/`，worker=`runner-worker.ps1`，stdout=`runner.stdout.log`、stderr=`runner.stderr.log`、exit=`runner.exitcode.txt`、完成标记=`runner.done`、paired manifest=`manifest.json`。启动后只读核对显示进程存活、manifest=`running`、completed_arms为空、candidate=`ab66f20d...2f78`、reserve=`sealed`。当前状态：**运行中，待检查**；不得提前写作 completed/通过，也不得因为前台等待或旧 run marker 自动重跑。
+
+- 2026-08-26 17:04 M46-F historical v3 双臂完成：`runner.done=true`、exit=`0`，Pipeline/Subgraph 各60 completed，paired manifest=`completed_pending_review`、reserve=`sealed`。Pipeline artifact=`cd70c2a8...a8963`、Gate=`598/112/10`；Subgraph artifact=`578db718...ab42`、Gate=`393/139/188`；paired=`f6a5e1a2...6f4d`、compare=`a9175c91...e5a6`。paired verdict=`57 insufficient / 3 tie`，三档passed均退化：basic `269→141`、core `289→162`、hard `150→90`。运行日志无Traceback/ERROR，只有正常请求日志与既有warning；这证明运行完整，不证明质量通过。
+- 2026-08-26 M46-F historical v3 闭集 review：60条Subgraph child projection全部observed/source-consistent，request count闭合。v3精准消除了value-shape失败`19→0`，answer-ready `12→26`，26次context expansion新增43条Evidence；但最终仍为`60/60 no_answer`（34 retrieval_unavailable、23 composer_unavailable、3 composer_output_invalid）。26个answer-ready全部被Composer拒绝（22 invalid cardinality、1 invalid citation binding、3 typed output invalid）；34个contract failure已精确定位为Evidence run mismatch19、question anchor非source span7、no unsupported requirement6、requested aspect非source span2。已知requests Pipeline/Subgraph=`120/139`，已知chat tokens=`133581/110622`，embedding token均不可得。review=`eval/reports/m46/m46-historical-paired-20260826-164511-review.md`，结论=`no_go_revise_stop`：不冻结candidate、不申请reserve、不再围绕同一失败簇追加historical调参；Pipeline保持默认、Subgraph保持experimental，下一步等待用户确认修订M46完成门后作品集轻量收口。
+
+- 2026-08-26 M46轻量收口决策与实现：用户明确确认修订原C6/C7完成门，并要求把未来修复包写入仓库外`D:\.Work\Practice\Python-Practice\DevProbe-todo.md`。plan现以historical closed-set no-go、Pipeline默认、Subgraph server-controlled experimental、no auto fallback、reserve sealed/read0、quality not established作为合法终局；未来重开顺序固定为Evidence run mismatch→Composer structured output→formation grounding，必须新假设/新candidate/新授权。B4 machine contract新增内容绑定`rollout`，identity更新为`ebb06f82...f164`；调用方仍只经过`DocumentEvidenceAcquirer` seam，没有把决策逻辑散到AnswerFlow。首轮聚焦pytest因sandbox无法清理`.agent_work/temp/m46-light-closure-focused`而在session finish报`WinError 5`，输出`.E.E........E`、exit1；当前不把它记为代码失败或通过，按同命令沙箱外重验。
+
+- 2026-08-26 M46-H 注释与聚焦验证：逐文件 AST 审计覆盖23个M46相关代码文件、257个类/函数/方法；模块说明和符号职责注释均闭合，复杂控制面原有中文分层/★注释保留，`git diff --check`通过。轻量收口首组沙箱外重验为`13 passed, 1 existing warning`；补齐注释后，全部`test_m46_*` + M41 external suite/review compatibility + M42 reserve合同为`57 passed, 1 existing warning in 2.47s`。该组显式覆盖B4 rollout identity、Pipeline默认/Subgraph experimental、无自动fallback与reserve sealed合同；未读取逐题reserve、未调用provider/Milvus。沙箱内同组因Windows pytest basetemp cleanup `WinError 5`退出，保留为环境故障，不冒充代码失败。warning仍是既有Starlette/httpx TestClient deprecation。
+
+- 2026-08-26 M46-H Probe审计：P1在business纵向链完成后按时`passed/continue`；D0首次P0 failed后，获授权的P0R在动作接线前`passed/continue`；P2真实执行为`failed/revise`，后续P2R/P3按用户决定暂停并写入仓库外todo。P3明确记为`not_executed/user_deferred`，绝不倒填passed；修订后的experimental-only完成门对P3作显式豁免。三代historical属于Formal Eval分账，不冒充Live Dev Probe；reserve始终sealed/read0/not-run。
+
+- 2026-08-26 17:32 M46-H 全仓验证启动前checkpoint：A–G已按轻量终局闭合；机器rollout=`ebb06f82...f164`，Pipeline默认/Subgraph experimental/no-auto-fallback，reserve sealed/read0/not-run。已完成注释审计257/257、`compileall`、`git diff --check`和聚焦`57 passed, 1 existing warning`；已知风险只有Subgraph historical no-go及仓库外重开包，不能宣称质量提升。待完成事项为全仓pytest、结果回读、最终notes/state/changelog与B5 handoff。全仓预计超过2分钟，按runbook后台运行；启动后必须检查done/exit/log，未检查前不得宣称M46完成。
+
+- 2026-08-26 17:33 M46-H 全仓pytest已后台启动：hidden PowerShell PID=`53380`，worker=`.agent_work/temp/m46-finish-full-20260826-173213/runner-worker.ps1`，日志=`pytest.log`，退出码=`pytest.exitcode.txt`，完成标记=`pytest.done`，basetemp=`basetemp/`。启动后只读核对为进程存活、log已创建、done/exit尚未出现；当前状态为**运行中，待检查**，不得提前记录通过或M46完成。
+
+- 2026-08-26 M46-H 首次全仓结果与兼容修复：后台done已出现、exit=`1`，结果=`621 passed / 5 failed / 1 warning in 570.22s`。5个失败全部来自M33/M34旧Pipeline测试仍要求Composer坏结构抛`AnswerFlowContractError`，而M46为保留B4 child ledger把该行为全局改成typed no-answer；这是聚焦M46测试未覆盖到的兼容回归，阻塞收工。修复收窄为：只有`evidence_validity`明确携带B4 `subgraph`账本时才返回typed `composer_output_invalid`并保留同次Trace/Eval投影；旧Pipeline继续抛原异常，support/citation validator本身不放宽。该修复保持既有外部合同和M46 experimental seam，不改变rollout/default/reserve决策。下一步先重跑5个失败及M46 projection，再按规则重新启动一次全仓回归。
+
+- 2026-08-26 17:45 M46-H 兼容修复验证与全仓重验checkpoint：M33 AnswerFlow + M34 Enterprise Composer + M46 B4 Eval projection聚焦=`26 passed, 1 existing warning in 1.55s`，证明旧Pipeline仍抛严格异常、B4 Subgraph仍保留typed result/child账；sandbox首跑只因basetemp cleanup `WinError 5`退出，沙箱外同组通过。`compileall`与`git diff --check`再次通过。代码行为已变化，首次全仓失败结果不能复用；按长任务规则后台重跑全仓，待done/exit/log检查后再进入技术档案和finish-docs。
+
+- 2026-08-26 17:46 M46-H 全仓pytest第二次已后台启动：hidden PowerShell PID=`73772`，worker=`.agent_work/temp/m46-finish-full-r2-20260826-174535/runner-worker.ps1`，日志=`pytest.log`，退出码=`pytest.exitcode.txt`，完成标记=`pytest.done`，basetemp=`basetemp/`。启动核对为进程存活、log已创建、done尚未出现；当前**运行中，待检查**。只有本次通过后才能完成finish-module，再开始finish-docs。
+
+- 2026-08-26 M46-H 第二次全仓结果：done已出现、exit=`1`，`625 passed / 1 failed / 1 warning in 590.35s`。唯一失败为未被M46修改的`test_m31_release.py::test_faulty_replace_that_corrupts_target_then_raises_still_restores_old_pointer`，异常链明确是恢复旧pointer时Windows `os.replace` 对pytest临时目录返回`WinError 5`，不是断言或M46行为失败。同一用例随后在沙箱外独立复现=`1 passed in 0.52s`；结合第二次全仓其余625项已通过，当前626项均已有同一代码下通过证据，无需第三次盲目全仓重跑。warning仍为既有Starlette/httpx TestClient deprecation，与M46无关。
+
+## 模块名称与改动文件清单
+
+- **模块**：M46 / Phase 4B B4 Bounded Agentic RAG；起始commit明确为`08b0333`，中途有用户创建的部分提交`417a788 M46-part1-20260826-160237`，最终范围由`08b0333..HEAD`、当前dirty和untracked三者归并。
+- **产品/API与组装**：`app/api/query.py`、`app/core/config.py`、`app/main.py`、`app/schemas/agent.py`、`engine/harness/adapters.py`、`engine/trace/recorder.py`。
+- **B4核心合同与运行时**：`domain_pack/phase4b/b4_contracts*.json`，`engine/phase4b/{agent_loop,b4_contracts,external_requirement_formation,rag_recovery_requirement_proposal,rag_strategy,rag_subgraph,scenario_projection}.py`，`engine/rag/{answer_flow,evidence_acquisition}.py`。
+- **Eval与运行脚本**：`eval/agent_scenario_v4_contracts.py`、`eval/rag_b4_projection.py`、`eval/rag_e2e_runtime.py`、`eval/run_rag_external_eval.py`，`scripts/{preflight_m46_historical_paired,probe_m46_b4_external,probe_m46_d0_requirement_formation,run_m46_historical_paired}.py`。
+- **测试**：全部`tests/test_m46_*.py`；兼容回归还实际覆盖M31–M45及全仓deterministic pytest。
+- **证据与文档**：`eval/reports/m46/`下三代historical的preflight/artifact/report/triage/compare/paired/final review，`docs/notes/m46-{plan,notes}.md`，以及Phase 4B changelog、`AI_CONTEXT.md`、`eval-baselines.md`、`rag-current-state.md`。`.codex/temp_work/m46-*`是部分提交中已有的安全Probe证据；仓库外`D:\.Work\Practice\Python-Practice\DevProbe-todo.md`不进入Git范围。
+
+## 关键决策与取舍
+
+1. **子循环藏在Document Evidence Acquisition seam内部。** 选择Pipeline/Subgraph两个adapter向AnswerFlow返回同一种结果，而不是把rewrite/expansion抬成顶层Agent Action。这样顶层仍只消费一次Knowledge action，RAG内部复杂度、child预算和stop不会形成第二套父循环；删除该seam会让acquisition复杂度重新散回AnswerFlow。
+2. **模型只提议requirement，确定性代码拥有执行权。** 用户确认G46-1方案A：procedure结构先确定性形成；开放问题才允许Qwen提出最多两个question-grounded atomic obligations。source-span、value shape、qualifier、coverage、action allowlist、ACL和预算仍由本地validator裁决，失败为零动作stop；未选方案是继续依赖qst/gold手写recipe或让模型自由生成动作。
+3. **实现与默认化分离。** 原计划候选是Subgraph通过historical后冻结并进入sealed reserve；三代60×2都no-go后，用户确认轻量终局：Pipeline默认、Subgraph server-controlled experimental、无自动fallback、`quality_claim=not_established`，reserve保持sealed/read0/not-run。风险是默认用户暂时得不到多步恢复收益；好处是保留完整作品集结构和真实评测故事，同时不拿不稳定能力冒充质量提升。
+4. **旧合同兼容优先。** 收工全仓发现B4为保留child ledger而把所有Composer坏结构改成typed no-answer，破坏M33/M34旧Pipeline异常合同；最终只在明确携带B4 subgraph账时启用typed result，旧Pipeline继续抛原异常。没有放宽support/citation validator，也没有用临时fallback遮蔽失败。
+
+## 阶段1注释小结
+
+- 完整审查23个M46相关代码文件、257个类/函数/方法；补齐所有缺失docstring，最终缺失数0。
+- 深化了三个核心概念：父/子预算分账、requirement formation的模型提议/本地裁决边界、B4-only typed failure投影为何不能扩散到旧Pipeline。
+- 对LangGraph observe/execute/route节点、Eval closed-world投影、usage完整性、Evidence reauthorization和兼容分支补了中文职责/防坑说明；复杂流程原有步骤分隔与★重点保留，未为凑数量滥加注释。
+
+## 阶段2验证快照
+
+| 验证 | 真实结果 | 结论 |
+| --- | --- | --- |
+| 收口聚焦：全部M46 + M41 external兼容 + M42 reserve | `57 passed, 1 warning in 2.47s` | rollout、默认/experimental、reserve sealed和主要合同通过 |
+| 收工发现的兼容修复聚焦：M33/M34/M46 projection | `26 passed, 1 warning in 1.55s` | 旧Pipeline严格异常与B4 typed child投影同时成立 |
+| 第一次全仓 | `621 passed, 5 failed, 1 warning in 570.22s` | 真实发现并阻塞了B4行为扩散，已修复；不能算通过 |
+| 第二次全仓 | `625 passed, 1 failed, 1 warning in 590.35s` | 唯一失败为M31临时目录`os.replace`的`WinError 5`，无M46断言失败 |
+| M31唯一环境失败项独立复现 | `1 passed in 0.52s` | 与第二次全仓的625项合并，626项均有当前代码下通过证据 |
+| 静态检查 | `compileall=passed`，`git diff --check`通过 | 无语法或空白错误；LF→CRLF是Git提示，不是diff错误 |
+
+共同warning是既有Starlette/httpx TestClient deprecation，不影响M46。所有收工pytest均为deterministic，无provider、Milvus、数据库写入或reserve逐题访问。
+
+## Live Dev Probe开发时间线（最终审计）
+
+- **适用**：M46修改真实RAG/Milvus、proposal、API task与外部runtime，因此预注册P1/P0/P2/P3。详细逐attempt的时间、代码阶段、HEAD/dirty、依赖、usage、Response/Trace、失败层和决定均已在上方 contemporaneous checkpoint保留，本节只作最终索引。
+- **P1 / after C、before D**：真实business release/caller/ACL与API task纵向链，零remote provider；`passed/continue`，父Knowledge action=1，child initial+rewrite闭合，放行external切片。
+- **P0→P0R / D0 formation门**：P0先`failed/revise`；按授权修复supplier/validator后P0R=`passed/continue`，在external action接线前闭合。失败attempt未删除。
+- **P2及补偿链**：真实qst_0420从环境不可用、usage丢失、proposal reject到runtime failure形成连续`revise`证据，并推动安全持久摘要、usage失败路径、D0 deep module和后续historical候选；最终P2仍为`failed/revise`，没有倒填成功。
+- **P3**：`not_executed/user_deferred`。用户决定暂停后续Dev Probe并写入仓库外todo；修订plan只对Pipeline-default/Subgraph-experimental终局豁免此完成门。它不是passed，也不证明procedure direct expansion真实效果。
+- **Formal Eval分账**：historical v1/v2/v3均是用户逐次精确授权的60×2 Formal Eval，不冒充Probe；最终v3=`no_go_revise_stop`。reserve不是Probe也未运行，始终sealed/read0。
+
+不存在`development_probe_missing`：计划时点发生的真实attempt与用户后续显式暂停/修订完成门均有当时记录；未在finish-module补跑真实链路冒充开发期证据。
+
+## 参考资料
+
+- 阅读`docs/phase4-reference.md`及其ARAG、DB-GPT等参考源码指针；借鉴parent/child retrieval分权、conditional edge停止、结构化引用与评测分层。
+- 阅读LangGraph Graph API/Subgraphs相关资料与本机1.1.2实现；借鉴私有subgraph state和显式输入/输出映射，不把framework recursion limit或checkpoint冒充业务预算/durable state。
+- 复用M45 action-card lineage、M41 RAG Eval lifecycle和M42 reserve污染状态机；未照搬自由LLM tool call、MessagesState大状态、gold/title驱动动作、自动fallback或模型输出直接作为安全事实。
+
 ## Handoff
 
-- **M46 未完成。** P1 已通过；external P2 从未 `continue`。禁止 P2R9、P3、M46-E、historical/reserve Formal Eval、默认切换和 `finish-module`。
-- **核心事实：** M45 的 qst_0420 action card 依赖 scenario-specific signed slots；它只证明 action executor，不证明产品能从开放问题形成 requirement。当前 M46 的 proposal 多次未形成 slot；新增的 `evidence_gap_v1` 属于未验证实验，P2R8 虽准入但以 `subgraph_runtime_failure` 停在 action 前。
-- **当前计划：** M46-D0 方案 A 本地合同/实现/离线 replay 已闭合；下一门是上述精确 `M46-P0`。未获出站确认前禁止运行；P0 非 `continue` 时继续冻结 M46-D/P2/P3/E。
-- **实验代码需重新审查：** 当前候选为 `external_requirement_formation.py` + `ExternalFormationSlotProvider`；旧 `evidence_gap_v1` 已从当前合同/代码撤回，历史 P2R证据保留。最终聚焦 `17 passed`、受影响回归 `94 passed`，均只有既有 deprecation warning。
-- **证据入口：** 本文件的 P2R3–P2R8 记录和 `.codex/temp_work/m46-p2r*-safe.json`；P2R8 的安全结果为 `deterministic_evidence_gap_v1/eligible`、proposal=0、`subgraph_runtime_failure`。reserve 始终 sealed。
-- 2026-08-25 M46-P2R8 执行前登记：用户明确同意执行 P2R8，并同意向 embedding/Qwen 发送最小授权 Evidence。将只重验 `qst_0420` 的新 B4 identity=`e4dc0a0d...86b0`，验证 value redaction 后 deterministic `evidence_gap_v1` 是否准入；同 profile/semantic、caller/ACL、purpose与禁区，不读 gold/title/expected docs、不触碰 reserve/M34/default/数据写入。最多4新 provider attempts（initial、最多2 rewrite、必要时1 Qwen）；若 deterministic 命中应为 proposal/model=0。按用户要求以持久安全摘要路径 `.codex/temp_work/m46-p2r8-safe.json` 前台直接执行。
-- 2026-08-25 M46-P2R7 执行前登记：用户明确同意执行 P2R7，并同意向 embedding/Qwen 发送最小授权 Evidence。它是只为补齐 P2R6 runner 漏投影而进行的一次补偿；同一 `qst_0420`、新 B4 identity=`cecfbf2b...d1a9`、同 profile/ACL/purpose/禁区，最多4新 provider attempts，不读 gold/title/expected docs、不触碰 reserve/M34/default/数据写入。输出仍写 `.codex/temp_work/m46-p2r7-safe.json`；鉴于本次是短 Probe 且 runner 已持久化安全摘要/异常结果，按用户要求前台直接执行，不作为后台任务启动。
+- **已完成且可依赖**：B4内容绑定合同与`DocumentEvidenceAcquirer` seam；等价Pipeline adapter；有界Subgraph的observe→execute→stop、父子预算、Evidence merge/reauthorize、business/external slot形成、Agent Scenario v4及API/Trace/Eval同源child账。机器rollout固定Pipeline默认、Subgraph experimental、no-auto-fallback、quality未建立。
+- **未完成与风险**：historical v3的Subgraph仍`60/60 no_answer`；34个child contract failure含Evidence run mismatch19，26个answer-ready全部被Composer严格合同拒绝。未证明总体正确率、Reliability、吞吐、多worker或默认收益；P3未执行，reserve未运行。
+- **必须延续的边界与决策门**：reserve`f70c5fca...e505`保持sealed/read0/not-run；不得用旧candidate/run/授权重跑，不得放宽support/citation/ACL或用qst/gold/title特判。未来重开必须先提出Evidence run identity、Composer structured output或formation grounding的新假设，形成新identity并先过historical，再由用户另行授权reserve。
+- **下一模块入口与必读指针**：M47/B5应从`engine/phase4b/task_boundary.py`、TaskState/turn boundary、B4 termination/child ledger和当前rollout合同开始；只在任务边界持久化/恢复，不能恢复RAG Subgraph program counter。先读本notes、`m46-plan.md`、`AI_CONTEXT.md`和Phase4B roadmap对应B5章节；回归入口保留M43/M44 task与M46合同测试。
+
+## State impact
+
+- **已更新**：`eval-baselines.md`（v2/v3 historical数字、可比性、非长期基线）、`rag-current-state.md`（Pipeline默认/Subgraph experimental、no fallback、reserve sealed与重开门）、`AI_CONTEXT.md`（当前rollout与活跃坑）、Phase4B changelog（实验与最终模块档案）。
+- **已检查、无需修改**：`runbook.md`/`runbook-rag.md`，现有CLI、selector、授权与RAG运行命令未改变；`schema-retrieval-milvus-embedding.md`，未切embedding/collection/index；`database-current-state.md`，未改schema/seed/指标/数据库事实。
+
+## finish-module技术档案交付清单
+
+- [x] 模块最终文件范围已与Git状态、起始commit `08b0333`、阶段提交 `417a788` 和notes核对；未把用户的其他改动纳入M46说明。
+- [x] notes已固化关键决策、注释小结、验证快照、参考资料、Handoff和State impact。
+- [x] Live Dev Probe适用性与时间线已审计；不存在`development_probe_missing`或Formal Eval混算。
+- [x] 已读取`CHANGELOG_INDEX.md`并按索引写入Phase4B完整模块记录。
+- [x] `AI_CONTEXT.md`已更新并清理失效状态。
+- [x] 所有命中的专项state均已完整检查并更新或记录无需修改理由。
+- [x] 新结论与历史、代码、测试、Eval、默认配置和各state无冲突或重复权威定义。
+- [x] changelog新章节、`AI_CONTEXT.md`和所有修改过的专项state已完整回读。
+- [x] `git diff --check`及本轮文档链接检查通过；plan、notes、Phase 4B roadmap、Phase 4参考、最终historical review、仓库外todo及所有修改过的state路径均存在。
+
+## 收工前阶段性Handoff（历史）
+
+- **M46 A–G 已按修订plan闭合，H正在执行。** Pipeline仍为产品默认/显式baseline，Subgraph仅server-controlled experimental；candidate不冻结，reserve不解封。
+- **最新真实证据：** run `m46-historical-paired-20260826-164511` 两臂各60 completed；value-shape失败清零、child projection 60/60、answer-ready增至26，但Subgraph最终仍`60/60 no_answer`，paired=`57 insufficient / 3 tie`，三档均退化。闭集review=`no_go_revise_stop`。
+- **当前代码与证据：** B4 historical candidate仍为`ab66f20d...2f78`，轻量rollout contract为`ebb06f82...f164`；收口聚焦回归`57 passed, 1 existing warning`，注释审计与diff check通过。review见`eval/reports/m46/m46-historical-paired-20260826-164511-review.md`。不得把局部修复写成质量提升。
+- **运行边界：** reserve `f70c5fca...e505` 继续sealed、未读取逐题内容；P2R/P3仍在仓库外todo。不得自动运行新的historical/reserve或切换默认。
+- **当时待完成：** 启动并检查全仓后台回归；随后固化最终notes/state/changelog与B5 handoff。该事项现已完成，最终结论以上方正式Handoff和验证快照为准。
+
+## finish-module最终一致性检查
+
+- 2026-08-26：最终`git diff --check`通过，仅有Git的LF→CRLF提示；必需文档、最终historical review和仓库外`DevProbe-todo.md`路径全部存在。
+- 第二次全仓的625项通过证据与唯一M31环境失败项的独立通过证据共同覆盖当前626项；没有把环境失败改写成一次完整绿测，也没有重复启动第三次长回归。
+- 技术状态、评测账本、RAG现状与Phase 4B历史均统一到轻量终局：Pipeline默认、Subgraph仅实验、无自动fallback、质量未建立、candidate不冻结、reserve sealed/read0/not-run。
+
+## finish-docs执行清单
+
+- [x] 已确认本notes中最新`finish-module技术档案交付清单`全部为`[x]`，技术收工先于学习复盘完成。
+- [x] 已读取M46 notes、当前技术状态、CHANGELOG索引与Phase 4B的M46模块记录，并核对Git改动范围。
+- [x] 已按Track A在`docs/dev-log.md`追加M46记录，未修改既有模块内容。
+- [x] 已覆盖大白话、实现主线、新概念、代码阅读路线、设计要点、项目亮点、面试追问、验证与下一步。
+- [x] 所有数字、结论、默认行为、未证明边界和后续入口均可从M46技术档案追溯。
+- [x] 已完整回读新增M46记录（195行），术语首次解释、段落长度、数字表格和面试表述均已检查。
+- [x] `finish-docs`期间五个技术state/changelog文件SHA-256前后完全一致；该阶段仅修改`docs/dev-log.md`与本notes。
+- [x] 最终`git diff --check`通过（仅Git的LF→CRLF提示），学习复盘具备可交付状态。

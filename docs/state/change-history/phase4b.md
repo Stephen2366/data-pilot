@@ -19,6 +19,24 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M46 Phase 4B B4 Bounded Agentic RAG与轻量rollout（2026-08-26）
+
+- **改动范围**：起始commit明确为`08b0333`，期间有部分提交`417a788 M46-part1-20260826-160237`。模块新增内容绑定B4合同、Document Evidence Acquisition seam、Pipeline/Subgraph两个adapter、有界RAG子图、external requirement formation与专属proposal outbound、父子预算/Evidence重授权、Agent Scenario v4、API/Trace/Eval同源投影、paired runner/review和M46测试/报告；没有修改数据库schema/seed、active release、embedding/collection、Composer安全validator或客户端策略接口。
+- **关键设计与用户决策**：RAG恢复循环放在一次父级Knowledge action内部，避免顶层Agent与RAG形成双循环；模型最多提出两个question-grounded atomic obligations，source-span/value/coverage/action/ACL/预算仍由确定性代码裁决。三代historical 60×2均no-go后，用户确认作品集轻量终局：Pipeline保持默认，Subgraph保留server-controlled experimental，不启用自动cross-strategy fallback，`quality_claim=not_established`；candidate不冻结，decision reserve保持sealed/read0/not-run。未来重开必须新假设、新candidate、新授权，仓库外todo固定Evidence run identity→Composer structured output→formation grounding的优先级。
+- **真实证据**：P1 business纵向链`passed/continue`；D0的P0失败后P0R=`passed/continue`；P2为`failed/revise`，P3按用户决定`not_executed/user_deferred`且不倒填passed。最终historical v3 `m46-historical-paired-20260826-164511`两臂各60 completed，Gate `598/112/10→393/139/188`、paired `57 insufficient / 3 tie`、三档均退化；Subgraph虽把answer-ready提高到26并新增43条Evidence，最终仍`60/60 no_answer`。失败为Evidence run mismatch19、formation grounding15及26个answer-ready全部被严格Composer合同拒绝；因此review=`no_go_revise_stop`，不是质量胜出或长期基线。
+- **参考资料**：依据`docs/phase4-reference.md`定点复核ARAG parent/child retrieval与conditional edge、DB-GPT structured references/evaluator，以及LangGraph Subgraphs/Graph API；借鉴私有子图state、显式映射、结构化引用和评测分层。未照搬自由LLM tool call、MessagesState大状态、framework recursion/checkpoint冒充业务预算或durable state、gold/title动作选择和失败后自动fallback。
+- **验证快照**：注释审计23个代码文件/257个符号，缺失0；收口聚焦`57 passed, 1 warning`，兼容修复聚焦`26 passed, 1 warning`，compileall/diff check通过。首次全仓`621 passed / 5 failed`真实发现B4 typed failure扩散到M33/M34旧Pipeline，修复为仅B4 subgraph账启用；第二次全仓`625 passed / 1 failed`，唯一失败是未修改的M31 fault-injection在pytest临时目录`os.replace`触发Windows `WinError 5`，同项沙箱外独立`1 passed`。warning为既有Starlette/httpx deprecation；626项均有当前代码下通过证据。
+- **遗留/后续**：未证明Subgraph总体正确率、Reliability、吞吐、多worker或默认收益；P3与真实decision reserve均未运行。M47/B5消费稳定TaskState/turn boundary、B4 termination/child ledger和最终rollout，只在任务边界持久化/恢复，不能恢复RAG Subgraph program counter。M46后续质量修复不属于B5，必须按仓库外重开包另立计划。
+
+### [实验] M46/B4 historical Pipeline/Subgraph paired v2 仍为 no-go（2026-08-26）
+
+- **范围与身份**：按用户精确授权运行 external `diagnostic_dev/full` 60 题 × Pipeline/Subgraph 两臂，logical run `m46-historical-paired-20260826-160237`，candidate `26636b5c...68c8`、B4 contract `8915f0f0...ddf7`；两臂各 60 次均 completed，paired manifest 为 `completed_pending_review`，reserve `f70c5fca...e505` 全程 sealed、未读取逐题内容。Pipeline artifact `b01fa4e3...bfc4`，Subgraph `7eb33e64...dc8a`，paired `88e263f4...a622`，comparison `4bfcea7d...e5bf`。
+- **结果与失败结构**：Pipeline Gate `571/112/37`，Subgraph `375/126/219`，60 个 paired verdict 全部 `insufficient`；basic/core/hard passed 分别 `269→131 / 272→154 / 134→90`。formation v2 已把旧候选的 28 个 unsupported current qualifier 降到 0，但 Subgraph 仍为 45 contract failure、12 answer-ready、3 child projection missing；主要新失败簇为 value-shape 19、observe Evidence contract 15，12 个 answer-ready 又全部被严格 Composer 合同拒绝。最终 60 题均 no-answer，因此只能判定 historical `no-go/revise`，不能冻结 candidate、解封 reserve或切换默认。
+- **Usage 边界**：Pipeline 已知 requests `113`、chat tokens `132841`；Subgraph 已知下限 requests `123`、chat tokens `102522`，但 3 条 child projection 缺失，且两臂 embedding tokens 均不可得，所以禁止将这些数字解释为完整总成本。
+- **后续有界修复**：本地已把 `composer_output_invalid` 收敛为保留 child ledger 的 typed result；formation v3 对合法但错误的 value-shape 枚举使用服务端 deterministic expected shape 规范化；Evidence 异常只投影 allowlisted reason。B4 contract 更新为 `df8a96c4...1afe`，新 candidate `ab66f20d...2f78` 仅完成零 provider preflight，受影响回归 `61 passed, 1 warning`。它是新候选，不继承 v2 授权；是否再次运行 historical 或调整 M46 完成路线须另行决定，当前 Pipeline 继续默认、Subgraph 仅 experimental、reserve 继续 sealed。
+
+> ⚠️ 注（同日最后一次 historical v3）：用户授权把 `ab66f20d...2f78` 作为最后一个 historical candidate；run `m46-historical-paired-20260826-164511` 两臂各60 completed、reserve sealed。v3 消除了 value-shape `19→0` 并把 child projection补齐至60/60，answer-ready `12→26`；但26题仍全部被严格Composer合同拒绝，另有Evidence run mismatch19等34个contract failure，最终Subgraph仍为`60/60 no_answer`。paired=`57 insufficient / 3 tie`，Gate `598/112/10→393/139/188`，三档均退化；review结论=`no_go_revise_stop`。按运行前止损约定，不冻结candidate、不解封reserve、不再追加同类historical调参；用户随后已显式修订完成门并确认Pipeline默认/Subgraph experimental的轻量终局，详见上方M46模块档案。
+
 ### [验收] M45/B3 accept-module 验收通过（2026-08-25）
 
 - 9 项门禁全部通过：废弃口径清零；目录地图一致且 AGENTS/CLAUDE 内容同步；进度状态一致；最新 changelog/dev-log 结构完整；注释合规（引擎/核心文件逐个通读、其余抽样，无 ❌ 标准命中）；单一事实源抽查（C2/C4/C5 代码合同、B0 候选卡、reserve sealed）闭合；裁剪验证 `106 passed, 1 warning in 3.71s`；AI_CONTEXT 事实快照同步；state 文档交叉一致。M45 已在 AI_CONTEXT 记录为"已验收通过"，M46/B4 可进入 plan 制定；M46 reserve 继续 sealed。

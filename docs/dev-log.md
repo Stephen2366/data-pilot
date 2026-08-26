@@ -3689,3 +3689,194 @@ Get-Content eval/reports/m45/m45-b3-continuation-review.json
 
 本模块**暂无独立可交互的产品入口**。原因是 M45 刻意只完成 diagnostic admission（诊断准入），没有把 recovery action 接入普通 `/api/query` 或 B2 Agent Loop；此时启动 FastAPI 看不到 M45 自动补救是符合边界的。当前最直观的体验方式是阅读 v4 review，或在不调用 provider 的前提下按上述命令查看离线复演入口。真正可从 Swagger 触发的 Agentic RAG 效果属于 M46/B4。
 
+## ★ M46 Phase 4B B4：把 RAG 补救动作装进有预算、有刹车的子图
+
+（2026-08-26）
+
+**简述**：M46 把 M45 验证过的 query rewrite（查询改写）和 context expansion（上下文扩展）接进产品 RAG，形成一条 **bounded RAG Subgraph（有界 RAG 子图）**。它具备父子预算、证据合并、重授权、停止原因和 API/Trace/Eval 同源账本；但真实历史集 A/B 没有证明答案质量收益，所以最终保持 Pipeline（原流水线）为默认，Subgraph 只作为服务端实验策略。
+
+### 先用大白话讲
+
+把普通 RAG 想成调查员只去资料室一次：拿到几份材料，就交给撰稿人写答案。M46 的新子图允许调查员发现“证据不够”后，再做有限次数的补查：换一个更聚焦的问题，或沿同一份文档继续翻几页，然后把新增材料重新检查权限、身份和支持关系。
+
+关键不是“多查几次”，而是每一步都要记账。总任务只批准一次 Knowledge action（知识动作），子图内部再用自己的 child budget（子预算）管理初查、改写和扩展；任何重复、越权、无进展、预算耗尽或 Composer（答案合成器）拒绝都必须停止并留下原因。
+
+代码结构和控制合同已经闭合，但最终 60 题双臂历史诊断显示：Subgraph 虽然让可进入合成阶段的题从 12 增到 26，最终仍有 60/60 没生成可交付答案。因此系统没有偷偷切默认，也没有在失败后自动回退再跑 Pipeline；产品继续走稳定旧路径，实验能力保留给以后按新假设修复。
+
+### 这次做了什么
+
+M46 解决的核心矛盾是：**Agentic RAG 需要根据证据继续行动，但继续行动不能绕过权限、预算、运行身份和质量门**。
+
+1. **用统一 Evidence Acquisition seam 隔离“怎么拿证据”。**
+
+   `DocumentEvidenceAcquirer`（文档证据获取接口）成为 AnswerFlow 与具体检索策略之间的接缝；原 Pipeline 和新 Subgraph 都从这里返回统一结果。
+
+   - **原问题**：如果 AnswerFlow 直接依赖检索器，新策略会把分支、预算和失败处理扩散到生成链，旧行为也容易被误改。
+   - **解决方式**：Pipeline adapter 保留原行为；Subgraph adapter 封装观察、动作、停止与 child ledger。上层只消费同一种 Evidence 结果。
+   - **兼容取舍**：Subgraph 的 Composer 坏结构会形成 typed no-answer（带类型的无答案结果），旧 Pipeline 仍抛原合同异常。第一次全仓测试正是靠 5 个 M33/M34 失败发现并修正了这处行为扩散。
+   - **边界**：没有为两种策略复制两套 AnswerFlow，也没有放宽 support、citation 或 ACL 校验。
+
+2. **把补救过程做成真正有界的父子控制面。**
+
+   子图按 `observe → execute → stop` 运行：先观察 Evidence 缺口，再执行受准入的 rewrite 或 expansion，最后根据进展和预算决定继续或停止。
+
+   - **父子分账**：父 Agent 只看到一次 Knowledge action；子图内部记录 initial retrieval、rewrite、expansion 的实际消费，避免一次父动作暗中变成无限调用。
+   - **证据安全**：新增 Evidence 合并前重新核对来源身份、ACL、重复与授权；external requirement（外部语料需求）只能由受控 formation（形成器）产出。
+   - **停止合同**：无合法动作、无正向 EvidenceDelta、重复执行、预算耗尽、运行失败或答案合同失败都会产生明确 termination reason（终止原因）。LangGraph recursion limit 只是框架保险，不冒充业务预算。
+   - **重要取舍**：不保存并恢复子图内部 program counter（程序计数器）；未来持久化只发生在产品 task boundary（任务边界）。
+
+3. **让 API、Trace 和 Eval 读取同一份子图事实。**
+
+   M46 新增 Agent Scenario v4（智能体场景工件第四版）和 RAG B4 projection（评测投影），把 action、预算、停止、runtime identity（运行身份）和 child ledger 从同一次执行投影出去。
+
+   - **原问题**：如果 API、日志和评测分别重算，容易出现“响应说执行了扩展，Trace 没记录，Eval 又算成另一条链”的漂移。
+   - **解决方式**：三者共享同源 artifact identity；result 与 Trace 两侧的子图摘要必须同时存在且哈希一致，否则评测按不完整证据失败关闭。
+   - **隐私边界**：仓库工件只保存安全投影、身份和汇总，不保存 reserve 逐题内容、完整 prompt 或私有 Evidence 正文。
+   - **验证证据**：M46 聚焦、M41 external 兼容和 M42 reserve 合同合计 57 项通过；旧 Pipeline 异常与新 Subgraph typed result 的兼容组 26 项通过。
+
+4. **把策略切换做成服务端 rollout，而不是客户端自由选择。**
+
+   环境变量 `PHASE4B_RAG_STRATEGY=pipeline|subgraph` 决定运行策略，默认值固定为 `pipeline`。
+
+   - **为什么由服务端控制**：客户端不能挑更宽松或尚未证明质量的执行路径；运维可以小范围开启实验，也能明确切回旧路径。
+   - **为什么不自动 fallback（回退）**：Subgraph 失败后若自动再跑 Pipeline，会增加成本，还会让一次请求产生两条难以解释的运行身份；因此失败保持可见，回退必须由运维显式切换。
+   - **机器合同**：rollout、默认策略、实验状态、无自动回退和 `quality_claim=not_established` 都进入内容绑定合同；不是只写在说明文档里。
+   - **长期边界**：Subgraph 结构是可展示、可测试的正式代码，但当前不能宣传成质量优于 Pipeline。
+
+5. **用三轮 60×2 历史诊断决定“保留实验，不切默认”。**
+
+   最终一轮对相同 60 道 historical dev 题分别运行 Pipeline 与 Subgraph，每题两臂配对比较；这是 Formal Eval（正式评测），与开发期 Probe 分账。
+
+   | 指标 | Pipeline | Subgraph | 解读 |
+   |---|---:|---:|---|
+   | 完成执行 | 60/60 | 60/60 | runner 本身完整结束 |
+   | Gate 分布 | 598 / 112 / 10 | 393 / 139 / 188 | Subgraph 下游失败明显增多 |
+   | answer-ready | 12 | 26 | 更多题走到可合成阶段 |
+   | 最终 no-answer | — | 60/60 | 仍没有形成质量收益 |
+   | paired verdict | — | 57 insufficient / 3 tie | 三个难度层均未胜出 |
+
+   - **局部改进**：value-shape failure（值形状失败）从 19 降到 0，answer-ready 增加到 26，并新增 43 条 Evidence。
+   - **主要失败簇**：19 个 Evidence run identity 不一致、15 个 formation grounding（需求形成与证据落地）失败；26 个 answer-ready 最终全部被 Composer 严格合同拒绝。
+   - **决策**：评审结果是 `no_go_revise_stop`。candidate 不冻结，sealed reserve（封存留出集）保持 read0/not-run，避免为了拿漂亮结果污染最后决策集。
+   - **轻量收口**：未来若重开，依次研究 Evidence run identity、Composer structured output（结构化输出）和 formation grounding；必须形成新假设、新 candidate 和新授权，不能复用旧运行包装成重验。
+
+### 新概念
+
+- **Bounded Subgraph（有界子图）**：能循环执行多个步骤，但动作种类、次数、资源和停止条件都有业务合同。它像数据库事务中的受控子流程，不是让模型无限“再想一次”。
+- **Parent/child budget（父子预算）**：父任务按一个业务动作计账，子图再记录内部检索和模型消耗。两层都真实记录，既避免父账过细，也避免子流程藏成本。
+- **Run identity（运行身份）**：把候选合同、策略、语料与一次执行绑定成可核对的指纹。Evidence 来自另一条运行时，即使内容看似相关，也不能静默拼接。
+- **Rollout contract（发布策略合同）**：把默认策略、实验策略、fallback 和质量声明写成机器可验证数据，防止代码、配置与文档各说一套。
+- **Paired historical diagnostic（配对历史诊断）**：同一道题由两个策略分别执行，再逐题比较。它能定位退化结构，但 historical dev 不是 sealed reserve，不能代替最终泛化结论。
+- **Lightweight closure（轻量收口）**：架构、测试和证据边界完整保留；当真实效果连续卡住时，不继续无上限试错，也不把实验能力删除，而是保持默认安全并登记明确重开路径。
+
+### 代码阅读路线
+
+1. **先看机器合同和 rollout 决策**：`domain_pack/phase4b/b4_contracts.json`、`engine/phase4b/b4_contracts.py`
+   重点看父子预算、动作闭集、strategy rollout、quality claim 与 content identity 如何绑定。这里回答“系统允许什么”，而不是“某次刚好做了什么”。
+
+2. **再看统一证据获取接缝**：`engine/rag/evidence_acquisition.py`、`engine/phase4b/rag_strategy.py`
+   先理解 Pipeline adapter 怎样保持旧行为，再看 server-controlled resolver 怎样装配 Subgraph。AnswerFlow 不需要知道内部走了几轮补救。
+
+3. **进入有界子图主循环**：`engine/phase4b/rag_subgraph.py`
+   沿 observe、action admission、execute、Evidence merge、budget ledger 和 termination 阅读。重点核对每条回边为什么还能继续，以及失败如何安全停止。
+
+4. **看 external requirement 怎样形成**：`engine/phase4b/external_requirement_formation.py`、`engine/phase4b/rag_recovery_requirement_proposal.py`
+   模型只提出闭集结构，本地继续校验 question/Evidence grounding、敏感值处理、字段形状和 usage；输出不是天然可信事实。
+
+5. **看产品接线与旧链兼容**：`engine/rag/answer_flow.py`、`engine/phase4b/agent_loop.py`、`app/main.py`
+   关注旧 Pipeline 异常语义怎样保留、Subgraph child ledger 怎样进入 task response，以及客户端为何不能提交 strategy。
+
+6. **最后看评测同源与历史 A/B**：`eval/rag_b4_projection.py`、`eval/agent_scenario_v4_contracts.py`、`scripts/run_m46_historical_paired.py`、`eval/reports/m46/`
+   从 result/Trace hash 对账读到 paired manifest 和最终 review，可以看到“执行完成”“局部结构改善”和“质量允许发布”是三个不同结论。
+
+核心数据流：
+
+`Agent 的一次 Knowledge action`
+→ `DocumentEvidenceAcquirer`
+→ `Pipeline 或 bounded Subgraph`
+→ `Observation / rewrite / expansion / stop`
+→ `authorized Evidence + child ledger`
+→ `Composer`
+→ `API / Trace / Eval 同源投影`
+
+### 设计要点
+
+- **深模块接缝**：上层只依赖 Evidence Acquisition，不把策略分支、循环和预算散进 AnswerFlow。
+- **控制权留在服务端**：模型可以提 proposal，但 ACL、运行身份、预算、Evidence 准入和 rollout 都由本地合同裁决。
+- **失败保持可见**：不自动跨策略 fallback，不用一次成功掩盖失败路径，也不把 historical dev 冒充 sealed reserve。
+- **实验能力与默认质量分离**：Subgraph 可以有完整工程结构和演示入口，但没有通过质量门就不替换 Pipeline 默认，汪。
+
+### 有面试价值的亮点
+
+1. **“我把 Agentic RAG 做成有界控制系统，而不是多次检索的 prompt 技巧。”** 父子预算、动作闭集、EvidenceDelta、去重、无进展和停止原因都进入机器合同，LangGraph 只承载图执行。
+
+2. **“我用一个深接口同时承载旧 Pipeline 和新 Subgraph。”** AnswerFlow 不感知内部拓扑，既保留旧行为，又让实验策略能独立演进；全仓回归发现兼容扩散后，修复也能收窄在策略语义边界。
+
+3. **“API、Trace、Eval 不各自编故事。”** 三者从同一次运行事实投影，child ledger 和 hash 缺一侧就失败关闭，便于排障、复现和面试时解释评测可信性。
+
+4. **“我把 rollout 决策也代码化。”** Pipeline 默认、Subgraph experimental、no-auto-fallback 和质量未建立都是内容绑定合同，避免某次环境变量误配被写成产品升级。
+
+5. **“我能用负结果做工程决策。”** 三轮 historical A/B 保留完整失败簇；最终没有消耗 sealed reserve，而是把修复顺序和重开条件登记清楚，控制了个人项目的试错成本。
+
+### 面试官追问
+
+1. **[基础追问] RAG Subgraph 和普通 Pipeline 最大区别是什么？**
+
+   Pipeline 通常按固定顺序检索、筛选、生成一次；Subgraph 会根据当前 Evidence 的缺口选择有限补救动作，再观察是否有进展。M46 的关键不是循环本身，而是循环只能在签名 requirement、ACL、父子预算、去重和停止合同都满足时继续。
+
+2. **[工程/深挖追问] 为什么父 Agent 只记一次 Knowledge action，子图还要另建账本？**
+
+   对父 Agent 来说，这是一次完整的“获取回答证据”业务动作；若把每次内部检索都暴露成父动作，Controller 会与 RAG 实现细节耦合。但成本和安全不能因此隐藏，所以子账记录 initial、rewrite、expansion 和模型调用，父账与子账通过同一 runtime identity 对账。
+
+3. **[工程/深挖追问] 为什么 Subgraph 失败后不自动切 Pipeline？**
+
+   自动回退会把一次用户请求变成两套策略、两份成本和两条运行身份，失败原因也可能被最终成功响应掩盖。M46 选择失败可见、运维显式切换；这让账本和 Eval 可解释，也避免实验策略绕过 rollout 控制。
+
+4. **[工程/深挖追问] 你怎样防止模型 proposal 越权或把答案泄进查询？**
+
+   模型只能看到允许出站的问题与当前授权 Evidence，并返回闭集 JSON；服务端重新校验字段、数量、值形状、Evidence grounding、动作资格和预算。proposal 只是候选，不拥有 ACL、Evidence admission 或停止决策权。
+
+### 验证与下一步
+
+**验证结果：**
+
+| 范围 | 真实结果 | 证明什么 |
+|---|---:|---|
+| M46 + M41 external + M42 reserve 聚焦 | 57 passed，1 warning | rollout、父子合同、评测投影、兼容和 reserve sealed 边界闭合 |
+| M33/M34/M46 兼容修复聚焦 | 26 passed，1 warning | 旧 Pipeline 严格异常与新 Subgraph typed result 同时成立 |
+| 第二次全仓 | 625 passed，1 failed，1 warning | 除一个 Windows 临时目录权限波动外，整仓无其他失败 |
+| 唯一 M31 失败项独立重跑 | 1 passed | 与上项合并后，当前 626 项均有同代码下通过证据 |
+| historical v3 | 两臂各 60 completed；57 insufficient / 3 tie | Subgraph 未建立质量收益，不能冻结 candidate 或切默认 |
+| 静态与注释门 | compileall、diff check 通过；257/257 symbols | 语法、补丁格式和新手注释闭合 |
+
+warning 是既有 Starlette TestClient/httpx deprecation。第二次全仓没有被写成“一次完整绿测”：唯一失败明确保留为 Windows `os.replace` 对 pytest 临时目录的 `WinError 5`，随后只对该项独立复现通过。M46 没有运行 sealed reserve，也没有证明 Subgraph 的正确率、Reliability、吞吐或多 worker 收益。
+
+**下一步**：先完成人工检查和 `accept-module` 验收。M47/B5 应从 task boundary、TaskState、turn boundary 和 B4 termination/child ledger 开始，只持久化可恢复的任务事实，不恢复 RAG 子图内部 program counter。若未来重开 Subgraph 质量修复，按项目外 todo 的顺序提出新假设并重新获得 Historical Eval 授权。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录；以下聚焦测试不调用真实 provider、不读取 sealed reserve。
+& 'D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe' -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m46-devlog tests/test_m46_b4_contracts.py tests/test_m46_b4_external_chain.py tests/test_m46_b4_proposal.py tests/test_m46_rag_eval_projection.py
+
+# 查看最终 historical 闭集评审；只读，不会重新执行 60×2。
+Get-Content eval/reports/m46/m46-historical-paired-20260826-164511-review.md
+
+# 查看 paired 汇总；只读，不会访问 reserve。
+Get-Content eval/reports/m46/m46-historical-paired-20260826-164511-paired.json
+```
+
+**本地启动体验：**
+
+```powershell
+# 默认体验稳定 Pipeline。
+$env:PHASE4B_RAG_STRATEGY = 'pipeline'
+& 'D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe' -m uvicorn app.main:app --reload
+
+# 仅在本地实验时显式切换 Subgraph；不要把它当成质量已上线。
+$env:PHASE4B_RAG_STRATEGY = 'subgraph'
+& 'D:\.Programs\Python\anaconda3\envs\fastapi0614\python.exe' -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs`，通过 `POST /api/query` 提交 RAG 问题。客户端请求体里没有 strategy 字段：策略只能由服务端配置。观察响应和 Trace 中的 action、child budget、Evidence validity 与 termination；若 Subgraph 返回 no-answer，应保留该失败证据并显式切回 Pipeline，不要在同一请求里自动重跑两臂。
+

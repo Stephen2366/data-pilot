@@ -1,0 +1,19 @@
+{
+  "schema_version": "phase4b-b4-historical-paired-artifact-v1",
+  "status": "completed_pending_review",
+  "run_id": "m46-historical-paired-20260826-164511",
+  "candidate_identity": "ab66f20dc40eb8a1f1deba3fd16aad466a5a836e7543aacdb65326d182532f78",
+  "arm_artifacts": {
+    "pipeline": {
+      "artifact_identity": "cd70c2a8bd12b4d09f80faca3ec90f33e186b20339d5e4d22edf9c3aa0ea8963",
+      "sha256": "95b4de662bf88bf24f8302eac045d4d099e81d18798afa89058b8fdffe06084d"
+    },
+    "subgraph": {
+      "artifact_identity": "578db71837669bcf4dd30fada21d28030d5ff7a319fba3f3c7ef24714e83ab42",
+      "sha256": "e2ac9abcb0fd99e49d9186354ceb817d5a15622890573e861a7215bc9e446b4d"
+    }
+  },
+  "comparison_identity": "a9175c91373b43c0c8d13175fedf52bd659649b7ac0c92408c95d0c20f35e5a6",
+  "reserve_state": "sealed",
+  "artifact_identity": "f6a5e1a291fd5e1a7d9353f9bfe1e0b536b221f7349691386183bb12c9886f4d"
+}

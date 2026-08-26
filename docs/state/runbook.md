@@ -83,7 +83,8 @@ Live Dev Probe 用少量真实 API、LLM、MySQL、Milvus/RAG 调用检查产品
 ## 长任务与验证
 
 - 长任务纪律（后台、日志路径、checkpoint、汇报方式）按 `AGENTS.md`「长时间命令与余额控制」执行。
-- 完整仓库验证：`python -m pytest -p no:cacheprovider --basetemp=.agent_work\temp\pytest-<name>`
+- 完整仓库验证：`python -m pytest -p no:cacheprovider --basetemp=.agent_work\temp\<module>\pytest-full-<run>`
+- 开发期测试、Dev Probe 与后台任务也统一使用 `.agent_work/temp/<module>/<run-name>/`；目录命名和同次运行文件归档规则以 `AGENTS.md`「工作约定」为准。
 - 改动后运行：`git diff --check`
 
 ## 数据库安全提醒

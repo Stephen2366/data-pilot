@@ -42,8 +42,8 @@ def _expect_exact(payload: Mapping[str, Any]) -> None:
     expected_root = {
         "contract_version", "predecessor_contract_identity", "b3_campaign_identity",
         "runtime_identity", "strategies", "parent_budget", "child_budget", "actions",
-        "terminations", "proposal", "external_requirement_formation", "reserve", "artifact_versions", "scenarios",
-        "capability_matrix",
+        "terminations", "proposal", "external_requirement_formation", "reserve", "rollout",
+        "artifact_versions", "scenarios", "capability_matrix",
     }
     if set(payload) != expected_root:
         raise B4ContractError("b4_contract_shape_invalid", "root 字段不闭合")
@@ -108,13 +108,14 @@ def _expect_exact(payload: Mapping[str, Any]) -> None:
         raise B4ContractError("b4_proposal_contract_invalid", "G46-1 方案 A 发生漂移")
     formation = payload["external_requirement_formation"]
     if not isinstance(formation, dict) or formation != {
-        "identity": "phase4b-b4-external-requirement-formation-v2",
+        "identity": "phase4b-b4-external-requirement-formation-v3",
         "enabled_for": "external_profile_only",
         "precedence": ["procedure_boundary_v1", "structured_question_obligations", "typed_stop"],
         "input_fields": ["question", "authorized_document_evidence", "max_requirements"],
         "max_requirements": 2,
         "question_grounding": "exact_source_spans",
         "qualifier_validation": "server_downgrade_unsupported_current_authority_to_none",
+        "value_shape_validation": "server_normalize_to_deterministic_expected_shape",
         "evidence_grounding": "server_question_document_meaningful_token_overlap",
         "answer_value_policy": "question_values_are_constraints_model_values_denied",
         "focused_query_owner": "deterministic_server_assembler",
@@ -133,6 +134,26 @@ def _expect_exact(payload: Mapping[str, Any]) -> None:
         raise B4ContractError("b4_reserve_immutability_invalid", "原 reserve ledger 必须只读")
     if reserve.get("source_identity") != "f70c5fcafa3d7601d2700a5d98dc2a2647532c236dd1a56e6a48008fa100e505":
         raise B4ContractError("b4_reserve_identity_mismatch", "reserve identity 漂移")
+    # ★ 轻量收口不是“假装 reserve 跑过”，而是一个独立、内容绑定的 rollout 终局。
+    # 默认策略、实验状态、质量声明和未来重开门集中在 B4 合同中，调用方继续只认识
+    # acquisition seam，不需要学习 historical/reserve 的决策细节。
+    rollout = payload["rollout"]
+    if not isinstance(rollout, dict) or rollout != {
+        "identity": "phase4b-b4-rollout-decision-v1",
+        "decision": "pipeline_default_subgraph_experimental",
+        "decision_basis": "historical_no_go_portfolio_lightweight_closure",
+        "historical_run_id": "m46-historical-paired-20260826-164511",
+        "historical_candidate_identity": "ab66f20dc40eb8a1f1deba3fd16aad466a5a836e7543aacdb65326d182532f78",
+        "historical_review": "eval/reports/m46/m46-historical-paired-20260826-164511-review.md",
+        "reserve_state": "sealed",
+        "reserve_decision_run": "not_run",
+        "default_strategy": "pipeline",
+        "subgraph_status": "server_controlled_experimental",
+        "automatic_cross_strategy_fallback": False,
+        "quality_claim": "not_established",
+        "reopen_policy": "new_hypothesis_new_candidate_new_authorization",
+    }:
+        raise B4ContractError("b4_rollout_decision_invalid", "轻量收口的默认/实验/reopen合同发生漂移")
 
 
 def load_b4_contract_bundle(

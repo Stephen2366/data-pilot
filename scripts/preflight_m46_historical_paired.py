@@ -110,6 +110,8 @@ def build_preflight(*, dataset_root: Path) -> dict[str, Any]:
 
 
 def main() -> None:
+    """生成零 provider 调用、reserve sealed 的 historical 候选快照。"""
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)

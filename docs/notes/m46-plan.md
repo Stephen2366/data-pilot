@@ -6,9 +6,9 @@
 
 ## 1. 模块定义与范围判断
 
-M45/B3 已通过验收并给出 v4 `go_for_M46`：`query_rewrite_candidate` 与 `context_expansion_candidate` 两张 action card 均完成，同一个 external semantic runtime 已在不同真实 Observation 下证明两种动作及错误动作排除。M44/B2 则已经提供顶层 Action、EvidenceDelta、Budget、Progress、Termination 和单次 `collect_document_evidence` seam。M46 的顺序与范围因此成立：**保留顶层一次文档取证动作，在 Knowledge Tool 内部交付真正的 bounded RAG Subgraph，并用新的 sealed decision reserve 判断它是否值得切为默认。**
+M45/B3 已通过验收并给出 v4 `go_for_M46`：`query_rewrite_candidate` 与 `context_expansion_candidate` 两张 action card 均完成，同一个 external semantic runtime 已在不同真实 Observation 下证明两种动作及错误动作排除。M44/B2 则已经提供顶层 Action、EvidenceDelta、Budget、Progress、Termination 和单次 `collect_document_evidence` seam。M46 的顺序与范围因此成立：**保留顶层一次文档取证动作，在 Knowledge Tool 内部交付真正的 bounded RAG Subgraph，并先用historical判断它是否值得进入sealed decision reserve。**
 
-M46 完整对应 B4，不再拆成“先画子图、后面再做 A/B”的两个模块。只实现图而不完成 business T4、父子预算、sealed reserve A/B 和默认/experimental/fallback 结论，不能验收 B4；反过来，把 B5 durable state 或 B6 Compact 一并塞入 M46 又会混入独立主要问题。因此本模块内部按纵向切片推进，但最终必须一次闭合 B4。
+M46 完整对应 B4，不再拆成“先画子图、后面再做 A/B”的两个模块。2026-08-26 用户在三代 historical 60×2 均 no-go、最后一代仍 `60/60 no_answer` 后确认作品集轻量收口：B4 以“完整 experimental adapter + Pipeline稳定默认 + historical闭集no-go证据 + sealed reserve不消费 + 精确重开门”闭合。该修订替代原计划“必须先运行 reserve 才能验收”的完成门，但不删除 Subgraph、父子预算、Trace/Eval、安全合同或测试，也不把 historical 当作未污染质量胜负。B5 durable state 与 B6 Compact 仍不进入 M46。
 
 用户完成 M46 后应能：
 
@@ -16,7 +16,7 @@ M46 完整对应 B4，不再拆成“先画子图、后面再做 A/B”的两个
 - 演示 business T4 在产品 task/Loop seam 内补齐两篇退款政策，而顶层仍只消费一次 Knowledge action；
 - 在同一个 external semantic runtime 上展示 rewrite→expansion 与直接 expansion 两条不同恢复路径；
 - 对照 Pipeline 与 Subgraph 在同 corpus、AnswerFlow、provider 和冻结预算下的检索、回答、citation、安全、调用、token 与延迟；
-- 根据 sealed reserve 的预注册结论明确选择“Subgraph 默认 + Pipeline fallback”或“Pipeline 默认 + Subgraph experimental”，而不是把“子图能跑”写成“质量已提升”。
+- 根据已完成 historical 的真实 no-go 与用户确认，固化“Pipeline 默认 + Subgraph experimental”；明确 reserve 未运行且保持 sealed，不把“子图能跑”写成“质量已提升”。
 
 ## 2. 当前事实与问题
 
@@ -29,7 +29,7 @@ M46 完整对应 B4，不再拆成“先画子图、后面再做 A/B”的两个
 | M45 diagnostic expansion 可重水化并重新授权 Evidence，但当前返回值没有完整携带生产 Gate 需要的 pre-generation authorization 和合并 ledger | 不能直接把 diagnostic safe projection 塞进 AnswerFlow；M46 必须建立生产 acquisition result，并复用底层 authority/ACL seam而非复制安全逻辑 | `engine/phase4b/rag_enterprise_diagnostics.py::EnterpriseSiblingExpansionAdapter`、`engine/rag/answer_flow.py::_gate` |
 | M45 的 external requirement slots 既有 deterministic recipe，也有受控 structured proposal 与 `procedure_boundary_v1`；最终 proposal 仍曾失败且其 outbound 只获 diagnostic 授权 | reserve 泛化不能依赖 qst ID/手写 gold slot；若产品 Subgraph使用模型 proposal，必须新建 receiver/purpose/data class、预算和失败关闭合同，不能继承 M45 或普通 API 权限 | `scripts/probe_m45_b3.py::_external_recipe`、`engine/phase4b/rag_requirement_proposal.py`、M45 P4/P4R/P5 lineage |
 | business T4 的 TaskState 已持有服务端 required document keys；external reserve 不能把 gold key/title/答案事实放入 runtime | business 可优先确定性形成缺口；external action eligibility 必须从问题、当前已授权 Evidence、结构坐标和安全 proposal 形成，评分 gold 只能在执行后离线使用 | `engine/phase4b/task_runtime.py`、`engine/phase4b/rag_diagnostics.py::RequirementSlot/RAGRecoveryDiagnostic` |
-| sealed reserve `f70c5fc...e505` 为 60 题，首次解封 owner=M46；原 `access_ledger.jsonl` 的 hash 已进入 v1 identity | M46 不能原位追加旧 ledger 或逐题试跑；必须用 additive run ledger 引用不可变 v1.0.0，并在双臂 RunSpec 冻结后一次解封、双臂完成前不看结果 | `eval/cases/agent/phase4b_reserve_manifest.json`、`eval/agent_reserve_contracts.py::seal_reserve/apply_access_event` |
+| sealed reserve `f70c5fc...e505` 为 60 题，原 `access_ledger.jsonl` 的 hash 已进入 v1 identity | historical最终no-go，M46不再解封；原manifest/ledger保持只读sealed。未来只有新假设/新candidate先通过historical后才可重新申请一次决策运行 | `eval/cases/agent/phase4b_reserve_manifest.json`、`eval/agent_reserve_contracts.py::seal_reserve/apply_access_event` |
 | external 产品默认是 semantic；历史 lexical/semantic baseline、M41/M44A artifact 与 M34 180 题均已解封且协议不同 | historical 只能承担开发/回归，不能替代新 reserve 或与其混分；B4 candidate 不得顺手换 embedding、recipe、Composer 或 corpus | `docs/state/rag-current-state.md`、`docs/state/eval-baselines.md` |
 | 当前依赖实际为 LangGraph `1.1.2`；官方文档允许不同 state schema 的 subgraph 在父节点内显式映射输入/输出，并由 conditional edge 停止 | M46 可以保留顶层/子图私有 state 分权，但不能靠框架 recursion limit、MessagesState 或 checkpoint 冒充业务预算、Trace 或 durable state | `pyproject.toml`、本机 package metadata、LangGraph 官方 Subgraphs/Graph API 文档 |
 
@@ -45,13 +45,13 @@ M46 完整对应 B4，不再拆成“先画子图、后面再做 A/B”的两个
 
 参考复核得到的直接结论：ARAG 证明“子图 + 两类 retrieval action + 去重/停止”可实现，但其 Tool 输出、动作控制和 corpus 规模不足以提供 DataPilot 的安全/质量保证；DB-GPT 与 GustoBot 反而说明 reference identity、失败分层和 fallback 很容易在汇合处丢失。M46 因此采用 **小 acquisition interface + 深 Subgraph implementation**：测试和调用方只跨同一 Evidence acquisition seam，内部复杂度不泄漏。
 
-规模与代表性边界：ARAG 是教学型 child/parent demo，GustoBot 是菜谱知识多后端样板，DB-GPT 是平台资源抽象；它们都没有 DataPilot 的 36,417 documents / 139,214 units、60 题 sealed reserve、双 ACL、typed Evidence、父子预算或一题一次 completed artifact。参考源码只能确认 seam 和反例，Subgraph 的净收益仍必须由 business T4、historical dev 与新 reserve 证明。
+规模与代表性边界：ARAG 是教学型 child/parent demo，GustoBot 是菜谱知识多后端样板，DB-GPT 是平台资源抽象；它们都没有 DataPilot 的 36,417 documents / 139,214 units、60 题 sealed reserve、双 ACL、typed Evidence、父子预算或一题一次 completed artifact。参考源码只能确认 seam 和反例；本模块historical已证明当前Subgraph不值得进入reserve，未来净收益仍须由新candidate的historical与另行授权的reserve证明。
 
 ## 4. 目标、优先级与非目标
 
 ### 模块完成状态
 
-M46 完成后，系统在不改变上层 Knowledge Tool/AnswerFlow 语义的前提下拥有两个真实 adapter：固定 Pipeline baseline 与 bounded RAG Subgraph experimental adapter。Subgraph 在一次父级文档取证内完成 initial retrieval → Observation → eligible action → rewrite/expansion/stop → Evidence merge/reauthorize → Progress/Termination；父子预算、Trace、API 和 Agent Scenario v4 同源。business T4、同 runtime 两动作选择、historical dev view 和 sealed reserve paired A/B 全部闭合，并形成经用户确认的 default/experimental/fallback 结论。
+M46 完成后，系统在不改变上层 Knowledge Tool/AnswerFlow 语义的前提下拥有两个真实 adapter：固定 Pipeline baseline 与 bounded RAG Subgraph experimental adapter。Subgraph 在一次父级文档取证内完成 initial retrieval → Observation → eligible action → rewrite/expansion/stop → Evidence merge/reauthorize → Progress/Termination；父子预算、Trace、API 和 Agent Scenario v4 同源。business T4、同 runtime 两动作选择、historical dev 60×2 与闭集 failure review 均有证据；rollout 合同明确 Pipeline 默认、Subgraph 受控 experimental、无自动跨策略 fallback。sealed reserve 保持未消费，作为未来新假设/新candidate稳定后才可能使用的决策集。
 
 ### 必须完成
 
@@ -61,8 +61,8 @@ M46 完成后，系统在不改变上层 Knowledge Tool/AnswerFlow 语义的前�
 - 复用 Knowledge Tool、SQLite authority、ACL 双检、Evidence ledger、Shared Gate、Composer 和 Citation Validator；子图不得复制或绕过这些所有者。
 - business T4 通过产品 task/Loop seam补齐基础政策与质量专项政策；external 同 runtime 在不同场景分别证明 rewrite→expansion 与 direct expansion，并排除错误动作。
 - 新增 additive B4 runtime/contract/Agent Scenario family；M42 v1、M43 v2、M44 v3、legacy M31–M40 artifact和断言不改签。
-- 完成 historical dev paired view；冻结 candidate、RunSpec、scorer、review 和 default policy 后，按精确授权首次解封 60 题 reserve，完成 Pipeline/Subgraph paired A/B 与闭集语义 review。
-- 输出明确的 `subgraph_default` 或 `pipeline_default_subgraph_experimental` 结论；无稳定净收益时仍可完成 B4，但不得宣称质量提升或静默切默认。
+- 完成 historical dev paired view与闭集review；若candidate可冻结，原路线才允许另行授权reserve。当前三代均no-go，按用户确认停止该分支并保持reserve sealed。
+- 输出内容绑定的 `pipeline_default_subgraph_experimental` rollout 结论；basis=`historical_no_go_portfolio_lightweight_closure`、quality claim=`not_established`，不得宣称质量提升或静默切默认。
 
 ### 建议完成
 
@@ -144,22 +144,21 @@ M46 完成后，系统在不改变上层 Knowledge Tool/AnswerFlow 语义的前�
 
 ### C6：Historical 与 sealed reserve A/B 合同
 
-- 输入：冻结的 Pipeline/Subgraph candidate、同一 external profile/semantic/Composer/model/outbound/caller、paired RunSpec、closed-world assertion plan、review protocol和不可变 reserve v1 manifest。
-- 成功输出：
-  - historical dev：同一 60 dev questions 两臂各执行一次，作为开发/回归视图，可在 reserve 前暴露实现或泛化问题；
-  - sealed decision：reserve 60 题两臂各执行一次，双臂结果在同一 run completed 前不可查看，之后完成闭集语义 review与 paired compare；
-  - 共同报告 retrieval/selected/generation-visible/cited coverage、support/answer correctness/completeness、trigger precision、recovery success、Evidence gain per extra call、duplicate/no-progress、calls/tokens/latency/cost 和 unsafe recovery prevention。
-- 失败语义：任一 arm/spec/identity漂移、提前查看一臂结果/gold、漏/多/重复 execution、partial manifest冒充 completed、为评分重跑 pipeline 或运行后调参，均使本次 decision artifact fail closed；污染事件使 reserve永久退出 decision set。
-- 必须保持的不变量：原 v1.0.0 reserve/`access_ledger.jsonl` 不原位修改；M46 新建 additive run ledger，先引用并校验 sealed manifest/hash，再写 `first_unseal@M46`。historical 与 reserve分账；reserve用于决策后标记 consumed，不恢复为 sealed。任何真实运行均按 runbook精确授权、一次 run_id、无自动重跑。
+- 输入：同一 external profile/semantic/Composer/model/outbound/caller 的 Pipeline/Subgraph candidate、paired RunSpec、closed-world assertion/review protocol，以及不可变 reserve v1 manifest。
+- 成功输出：historical dev 同一60 questions两臂各执行一次，形成completed artifact、paired compare、完整child/usage投影与闭集failure review。只有historical支持冻结candidate时，才允许另行授权sealed reserve 60×2。
+- 当前终局：三代historical均completed/no-go；最后一代`m46-historical-paired-20260826-164511`为`57 insufficient / 3 tie`且Subgraph `60/60 no_answer`。因此candidate不冻结，reserve分支按用户确认停止，v1 manifest/ledger继续sealed/只读，逐题records read=0。
+- 失败语义：partial manifest冒充completed、身份漂移、为评分自动重跑、把historical冒充未污染决策、把sealed写成consumed，均fail closed。未来重开必须提出新能力假设、产生新candidate identity、先在historical证明稳定，再取得新的精确授权；不能继承本模块旧运行授权。
+- 必须保持的不变量：历史artifact不改签；原reserve/`access_ledger.jsonl`不原位修改；Pipeline/Subgraph两账分离；任何真实运行仍遵守runbook的一次run_id、无自动重跑。
 - 本模块不冻结的实现细节：外部 run目录名和并行度；它们必须在不改变一题一次、双臂盲化、provider限流和 artifact identity的前提下于开工 notes登记。
 
 ### C7：Default/experimental/fallback 决策合同
 
-- 输入：C6 completed reserve artifact、来源哈希通过的闭集语义 review、paired compare、contract/security Gate 和成本视图。
+- 输入：优先使用C6 completed reserve artifact；若historical连续no-go且用户明确选择轻量收口，则使用来源哈希通过的最后一次historical closed-set review、paired compare、contract/security Gate、成本视图和sealed audit。
 - 成功输出：
   - `subgraph_default`：只有 required安全/身份/预算全绿，Subgraph 在 paired语义 pass与多文档 completeness/cited coverage上形成预注册净正收益、无关键分层退化，且用户接受额外调用/token/latency后成立；Pipeline保留 fallback；
   - `pipeline_default_subgraph_experimental`：净收益不稳定、主要收益被成本抵消、出现关键退化或证据不确定时成立；Subgraph仍完整可运行、可评测，Pipeline继续默认。
-- 失败语义：没有 completed reserve、review未闭集、identity不可比或安全Gate失败时只能 `review_required`，M46不得收工；不能靠 historical或business单题代替。
+- 当前终局：用户于2026-08-26确认`pipeline_default_subgraph_experimental`，basis=`historical_no_go_portfolio_lightweight_closure`；reserve=`sealed/not_run`、quality claim=`not_established`、automatic cross-strategy fallback=`false`。该终局只允许experimental能力交付，不构成Subgraph质量胜出或reserve结论。
+- 失败语义：没有闭集historical review、没有用户轻量收口确认、rollout与服务端默认不一致、把reserve状态写错或隐藏no-go时只能`review_required`，M46不得收工。
 - 必须保持的不变量：实现完成与默认切换分离；默认变化必须由用户确认并记录。没有稳定净收益时不允许把“experimental adapter存在”表述为质量提升。
 - 本模块不冻结的实现细节：面向用户的报告措辞；净收益 required/advisory字段和 paired排序在任何 formal run前写入并 hash冻结。
 
@@ -231,32 +230,32 @@ M46 完成后，系统在不改变上层 Knowledge Tool/AnswerFlow 语义的前�
 - Live Probe checkpoint：P1–P3已覆盖真实影响面；若 E 改变其覆盖的核心策略/调用/安全/预算，按 runbook判定并执行最小受影响重验，不能沿用失效证据
 - 完成门：experimental adapter完整可运行、可回退、可追踪；Pipeline仍可显式作为 baseline，产品默认尚不因代码存在而切换
 
-### M46-F：historical dev paired run、candidate冻结与 reserve preflight
+### M46-F：historical dev paired run、闭集review与止损
 
 - 优先级：必须完成
 - 依赖：M46-E、G46-3 historical范围精确授权
-- 实施内容：先完成 contract/security回归；再按一次精确授权运行 external historical dev full 60的 Pipeline/Subgraph paired view并完成闭集review。依据 dev结果只允许在本切片内显式 revise；最终冻结 candidate code/contract/Prompt/budget/scorer/review/default policy hashes，核对 reserve仍sealed。
+- 实施内容：完成contract/security回归，并按精确授权运行external historical dev full 60的Pipeline/Subgraph paired view与闭集review。允许在本切片内显式revise；若最后候选仍明确no-go，则执行用户确认的止损，不冻结candidate、不申请reserve。
 - 关键合同：C5、C6、C7
-- 交付物：historical completed artifact/report/review/compare、candidate freeze manifest、reserve preflight report
+- 交付物：三代historical completed artifact/report/compare、最终closed-set review、失败簇与usage账、reserve sealed audit
 - 验证方式：120 physical executions恰好闭合、双臂协议仅允许strategy/child-runtime差异；安全/预算/identity全绿；大规模失败层和成本可解释
 - Live Probe checkpoint：不适用；本切片是真实 Formal Eval，必须使用G46-3精确授权，不能计入Live Probe或自动运行
-- 完成门：historical review支持冻结当前candidate且无未处理revise；任何candidate改动都产生新identity并使旧结果只作历史，不得直接解封reserve
+- 完成门：最终run双臂60/60 completed、review闭集、失败/usage/identity可解释；结果若支持则冻结candidate，否则必须有用户确认的`no_go_revise_stop`与精确重开门。当前按后一终局闭合。
 
-### M46-G：sealed reserve paired A/B 与默认决策
+### M46-G：轻量 rollout 决策与 reserve 保全
 
-- 优先级：必须完成
-- 依赖：M46-F candidate冻结、G46-3 reserve精确授权
-- 实施内容：校验sealed v1.0.0并在additive ledger登记`first_unseal@M46`；同一RunSpec执行60题×2 arms，双臂completed前不开放结果；完成闭集review、paired compare、C7 default eligibility和用户G46-2决策；固化default/experimental/fallback记录。
+- 优先级：必须完成（2026-08-26经用户确认由原reserve运行改为轻量rollout）
+- 依赖：M46-F `no_go_revise_stop`、用户轻量收口确认
+- 实施内容：不解封reserve；校验v1 manifest/ledger仍sealed且逐题read=0。把historical run/review、Pipeline默认、Subgraph server-controlled experimental、无自动跨策略fallback、quality claim未建立和未来重开门写入内容绑定B4 rollout合同。
 - 关键合同：C6、C7
-- 交付物：reserve completed artifact、access/run ledger、review、compare、default decision record、安全仓库manifest与项目外immutable大artifact
-- 验证方式：120 physical executions、closed-world/hash/identity、required三态、paired语义/coverage/citation/cost、安全等价与污染测试；不得resume非法前缀或新ID重跑
-- Live Probe checkpoint：不适用；这是首次sealed decision Formal Eval，只有用户精确授权才执行
-- 完成门：C7输出用户确认的两个合法终局之一；`review_required`、未完成review、污染、未处理安全失败或未确认默认均不算M46完成
+- 交付物：内容绑定rollout decision、historical closed-set review、reserve sealed audit、仓库外reopen todo
+- 验证方式：合同hash/tamper、服务端默认与rollout一致、客户端不可选strategy、Subgraph仍可显式运行、无自动fallback、reserve manifest/ledger只读对账
+- Live Probe checkpoint：不适用；本切片不执行provider、Milvus或reserve逐题读取
+- 完成门：C7=`pipeline_default_subgraph_experimental`，basis/no-quality-claim/sealed/reopen字段闭合且与代码、plan、notes/state一致
 
 ### M46-H：收工验证与 B5 handoff
 
 - 优先级：必须完成
-- 依赖：M46-G 合法终局
+- 依赖：M46-G 轻量rollout合法终局
 - 实施内容：聚焦/受影响/全仓回归、artifact/hash/状态对账、notes Probe与Formal Eval审计、技术档案和capability handoff；按项目流程执行 `finish-module → finish-docs → 用户人工检查 → accept-module`。
 - 关键合同：C1–C7
 - 交付物：最终验证快照、M46 notes/state/changelog、M47/B5 handoff
@@ -318,6 +317,8 @@ M46 完成后，系统在不改变上层 Knowledge Tool/AnswerFlow 语义的前�
 
 ### G46-2：Pipeline/Subgraph 产品默认
 
+**决策状态：已确认。用户于2026-08-26在最后一次historical v3仍`60/60 no_answer`后选择方案A；Pipeline保持默认，Subgraph保持server-controlled experimental，不启用自动跨策略fallback。**
+
 #### 方案 A：Pipeline 默认，Subgraph experimental（无净收益时建议）
 
 - 做法：普通产品仍走Pipeline；Subgraph只在服务端受控experiment/eval runtime可选，Pipeline保持baseline与稳定产品路径。
@@ -334,14 +335,16 @@ M46 完成后，系统在不改变上层 Knowledge Tool/AnswerFlow 语义的前�
 
 #### 建议与确认时点
 
-- 建议：不预判。reserve前保持方案A；只有C7明确`default_eligible`时再建议方案B，否则正式选择A。
+- 最终选择：方案A。依据是最后一次historical closed-set no-go与作品集轻量收口确认，不是reserve胜负；quality claim明确为`not_established`。
 - 建议理由：roadmap已冻结“实现与默认化分离”，M44A也证明技术闭链不能等同质量胜出。
 - 用户确认前允许推进：完整实现experimental adapter、historical/reserve候选运行和报告。
 - 用户确认前禁止推进：修改产品默认、active strategy identity或把实验结果写成质量提升。
-- 需要确认的时点：M46-G reserve artifact与闭集review完成后、任何默认切换前。
+- 后续无需在M46再次确认默认；未来只有新候选先在historical形成稳定提升、且用户重新授权decision run时才能重开。
 - 重开决策的条件：未来新的sealed candidate证明不同结论；不得用已消费reserve反复调参后重新决策。
 
-### G46-3：两次大规模 Formal Eval 精确运行授权
+### G46-3：历史决策——两次大规模 Formal Eval 精确运行授权
+
+**最终状态：historical已分三代按独立授权完成，最后一代仍no-go；用户确认不执行reserve 60×2，reserve继续sealed。本节以下方案保留为原始决策依据，不再构成本模块待执行项。**
 
 #### 方案 A：按计划完成 historical 60 paired + reserve 60 paired（建议，也是B4完整验收范围）
 
@@ -370,7 +373,7 @@ M46 完成后，系统在不改变上层 Knowledge Tool/AnswerFlow 语义的前�
 
 ### Live Dev Probe（开发期真实探针）
 
-本模块修改真实 business RAG、Enterprise semantic/Milvus、API task与可能的proposal outbound，pytest/fake不能证明真实效果，必须设计Probe。standing authorization、计数、禁区、重验和Formal Eval分账统一引用 `docs/state/runbook.md`「Live Dev Probe」；本节只冻结场景、时点和更严格边界。
+本模块修改真实 business RAG、Enterprise semantic/Milvus、API task与proposal outbound，因此开工时预注册P1–P3。实际开发中P1 passed，D0的P0R passed/continue，P2真实执行为failed/revise；用户随后明确要求暂停其余Dev Probe并把未闭合项移入仓库外todo。2026-08-26轻量收口进一步确认：P2失败与P3未执行如实保留，不倒填passed、不在finish-module补跑；P3从experimental-only终局的完成门豁免，未来重开必须重新登记/授权。standing authorization、计数、禁区、重验和Formal Eval分账仍引用`docs/state/runbook.md`。
 
 | Probe ID / 执行时点 | 探针场景 | 真实产品链路/依赖 | 需要观察的结果与 Trace 事实 | 通过/失败/不确定标准 | 决策与停止条件 |
 | --- | --- | --- | --- | --- | --- |
@@ -384,25 +387,26 @@ Probe共同收紧项：
 - P2/P3每题首次一次；两题累计真实provider attempts预计≤8、observed tokens≤30000。proposal、embedding、Composer、retry均按实际逐次记账；意外越界后记录并停止。
 - gold只在执行结束后作离线语义oracle，不进入trigger/query/proposal/seed selection。P1业务required keys来自服务端TaskState，不是评分器注入。
 - P2/P3中应自然触发的recovery路径若未触发，该子能力为`inconclusive/not_exercised`，不能靠改query/top-k或重跑展示。
-- 模块完成后建议用户执行的Formal Eval：先 `M46 historical dev full paired`（60题×2 arms），后 `M46 sealed reserve full paired`（60题×2 arms）；均按G46-3单独精确授权，不属于Live Probe。
+- Probe终局审计：P1=`passed/continue`；P0首次failed/revise后P0R=`passed/continue`；P2=`failed/revise`并成为historical迭代输入；P3=`not_executed/user_deferred`，只对本次Pipeline-default/Subgraph-experimental轻量终局豁免，绝不冒充真实成功证据。
+- 本模块Formal Eval终局：historical dev full paired已完成三代，最后一代closed-set review=`no_go_revise_stop`；用户确认停止reserve分支。不得在finish-module阶段补跑reserve或把它记作completed。
 
 | 能力/合同 | 验证方式 | 通过标准 | 优先级 |
 | --- | --- | --- | --- |
 | C1 acquisition interface | Pipeline/Subgraph contract tests + deletion test | 两adapter同interface；Pipeline等价；AnswerFlow/调用方不感知child state/action | 必须完成 |
-| C2 Subgraph control | graph/state/edge tests + P1–P3 + v4 rehearsal | 两动作/stop closed-world；同runtime不同Observation正确选择；duplicate/no-progress/budget稳定终止 | 必须完成 |
+| C2 Subgraph control | graph/state/edge tests + P1/P0R/P2时间线 + P3豁免记录 + v4 rehearsal | 两动作/stop closed-world；父子预算与安全合同确定性闭合；真实P2失败和P3未执行不被隐藏 | 必须完成（experimental-only） |
 | C3 parent-child budget | precheck/actual overrun/tamper tests + API/Trace对账 | 父Action/Knowledge=1；child逐维守恒并汇总；无父子双循环、无框架limit冒充预算 | 必须完成 |
 | C4 Evidence/ACL/AnswerFlow | authority/ACL/revision/duplicate/ledger/Gate/citation tests | 每项回源重水化+双授权；只有Gate允许Evidence进Composer；Subgraph零子答案 | 必须完成 |
 | C5 runtime/compatibility | Agent Scenario v4 + M31–M45回归 | API/Trace/Eval同源；客户端不能选strategy；旧v1/v2/v3与legacy原断言不改 | 必须完成 |
 | C6 historical run | 60×2 completed artifact/review/compare | execution/arm/assertion闭集、identity可比、失败层/成本/语义review完整；不解封reserve | 必须完成 |
-| C6 reserve run | 60×2 completed artifact/review/compare + access ledger audit | 首次解封合法、双臂结果盲化到completed、无污染/重跑、paired结论可复核 | 必须完成 |
-| C7 rollout | decision projector + 用户确认记录 | 只产生两个合法终局之一；无completed reserve不切默认/不验收 | 必须完成 |
+| C6 reserve保全 | manifest/ledger sealed audit + 仓库外reopen todo | reserve未解封、逐题read=0、未伪造decision结果；未来重开门精确 | 必须完成（替代原reserve run） |
+| C7 rollout | 内容绑定decision + 用户确认记录 | Pipeline默认、Subgraph experimental、no auto fallback、quality未建立、historical/review/sealed identity闭合 | 必须完成 |
 | 安全与私密投影 | injection/outbound/ACL/tamper tests + artifact scan | 零正文/raw query/gold/Prompt/raw response/Thought/凭据泄漏；unsafe零recovery | 必须完成 |
 
 聚焦测试顺序：C1 Pipeline等价 → C2 child state/action → C3父子预算 → C4 authority/ACL/ledger → C5 API/Trace/Scenario v4 → C6 runner/ledger/review/compare → C7 rollout。
 
-全量回归范围：M31–M34 Knowledge/Evidence/Answer、M35–M40 legacy Harness/Hybrid/assurance、M41 RAG Eval、M42 reserve/B0、M43 task、M44 B2/Scenario v3、M44A semantic runtime、M45 diagnostic/qualification，以及全仓 deterministic pytest。预计超过2分钟的完整回归和两次Formal Eval按`AGENTS.md`后台规则执行。
+全量回归范围：M31–M34 Knowledge/Evidence/Answer、M35–M40 legacy Harness/Hybrid/assurance、M41 RAG Eval、M42 reserve/B0、M43 task、M44 B2/Scenario v3、M44A semantic runtime、M45 diagnostic/qualification，以及全仓 deterministic pytest。预计超过2分钟的完整回归按`AGENTS.md`后台规则执行；不再运行新的M46 Formal Eval。
 
-不可外推结论：P1–P3不能证明总体质量、Reliability、吞吐、多worker或default收益；historical dev可用于开发但不能做未污染默认决策；reserve单次paired结果也不证明真实企业connector/ACL/生产性能。Subgraph Evidence gain不等于答案正确，自动Gate/citation不替代闭集语义review。
+不可外推结论：P1–P3不能证明总体质量、Reliability、吞吐、多worker或default收益；historical dev可用于开发和止损，不能冒充未污染reserve决策。Subgraph Evidence gain不等于答案正确，自动Gate/citation不替代闭集语义review；当前rollout只证明为何保留Pipeline默认，不证明Subgraph的未来上限。
 
 历史artifact边界：M34/M39/M41/M42/M44A/M45 completed artifact只读、不补字段、不改签；M46引用identity/SHA-256并创建additive v4/runtime/reserve artifact。原sealed reserve文件和hash保持不可变。
 
@@ -414,7 +418,7 @@ Probe共同收紧项：
 - M45 v4 action cards、typed Observation/requirement slot/structure trigger、sibling/forward expansion、proposal validator和safe/private lineage。
 - B2 TaskState/Loop/KnowledgeRuntimeResolver、现有 Knowledge Tool/AnswerFlow/Shared Gate/Citation、business active release和Enterprise SQLite authority + Milvus semantic runtime。
 - `docs/state/runbook.md`、`runbook-rag.md`、`rag-current-state.md`、`eval-baselines.md`与sealed reserve manifest的运行/身份/污染边界。
-- G46-1已确认采用方案A；G46-3在两次Formal Eval前分别精确确认；G46-2在reserve review后确认。
+- G46-1已确认采用方案A；historical三代授权与结果见notes；G46-2已确认Pipeline默认/Subgraph experimental；用户已确认作品集轻量收口并停止reserve分支。
 
 ### 交付物
 
@@ -424,8 +428,8 @@ Probe共同收紧项：
 - 产品task/Knowledge factory接线与安全API/Trace投影；
 - additive Agent Scenario v4、deterministic rehearsal、contract/security/tamper tests；
 - historical dev paired artifact/review/compare；
-- sealed reserve paired artifact/additive access ledger/review/compare；
-- default/experimental/fallback决策记录、仓库安全manifest和项目外immutable大artifact；
+- sealed reserve只读保全证据与仓库外精确reopen todo（本模块不产生reserve paired artifact）；
+- 内容绑定的default/experimental/no-auto-fallback决策记录、仓库安全manifest和historical immutable artifact；
 - M46 notes、技术档案、学习复盘和M47/B5 handoff。
 
 只冻结交付物职责，不提前固定不必要的文件名、类名、Graph node名、并行度、run_id或报告UI。
@@ -434,15 +438,15 @@ Probe共同收紧项：
 
 - 本模块完成但刻意不处理的内容：B5 durable task state、restart/multi-worker/CAS/TTL持久化；B6 deterministic typed Compact与全阶段extended sequence；生产SSO/connector ACL/吞吐优化仍不在Phase 4B主线。
 - 下一模块可直接消费的产物：M47/B5消费稳定TaskState/turn boundary、B4 runtime/termination/child ledger和最终默认策略；恢复后只从任务边界重进Loop，不能恢复RAG Subgraph program counter。
-- 后续需要根据真实失败重新规划的内容：若reserve为`pipeline_default_subgraph_experimental`，B4仍已完成，失败结构与重开门必须精确记录；未来只有新的action/corpus/model假设和新的sealed decision set才能重开默认比较，不能反复消费本reserve。若C6/C7未完成或reserve污染，则M46本身未完成，不能推给M47。
+- 后续需要根据真实失败重新规划的内容：当前`pipeline_default_subgraph_experimental`来自用户确认的historical no-go轻量收口，不是reserve判胜。失败结构与重开门已写入仓库外todo；未来只有新的Evidence run identity修复、Composer structured-output方案或formation grounding假设形成新candidate，并先通过historical后，才可重新申请使用仍sealed的decision reserve。
 - 可能存在的风险：M45 external slots过度依赖已知题；proposal不稳定或新增出站不被接受；child消费无法从现有diagnostics完整观测；expanded Evidence增加context却降低Composer正确性；120+120 paired executions费用/耗时较大；semantic/Milvus运行依赖可能使artifact inconclusive。对应控制是G46-1、同源child ledger、Shared Gate唯一性、historical先行、两次精确授权和三态停止。
-- 强制后续开工条件：M47只能在M46 C1–C7 required全部闭合、G46-2形成合法终局、M46完成`finish-module → finish-docs → 用户人工检查 → accept-module`后开工。experimental-only是合法B4终局；`review_required`不是。
-- 最终验收标准：M46以第8节全部必须项、P1–P3开发时点证据、historical与sealed reserve completed artifact、闭集review和用户默认决策为准；Phase 4B最终仍须在M47/B5、M48/B6后满足roadmap Definition of Done，不得把B4完成外推为阶段完成。
+- 强制后续开工条件：M47只能在修订后的C1–C7 required全部闭合、G46-2轻量rollout合法、M46完成`finish-module → finish-docs → 用户人工检查 → accept-module`后开工。experimental-only是本次授权的合法B4终局；`review_required`不是。
+- 最终验收标准：M46以第8节修订后的必须项、已执行/暂缓Probe事实、historical completed artifact与闭集review、reserve sealed audit和用户轻量rollout决策为准；Phase 4B最终仍须在M47/B5、M48/B6后满足roadmap Definition of Done，不得把B4完成外推为阶段完成。
 
 ## 11. 开工条件
 
 - 开工前无需确认：M46完整对应B4；M45 v4 `go_for_M46`与reserve sealed成立；顶层只保留一次`collect_document_evidence`；Pipeline长期保留；Subgraph必须完整实现但默认化分离；不改corpus/embedding/Composer/active release；M47=B5、M48=B6。这些由roadmap/state/用户本轮模块映射要求确定。
 - 已确认并放行：G46-1采用方案A，允许在完成前置切片后实施受控external proposal/outbound；该确认不包含任何Formal Eval运行授权。
-- 实施中仍需确认：G46-3 historical与reserve两次精确运行授权；G46-2 reserve后默认策略。未确认不阻塞其前置的deterministic/本地切片，但严格阻塞对应Formal Eval、reserve解封和默认切换。
+- 已确认并停止：historical最后候选已运行并no-go；G46-2选择Pipeline默认/Subgraph experimental；reserve保持sealed、不再申请本模块运行授权。
 - M46 notes开工checklist必须预登记P1/P2/P3的时点、阻塞切片、预计calls/tokens和reserve=sealed；同时登记外部artifact新版本目录与原v1.0.0只读分离断言。
-- 发现新冲突时：按“依据、选项、做法、影响、适用条件、风险、建议、确认时点”暂停对应分支。不得因实现、费用或验收方便而减少两张动作、父子预算、business T4、historical view、sealed reserve A/B或默认决策；若用户暂不授权大运行，M46保持未完成而不是留下模糊后续项。
+- 发现新冲突时：按“依据、选项、做法、影响、适用条件、风险、建议、确认时点”暂停对应分支。轻量收口只豁免本模块reserve运行，不得删除两张动作、父子预算、business T4、historical view、默认决策或把no-go改写成质量提升。

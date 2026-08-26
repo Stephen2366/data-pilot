@@ -70,6 +70,7 @@ AnswerReason = Literal[
     "retrieval_unavailable",
     "active_release_unavailable",
     "composer_unavailable",
+    "composer_output_invalid",
     "citation_invalid",
 ]
 ActiveLoader = Callable[[], tuple[object, KnowledgeBundleView]]
@@ -621,7 +622,33 @@ class RAGAnswerFlow:
                 bundle=bundle,
                 evidence_validity=validity,
             )
-        self._validate_claim_drafts(drafts=drafts, context=gate.context, max_claims=request.requirement.max_claims)
+        try:
+            self._validate_claim_drafts(
+                drafts=drafts,
+                context=gate.context,
+                max_claims=request.requirement.max_claims,
+            )
+        except AnswerFlowContractError as exc:
+            if exc.reason_code != "composer_output_invalid":
+                raise
+            if "subgraph" not in validity:
+                # M31–M34 的 Pipeline 合同把坏结构视为调用方可见的严格异常；不能为了 B4
+                # Eval 保留 child ledger，就把所有旧调用路径悄悄改成 typed no-answer。
+                raise
+            # ★ provider 已返回但 claim/support 合同失败仍是一份完整的 RAG result。以前异常
+            # 直接越过 result_observer，导致同次 B4 Subgraph child ledger 在 Eval/Trace 对账中丢失。
+            return self._failure_result(
+                outcome=outcome,
+                execution_status="failed",
+                answer_status="no_answer",
+                safety_status="passed",
+                reason_code="composer_output_invalid",
+                gate_decision=gate,
+                started_at=started_at,
+                counts=(tool_calls, gate_calls, composer_calls, validator_calls),
+                bundle=bundle,
+                evidence_validity=validity,
+            )
 
         # 步骤 5：代码分配 claim/slot，再由现有 validator 全量校验 =====================
         slots, citation_drafts, claim_refs = self._build_citation_drafts(

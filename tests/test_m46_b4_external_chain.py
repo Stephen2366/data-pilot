@@ -10,10 +10,14 @@ from typing import Any
 from engine.governance import authorize_document, test_caller as make_test_caller
 from engine.phase4b.external_requirement_formation import FormedRequirement
 from engine.phase4b.rag_diagnostics import ExpansionPreview, RequirementSlot
-from engine.phase4b.rag_subgraph import BoundedRAGSubgraphAcquirer, SlotResolution
+from engine.phase4b.rag_subgraph import (
+    BoundedRAGSubgraphAcquirer,
+    SlotResolution,
+    _safe_runtime_failure_code,
+)
 from engine.rag.answer_flow import RAGAnswerRequest
 from engine.rag.catalog import CatalogEntry
-from engine.rag.evidence import Evidence, EvidenceLedger, make_document_evidence
+from engine.rag.evidence import Evidence, EvidenceContractError, EvidenceLedger, make_document_evidence
 from engine.rag.evidence_acquisition import AcquisitionResult
 from engine.rag.knowledge_tool import (
     KnowledgeRequest,
@@ -447,3 +451,20 @@ def test_execute_exception_projects_safe_stage_and_marks_attempts_unobserved() -
     assert "must-not-leak" not in str(child)
     assert "fixture_private_reason" not in str(child)
     assert result.outcome.selected_evidence == ()
+
+
+def test_evidence_runtime_failure_exposes_only_allowlisted_reason_code() -> None:
+    """未来合法运行可定位 Evidence 合同层，但异常正文仍不进入 Trace/Eval。"""
+
+    code = _safe_runtime_failure_code(
+        stage="observe",
+        exc=EvidenceContractError("evidence_run_mismatch", "private document detail"),
+    )
+    unknown = _safe_runtime_failure_code(
+        stage="observe",
+        exc=EvidenceContractError("future_private_reason", "private document detail"),
+    )
+
+    assert code == "subgraph_observe_evidence_contract_evidence_run_mismatch_failure"
+    assert unknown == "subgraph_observe_evidence_contract_unknown_failure"
+    assert "private document detail" not in code + unknown

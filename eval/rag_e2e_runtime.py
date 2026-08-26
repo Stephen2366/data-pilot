@@ -57,6 +57,8 @@ class FixedRAGEvalRouter:
     identity = "eval-fixed-rag-router-v1"
 
     def decide(self, request: HarnessRequest) -> RouteDecision:
+        """将已预选的 external benchmark 请求稳定路由到 RAG。"""
+
         return RouteDecision(
             "rag",
             "eval_rag_route_preselected",
@@ -127,6 +129,8 @@ class RAGProductExecutor:
         usage_before = dict(usage_fn()) if callable(usage_fn) else {}
 
         def tool_factory() -> RAGToolAdapter:
+            """为当前 HTTP 执行创建隔离的 AnswerFlow 与结果观察器。"""
+
             flow = self._answer_flow_factory() if self._answer_flow_factory is not None else RAGAnswerFlow(composer=self._composer)
             return RAGToolAdapter(
                 answer_flow=flow,

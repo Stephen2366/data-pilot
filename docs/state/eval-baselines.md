@@ -2,7 +2,7 @@
 
 > 本文是评测数字、分母、artifact、实验状态与可比性规则的唯一详细账本。`rag-current-state.md` 只保留 RAG 当前运行口径和结论摘要；两处出现同一 profile identity 时，以本文判断“能否比较”，以 `rag-current-state.md` 判断“当前运行使用什么”。M26 及以前的 formal / challenge / diagnostic 账本已归档到 [eval-baselines-old.md](../archive-versions/eval-baselines-old.md)。
 
-更新时间：2026-08-24
+更新时间：2026-08-26
 
 ## 当前状态
 
@@ -16,11 +16,13 @@
 - **M40 P7 technical assurance**：`phase4-assurance-v1` 是九个现有 deterministic family 的 closed-world 技术 Gate，另以 `phase4-trace-rehearsal-v1` 关联 SQL、RAG、Hybrid、澄清恢复和安全拒绝的同次 API/Trace 安全投影。它只登记 contract/artifact identity 与 P6 verified `no_go`，不产生新的质量分数、不混入 M27/M34 数字，也不等于 Phase 4 人工验收或生产就绪。
 - **M41 business RAG 产品 Eval**：当前合同为 `phase4-rag-e2e-v1`，用户入口已合并为唯一 `business` selector（5 题各 1 次），并保留 `--scenario` 单题诊断。首次真实 Qwen Smoke `m41-rag-smoke-20260822-01` 是合并前的历史 2 题 artifact，已 completed 且 review 通过；原件不改签，也不能冒充当前 5 题 Business 结果。
 - **M41 external 套件与候选对比**：完整 180 catalog 的 difficulty 为 basic/core/hard `64/74/42`，与 dev/held-out partition、smoke/basic/core/hard/reliability/full suite 分离。compare-v2 默认只作同 runtime strict repeat；候选 A/B 必须显式声明允许变化的 runtime 字段，自动 paired 迁移仍不等于人工 correctness。现有 v2/post-fix dev smoke/basic/core 快照见下方，正式长期基线尚未登记。
-- **M42 Phase 4B B0 Eval 前置**：`phase4b-agent-scenario-v1` 只冻结 sequence/turn/execution/assertion closed-world skeleton 和 capability handoff；deterministic rehearsal 的 Agent artifact `b303d4d...52982`、business Observation `e6bc5fa...aab99` 与 sealed reserve `f70c5fc...e505` 都不是新的质量分数或正式长期基线。reserve 为 60 题 `20/20/20`，M46 前不可运行 candidate；M41/M34 artifact 不改签。
+- **M42 Phase 4B B0 Eval 前置**：`phase4b-agent-scenario-v1` 只冻结 sequence/turn/execution/assertion closed-world skeleton 和 capability handoff；deterministic rehearsal 的 Agent artifact `b303d4d...52982`、business Observation `e6bc5fa...aab99` 与 reserve `f70c5fc...e505` 都不是新的质量分数或正式长期基线。reserve为60题`20/20/20`；M46因historical no-go未冻结candidate、未解封或运行该reserve，当前仍sealed/read0。M41/M34 artifact不改签。
 - **M43 Phase 4B B1 deterministic artifact**：新增 additive `phase4b-agent-scenario-artifact-v2`，只记录 TaskDelta、state transition、Evidence validity、node Context、task lifecycle 与 0/1 invocation 事实；M42 v1 未改签。当前 rehearsal artifact `cc9f696...b27c92` 绑定 B1 contract `383fbf5...e9d32`，8 项 deterministic checks 通过、external calls 为 0。它证明 B1 技术合同和冻结 oracle，不是 LLM/Agent 质量分数或正式长期基线；M46 reserve 仍 sealed。
 - **M44A Enterprise semantic 技术 smoke**：产品 API/external Eval 默认改为 semantic，但 M34 lexical/semantic 正式 retrieval 结果和历史 artifact 不改签。单题 C6 `m44a-rag-external-qst0386-20260824-c6` 只证明真实向量产品链闭合，不自动登记正式长期基线，也不构成 lexical/semantic A/B。
 - **M44A semantic dev Smoke**：9 题 post-fix external smoke `m44a-rag-external-semantic-smoke-20260824-023039` 已 completed；Gate `92/16/0`、人工 `2/7`。与历史 lexical smoke 的 candidate compare 已按预注册 runtime 字段闭合，但单次 generation 不构成 Reliability 或单组件因果；仍不登记正式长期基线。
 - **M44 Agent Scenario v3**：`phase4b-agent-scenario-v3` 是 B2 closed-world deterministic 控制/安全 artifact；rehearsal identity `63c9483c8d55b958b48925085d99c9bb14164c1120a7d364c0b1c611dabac700`，6/6 checks、external calls=0。它冻结 action sequence、actual consumption、EvidenceDelta/progress/termination、Context 与 private-payload 安全投影，不产生真实模型/RAG 质量分数，不与 M27/M34/M41 基线混算。
+- **M46 historical paired v2**：external `diagnostic_dev/full` 60 题的 Pipeline/Subgraph 两臂均 completed，run `m46-historical-paired-20260826-160237`，Gate `571/112/37 → 375/126/219`，60 个 paired verdict 全部 insufficient，Subgraph 60 题最终均 no-answer，因此是不可变的 `no-go/revise` 开发历史，不是正式长期基线或 reserve 决策。Pipeline 已知 `113 requests / 132841 chat tokens`；Subgraph 仅有下限 `123 / 102522`，3 条 child projection 缺失且 embedding tokens 不可得。后续 v3 是独立candidate与独立授权，不能混算或覆盖v2；sealed reserve始终未解封。
+- **M46 historical paired v3（当前最终 historical 结论）**：run `m46-historical-paired-20260826-164511` 两臂各60 completed，Gate `598/112/10 → 393/139/188`，paired `57 insufficient / 3 tie`，Subgraph仍为`60/60 no_answer`。v3修复了value-shape与projection完整性，answer-ready增至26，但全部被Composer合同拒绝，另有19个Evidence run mismatch；结论=`no_go_revise_stop`，不登记长期基线、不冻结candidate、不解封reserve。已知requests `120→139`、chat tokens `133581→110622`，embedding token不可得；详见 [`closed-set review`](../../eval/reports/m46/m46-historical-paired-20260826-164511-review.md)。
 - **记录分类**：实验先按“是否仍能支持当前路线判断”进入「当前有效实验快照」；用户明确指定后才进入「正式长期基线」；合同、运行条件或决策价值已过时的记录转入「历史实验记录」。分类不按模块编号自动新增标题。
 
 ## 读数与分母

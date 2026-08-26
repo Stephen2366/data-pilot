@@ -8,11 +8,11 @@
 | ------------ | ------------------------------------------------------------ |
 | 阶段路线     | `docs/phase4b-roadmap.md`                                    |
 | 阶段参考     | `docs/phase4-reference.md`                                   |
-| 当前活动模块 | M45/B3 已验收通过（accept-module，2026-08-25）；v4 `go_for_M46`，M46/B4 可开始规划 |
-| 当前 plan    | `docs/notes/m45-plan.md`                                    |
-| 当前 notes   | `docs/notes/m45-notes.md`                                   |
-| 待决事项     | M45 学习复盘 / 人工检查 / accept-module 门全部通过；下一步制定 M46/B4 plan；M46 plan 前 reserve 继续 sealed，不提前运行 A/B |
-| 更新时间     | 2026-08-25                                                   |
+| 当前活动模块 | M46/B4 技术收工已完成；等待finish-docs与后续人工检查 |
+| 当前 plan    | `docs/notes/m46-plan.md`                                    |
+| 当前 notes   | `docs/notes/m46-notes.md`                                   |
+| 待决事项     | 无产品策略待决；完成M46学习复盘，reserve继续sealed/not-run |
+| 更新时间     | 2026-08-26                                                   |
 
 ## 必读规则
 
@@ -41,6 +41,7 @@
 - Thread checkpoint：方案 A，应用持有 `inprocess-bounded-thread-v2`，state `m37-thread-v2`，默认 TTL `900s`（`THREAD_CHECKPOINT_TTL_SECONDS`）。除 M36 一次结构化恢复外，成功 SQL/RAG 可在显式开启后签发一次 closed-world follow-up；owner 绑定 trusted caller + tenant/active role，同 version 原子单 claim，重启/多 worker 不恢复或共享。checkpoint 不保存旧 answer/rows/正文/citation。
 - Agent task boundary：应用另持有 `phase4b-in-memory-task-boundary-v1`，复用默认 TTL 900s，但与 thread checkpoint/state family 分离。它绑定 trusted caller+tenant、执行 version/TTL/原子 claim/commit/switch/cancel/clear；错 owner 与未知 task 统一失败。只保存通用 TaskState v2 与安全 EvidenceRef validity，不保存 rows/正文/完整历史答案；明确为 process-local non-durable，B5 前不得宣称跨进程恢复。
 - B2 Agent Loop：只有 accepted task turn 进入独立 `phase4b-agent-loop-v1`，由确定性 Controller 选择 closed-world Evidence action；父预算最多 3 次 Evidence action/deep Tool、1 次 Knowledge、每 requirement 1 次 repair、6 次 model call、24000 observed tokens。clarification/cancel/clear/pre-rejection 为零 Loop，legacy 非 task Harness 拓扑不变。
+- B4 RAG acquisition：服务端保留 Pipeline/Subgraph 两个 adapter，Pipeline 仍为产品默认与显式 baseline，Subgraph 仅 server-controlled experimental；Subgraph 在一次父级 Knowledge action内执行 bounded initial retrieval → Observation → eligible rewrite/expansion/stop → Evidence merge/reauthorize，并投影独立 child ledger。historical candidate `ab66f20d...2f78` 已完成最后一次60×2且no-go；当前内容绑定rollout contract `ebb06f82...f164`明确`quality_claim=not_established`、无自动跨策略fallback、reserve sealed/not-run。
 - Task Knowledge runtime：服务端 requirement scope 只允许 `business_release/external_profile`，请求不能选择 corpus/backend。business 使用 22 条 active release lexical，external 与普通非 task RAG 使用 Enterprise semantic；SQLite profile 是正文 authority，Milvus/identity/ACL/readiness 缺失时失败关闭且不跨账 fallback。完整 runtime identity 与 preflight 见 RAG/Milvus 专项 state。
 - Evidence follow-up：SQL 没有可靠业务 snapshot，永远重查；EnterpriseRAG-Bench external 永远重检索；只有业务 22-entry release 的同 requirement 解释动作可按当前 active authority/revision/content/anchor 重新加载并重新授权，随后签发新 run Evidence/ledger/citation。requirement/identity 变化重检索一次，ACL/用途拒绝零 retrieval 停止。
 - Caller：`local/demo/test` 使用明确标记的 fixture resolver，请求 `user_role` 只能选择 resolver 已解析的 role；其他环境没有 authenticated resolver 时在 Tool 前失败关闭。生产认证尚未建设。
@@ -55,6 +56,8 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-26 | M46技术收工：注释审计23文件/257符号、缺失0；聚焦`57 passed`，兼容修复聚焦`26 passed`。全仓首次发现并修复M33/M34 Pipeline兼容回归；第二次625项通过，唯一M31临时目录`os.replace` WinError5项独立`1 passed`，故当前626项均有通过证据。M46 rollout identity=`ebb06f82...f164`，默认/experimental/reserve边界不变。 |
+| 2026-08-26 | M46最后一次 historical v3 `m46-historical-paired-20260826-164511` 两臂各60 completed，Gate `598/112/10 → 393/139/188`，paired `57 insufficient / 3 tie`。value-shape `19→0`、child projection 60/60、answer-ready `12→26`，但26题全部被Composer合同拒绝，另有Evidence run mismatch19，最终Subgraph仍`60/60 no_answer`。用户已确认`no_go_revise_stop`后的轻量收口：不冻结candidate、不解封reserve、不再追加同类historical；Pipeline默认/Subgraph experimental，未来修复包在仓库外todo。 |
 | 2026-08-25 | M45-H/P5 最终 passed：显式默认关闭的 `procedure_boundary_v1` 在 qst_0431 initial coverage 显示完整、且 SQLite authority 证明存在 forward unit 时，准入 expansion 并新增 2 条同物理文档后续 Evidence；P5 retrieval/embedding/chat/Composer=0。v4 review `949a3b03...fbb4`=`go_for_M46`，两张 action card completed，累计 provider attempts 仍为 11；全仓 `582 passed, 1 warning`。M45/B3 技术完成，但它仍是 diagnostic admission，不是产品 RAG Subgraph。 |
 | 2026-08-25 | M45-P4R/v3 最终 no-go：qst_0461 用 P4 immutable proposal 离线重放后 expansion passed；qst_0431 唯一 Qwen revalidation transport 成功，但本地 coverage validator 判为 `proposal_no_unsupported_requirement`，未触发 action。runner 未 catch 异常导致 raw/token usage 丢失，故 tokens=`unobserved`，严禁估算为 0 或补发。recovered safe `6426219b...a949`，v3 review `8fb3cfad...14e4`，累计 provider attempts=`8 embedding + 3 chat = 11`；M45/B3 未完成、M46 blocked。 |
 | 2026-08-25 | M45-P4 受控 A2 真实 Probe failed：qst_0431 proposal schema 因 prompt 未声明 marker 数量上限被 validator 拒绝；qst_0461 正确提出 weekly schedule 缺口，但 literal phrase matcher 未命中语义等价 sibling，expansion 未准入。2 Qwen calls / 3877 tokens，零新 retrieval/embedding/Composer；累计 provider attempts=10。safe `a374f0c0...cfac`，v2 review `ce0d7615...40af`=`review_required/no_go`；不自动重跑，M46 blocked。 |
@@ -66,7 +69,8 @@
 > 只保留仍然生效的路线和限制；已经完成的必须删除或改写。
 
 - (2026-08-24) M44A 仍是 B2 前置修复、不占 B milestone。business 小 catalog 与 external 180 题继续分账，120 held-out 保持停门；external 产品默认为 semantic，但历史 lexical artifact/正式 retrieval baseline 不改签，也没有证据宣称 semantic 质量更优。
-- (2026-08-25) M45/B3 最终以 v4 `go_for_M46` 完成：rewrite、bounded sibling expansion 与 procedure forward continuation 两张 action card已闭合。P1～P4R 的失败/no-go 保留为 required lineage；P5 不调用 provider。M46 只能消费这些 diagnostic contracts，仍须另立 plan 接产品 Subgraph、父子预算和 sealed reserve A/B，不能把 M45 的 Evidence gain 外推为答案正确率或默认净收益。
+- (2026-08-25) M45/B3最终以v4 `go_for_M46`完成，rewrite、bounded sibling expansion与procedure forward continuation两张action card已闭合；M46已消费这些diagnostic contracts并完成experimental产品Subgraph。M45的Evidence gain仍不能外推为答案正确率，最终默认/质量结论以M46 historical no-go与rollout为准。
+- (2026-08-26) M46/B4技术收工已完成：完整experimental Subgraph、父子预算和同源Eval child ledger可复用；最后一次historical v3仍60题无答案并三档退化。Pipeline默认、Subgraph server-controlled experimental、无自动fallback、quality claim未建立；candidate不冻结，reserve sealed/not-run。后续质量修复须以新假设/新candidate/新授权另立计划；Phase 4B主线下一技术入口为M47/B5 durable task state。
 
 ## 防遗忘能力账本
 
@@ -78,7 +82,7 @@ M41 及以后的能力缺口：
 | ------ | ------------------------------------------------------------ | ------------------------------------------------------------ | --------------------- |
 | P2     | M44 G44-2 未选方案 B：由结构化模型提出 next Action、再由确定性 Controller 审核 | M44 已确认方案 A，首版 next-action 完全确定性，decision model calls/tokens 固定为 0；这不代表永久排除模型 proposal。只有 required paraphrase 集形成稳定且不可接受的 deterministic clarification 失败簇，才能另立 module plan 评估结构化 proposal adapter；届时必须保留 closed-world Action allowlist、deterministic validator、Budget/ACL/outbound/duplicate/no-progress 硬门，并重新取得 decision purpose、数据类别和真实 E2E 的用户授权。不得仅因模型看起来更灵活就重开，也不得把它算作 M44 未完成项 | Phase 4B 后续质量候选 |
 | P2     | G4 typed comparison completion 是“只消费服务端 metric_comparison requirement + 已验证 SQL rows”的窄合同 | 不扩成任意公式/required-output 平台：多期趋势、任意公式、自然语言自由计算、通用 required-output DSL 均不在授权内；只有用户确认新合同并另立 plan 才能扩展 | Phase 4B 后续质量候选 |
-| P2     | `procedure_boundary_v1` 只证明 forward context 值得补取，不证明后续正文一定改善最终答案 | M45-H 已以默认关闭、procedure-shaped intent + SQLite forward unit 的窄合同闭合 qst_0431；M46 接入产品 Subgraph 时必须保留该 trigger identity、ACL/同文档/budget/stop，并通过 Pipeline/Subgraph A/B 与人工语义 review 判断净收益。不得直接全局开启或把 Evidence gain 当 answer correctness | Phase 4B M46/B4 必审 |
+| P2     | `procedure_boundary_v1`只证明forward context值得补取，不证明后续正文一定改善最终答案 | M46已在experimental Subgraph中保留trigger identity、ACL/同文档/budget/stop，并用historical paired review发现总体no-go；未来重开仍不得全局开启或把Evidence gain当answer correctness，必须形成新candidate与可比证据 | Phase 4B 后续质量候选 |
 
 M29–M40 的能力缺口：
 
@@ -104,3 +108,4 @@ M29–M40 的能力缺口：
 | LangFuse Cloud 重新启用前需统一 question/answer 脱敏（M28 F7） | RAG/Hybrid 若启用 Cloud 会外传完整问答 | LangFuse 默认关闭且 M31 outbound 未放行 Cloud；重新启用前先做 allowlist/redaction 策略和用户决策。 |
 | 最终 deterministic repair 真实路径仍未触发 | 最终 Probe 的初始 SQL 已是合法 MySQL，故没有 repair action；这不证明 repair 失败，也不能充当真实成功证据 | 保留 deterministic snapshot/reuse/provider=0 tests；禁止故意制造无效 SQL。只有以后自然出现 typed dialect failure 时才能补真实证据，不以此单独重复调用。 |
 | Enterprise semantic 依赖项目外 profile、DashScope embedding 与 Milvus | Docker 未启动、snapshot identity 漂移或 provider 不可用时 RAG 会明确 unavailable；启动加载/核验约 10 秒，当前单锁优先保证共享 client 安全而非吞吐 | 启动前按 `runbook-rag.md` 执行 preflight；应用不自动启动 Docker、不降级 lexical；用 `/health/rag` 判断 readiness，性能优化须另立候选与证据 |
+| M46 Subgraph historical 泛化仍 no-go | v3虽清除value-shape失败并使26题answer-ready，但Evidence run mismatch与严格Composer输出合同仍使60题全部no-answer | 用户已确认轻量收口：Pipeline默认、Subgraph experimental、reserve sealed/not-run；未获新计划/候选/授权不得重跑。重开顺序与证据入口见仓库外`DevProbe-todo.md` |

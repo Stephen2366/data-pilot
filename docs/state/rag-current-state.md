@@ -2,11 +2,11 @@
 
 > 本文是知识库的当前运行状态入口，作用类似 `database-current-state.md`：只记录续接开发需要立刻知道的语料、active identity、运行接线、当前结论和活跃风险。评测数字、分母、artifact 与可比性规则统一以 `eval-baselines.md` 为准；本文不建立第二份评测账本。涉及知识原件、active release、外部 corpus、Knowledge Tool 或 M34 运行状态时必须先读本文。
 
-**更新时间：2026-08-24**
+**更新时间：2026-08-26**
 
 ## 一句话结论
 
-DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知识 release** 继续默认 deterministic lexical；EnterpriseRAG-Bench 的 **36,417 篇文档 / 180 题**产品 API/external Eval 在 M44A 后默认走既有 Milvus semantic snapshot。lexical 只作显式历史 baseline；semantic 不可用时失败关闭而不降级。60 dev 的历史 lexical 运行已完成，120 held-out 未运行。
+DataPilot现在有两套彼此隔离的知识运行口径：**22条业务知识release**继续默认deterministic lexical；EnterpriseRAG-Bench的**36,417篇文档/180题**产品API/external Eval在M44A后默认走既有Milvus semantic snapshot。M46又在Document Evidence Acquisition seam内提供Pipeline/Subgraph两个adapter，但Pipeline仍是产品默认，Subgraph只作服务端实验能力；semantic或实验依赖不可用时失败关闭而不降级。
 
 ## 当前两套知识运行口径
 
@@ -83,7 +83,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - gold 不进入 runtime，只在 Tool 返回后评分；retrieval gold coverage 不能冒充答案正确率。
 - completed Answer/Citation Eval 证明真实 Tool → Evidence → AnswerFlow → citation 链路与账本可复现，但暴露出 lexical 漏召回、多文档 context packing 不足和 Composer support 合同拒绝三类主要缺口。
 - `answer_status=complete` 只表示回答、support 和 citation 合同闭合，不等于答案正确；M34 没有启用 LLM Judge。
-- M39 只读审计已将冻结 M34 的 60 dev 分为 retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`；120 held-out 未逐题消费。现有材料没有“首次 Observation 选择允许动作后新增 Evidence”的证据，也没有可比额外预算，因此 P6 为严格 `no_go`，不接入 RAG Subgraph。其“当时不切 external lexical 默认”已被 M44A 的用户选择替代，但 B3/B4 Evidence 门未改变。可复核报告见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
+- M39只读审计当时将冻结M34的60 dev分为retrieval `11`、context/packing `13`、Composer `10`、provider unavailable `2`、not classifiable `24`，并因缺少action-level Evidence而判P6 `no_go`。M45后续补齐动作准入证据，M46据此接入experimental Subgraph；这不改写M39历史结论。M46最终historical仍no-go，因此Pipeline保持默认。可复核报告见[`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
 - M41 首次真实 business Qwen Smoke `m41-rag-smoke-20260822-01` 已 completed：2 个 Scenario、自动 required `23/23`、Gate `passed`、人工 review `2/2 pass`。唯一 generation 调用成功并消耗 `1012` tokens，no-candidate 题零 provider；该单次窄结果不能外推 Core、多文档、Reliability 或整体业务 RAG 质量，也尚未登记正式长期基线。
 - M41 external 60 dev `m41-rag-external-dev-20260822-01` 已 completed：primary triage `24 passed / 20 retrieval / 7 product_runtime / 5 citation / 4 selection`，candidate/selected/generation-visible/cited gold 为 `35/30/30/24`（分母均 60），usage `137299` tokens；人工语义 verdict `18 pass / 26 fail / 16 insufficient_evidence`。它证明 180 题可以像 Text2SQL 一样逐层定位，且自动链路通过不能代替语义正确。
 - M41 首条 post-fix dev core `m41-rag-external-core-20260823-151649` 已 completed：25 题，Gate `failed`（required 211/58/31），primary triage `9 retrieval / 7 product_runtime / 1 selection / 1 citation / 1 provider_or_support / 6 passed`，usage `53106` tokens；AI reviewer verdict `4 pass / 13 fail / 8 insufficient_evidence`。5 题 Composer 坏结构被如实标记（归类修正生效）；9 题 lexical 漏召回为最大失败层；verdict fail 主体是检索错文档→答偏与有引用仍拒答，4 例 pass 全部检索命中 gold——检索命中是语义正确的关键前提。未登记正式基线，120 held-out 未运行。
@@ -92,7 +92,7 @@ DataPilot 现在有两套彼此隔离的知识运行口径：**22 条业务知�
 - M44A C6 `m44a-rag-external-qst0386-20260824-c6` 按用户授权只运行 `diagnostic_dev/qst_0386` 一次：completed artifact `0a5bc40...c9647`，required `12/0/0`，semantic candidate→selected→generation-visible→cited 为 `5→3→3→1`，Qwen 一次 2054 tokens，人工语义 pass。它证明 query embedding→Milvus→SQLite Evidence→Composer→citation 产品链闭合；advisory exact-fact 下限仍失败，因此既不登记正式长期基线，也不外推 60/180 题质量。
 - M44A semantic dev Smoke `m44a-rag-external-semantic-smoke-20260824-023039` 9 题一次 completed：required `92/16/0`、triage `5 passed / 4 retrieval`、人工 `2 pass / 7 fail`、19033 tokens。4 题 candidate 阶段漏 gold；另有命中 gold 后仍提取不全/事实错误。与历史 lexical smoke 的合法 candidate compare 为自动 `1 win / 5 tie / 3 loss`、人工 `3/6→2/7`；两侧均单次 generation，不能推导稳定 backend 因果或 Reliability，也不登记长期基线。
 
-M42 另创建 60 题 Phase 4B decision reserve，identity `f70c5fc...e505`，使用 external corpus/profile 的 20 份未进入既有 180 gold 的冻结文档；分布 basic/core/hard `20/20/20`，core 8、hard 20 道多文档。逐题材料在项目外 immutable store，仓库只保存安全 manifest。它在 M46 前保持 sealed，未运行 candidate，也不改变 M34/M41 基线；M44A 的产品默认切换没有读取或污染该 reserve。
+M42 另创建60题Phase 4B decision reserve，identity `f70c5fc...e505`，使用external corpus/profile的20份未进入既有180 gold的冻结文档；分布basic/core/hard `20/20/20`，core 8、hard 20道多文档。逐题材料在项目外immutable store，仓库只保存安全manifest。M46因historical no-go没有冻结candidate或运行decision set，用户确认轻量收口后该reserve继续sealed/read0/not-run，也不改变M34/M41基线；M44A的产品默认切换没有读取或污染它。
 
 semantic snapshot 已完成全部 139,214 个 unique unit，并在 M44A 后成为 Enterprise 产品默认候选索引：
 
@@ -116,6 +116,7 @@ semantic snapshot 已完成全部 139,214 个 unique unit，并在 M44A 后成�
 - M41 external-180：完整 180 catalog 复用同一 Evidence/Gate/review 框架，以 partition × suite 选择运行范围；dev 为 smoke 9、basic 21、core 25、hard 14、reliability 6×3、full 60。业务题与 external 题不得混成同一分数。
 - M42 `phase4b-agent-scenario-v1`：sequence/turn/execution/assertion closed-world skeleton，安全投影只保存 evidence kind/ref 和三态结果；B0 capability matrix 明示 M43–M48 unavailable。它不替代 M41 单题 RAG Eval，也不证明 Agent runtime 或 RAG Subgraph 已可执行。
 - M44 `phase4b-agent-scenario-v3`：从同一 B2 Loop 事实冻结 task/contract/seed/caller/knowledge/policy identity、逐 action budget/EvidenceDelta/progress/termination、Context 与 private payload；deterministic rehearsal 6/6、零 provider。B2 在业务首次检索只返回 quality 而缺 basic 时稳定停止为 `budget_exhausted/required_coverage_incomplete`，不会重复 query；这证明控制和审计合同，不是 B3 recovery 或 B4 RAG Subgraph。
+- M46 `phase4b-agent-scenario-v4`与B4 rollout：在一次父Knowledge action内投影child attempt/consumption/termination和安全formation facts；Pipeline默认、Subgraph server-controlled experimental、no-auto-fallback、quality未建立，reserve sealed/read0/not-run。它证明控制/审计结构可运行，不证明Subgraph质量胜出。
 
 ## 活跃风险与后续边界
 
@@ -124,9 +125,10 @@ semantic snapshot 已完成全部 139,214 个 unique unit，并在 M44A 后成�
 - **生产真实性**：合成语料属性见“数据与身份”；当前仍未证明真实 connector ACL、权限继承、增量同步、删除传播、企业脏数据或生产性能。
 - **能力范围**：M38 已把两类 canonical SQL + Document Hybrid 接入同一 Harness，但不是自由多轮或开放跨来源研究。第二次追问、Hybrid follow-up、optional branch、生产认证、长历史、持久 checkpoint 和通用评测平台仍未完成，LangFuse Cloud 仍关闭。
 - **成本**：取消 800-token 应用上限后没有固定人工费用上界；后续真实运行必须记录 provider usage，未经新计划和费用确认不得重跑大规模 generation。
+- **M46 B4 rollout**：Pipeline继续作为产品默认和显式baseline；Subgraph保留为server-controlled experimental，不允许客户端选择，也不启用自动跨策略fallback。最后一次historical v3仍`60/60 no_answer`，因此`quality_claim=not_established`；candidate不冻结，Phase 4B reserve `f70c5fc...e505`保持sealed/read0/not-run。未来只有新假设、新candidate和新授权才能重开。
 - **M41/M44A 后续真实运行门**：历史 business Smoke、lexical external dev 与 M44A semantic 单题 C6 均已按各自授权完成。external selector 默认 dev，产品 retrieval 默认 semantic；120 held-out/all 仍须明确说出。任何真实运行都只授权一次，不得自动重跑、扩大 suite 或在 semantic 失败后换 lexical 冒充同次授权。
 - **数据纪律**：raw、extracted、SQLite profile、Milvus collection 和大 artifact 不提交 Git；项目内只保存 recipe、轻量 split、代码与必要状态文档。
-- **Phase 4B reserve 污染门**：M46 前不得读取逐题 gold、运行 candidate 或用 reserve 调参；发生提前访问/调参时必须按访问状态机标记 retired，不能继续充当 decision set。M34/M41 现有 180 题只作 historical regression，不与该 60 题 reserve 合并。
+- **Phase 4B reserve 污染门**：只有historical支持正式冻结的新candidate、闭集review和用户精确授权同时成立，才可读取逐题内容并运行一次decision set；不得用reserve调参。提前访问/调参时必须按访问状态机标记retired，不能继续充当decision set。M34/M41现有180题只作historical regression，不与该60题reserve合并。
 - **默认与质量证据分离**：M44A 的 semantic 产品默认是已确认合同；若要切回 lexical、换 embedding/recipe、Hybrid 或 rerank，必须产生新 identity、明确成本与单变量证据并经用户确认。单题 C6 或开发便利都不能触发切换。
 - **运行依赖与性能**：应用不启动或维护 Docker/Milvus；离线时 RAG 明确 unavailable。139k metadata/unit-set 启动核验约 10 秒，semantic query 首版以单锁保护共享 provider/client，尚未形成吞吐或多 worker 性能结论。
 - **未接入候选**：WixQA 仍只是项目外候选，未索引、未评测、也不属于 active corpus；后续若重新考虑，需另开 corpus 调查和接入计划。

@@ -85,7 +85,7 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
 demo/                   # Streamlit 演示页
 scripts/                # 本地脚本，例如 seed 数据
 tests/                  # pytest 测试
-.agent_work/temp/       # AI 工具共享临时目录，不区分 Claude / Codex
+.agent_work/temp/       # AI 工具共享临时目录；新产物按 <module>/<run-name>/ 分层
 ```
 
 ## 开发环境
@@ -94,7 +94,7 @@ tests/                  # pytest 测试
 
 ## 工作约定
 
-- 所有 AI 工具共享同一个临时目录：`.agent_work/temp/`，用于存放脚本中间产物、一次性 JSON、缓存、临时 smoke 摘要等。
+- 所有 AI 工具共享同一个临时目录：`.agent_work/temp/`，用于存放脚本中间产物、一次性 JSON、缓存、临时 smoke 摘要等。新建的模块临时产物统一放入 `.agent_work/temp/<module>/<run-name>/`：`<module>` 使用小写模块号（如 `m46`），每次测试、Dev Probe 或后台任务再使用独立且能辨认的子目录（如 `pytest-focused`、`pytest-full-r2`、`probe-p2r`）；同一运行的 basetemp、日志、退出码和完成标记放在该子目录内。已有历史目录无需迁移，非模块任务可继续使用明确命名的独立目录。
 - 可复用运行数据不要放临时目录：模块 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），Agent Trace 写入 `eval/traces/`，eval 报告（report / triage / compare）写入 `eval/reports/`，开发过程中的 notes / 实验 / 审查等 写入 `docs/notes/`（见「开发素材与收工」）；smoke 的一次性输出摘要仍放临时目录。
 - 当前阶段的能力顺序和长期边界以阶段 roadmap 为准；当前模块合同和验收以独立 `<module>-plan.md` 为准；运行配置、Eval、数据库和索引事实分别以对应 state 文档为准。模块 plan 只引用这些事实源，不复制形成第二份权威定义。
 - README 只在阶段结束时统一整理和更新。
@@ -139,7 +139,7 @@ tests/                  # pytest 测试
 - 开发过程中优先运行与当前改动直接相关的测试；允许在当前轮等待，但应设置合理等待时间并稀疏检查，禁止高频心跳轮询。
 - 测试失败后优先修复并重跑相关失败用例，不立即重复运行完整测试。
 - 完成全部代码修改后，完整测试、Eval、构建或数据处理任务如果预计超过 2 分钟，使用后台进程运行，不进行 AI 心跳轮询。
-- 后台任务必须将日志、退出码和完成标记写入 `.agent_work/temp/`。
+- 后台任务必须将日志、退出码和完成标记写入 `.agent_work/temp/<module>/<run-name>/`；同一运行的文件集中存放，不与其他测试或 Probe 混用目录。
 - 启动后台任务前，先在当前模块 notes 中写入阶段性 checkpoint，至少记录截至此刻的关键决策、改动范围、已完成验证、已知风险和待完成事项；不得让这些信息只存在于会话上下文。
 - 后台任务启动成功后，在 notes 中追加命令、PID、日志路径、退出码路径、完成标记路径，并将结果标为“运行中，待检查”；不得提前记录为验证通过。随后向用户报告上述任务信息和检查方法，然后结束当前回复。
 - 用户稍后要求继续时，先重新读取 notes、后台任务退出码、完成标记和必要日志，再更新最终验证结论。

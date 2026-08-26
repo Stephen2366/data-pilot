@@ -68,6 +68,8 @@ class PipelineEvidenceAcquirer:
         """只执行一次 Pipeline retrieval，或执行已存在的 business rehydrate 合同。"""
 
         def retrieve(reason: str) -> AcquisitionResult:
+            """执行一次旧 Pipeline retrieval，并附上可审计的重获原因。"""
+
             outcome = self._knowledge_tool.retrieve(
                 KnowledgeRequest(
                     question=request.question,

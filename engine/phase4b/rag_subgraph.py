@@ -108,6 +108,8 @@ class ChildConsumption:
         )
 
     def safe_projection(self) -> dict[str, Any]:
+        """把一次 recovery 压缩为不含 query、正文与 provider 原文的 timeline 行。"""
+
         """只公开消费数字，不公开 query、正文、slot marker 或 provider 原文。"""
 
         return dict(self.__dict__)
@@ -128,6 +130,8 @@ class ChildAttempt:
     progress_reason: str
 
     def safe_projection(self) -> dict[str, Any]:
+        """把一次 recovery 压缩为不含 query、正文与 provider 原文的 timeline 行。"""
+
         return {
             "ordinal": self.ordinal,
             "action": self.action,
@@ -165,6 +169,8 @@ class ChildLedger:
         return updated
 
     def stopped(self, *, termination: SubgraphTermination, detail_code: str) -> "ChildLedger":
+        """以 typed termination 冻结 child ledger，不隐式追加新动作。"""
+
         return replace(self, termination=termination, detail_code=detail_code)
 
     def _validate_budget(self) -> None:
@@ -192,6 +198,8 @@ class ChildLedger:
             raise RAGSubgraphContractError("child_budget_exhausted")
 
     def safe_projection(self) -> dict[str, Any]:
+        """输出可进入父 Observation 的 B4 child 安全投影。"""
+
         return {
             "attempts": [item.safe_projection() for item in self.attempts],
             "consumption": self.consumption.safe_projection(),
@@ -212,7 +220,10 @@ class RequirementSlotProvider(Protocol):
 
     def resolve(
         self, *, request: "RAGAnswerRequest", initial: RetrievalOutcome
-    ) -> "SlotResolution": ...
+    ) -> "SlotResolution":
+        """根据 server-owned facts 形成有限的 typed recovery slots。"""
+
+        ...
 
 
 @dataclass(frozen=True)
@@ -237,6 +248,8 @@ class BusinessT4SlotProvider:
     identity = "phase4b-b4-business-t4-slots-v1"
 
     def resolve(self, *, request: "RAGAnswerRequest", initial: RetrievalOutcome) -> SlotResolution:
+        """仅为固定 business T4 requirement 返回服务端预定义 slots。"""
+
         del initial
         required = set(request.requirement.required_document_keys)
         if required != {"refund_policy_basic", "refund_policy_quality"}:
@@ -266,6 +279,8 @@ class ExternalFormationSlotProvider:
         self._former = former
 
     def resolve(self, *, request: "RAGAnswerRequest", initial: RetrievalOutcome) -> SlotResolution:
+        """调用 external former，并把结果适配为子图可消费的 slot facts。"""
+
         result = self._former.form(ExternalRequirementFormationInput(
             question=request.question,
             current_evidence=initial.selected_evidence,
@@ -285,6 +300,8 @@ class ExternalFormationSlotProvider:
 
 
 class _SubgraphState(TypedDict, total=False):
+    """B4 子图进程内状态；不直接作为 Trace 或 Eval artifact。"""
+
     observation: RecoveryObservation
     execution: RecoveryExecution
     executions: tuple[RecoveryExecution, ...]
@@ -316,7 +333,17 @@ def _safe_runtime_failure_code(*, stage: str, exc: Exception) -> str:
     elif isinstance(exc, RetrievalAdapterError):
         category = "retrieval_adapter"
     elif isinstance(exc, EvidenceContractError):
-        category = "evidence_contract"
+        safe_reasons = {
+            "evidence_invalid",
+            "evidence_unauthorized",
+            "evidence_purpose_invalid",
+            "evidence_revision_unavailable",
+            "evidence_run_mismatch",
+            "evidence_unknown",
+            "evidence_transition_invalid",
+        }
+        reason = exc.reason_code if exc.reason_code in safe_reasons else "unknown"
+        category = f"evidence_contract_{reason}"
     elif isinstance(exc, KeyError):
         category = "key_error"
     elif isinstance(exc, TypeError):
@@ -424,6 +451,8 @@ class BoundedRAGSubgraphAcquirer:
         runtime_stage = {"value": "compile"}
 
         def observe_node(state: _SubgraphState) -> dict[str, Any]:
+            """观察当前 coverage，并产生下一步 action eligibility。"""
+
             runtime_stage["value"] = "observe"
             previous = state.get("execution")
             if previous is not None and previous.chosen_action == "query_rewrite_candidate" and previous.added_evidence:
@@ -472,6 +501,8 @@ class BoundedRAGSubgraphAcquirer:
             return {"observation": observation}
 
         def execute_node(state: _SubgraphState) -> dict[str, Any]:
+            """严格执行 observation 已授权的一次 recovery action。"""
+
             runtime_stage["value"] = "execute"
             observation = state["observation"]
             execution = diagnostic.execute(
@@ -484,9 +515,13 @@ class BoundedRAGSubgraphAcquirer:
             return {"execution": execution, "executions": (*state.get("executions", ()), execution)}
 
         def route_after_observe(state: _SubgraphState) -> str:
+            """没有可执行 recovery action 时直接 typed stop。"""
+
             return "execute" if any(action != "stop" for action in state["observation"].eligible_actions) else "stop"
 
         def route_after_execute(state: _SubgraphState) -> str:
+            """仅在首次 rewrite 确有新增 Evidence 时允许再观察一次。"""
+
             execution = state["execution"]
             if (
                 execution.chosen_action == "query_rewrite_candidate"
@@ -663,6 +698,8 @@ class BoundedRAGSubgraphAcquirer:
         *,
         outcome: RetrievalOutcome | None = None,
     ) -> AcquisitionResult:
+        """把 child ledger 与最终 outcome 封装回 acquisition seam。"""
+
         result = outcome or self._stopped_outcome(initial.outcome, ledger)
         validity = {
             **initial.evidence_validity,

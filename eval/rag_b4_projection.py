@@ -43,6 +43,8 @@ def _safe_child_projection(raw: Any) -> dict[str, Any] | None:
         "total_tokens",
     )
     def safe_consumption(value: Mapping[str, Any]) -> dict[str, Any]:
+        """按固定字段复制 consumption，未知或错误类型按未观察处理。"""
+
         projected: dict[str, Any] = {
             key: _integer(value.get(key)) for key in numeric_consumption
         }

@@ -52,6 +52,8 @@ CHILD_CONSUMPTION_FIELDS = {
 
 
 def _source_identity(turn: Mapping[str, Any]) -> str:
+    """从父循环唯一事实计算 v4 turn 的来源身份。"""
+
     return agent_scenario_source_identity(
         actions=turn["actions"],
         budget=turn["budget"],
@@ -141,6 +143,8 @@ def validate_agent_scenario_v4(payload: Mapping[str, Any], *, bundle: B4Contract
 def _validate_turn(
     turn: Mapping[str, Any], *, strategy: str, bundle: B4ContractBundle
 ) -> None:
+    """校验单 turn 的字段闭集、父账连续性与策略对应的 child 数量。"""
+
     if set(turn) != TURN_FIELDS or turn["scenario_id"] not in bundle.payload["scenarios"]:
         raise ValueError("agent_scenario_v4_turn_invalid")
     if turn["source_projection_identity"] != _source_identity(turn):
@@ -178,6 +182,8 @@ def _validate_turn(
 
 
 def _validate_child(child: Mapping[str, Any], *, bundle: B4ContractBundle) -> None:
+    """校验 child timeline 形状、ordinal 与所有 B4 预算上限。"""
+
     if set(child) != CHILD_FIELDS or child["termination"] not in bundle.payload["terminations"]:
         raise ValueError("agent_scenario_v4_child_invalid")
     consumption = child["consumption"]
@@ -205,6 +211,8 @@ def _validate_child(child: Mapping[str, Any], *, bundle: B4ContractBundle) -> No
 
 
 def _validate_budget_step(action: Mapping[str, Any]) -> None:
+    """证明一次父 Action 的 before + consumed = after。"""
+
     before, consumed, after = action["budget_before"], action["consumed"], action["budget_after"]
     if set(before) != {"profile", "consumed"} or set(after) != {"profile", "consumed"}:
         raise ValueError("agent_scenario_v4_budget_shape_invalid")
@@ -222,6 +230,8 @@ def _validate_budget_step(action: Mapping[str, Any]) -> None:
 
 
 def _reject_private_payload(value: Any, *, key: str = "") -> None:
+    """递归拒绝 v4 artifact 中不应持久化的私有执行字段。"""
+
     # Task state 的既有安全投影允许保存用户问题；v4 新增的 child ledger 则由严格字段集合
     # 保证没有 question。这里拦截的是正文、provider 原文和执行私密数据，不能误伤旧合同。
     denied = {"rows", "content", "prompt", "raw_response", "api_key", "thought", "stack"}

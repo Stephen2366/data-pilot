@@ -47,6 +47,8 @@ class _RecordingKnowledgeTool:
         self.attempts: list[dict[str, Any]] = []
 
     def retrieve(self, request: Any) -> Any:
+        """原样转发 retrieval，并只记录白名单诊断与 query fingerprint。"""
+
         row: dict[str, Any] = {
             "ordinal": len(self.attempts) + 1,
             "query_fingerprint": canonical_hash(request.question),
@@ -85,6 +87,8 @@ class _RecordingSlotProvider:
         self.last_resolution: Any | None = None
 
     def resolve(self, *, request: Any, initial: Any) -> Any:
+        """原样转发 slot resolution；私有对象只保留在 Probe 进程内。"""
+
         self.last_resolution = self._delegate.resolve(request=request, initial=initial)
         return self.last_resolution
 
