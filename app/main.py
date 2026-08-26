@@ -14,10 +14,12 @@ from app.api import query_router, resources_router
 from app.core.config import Settings, get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, register_request_logging_middleware
+from app.db.session import build_engine
 from engine.harness.caller import build_default_caller_resolver
 from engine.harness.thread import ThreadCheckpointManager
 from engine.harness.adapters import RAGToolAdapter
 from engine.phase4b.task_boundary import TaskBoundary
+from engine.phase4b.mysql_task_boundary import MySQLTaskBoundary
 from engine.phase4b.rag_enterprise_diagnostics import EnterpriseSiblingExpansionAdapter
 from engine.phase4b.rag_recovery_requirement_proposal import make_b4_qwen_requirement_proposal_client
 from engine.phase4b.rag_strategy import (
@@ -175,6 +177,9 @@ def _lifespan(settings: Settings):
                 application.state.rag_tool_factory = None
             if product is not None:
                 product.close()
+            boundary = getattr(application.state, "task_boundary", None)
+            if hasattr(boundary, "close"):
+                boundary.close()
 
     return lifespan
 
@@ -226,7 +231,16 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     application.state.thread_checkpoint_manager = ThreadCheckpointManager(
         ttl_seconds=settings.thread_checkpoint_ttl_seconds
     )
-    application.state.task_boundary = TaskBoundary(ttl_seconds=settings.thread_checkpoint_ttl_seconds)
+    if settings.task_boundary_backend == "memory":
+        if settings.app_env.strip().lower() != "test":
+            raise ValueError("memory task boundary 只允许 APP_ENV=test 显式启用")
+        application.state.task_boundary = TaskBoundary(ttl_seconds=settings.task_checkpoint_ttl_seconds)
+    else:
+        application.state.task_boundary = MySQLTaskBoundary(
+            build_engine(settings.database_url), ttl_seconds=settings.task_checkpoint_ttl_seconds,
+            tombstone_retention_seconds=settings.task_tombstone_retention_seconds,
+            max_state_bytes=settings.task_state_max_bytes,
+        )
     # M44A：lifespan 在配置闭合时注入 Enterprise product factory；None 表示 fail-closed，
     # endpoint 不再构造业务小语料。Eval/测试仍可在进入 lifespan 前显式覆盖深 seam。
     application.state.rag_tool_factory = None

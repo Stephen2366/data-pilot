@@ -1,0 +1,260 @@
+{
+  "artifact_version": "phase4b-agent-scenario-artifact-v5",
+  "status": "completed",
+  "run_spec": {
+    "run_id": "m47-v5-deterministic",
+    "predecessor_artifact_version": "phase4b-agent-scenario-artifact-v4",
+    "backend_identity": "phase4b-mysql-task-boundary-v1",
+    "state_schema_version": "phase4b-task-state-v2",
+    "event_schema_version": "phase4b-task-boundary-event-v1",
+    "contract_identity": "260e819a4539ffc6c6b509dcf1520122d21f418a1e094fb6bb88a8198cf1a02e"
+  },
+  "run_spec_identity": "5b43cd2399e498125d309b33b904beb2b335a701c19e6bf8756b0a65dd282278",
+  "legacy_artifacts": {
+    "v1": "unchanged_readable",
+    "v2": "unchanged_readable",
+    "v3": "unchanged_readable",
+    "v4": "unchanged_readable"
+  },
+  "cases": [
+    {
+      "scenario_id": "RESTART_RESUME",
+      "checkpoint": {
+        "task_safe_ref": "task:safe-a",
+        "task_version": 3,
+        "status": "active",
+        "state_identity": "state:a"
+      },
+      "lifecycle": [
+        {
+          "task_safe_ref": "task:safe-a",
+          "action": "started",
+          "reason_code": "task_started",
+          "version_before": null,
+          "version_after": 1,
+          "state_identity": "state:a",
+          "previous_task_safe_ref": null,
+          "checkpoint_safe_ref": "task:safe-a",
+          "resume_source": "database",
+          "storage_outcome": "committed",
+          "schema_version": "phase4b-task-boundary-event-v1"
+        },
+        {
+          "task_safe_ref": "task:safe-a",
+          "action": "active",
+          "reason_code": "task_active",
+          "version_before": 1,
+          "version_after": 3,
+          "state_identity": "state:a",
+          "previous_task_safe_ref": null,
+          "checkpoint_safe_ref": "task:safe-a",
+          "resume_source": "database",
+          "storage_outcome": "committed",
+          "schema_version": "phase4b-task-boundary-event-v1"
+        }
+      ],
+      "runtime_identity": {
+        "identity": "phase4b-mysql-task-boundary-v1",
+        "durability": "database_durable"
+      },
+      "assertions": [
+        [
+          "required:restart_resume",
+          "passed"
+        ]
+      ],
+      "source_identity": "44c27b22aab50a530a8170fb7ea618ee30381bcde18cc54e9d4663590ac308ef"
+    },
+    {
+      "scenario_id": "MULTIWORKER_CONFLICT",
+      "checkpoint": {
+        "task_safe_ref": "task:safe-a",
+        "task_version": null,
+        "status": "rejected",
+        "state_identity": "state:a"
+      },
+      "lifecycle": [
+        {
+          "task_safe_ref": "task:safe-a",
+          "action": "active",
+          "reason_code": "task_active",
+          "version_before": 3,
+          "version_after": 5,
+          "state_identity": "state:a",
+          "previous_task_safe_ref": null,
+          "checkpoint_safe_ref": "task:safe-a",
+          "resume_source": "database",
+          "storage_outcome": "committed",
+          "schema_version": "phase4b-task-boundary-event-v1"
+        },
+        {
+          "task_safe_ref": "task:safe-a",
+          "action": "rejected",
+          "reason_code": "task_version_conflict",
+          "version_before": null,
+          "version_after": null,
+          "state_identity": "state:a",
+          "previous_task_safe_ref": null,
+          "checkpoint_safe_ref": "task:safe-a",
+          "resume_source": "database",
+          "storage_outcome": "committed",
+          "schema_version": "phase4b-task-boundary-event-v1"
+        }
+      ],
+      "runtime_identity": {
+        "identity": "phase4b-mysql-task-boundary-v1",
+        "durability": "database_durable"
+      },
+      "assertions": [
+        [
+          "required:multiworker_conflict",
+          "passed"
+        ]
+      ],
+      "source_identity": "fc1e285db9fa7958e4442670817b10512f21ec666a7c36f7d479cd4a5bedc344"
+    },
+    {
+      "scenario_id": "WRONG_OWNER",
+      "checkpoint": {
+        "task_safe_ref": "task:safe-a",
+        "task_version": null,
+        "status": "rejected",
+        "state_identity": "state:a"
+      },
+      "lifecycle": [
+        {
+          "task_safe_ref": "task:safe-a",
+          "action": "rejected",
+          "reason_code": "task_unavailable",
+          "version_before": null,
+          "version_after": null,
+          "state_identity": "state:a",
+          "previous_task_safe_ref": null,
+          "checkpoint_safe_ref": "task:safe-a",
+          "resume_source": "database",
+          "storage_outcome": "committed",
+          "schema_version": "phase4b-task-boundary-event-v1"
+        }
+      ],
+      "runtime_identity": {
+        "identity": "phase4b-mysql-task-boundary-v1",
+        "durability": "database_durable"
+      },
+      "assertions": [
+        [
+          "required:wrong_owner",
+          "passed"
+        ]
+      ],
+      "source_identity": "e9fcf85466522a5ecc0622ad9313f6a92f9576d495a64890e48abe201a798211"
+    },
+    {
+      "scenario_id": "EXPIRED",
+      "checkpoint": {
+        "task_safe_ref": "task:safe-a",
+        "task_version": 1,
+        "status": "expired",
+        "state_identity": "state:a"
+      },
+      "lifecycle": [
+        {
+          "task_safe_ref": "task:safe-a",
+          "action": "expired",
+          "reason_code": "task_expired",
+          "version_before": 1,
+          "version_after": 1,
+          "state_identity": "state:a",
+          "previous_task_safe_ref": null,
+          "checkpoint_safe_ref": "task:safe-a",
+          "resume_source": "database",
+          "storage_outcome": "committed",
+          "schema_version": "phase4b-task-boundary-event-v1"
+        }
+      ],
+      "runtime_identity": {
+        "identity": "phase4b-mysql-task-boundary-v1",
+        "durability": "database_durable"
+      },
+      "assertions": [
+        [
+          "required:expired",
+          "passed"
+        ]
+      ],
+      "source_identity": "fb3e323c8c232cfef70fca05694576fe80b3f0b221f13f0f910e2abc87167f9e"
+    },
+    {
+      "scenario_id": "CLEAR",
+      "checkpoint": {
+        "task_safe_ref": "task:safe-a",
+        "task_version": 3,
+        "status": "cleared",
+        "state_identity": "state:a"
+      },
+      "lifecycle": [
+        {
+          "task_safe_ref": "task:safe-a",
+          "action": "cleared",
+          "reason_code": "task_cleared",
+          "version_before": 1,
+          "version_after": 3,
+          "state_identity": "state:a",
+          "previous_task_safe_ref": null,
+          "checkpoint_safe_ref": "task:safe-a",
+          "resume_source": "database",
+          "storage_outcome": "committed",
+          "schema_version": "phase4b-task-boundary-event-v1"
+        }
+      ],
+      "runtime_identity": {
+        "identity": "phase4b-mysql-task-boundary-v1",
+        "durability": "database_durable"
+      },
+      "assertions": [
+        [
+          "required:clear",
+          "passed"
+        ]
+      ],
+      "source_identity": "2fe943f3d55d4fc70c6614b59df310f1833952035afb1e735bf507ef722305a8"
+    },
+    {
+      "scenario_id": "SWITCH",
+      "checkpoint": {
+        "task_safe_ref": "task:safe-a",
+        "task_version": 1,
+        "status": "switched",
+        "state_identity": "state:a"
+      },
+      "lifecycle": [
+        {
+          "task_safe_ref": "task:safe-a",
+          "action": "switched",
+          "reason_code": "task_switched",
+          "version_before": 3,
+          "version_after": 1,
+          "state_identity": "state:a",
+          "previous_task_safe_ref": "task:safe-old",
+          "checkpoint_safe_ref": "task:safe-a",
+          "resume_source": "database",
+          "storage_outcome": "committed",
+          "schema_version": "phase4b-task-boundary-event-v1"
+        }
+      ],
+      "runtime_identity": {
+        "identity": "phase4b-mysql-task-boundary-v1",
+        "durability": "database_durable"
+      },
+      "assertions": [
+        [
+          "required:switch",
+          "passed"
+        ]
+      ],
+      "source_identity": "99898ff5889c60c047255c7c841bc36f567b1993d42324051236c82b12163705"
+    }
+  ],
+  "artifact_identity": "c1ad166376db7ecc4e49b6aa870b4967c37d0f0779eeeb521fe7daf9d66000af",
+  "provider_calls": 0,
+  "tokens": 0
+}

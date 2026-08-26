@@ -10,7 +10,6 @@
 
 - `[模块任务]`：功能、架构、默认行为、安全口径、评测口径等实质性任务。
 - `[实验]`：A/B、真实 LLM Eval、smoke 或会影响路线判断的实验结论。
-- `[验收]`：accept-module、阶段验收或明确的完成状态。
 - `[小修]`：文档措辞、口径同步、注释补充、轻量整理；只需简写，不要求完整模板。
 
 「变更记录」：小修可以只写一段话；较大的任务建议包含：改动范围、关键记录（比如关键决策、决策原因、实验结果、新发现、用户做出的选择等）、参考资料、验证快照、遗留/后续。
@@ -19,9 +18,14 @@
 
 ## 变更记录（新的在上）
 
-### [验收] M46/B4 accept-module 验收通过（2026-08-26）
+### [模块任务] M47 Phase 4B B5 Durable Task State（2026-08-26）
 
-- 9 项门禁中 8 项通过、2 项修复后闭合：废弃口径清零（修复 M46 新增测试负例 `.codex/temp_work` 引用为普通越界路径、删除未跟踪 stderr 日志、SKILL.md 排除 glob 同步 `dev-log(M0-M28).md` 后复扫 `NO_HITS`）；目录地图一致且 AGENTS/CLAUDE 内容一致；进度状态一致（AI_CONTEXT 已更新为"已验收通过"）；最新 changelog/dev-log 结构完整；注释合规（抽样 13 个 M46 文件，中文 docstring/★/步骤注释齐全）；单一事实源抽查（C1 acquisition seam、C7 rollout 合同、C2-ERF formation、reserve sealed manifest）闭合；裁剪验证 `57 passed, 1 warning`（9 个 M46 专项 + M41 external suites/review + M42 reserve，修复后重跑仍 57 passed）；AI_CONTEXT 事实快照同步；state 文档交叉一致。M46 已在 AI_CONTEXT 记录为"已验收通过"，M47/B5 可进入 plan 制定；reserve 继续 sealed。
+- **改动范围**：起始 commit 明确为 `db0c14548d1f3a6fd270560fd0440108e4a35493`，期间无模块提交。模块新增 B5 machine contract/manifest、closed-world TaskState v2 codec、adapter-neutral boundary、checkpoint/event ORM 与 Alembic `20260826_0004`、MySQL durable adapter、产品/API/Trace 接线、真实 MySQL Probe、restart/multi-worker rehearsal、Agent Scenario v5、报告与专项测试；同步修正 M1 表集合及 M43/M46 additive compatibility 断言。没有修改业务表、seed、Knowledge/RAG release、embedding/index、M46 rollout/reserve 或 M48 Context Compact。
+- **关键记录**：用户对 G47-1/G47-2 均选择方案 A：产品默认 MySQL/InnoDB snapshot + typed event ledger，memory 仅 test 明示；active TTL 900 秒，terminal/clear/expiry 立即 scrub，24h 后 bounded purge，不新增应用层加密；真实 Probe 只写隔离库 `datapilot_m47_test`，禁止触碰 `datapilot_dev` 与业务数据。owner、tenant、active role、expected version、single-use claim token 与 TTL 共同进入数据库 CAS；switch 在短事务内原子退休旧 task/创建新 task；claimed crash 保守停止且不自动重放 Tool。当前合法 TaskState v2 可严格 round-trip，G47-3 migration registry 未触发。
+- **真实 Probe 与实验结论**：P1 在切片 C 后、D 前按时执行并经一次 import-order 修复后 `continue`；最终真实 MySQL 双 session 唯一 claim、commit/switch rollback、active/claimed expiry scrub、过期 commit fencing 与 bounded purge 全部通过，清理 `5/13→0/0`。P2 在 E 后、F 前经三轮 fixture/断言修正后 `continue`；process A/B `version 1→3` restart-resume、双 worker 单胜者、旧版本拒绝、role/tenant 隐匿拒绝、claimed crash 保守停止和 clear scrub 通过，清理 `4/11→0/0`。两项 calls/tokens 均 `0/0`，均为 exploratory/baseline-ineligible 开发证据，不是 Formal Eval。
+- **参考资料**：定点复核 DataAgent saver/GraphService 接线、ARAG `InMemorySaver + interrupt_before` 反例，以及 MySQL InnoDB locking、JSON 和 SQLAlchemy transaction/rowcount 官方文档。借鉴 adapter seam、短事务、数据库条件更新和显式 release；未照搬 Graph program counter、应用层伪 CAS、长事务、`SKIP LOCKED`、自由 JSON 或“有 saver 即 durable”的结论。
+- **验证快照**：注释审计 12 个主要 Python 文件/112 个 symbol，非豁免缺失 0；最终 lifecycle 聚焦 `27 passed`，TTL/fencing 聚焦 `12 passed`，Phase 4B 受影响集合无 failure；Scenario v5 6/6、零 provider，identity `c1ad166376db7ecc4e49b6aa870b4967c37d0f0779eeeb521fe7daf9d66000af`。临时 SQLite metadata 的 Alembic current 为 `20260826_0004 (head)` 且 check 无新操作，compileall/diff check 通过。后台全仓真实执行 640 项为 `639 passed, 1 failed, 1 warning`，唯一失败是 M1 旧断言未计两张 M47 基础设施表；修复后该项独立 `1 passed`，故当前代码下 640 项均有通过证据，但不表述为同一次全仓零失败。warning 为既有 Starlette/httpx deprecation。
+- **遗留/后续**：`datapilot_dev` 按用户禁区仍未执行 0004，产品 task runtime 启动前必须正常迁移；未证明外部 Tool exactly-once、生产认证、吞吐/容灾或 Agent 答案质量。M48/B6 应消费 durable typed event/checkpoint identity 构建有界 Compact，不得恢复 Graph/RAG program counter，也不得把 rows、正文、答案、Prompt 或无界历史写回 checkpoint。
 
 ### [模块任务] M46 Phase 4B B4 Bounded Agentic RAG与experimental rollout（2026-08-26）
 
@@ -40,10 +44,6 @@
 - **后续有界修复**：本地已把 `composer_output_invalid` 收敛为保留 child ledger 的 typed result；formation v3 对合法但错误的 value-shape 枚举使用服务端 deterministic expected shape 规范化；Evidence 异常只投影 allowlisted reason。B4 contract 更新为 `df8a96c4...1afe`，新 candidate `ab66f20d...2f78` 仅完成零 provider preflight，受影响回归 `61 passed, 1 warning`。它是新候选，不继承 v2 授权；是否再次运行 historical 或调整 M46 完成路线须另行决定，当前 Pipeline 继续默认、Subgraph 仅 experimental、reserve 继续 sealed。
 
 > ⚠️ 注（同日最后一次 historical v3）：用户授权把 `ab66f20d...2f78` 作为最后一个 historical candidate；run `m46-historical-paired-20260826-164511` 两臂各60 completed、reserve sealed。v3 消除了 value-shape `19→0`，把 child projection补齐至60/60，并将answer-ready `12→26`；closed-set review据此把下一轮优化边界收敛到Evidence run identity、formation grounding和Composer structured output。当前candidate不晋级、不解封reserve、不再追加同类historical调参；用户随后已显式修订完成门并确认Pipeline默认/Subgraph experimental的rollout终局，原始Gate和paired数字仍由Eval artifact保留，详见上方M46模块档案。
-
-### [验收] M45/B3 accept-module 验收通过（2026-08-25）
-
-- 9 项门禁全部通过：废弃口径清零；目录地图一致且 AGENTS/CLAUDE 内容同步；进度状态一致；最新 changelog/dev-log 结构完整；注释合规（引擎/核心文件逐个通读、其余抽样，无 ❌ 标准命中）；单一事实源抽查（C2/C4/C5 代码合同、B0 候选卡、reserve sealed）闭合；裁剪验证 `106 passed, 1 warning in 3.71s`；AI_CONTEXT 事实快照同步；state 文档交叉一致。M45 已在 AI_CONTEXT 记录为"已验收通过"，M46/B4 可进入 plan 制定；M46 reserve 继续 sealed。
 
 ### [模块任务] M45 Phase 4B B3 RAG failure funnel 与 action-level Evidence admission（2026-08-25）
 

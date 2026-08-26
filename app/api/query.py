@@ -23,20 +23,19 @@ from engine.harness.thread import ThreadCheckpointManager
 from engine.harness.turn import AgentTurnResult, TurnRequest, clear_thread, run_turn
 from engine.trace.recorder import TraceRecord, TraceStep, append_trace
 from engine.trace.runtime import build_trace_runtime_identity
-from engine.phase4b.task_boundary import TaskBoundary
+from engine.phase4b.task_boundary import TaskBoundaryPort
 from engine.phase4b.task_turn import TaskTurnRequest, TaskTurnResult, clear_task, run_task_turn
-from engine.phase4b.task_runtime import B1_CONTRACT_IDENTITY
 from engine.phase4b.agent_loop import AgentLoopRuntime
-from engine.phase4b.b2_contracts import load_b2_contract_bundle
 from engine.phase4b.b4_contracts import load_b4_contract_bundle
+from engine.phase4b.b5_contracts import load_b5_contract_bundle
 from engine.phase4b.identity import canonical_hash
 from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver, KnowledgeRuntimeSpec
 from engine.phase4b.scenario_projection import agent_scenario_source_identity
 
 
 router = APIRouter(prefix="/api", tags=["query"])
-B2_BUNDLE = load_b2_contract_bundle()
 B4_BUNDLE = load_b4_contract_bundle()
+B5_BUNDLE = load_b5_contract_bundle()
 _SAFE_SQL_EXECUTION_MESSAGE = "SQL 执行失败。"
 
 
@@ -195,16 +194,13 @@ def _record_trace(
     )
     runtime_identity = deep_runtime_identity
     if task_turn is not None:
-        # B4 是父 Agent Loop 的一次 server-owned 执行策略；Task envelope 仍与 B2
-        # 相同，但 Trace 必须明确到底冻结了哪份上游合同，不能默默写成 B2。
-        b4_enabled = bool(task_turn.agent_loop and task_turn.agent_loop.runtime_identity.get("b4_enabled"))
-        task_contract = B4_BUNDLE.content_identity if b4_enabled else B2_BUNDLE.content_identity
-        task_predecessor = B2_BUNDLE.content_identity if b4_enabled else B1_CONTRACT_IDENTITY
+        # B5 是 durable task envelope 的顶层合同；父 Agent Loop 自己仍在 agent_loop
+        # runtime 内声明 B2/B4，避免把持久化边界和检索策略混成一个 identity。
         runtime_identity = {
             "format": "phase4b-agent-task-runtime-v1",
             "status": "complete",
-            "contract_identity": task_contract,
-            "predecessor_contract_identity": task_predecessor,
+            "contract_identity": B5_BUNDLE.content_identity,
+            "predecessor_contract_identity": B4_BUNDLE.content_identity,
             "task_state_version": task_turn.task.state.state_version if task_turn.task else None,
             "turn_understanding_identity": task_turn.delta.source_identity if task_turn.delta else None,
             "task_boundary": task_turn.task_runtime,
@@ -327,7 +323,7 @@ def query(request_body: QueryRequest, request: Request, db: Session = Depends(ge
         router=getattr(request.app.state, "harness_router", None),
     )
     if request_body.task is not None:
-        boundary: TaskBoundary = request.app.state.task_boundary
+        boundary: TaskBoundaryPort = request.app.state.task_boundary
         runtime_specs: list[KnowledgeRuntimeSpec] = []
         business_factory = getattr(request.app.state, "business_rag_tool_factory", None)
         if business_factory is not None:
@@ -427,12 +423,13 @@ def clear_query_task(
 
     resolver = getattr(request.app.state, "caller_resolver", None)
     resolution = resolver.resolve(user_role) if resolver is not None else None
-    boundary: TaskBoundary = request.app.state.task_boundary
+    boundary: TaskBoundaryPort = request.app.state.task_boundary
     task, lifecycle, ok, reason = clear_task(
         task_id=task_id,
         expected_version=expected_version,
         caller=resolution.caller if resolution else None,
         boundary=boundary,
+        active_role=resolution.active_sql_role if resolution else None,
     )
     safety = "passed" if ok else ("blocked" if reason == "task_unavailable" else "passed")
     message = "当前任务已清理。" if ok else "当前任务无法清理。"

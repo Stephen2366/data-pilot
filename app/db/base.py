@@ -24,3 +24,4 @@ from app.models.refunds import Refund  # noqa: E402,F401
 from app.models.tickets import Ticket  # noqa: E402,F401
 from app.models.user_behavior_log import UserBehaviorLog  # noqa: E402,F401
 from app.models.users import User  # noqa: E402,F401
+from app.models.agent_task_checkpoint import AgentTaskCheckpoint, AgentTaskEvent  # noqa: E402,F401

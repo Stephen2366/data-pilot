@@ -2,7 +2,7 @@
 
 > DataPilot 的公共运行入口。运行任何项目命令前先读本文，再按任务进入 Text2SQL 或 RAG 专用 runbook。当前状态见 `AI_CONTEXT.md`，评测数字见 `eval-baselines.md`；本文不保存历史实验和基线数字。
 
-更新时间：2026-08-24
+更新时间：2026-08-26
 
 ## 先选链路
 
@@ -37,7 +37,8 @@
 - clear：`DELETE /api/query/threads/{thread_id}?user_role=<role>&expected_version=<version>`。
 - 进程内 thread checkpoint 默认 TTL：`THREAD_CHECKPOINT_TTL_SECONDS=900`；重启或多 worker 不恢复、不共享。
 - M43 Agent task family 仍走同一 `POST /api/query`，只有请求携带严格 nested envelope 才启用：start 为 `"task":{"action":"start"}`；continue/switch/cancel 必须同时提交服务端上一响应的 `task_id` 与 `expected_version`。task envelope 与 legacy thread/follow-up payload 互斥，客户端不得提交 delta/state/route/Evidence/runtime 字段。
-- task clear：`DELETE /api/query/tasks/{task_id}?user_role=<role>&expected_version=<version>`。M43 task boundary 与 thread checkpoint 分离，但同样是进程内、默认 TTL 900s、重启/多 worker 不恢复；真正 durable task state 属于 B5，不得把当前 adapter 作为持久化能力。
+- task clear：`DELETE /api/query/tasks/{task_id}?user_role=<role>&expected_version=<version>`。M47 后产品 task boundary 默认 `TASK_BOUNDARY_BACKEND=mysql`，使用 MySQL durable checkpoint + typed event ledger；`TASK_CHECKPOINT_TTL_SECONDS=900`、`TASK_TOMBSTONE_RETENTION_SECONDS=86400`、`TASK_STATE_MAX_BYTES=65536`。memory 仅允许 `APP_ENV=test` 显式选择。该 family 与仍为进程内的 legacy thread checkpoint 分离；产品启动前数据库必须处于 Alembic `20260826_0004` head，否则 task storage 失败关闭。
+- M47 lifecycle maintenance 通过 `MySQLTaskBoundary.expire_stale(limit=...)` 与 `purge_tombstones(limit=...)` 的受限 seam 执行：两者均 bounded，只返回处理数量，不暴露 task 内容；purge 会先处理已到期 active/claimed 并立即 scrub，再删除已满 24h 的 tombstone。当前没有常驻 scheduler，部署方必须以受控运维入口周期调用；不得用业务 seed/reset 代替 maintenance。
 - B1 零 provider rehearsal：`python -m scripts.rehearse_m43_b1`。它只复核 B1 contract、TaskState/Evidence invalidation、node Context、Scenario v2 和冻结 SQL oracle，输出到 `eval/reports/m43/`；不运行真实 LLM、embedding、数据库或 sealed reserve。
 - M44 B2 task 使用独立 bounded Decision Loop：客户端仍只提交自然语言与严格 task envelope，不能提交 Action、budget、knowledge scope/runtime 或 repair 指令。Response/Trace 会增量返回安全的 `action_attempts`、`agent_budget`、`agent_termination`、`knowledge_runtimes` 与 `agent_loop_runtime`；普通非 task API 仍保持 M44A Enterprise RAG 默认。
 - B2 零 provider rehearsal：`python -m scripts.rehearse_m44_b2`。它复核 T3 Observation 驱动的原因→商品动作、T4 business Hybrid、T5 correction/reauthorization、单次 dialect repair、negative no-extra-action 与 Agent Scenario v3，输出到 `eval/reports/m44/`；external calls 固定为 0。

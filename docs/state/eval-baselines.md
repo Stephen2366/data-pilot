@@ -64,6 +64,12 @@ M41 `phase4-rag-e2e-review-v1` 同样绑定 artifact 与逐 execution checkpoint
 
 这里保留仍能帮助判断当前路线的真实运行；它们未必已成为正式长期 baseline，也未必能作严格对照。每条都必须写清楚证据状态和解释边界。Smoke、运行事故、中断和外部服务异常不作为独立记录进入本账本。
 
+### M47 Agent Scenario v5 durable control artifact（2026-08-26）
+
+- additive `phase4b-agent-scenario-v5` 覆盖 `RESTART_RESUME / MULTIWORKER_CONFLICT / WRONG_OWNER / EXPIRED / CLEAR / SWITCH` 六类 durable task control/safety 场景，v1～v4 保持 `unchanged_readable`。
+- 最终零 provider rehearsal 6/6 完成，artifact identity `c1ad166376db7ecc4e49b6aa870b4967c37d0f0779eeeb521fe7daf9d66000af`，calls/tokens=`0/0`，报告 `eval/reports/m47/m47-agent-scenario-v5-rehearsal.json`。真实 MySQL P1/P2 也均为 `continue`，但属于开发期 exploratory/baseline-ineligible Probe。
+- 这组证据证明 durable lifecycle、CAS、安全投影与兼容合同可复演，不评价 Agent 答案正确率、RAG 质量、吞吐或 Reliability；未登记正式长期质量基线，也不需要为 B5 追加付费 Formal Eval。
+
 > 2026-08-10 注：下表均为 `m27-v2` 修复前快照。它们仍可解释当时的模型行为和 M28 问题来源，但已不属于 `m27-v3` 可比序列；本轮未运行真实 LLM Eval。
 
 | 类型 | 证据状态 | Run ID | 日期 | 协议 / resolved runtime | Assertion views / Gate | 解释边界 |

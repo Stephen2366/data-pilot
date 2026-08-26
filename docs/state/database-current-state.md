@@ -4,16 +4,17 @@
 >
 > **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍统一从 `docs/state/CHANGELOG_INDEX.md` 进入。
 
-更新时间：2026-08-23
+更新时间：2026-08-26
 
 ## 一句话结论
 
-DataPilot 当前数据库有 **14 张物理表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs`。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。
+DataPilot 当前 schema 有 **14 张业务物理表 + 2 张 Agent task 状态基础设施表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs` 和两张基础设施表。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。M47 Probe 只在隔离库 `datapilot_m47_test` 验证了 0004；本机 `datapilot_dev` 按用户禁区仍未迁移，产品 task runtime 启动前必须正常升级。
 
 ## 关键入口
 
 - 基础升级迁移：`alembic/versions/20260722_0002_database_upgrade_14_tables.py`
 - 审查后 polish 迁移：`alembic/versions/20260722_0003_phase27_database_polish.py`
+- M47 durable task state：`alembic/versions/20260826_0004_m47_durable_task_state.py`
 - Seed 主逻辑：`scripts/seed_data.py`
 - ORM 模型：`app/models/`
 - Alembic metadata 注册：`app/db/base.py`
@@ -29,7 +30,7 @@ DataPilot 当前数据库有 **14 张物理表**；Text2SQL 只暴露其中 **13
 - 数据库升级测试：`tests/test_database_upgrade.py`
 - Seed 摘要输出：`eval/reports/database-upgrade-seed-summary.md`
 
-## 当前 14 张物理表
+## 当前 14 张业务表与 2 张状态基础设施表
 
 | 表 | 行数 | 粒度 | 主要用途 | 使用提醒 |
 | --- | ---: | --- | --- | --- |
@@ -49,6 +50,15 @@ DataPilot 当前数据库有 **14 张物理表**；Text2SQL 只暴露其中 **13
 | `orders_wide` | 10000 | 订单宽表快照 | 看板类渠道 / 商品 / 用户 / 退款汇总 | 业务月份按 `paid_at`；`snapshot_at/batch_id` 只选快照版本；精确明细、退款链路回星型表 |
 
 `knowledge_docs` 是当前唯一需要区分“本机既有物理数据”和“当前 seed 合同”的表：2026-08-17 只读查询本机 `datapilot_dev` 仍为 11 行，而代码与测试已冻结下一次 reset 为 22 行。该差异不影响当前 Knowledge runtime，因为权威输入和 active release 都不读取此表；只有明确执行 seed reset 后，本机物理行数才会变为 22。
+
+M47 另增加两张不进入 Text2SQL schema、RBAC 表集或业务 seed 的基础设施表：
+
+| 表 | 当前职责 | 关键边界 |
+|---|---|---|
+| `agent_task_checkpoints` | 保存当前 task lifecycle、owner/tenant/active-role binding、version/claim token/TTL 与 closed-world TaskState payload | terminal/clear/expiry 立即 scrub；不保存 rows、正文、答案、Prompt、凭据、Thought 或 program counter |
+| `agent_task_events` | 保存按 task/version 排序的 typed lifecycle/action 安全摘要，供审计与 M48 Compact 消费 | 只保存不可逆 safe ref 和 allowlisted typed summary，不作为正文/Trace 旁路 |
+
+这两张表由 0004 migration 管理，不属于 `EXPECTED_SEED_COUNTS` 的 14 张业务表；模型回归分别核对业务表集合与基础设施表集合。真实 MySQL Probe 仅在 `datapilot_m47_test` 创建并清空 synthetic 行，没有访问业务表。
 
 ## 兼容字段和新旧口径
 
@@ -118,7 +128,7 @@ DataPilot 当前数据库有 **14 张物理表**；Text2SQL 只暴露其中 **13
 
 ### Phase 4B 显式 seed profile
 
-M42 新增与默认 legacy 隔离的 `phase4b` profile；它仍使用现有 14 表 schema，不涉及 ORM/Alembic 变化。只有调用 `seed_database(..., profile_alias="phase4b")` 才会在隔离副本内追加 23 条订单/明细/退款/宽表事实，并生成 content-bound identity；默认调用和命令行仍保持 legacy。
+M42 新增与默认 legacy 隔离的 `phase4b` profile；它仍只使用既有 14 张业务表，不读写 M47 两张状态基础设施表。只有调用 `seed_database(..., profile_alias="phase4b")` 才会在隔离副本内追加 23 条订单/明细/退款/宽表事实，并生成 content-bound identity；默认调用和命令行仍保持 legacy。
 
 - profile identity：`9c49407708bcc8c1ce8b9e990fbfbff8d9a75dc1cd0dee798fb165f93af00673`
 - oracle identity：`be813a868e7cb163807f3d9559121c11ef837b8960c2ef466e75b6dddd57ef80`
@@ -155,7 +165,7 @@ Phase 2.7 的 seed 有意保留少量真实业务异常，供 Text2SQL 诊断使
 
 ## RBAC / 安全边界
 
-- Text2SQL 表级 RBAC 只面向 13 张 queryable tables；SQLAlchemy/Alembic 的 14 张物理表不是权限全集。
+- Text2SQL 表级 RBAC 只面向 13 张 queryable tables；SQLAlchemy/Alembic 的 14 张业务表加 2 张状态基础设施表不是权限全集，后两张也绝不进入 NL2SQL schema。
 - Text2SQL 安全口径：**敏感字段优先于角色权限**，`admin` 也不能通过自然语言 Text2SQL 直出 `users.email` / `users.phone` 明文字段；如后续确需查看，应设计脱敏 / 审计 / 专门接口。
 - `admin` / `ops`：可访问全部 13 张 queryable tables，但不能查 `users.email` / `users.phone` 等敏感字段。
 - `customer_service`：Text2SQL 仅可访问 `tickets`。

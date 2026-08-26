@@ -160,8 +160,13 @@ def test_m1_seed_data_counts_roles_and_business_facts_are_stable() -> None:
         wide_refund_summary = session.query(OrderWide).filter(OrderWide.has_refund.is_(True)).count()
         assert wide_refund_summary > 0
 
-    # 最后从数据库视角再看一次真实建出的表名，防止只检查 Python 对象。
+    # 最后从数据库视角再看一次真实建出的表名。EXPECTED_SEED_COUNTS 仍只描述
+    # 14 张业务表的 seed 行数；M47 的 task checkpoint/event 是基础设施表，不参与 seed。
     inspector = inspect(engine)
-    assert sorted(inspector.get_table_names()) == sorted(EXPECTED_SEED_COUNTS)
+    assert set(inspector.get_table_names()) == {
+        *EXPECTED_SEED_COUNTS,
+        "agent_task_checkpoints",
+        "agent_task_events",
+    }
     coupon_indexes = {index["name"] for index in inspector.get_indexes("coupons")}
     assert "ix_valid_range" in coupon_indexes

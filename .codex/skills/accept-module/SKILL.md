@@ -30,7 +30,22 @@ rg -n -f .codex/skills/accept-module/deprecated-terms.txt --hidden \
    -g '!.claude/skills/accept-module/**' -g '!.codex/skills/accept-module/**' .
 ```
 
-- 无输出（exit code 1）= ✅；有命中 = ❌，逐条列出 `文件:行` 与命中内容。
+Windows / PowerShell 无 `rg` 时的等价扫描（排除 glob 与上方 bash 版逐条一致；报告须注明本次使用 PowerShell 等价实现）：
+
+```powershell
+$terms = Get-Content '.codex/skills/accept-module/deprecated-terms.txt' | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') }
+$exclude = '^\.git/', '^dev-log\.md$', '^docs/dev-log\(M0-M28\)\.md$', '^docs/notes/', '^docs/state/AI_CONTEXT\.md$', '^docs/state/CHANGELOG_INDEX\.md$', '^docs/state/change-history/', '^CLAUDE\.md$', '^\.gitignore$', '^\.agent_work/', '^docs/archive-dormant/', '^docs/archive-versions/', '^\.claude/skills/accept-module/', '^\.codex/skills/accept-module/', '^\.env$', '^\.pytest_cache/', '^__pycache__/', '\.py[co]d?$', '\.egg-info/', '\.(db|sqlite|sqlite3)$', '^eval/traces/.*\.jsonl$'
+$root = (Get-Location).Path
+$hits = Get-ChildItem -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
+  $rel = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
+  if ($exclude | Where-Object { $rel -match $_ }) { return }
+  Select-String -Path $_.FullName -Pattern $terms -AllMatches -ErrorAction SilentlyContinue |
+    ForEach-Object { "$rel`:$($_.LineNumber)`:$($_.Line.Trim())" }
+}
+$hits   # 空 = ✅；有输出 = ❌，逐条列出
+```
+
+- 无输出（exit code 1 / PowerShell 无命中）= ✅；有命中 = ❌，逐条列出 `文件:行` 与命中内容。
 - 排除原因：dev-log.md / docs/dev-log(M0-M28).md / docs/notes/ 是历史记录文件（含旧日志与旧条目），引用的旧路径/旧口径不代表当前状态（AI_CONTEXT「当前状态」「已知的坑」「最新事实快照」的时效性由检查 3 / 8 / 9 兜底）；`docs/archive-dormant/` 和 `docs/archive-versions/` 是冻结历史文档，引用的旧路径/旧口径不代表当前项目；CLAUDE.md 与 .gitignore 的"已废弃口径"登记行是预防层而不是违规；`.agent_work/` 是一次性中间产物快照；skill 目录本身登记了这些词。CLAUDE.md 的路径正确性由检查 2 兜底。
 - rg 默认跳过 .gitignore 覆盖的文件。若本次模块改过路径类配置，额外人工看一眼本地 `.env`。
 
@@ -55,7 +70,7 @@ ls -la
 - `.` 开头的隐藏目录默认豁免；但地图已登记的隐藏目录（如 `.agent_work/temp/`）按地图检查。
 - 缓存类目录（`__pycache__`、`.pytest_cache`、`*.egg-info`）豁免。
 
-### AGENTS.md ↔ CLAUDE.md 同步
+### AGENTS.md 与 CLAUDE.md 同步
 
 两份入口文件不再依赖符号链接，验收时先规范化行尾再 diff：
 
@@ -86,7 +101,7 @@ diff <(sed 's/\r$//' CLAUDE.md) <(sed 's/\r$//' AGENTS.md)
 - 小修复走索引指定的当前 Phase changelog，放宽为：改了什么 / 为什么 / 验证了什么，或等价信息。
 - 「验证快照」出现"期待 / 预计 / 预期 / 应该会"这类措辞时，判断是否属于"没跑命令就下结论"，是则 ❌——验证快照必须来自真实执行过的命令 + 真实输出（铁律的日志版）。
 - 如果日志中出现“过程细节未记录”，不自动判 ❌。这是 `finish-module` 的防幻觉诚实标记；但如果大量关键决策都未记录，应给 ⚠️，建议后续开发中维护 `docs/notes/<module>-notes.md`。
-- 若本模块推翻或修正了旧条目的判断（归因修正、实验结论反转、口径变化），原条目处应有 ⚠️ 注 指向新结论；缺失 = ❌。
+- 若本模块推翻或修正了旧条目的判断（归因修正、实验结论反转、口径变化），原条目处应有 ⚠️ 注 指向新结论；缺失 = ❌。⚠️ 注只针对 changelog 中旧条目的归因/结论/口径被推翻的情况；**代码或测试断言的修正（如 M47 修正 M1 的"14 张表"断言）由当前模块档案记录即可，不强制回写旧模块 changelog**。
 
 ## 检查 5：注释合规
 
@@ -121,7 +136,7 @@ diff <(sed 's/\r$//' CLAUDE.md) <(sed 's/\r$//' AGENTS.md)
 
 报告中写明查阅了哪些文件和结论。不要为了通过验收临场补代码；发现问题先报告，让用户决定是否回到 `finish-module` 或单独修复。
 
-同模块复检：如果本模块在本次会话或近期已跑过验收（例如验收未通过 → 修复 → 复检），且能确定上次验收时的提交（问用户或从 `git log` 定位），期间改动能用 `git diff` 可靠界定，则本检查可只全文阅读增量改动的代码文件，并在报告中写明比对基准；界定不了就退回全量。其余检查项不适用此缩减，照常全量执行。
+同模块复检：如果本模块在本次会话或近期已跑过验收（例如验收未通过 → 修复 → 复检），且能确定上次验收时的提交（优先使用 AI_CONTEXT 验收记录中登记的 HEAD；没有则问用户或从 `git log` 定位），期间改动能用 `git diff` 可靠界定，则本检查可只全文阅读增量改动的代码文件，并在报告中写明比对基准；界定不了就退回全量。其余检查项不适用此缩减，照常全量执行。验收通过时把当时 HEAD 一并写入 AI_CONTEXT「当前活动模块」的验收记录（格式如 `已验收通过（HEAD=<短哈希>）`），作为未来复检的 diff 基准。
 
 ## 检查 6：单一事实源抽查
 
@@ -141,7 +156,7 @@ diff <(sed 's/\r$//' CLAUDE.md) <(sed 's/\r$//' AGENTS.md)
 
 1. **模块专项**：本模块新增 / 修改的测试文件（如 `tests/test_mXX_*.py`）。
 2. **受影响回归**：本模块改动波及的既有测试（依据 `git diff` 波及文件与本模块 notes 的回归记录）。
-3. **关键基线**：跨模块长期契约测试（如 M30 catalog / Text2SQL isolation、M27 foundation / review、legacy API / Trace）；具体清单以模块 notes 的验证快照记录为准。
+3. **关键基线**：跨模块长期契约测试（如 M30 catalog / Text2SQL isolation、M27 foundation / review、legacy API / Trace）；具体清单以模块 notes 的验证快照记录为准。**验收前先核对 notes 是否登记了"裁剪验证文件清单"**（模块专项 + 受影响回归 + 关键基线的具体测试文件）；没有登记时按 `git diff` 波及文件与 plan 的验证矩阵推导，并在报告中注明"清单按推导得出，建议后续模块 notes 预登记"。
 
 Windows / PowerShell 常用：
 
@@ -157,6 +172,8 @@ PYTHONDONTWRITEBYTECODE=1 "<CLAUDE.md 指定的项目 Python>" -m pytest -p no:c
 ```
 
 把输出最后一行（如 `45 passed in 1.23s`）原样贴进报告，并写明本次实际执行的文件范围。失败 = ❌，附失败用例名。
+
+若沙箱拒绝写入 `.agent_work/temp/`（如 `[sandbox: file access denied]`），改用系统临时目录或经许可的其他可写 basetemp，并在报告中注明"沙箱拒绝写入项目 temp，改用 <路径>"；这属于环境限制，不是 pytest 失败，也不得因此跳过裁剪验证。
 
 ### 全量回归（保留，默认不启用）
 
@@ -206,34 +223,37 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 3. 兼容字段、历史关系或诊断题必须明确“不是默认口径 / 自动硬门”；避免后续 case、reference SQL 或 prompt 把兼容路径误当默认事实。
 4. `CHANGELOG_INDEX.md` 路由到的 Phase 文件共同组成完整历史，不因本项发现旧结论就删除；若新模块推翻旧判断，按索引定位原条目并检查是否有 `⚠️ 注` 指向新结论。
 
-判定：实际矛盾、过期行动指令或当前口径缺同步 = ❌；仅有不冲突的冗余、术语不够通用或容易误读的措辞 = ⚠️；无问题 = ✅。本检查**只报告，不在验收过程中自动修复 state 文档**，避免验收门禁擅自改变长期口径；有 ❌ / ⚠️ 时给出精确修复建议，待用户或单独文档小修处理后复检本项。
+判定：实际矛盾、过期行动指令或当前口径缺同步 = ❌；仅有不冲突的冗余、术语不够通用或容易误读的措辞 = ⚠️；无问题 = ✅。本检查**只报告，不在验收过程中自动修复 state 文档**，避免验收门禁擅自改变长期口径；有 ❌ / ⚠️ 时给出精确修复建议，待用户或单独文档小修处理后复检本项——**"复检"只针对修复项做最小验证（如重读修改段落），不重新执行全部 9 项检查**（与「报告」节的"修复完成后禁止复检"一致）。
 
-## 验收报告
+## 报告
 
-聊天中输出下表（验收报告不落盘，会话即存档；验收事件的持久化靠下方「报告落点」）：
+聊天中输出下表（验收报告不落盘）：
 
-> 验收报告只在聊天中输出，不保存文件：9 项检查的核对结果是会话性内容，核心结论已通过「报告落点」持久化到 `docs/state/AI_CONTEXT.md`。
+| #    | 检查项               | 结果  | 证据 / 定位 |
+| ---- | -------------------- | ----- | ----------- |
+| 1    | 废弃口径清零         | ✅/❌   | ...         |
+| 2    | 目录地图一致         | ✅/⚠️/❌ | ...         |
+| 3    | 进度状态一致         | ✅/❌   | ...         |
+| 4    | 最新日志完整         | ✅/❌   | ...         |
+| 5    | 注释合规             | ✅/⚠️/❌ | ...         |
+| 6    | 单一事实源           | ✅/❌   | ...         |
+| 7    | 测试                 | ✅/❌   | ...         |
+| 8    | 事实快照同步         | ✅/⚠️/❌ | ...         |
+| 9    | State 文档交叉一致性 | ✅/⚠️/❌ | ...         |
 
-```markdown
-# 模块验收报告：<模块> / <日期>
+### 修复建议
 
-| # | 检查项 | 结果 | 证据 / 定位 |
-|---|---|---|---|
-| 1 | 废弃口径清零 | ✅/❌ | <命令结论或命中列表> |
-| 2 | 目录地图一致 | ✅/⚠️/❌ | ... |
-| 3 | 进度状态一致 | ✅/❌ | ... |
-| 4 | 最新日志完整 | ✅/❌ | ... |
-| 5 | 注释合规 | ✅/⚠️/❌ | <检查文件与结论> |
-| 6 | 单一事实源 | ✅/❌ | <抽查命令与结论> |
-| 7 | 测试 | ✅/❌ | <pytest 真实输出行> |
-| 8 | 事实快照同步 | ✅/⚠️/❌ | <notes 素材与 AI_CONTEXT 对照结论> |
-| 9 | State 文档交叉一致性 | ✅/⚠️/❌ | <读取文件、核对事实与定位> |
+- <❌ 和 ⚠️ 定位 + 大白话改法>
 
-## ❌ 项修复建议
-- <定位 + 具体改法>
-```
+### 一句话结论
 
-只要没有 ❌，直接在 AI_CONTEXT.md 的“当前活动模块”记录为“已验收通过”。有 ❌ 时：给出通俗易懂的修复建议；修复完成后**禁止复检**，直接改为验收通过。
+- <固定格式：`9 项全过 / N 项 ❌（+M 项 ⚠️）`，一行大白话说明是否通过、要做什么。>
+- 共同 warning（如既有 Starlette/httpx deprecation）与模块无关时，在此一句话带过即可，不逐项重复解释。
+
+验收结果的持久化只有一处：`docs/state/AI_CONTEXT.md`「当前活动模块」。
+
+- 无 ❌：直接编辑 AI_CONTEXT「当前活动模块」记录为"已验收通过（HEAD=<短哈希>）"。这是执行动作，不需要向用户确认；除该字段外不改任何文件。
+- 有 ❌：给出通俗易懂的修复建议；修复完成后**禁止复检**，直接改为验收通过。
 
 ## 维护本 skill
 

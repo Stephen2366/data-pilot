@@ -3880,3 +3880,209 @@ $env:PHASE4B_RAG_STRATEGY = 'subgraph'
 
 打开 `http://127.0.0.1:8000/docs`，通过 `POST /api/query` 提交 RAG 问题。客户端请求体里没有 strategy 字段：策略只能由服务端配置。观察响应和 Trace 中的 action、child budget、Evidence validity 与 termination；若 Subgraph 返回 no-answer，应保留该失败证据并显式切回 Pipeline，不要在同一请求里自动重跑两臂。
 
+## ★ M47 Phase 4B B5：让 Agent 任务真正跨进程活下来
+
+（2026-08-26）
+
+**简述**：M47 把只存在单个 Python 进程内存里的 Agent task（智能体任务）升级为 **MySQL durable task boundary（MySQL 持久任务边界）**。任务现在能在进程重启后从已提交边界继续，多 worker（多个工作进程）竞争时只有一个获准执行，并用 TTL（生存时间）、清理、身份绑定和 typed event ledger（类型化事件账本）守住安全边界。
+
+### 先用大白话讲
+
+可以把之前的任务状态想成写在某个值班员的便签上：值班员下班或办公室断电，便签就没了；两位值班员各拿一张便签时，还可能同时处理同一件事。
+
+M47 把便签换成了**档案室里的正式任务卷宗**。每次继续任务前，值班员都要拿着任务版本、一次性领取凭证和当前身份去登记；数据库只允许一人领取。同一任务做完一个 turn（一次任务轮次）后才盖章提交，另一个进程可以从这个已盖章的位置继续。
+
+卷宗也不是无限保存全部聊天。系统只存恢复所需的结构化状态和安全证据引用；任务结束、清除或过期时立即擦掉正文 payload（状态载荷），只留下短期防重放 tombstone（墓碑记录）。这样既能演示真正的重启恢复，又没有把数据库变成永久聊天仓库。
+
+### 这次做了什么
+
+M47 处理的核心矛盾是：**任务要能持久恢复，但恢复不能造成重复执行、越权读取或敏感上下文长期滞留**。
+
+1. **把任务状态做成严格、可版本化的数据库载荷。**
+
+   TaskState v2 不再作为任意 Python 对象直接塞进 JSON（结构化文本格式），而是经过 closed-world codec（闭世界编解码器）：允许哪些字段、字段类型和 schema identity（结构身份）都必须精确匹配。
+
+   - **原问题**：原来的 `safe_projection()` 是面向响应展示的摘要，会主动省略恢复必需字段；直接保存任意字典又会让未知字段和敏感内容混入长期存储。
+   - **解决方式**：独立 codec 完成 canonical round-trip（规范化往返），递归拒绝 rows（结果行）、正文、答案、Prompt（提示词）、凭据和 Thought（模型思考）等禁存字段，并设置 64 KiB 上限。
+   - **重要取舍**：当前合法 TaskState v2 已能无损恢复，所以没有预造“万能迁移框架”；遇到不兼容 schema 会失败关闭，不会猜默认值。
+   - **验证证据**：合同、codec、payload 上限和 tamper（篡改）测试进入 M47 聚焦套件；最终 Scenario v5 的工件也递归检查私有字段没有泄漏。
+
+2. **用数据库 CAS 保证多个 worker 只有一个胜者。**
+
+   CAS（Compare-And-Set，比较并设置）可以理解为“只有卷宗仍处于我看到的版本时，才允许盖下一枚章”。M47 把唯一胜者的判断放在 MySQL 条件更新和事务里，而不是依赖单进程锁。
+
+   - **领取条件**：owner（任务所有者）、tenant（租户）、active role（当前活动角色）、expected version（期望版本）、状态、TTL 和 single-use claim token（一次性领取令牌）共同参与校验。
+   - **提交条件**：只有持有本次 claim token 的 worker 才能 commit（提交）；旧请求、重复请求或输掉竞争的 worker 在深 Tool（深层工具调用）前就停止。
+   - **原子 switch**：切换任务时，同一短事务退休旧 task 并创建新 task；中途故障整笔回滚，不留下两个 active 任务。
+   - **边界**：这保证数据库任务边界只提交一次，但不承诺任意外部 Tool 的 exactly-once（外部副作用恰好一次）。进程在 Tool 中途崩溃时，系统宁可保守停止，也不自动重放。
+
+3. **补齐过期、清除和最小留存生命周期。**
+
+   持久化不等于永久保存。M47 把 active/claimed 过期、terminal（终态）、clear（主动清除）和 purge（物理清理）做成同一套生命周期合同。
+
+   - **即时擦除**：terminal、clear、active/claimed expiry 都立即 scrub（擦除）状态 payload，只保留防枚举、防重放所需的最小墓碑。
+   - **有限保留**：墓碑默认保留 24 小时，之后由 bounded maintenance（有上限的维护操作）分批清理，避免一次扫描无界占用数据库。
+   - **容易踩的坑**：若在数据库事务内先更新为 expired，再立即抛异常，事务会回滚，敏感 payload 其实没有被擦掉。最终实现先提交 scrub 和 event，再向调用方返回稳定错误。
+   - **未证明边界**：当前提供维护 seam（接缝），没有建设常驻 scheduler（定时调度器）或生产运维平台。
+
+4. **让 API（接口）、Trace（追踪）和 Eval（评测）共用一份 durable lifecycle 事实。**
+
+   checkpoint（任务检查点）保存当前可恢复快照，typed event ledger 保存 start、claim、commit、switch、expiry 等安全事件摘要；二者共同成为 B5 的权威事实。
+
+   - **产品接线**：产品默认装配 `MySQLTaskBoundary`，只有 `APP_ENV=test` 才允许显式使用 memory adapter（内存适配器）。业务 turn 不按后端复制两套流程。
+   - **身份复核**：每次恢复都重新核对 caller、tenant、active role 和 Evidence validity（证据有效性）；错 owner 与未知 task 统一返回不可枚举的安全结果。
+   - **同源投影**：API 和 JSONL Trace 从同一 lifecycle fact 投影 B5 runtime identity，raw task id 和数据库 payload 不进入 Trace。
+   - **向后兼容**：Agent Scenario v5 是 additive（只新增、不改签）工件，v1～v4 保持可读；M37 legacy thread checkpoint 仍是独立的进程内 family。
+
+5. **用真实 MySQL 和跨进程链路证明不是“只在 mock（模拟实现）里持久”。**
+
+   两个 Live Dev Probe（开发期真实探针）严格使用隔离库 `datapilot_m47_test`，没有调用 LLM（大语言模型）、embedding（向量化）或 RAG（检索增强生成），也没有触碰 `datapilot_dev` 和 14 张业务表。
+
+   | 证据 | 最终结果 | 证明范围 |
+   |---|---:|---|
+   | P1：真实 MySQL 双 session | `continue`；清理 `5/13 → 0/0` | 唯一 claim、commit、switch rollback、expiry scrub、过期提交 fencing、bounded purge |
+   | P2：进程 A → 进程 B | `version 1 → 3`；单 worker 胜者；清理 `4/11 → 0/0` | restart/resume、并发竞争、旧版本拒绝、role/tenant、claimed crash、clear |
+   | Agent Scenario v5 | 6/6；provider/tokens=`0/0` | 六类 durable 控制/安全合同可离线复演 |
+   | 全仓验证 | 639 passed + 修复后独立 1 passed | 当前 640 项都有同代码下通过证据 |
+
+   **证据边界**：这些结果证明持久化控制、安全和兼容合同，不证明 Agent 答案质量、生产吞吐、跨地域容灾或真实身份系统。全仓最后一项是旧的“只有 14 张表”断言，修正后独立通过，因此没有把两次运行包装成一次零失败全仓测试。
+
+### 新概念
+
+- **Durable checkpoint（持久检查点）**：把“已经安全提交到哪里”写入进程外存储。它类似数据库事务提交后的业务状态，而不是保存 Python 调用栈；进程重启后只能从已提交边界恢复。
+- **CAS / optimistic concurrency（比较并设置 / 乐观并发控制）**：请求携带自己看到的版本，数据库只在当前版本仍一致时更新。可类比 Spring/JPA 的 `@Version`，但 M47 还把状态和一次性 claim token 放进条件，防止旧 worker 迟到提交。
+- **Fencing token（栅栏令牌）**：worker 获得执行权时签发的一次性凭证。即使旧 worker 后来恢复，它也没有当前凭证，不能越过“栅栏”提交结果。
+- **Tombstone（墓碑记录）**：正文已擦除，但短期保留一个“这个任务已经结束/清除/过期”的最小记录，用来拒绝迟到请求和防止 task id 被立即复用。
+- **Typed event ledger（类型化事件账本）**：只记录允许的事件类别和安全摘要，不保存自由文本。它既能解释任务怎样变化，也为 M48 的有界 Context Compact（上下文压缩）提供可靠输入。
+
+### 代码阅读路线
+
+1. **先看 B5 允许什么**：`domain_pack/phase4b/b5_contracts.json`、`engine/phase4b/b5_contracts.py`
+   先理解 durable backend、state/event schema、TTL、保留期、禁存字段和兼容矩阵。这里是机器合同，负责防止配置、代码和报告各说一套。
+
+2. **再看状态怎样安全进出 JSON**：`engine/phase4b/task_state_codec.py`
+   从 encode/decode 的 closed-world 校验读起，重点看 schema identity、canonical payload、递归禁存检查和大小上限。无需死抠每个字段，先理解“恢复载荷”和“API 安全摘要”为什么不能共用一个 serializer（序列化器）。
+
+3. **理解 adapter-neutral boundary**：`engine/phase4b/task_boundary.py`
+   这里定义 task start/claim/commit/switch/cancel/clear 的共同语义，以及测试用 memory 实现。阅读重点是上层只依赖接口，不知道状态来自字典还是数据库。
+
+4. **进入 MySQL 并发与生命周期核心**：`engine/phase4b/mysql_task_boundary.py`
+   依次看 claim 的条件更新、claim token 提交 fencing、switch 短事务、expiry scrub 和 bounded purge。这个文件回答“两个进程同时来，数据库怎样决定唯一胜者”。
+
+5. **看数据表怎样承载合同**：`app/models/agent_task_checkpoint.py`、`alembic/versions/20260826_0004_m47_durable_task_state.py`
+   checkpoint 表保存当前快照，event 表保存有序安全事件；索引和约束服务于 owner/version/status 查询与事件顺序。两张表是基础设施表，不进入 Text2SQL 的 13 张可查询业务表。
+
+6. **看产品如何装配并恢复任务**：`app/core/config.py`、`app/main.py`、`engine/phase4b/task_turn.py`、`app/api/query.py`
+   先看配置如何把 MySQL 设为产品默认，再沿 `/api/query` 进入 task turn，观察 active role、claim/commit 和 lifecycle fact 怎样贯穿请求、响应与 Trace。
+
+7. **最后看证据链**：`scripts/probe_m47_mysql_boundary.py`、`scripts/rehearse_m47_b5.py`、`eval/agent_scenario_v5_contracts.py`、`tests/test_m47_b5_contracts.py`
+   P1 聚焦数据库事务，P2 聚焦跨进程产品链，Scenario v5 聚焦安全 artifact；三者合起来说明“存得下”“抢不重”“讲得清”是三层不同证据。
+
+核心数据流：
+
+`POST /api/query + task envelope（任务信封）`
+→ `caller / tenant / active role`
+→ `MySQLTaskBoundary.claim()`
+→ `TaskState v2 decode + Evidence 重核`
+→ `bounded Agent Loop / Tool`
+→ `commit + typed event`
+→ `Response / Trace / Scenario 同源投影`
+
+### 设计要点
+
+- **数据库决定唯一胜者**：不把进程内锁或“先查再写”冒充多 worker 并发保证。
+- **只恢复已提交业务边界**：不保存 LangGraph 节点栈、RAG 子图程序位置或 Tool 中间态，避免把框架 checkpoint 等同于业务可恢复性。
+- **失败关闭优先**：schema 不兼容、存储不可用、身份不符、版本冲突或 claimed crash 都在深执行前停止，不用宽松默认换表面成功。
+- **最小化持久数据**：结构化状态、EvidenceRef 和 typed event 足够恢复与审计；正文、答案、rows、Prompt 和 Thought 不进入 durable payload，汪。
+
+### 有面试价值的亮点
+
+1. **“我把单机状态升级成了数据库级并发协议。”** 不只是把字典换成表，而是用 expected version、状态和一次性 claim token 组成 CAS/fencing，让多个进程竞争时由数据库给出唯一胜者。
+
+2. **“我区分了业务 checkpoint 和框架 checkpoint。”** 系统只恢复已提交 TaskState，不恢复 LangGraph 调用栈或 RAG 子图 program counter；这让崩溃语义、重复 Tool 风险和可解释边界都更清楚。
+
+3. **“持久化和数据最小化一起设计。”** terminal/clear/expiry 立即 scrub，墓碑只短期防重放；typed ledger 只存安全摘要。不是为了可观测性把完整问答永久写进数据库。
+
+4. **“真实验证覆盖了 mock 最容易漏掉的地方。”** 两个独立 session、两个进程、两个 app/engine 真正访问 MySQL，并检查唯一胜者、原子回滚、崩溃停止和最终数据清零。
+
+5. **“我对验证结果不做过度包装。”** 全仓一次运行是 639 pass + 1 个过时断言失败，修正后单项通过；我据此说 640 项都有当前代码下通过证据，而不是说一次全仓 640 passed。
+
+### 面试官追问
+
+1. **[基础追问] 这次为什么不能只把内存字典序列化到 MySQL？**
+
+   因为持久化解决“进程退出后数据还在”，却不自动解决多 worker 并发、旧版本提交、身份复核和清理。M47 还需要数据库 CAS、一次性 claim token、closed-world codec、TTL 和 tombstone，才能形成安全的任务边界。
+
+2. **[工程/深挖追问] 两个 worker 同时 continue 同一版本，怎样保证 Tool 不被调用两次？**
+
+   两个请求先用相同 expected version 竞争数据库条件更新，只有受影响行数为 1 的请求拿到 claim token；输家在进入 Agent Loop 和 Tool 前得到稳定拒绝。赢家提交时还要携带同一 token，防止已经失去所有权的旧 worker 迟到写回。
+
+3. **[工程/深挖追问] 为什么进程在 Tool 调用后、commit 前崩溃时不自动恢复执行？**
+
+   因为外部 Tool 可能已经产生副作用，而数据库里还没有 committed task boundary。自动重跑会把“至少一次”误装成“恰好一次”。M47 选择让 claimed 状态到期后 scrub 并保守停止；若未来需要自动恢复，必须为具体 Tool 增加幂等键或可对账事务，不能由通用任务层猜测。
+
+4. **[工程/深挖追问] 你为什么同时保留 checkpoint 表和 event 表？**
+
+   checkpoint 适合快速读取“现在是什么状态”，event ledger 适合解释“为什么变成这样”并为后续 Compact 提供有序材料。只用事件会让每次恢复都重放完整历史，只用快照又缺少可追溯的动作边界；两者职责不同，但都受同一 schema 和隐私合同约束。
+
+5. **[压力追问] 你说 durable 已完成，但开发库都没迁移，这是不是只在测试库里自嗨？**
+
+   这个质疑对“当前机器能否直接启动产品 task API”是成立的：`datapilot_dev` 还没到 0004，所以启动前必须先迁移。我没有把它写成已部署；本模块证明的是 schema、adapter、产品默认接线和真实 MySQL 的重启/并发合同，而且 Probe 按用户确认故意只写隔离库，避免擅自改业务库。上线或本地正式体验前会先核对目标库、执行 Alembic migration，再做受控启动检查；这和代码能力完成、环境变更尚未授权是两个层次喵。
+
+### 验证与下一步
+
+**验证结果：**
+
+| 范围 | 真实结果 | 证明什么 |
+|---|---:|---|
+| M47 lifecycle 聚焦 | 27 passed | codec、CAS、lifecycle、API/runtime 主合同闭合 |
+| TTL/fencing 补强聚焦 | 12 passed | claimed expiry、scrub、过期提交拒绝和 event 语义闭合 |
+| Agent Scenario v5 | 6/6，provider/tokens=0/0 | restart、竞争、错 owner、过期、clear、switch 安全投影可复演 |
+| Alembic 临时 metadata | current=0004 head；check 无新操作 | ORM 与 migration metadata 一致 |
+| 全仓 + 失败项复验 | 639 passed / 1 failed；修正后该项 1 passed | 当前 640 项均有通过证据；不是同一次全仓零失败 |
+
+唯一 warning（警告）是既有 Starlette TestClient/httpx deprecation。P1/P2 是 **exploratory / baseline-ineligible（探索性、不可登记基线）**，本模块没有运行付费 Formal Eval；这些控制证据不能外推为答案质量或生产吞吐。
+
+**下一步**：M48/B6 应消费 M47 的 typed event/checkpoint identity，设计有界 Context Compact；必须继续禁止无界历史、正文、rows 和子图 program counter 进入持久状态。另一个现实前置是：在启动产品 task API 前，先确认目标数据库并把它升级到 Alembic 0004。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录，已激活项目 Python 环境；以下命令不调用真实 provider。
+# 1. 复核 M47 合同、API runtime 和 Scenario v5；预计相关用例全部通过。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m47-devlog tests/test_m47_b5_contracts.py tests/test_m47_api_runtime.py tests/test_m47_agent_scenario_v5.py
+
+# 2. 离线复演 Scenario v5；预计生成 6 个 completed case，provider/tokens 为 0/0。
+python -m scripts.rehearse_m47_agent_scenario_v5
+
+# 3. 只读查看最终安全工件，不会重新执行 MySQL Probe。
+Get-Content eval/reports/m47/m47-agent-scenario-v5-rehearsal.json
+```
+
+环境未激活时，把 `python` 替换成 `AGENTS.md` 中项目学习环境的完整 Python 路径。真实 MySQL 的 P1/P2 会写隔离测试库，不应仅为阅读复盘重复运行。
+
+**本地启动体验：**
+
+产品默认已经是 MySQL durable backend。当前本机 `datapilot_dev` **尚未执行 0004**；请先核对 `DATABASE_URL` 指向你明确要迁移的开发库并做好必要备份，再按项目 runbook 执行 `alembic upgrade head`。不要把 M47 的测试命令改指生产库。
+
+```powershell
+# 确认数据库已到 20260826_0004 后，再启动 FastAPI。
+python -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs`，先用 `POST /api/query` 提交：
+
+```json
+{"question":"查询 2026 年 7 月实际净退款金额。","user_role":"ops","task":{"action":"start"}}
+```
+
+保存响应中的 `task_id` 和 `task_version`，停止服务后重新启动，再提交：
+
+```json
+{"question":"改成 8 月，并和 7 月比较。","user_role":"ops","task":{"action":"continue","task_id":"替换为上一响应值","expected_version":1}}
+```
+
+上面的 `expected_version: 1` 只表示首次 start 常见的返回值；实际操作时，`task_id` 和 `expected_version` 都必须替换成上一响应中的原值。
+
+正常情况下，新进程会从数据库恢复任务并返回更高版本；若 owner、tenant、active role、版本、TTL 或 schema 不匹配，则会在深 Tool 前安全停止。这里的答案内容仍取决于当前模型、数据库和 RAG/SQL 运行条件，M47 只保证 durable task boundary 的控制与安全语义。
+

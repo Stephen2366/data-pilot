@@ -10,7 +10,7 @@ from engine.harness.graph import HarnessRuntime
 from engine.phase4b.agent_loop import AgentLoopResult, AgentLoopRuntime, run_agent_loop
 from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver
 from engine.phase4b.loop_contracts import AgentNodeContext
-from engine.phase4b.task_boundary import TaskBoundary, TaskBoundaryError, TaskLifecycleFact, TaskProjection
+from engine.phase4b.task_boundary import TaskBoundaryError, TaskBoundaryEvent, TaskBoundaryPort, TaskLifecycleFact, TaskProjection
 from engine.governance import TrustedCaller
 from engine.phase4b.task_runtime import NodeContext, TaskDelta, TaskState, TaskTransition, apply_delta, project_node_contexts, understand_turn
 
@@ -46,7 +46,7 @@ def run_task_turn(
     *,
     request: TaskTurnRequest,
     runtime: HarnessRuntime,
-    boundary: TaskBoundary,
+    boundary: TaskBoundaryPort,
     agent_runtime: AgentLoopRuntime | None = None,
 ) -> TaskTurnResult:
     """理解、claim、状态转换、最多一次深 Harness、commit 收敛成同一事实。"""
@@ -56,7 +56,7 @@ def run_task_turn(
         previous: TaskState | None = None
         claim: TaskProjection | None = None
         if request.action != "start":
-            claim = boundary.claim(task_id=request.task_id or "", expected_version=request.expected_version or 0, caller=caller)
+            claim = boundary.claim(task_id=request.task_id or "", expected_version=request.expected_version or 0, caller=caller, active_role=request.harness_request.active_sql_role)
             previous = claim.state
         owner = boundary.owner_ref(caller)
         delta = understand_turn(request.harness_request.question, action=request.action, previous=previous)
@@ -71,14 +71,14 @@ def run_task_turn(
             local_contexts = (_as_agent_context(contexts[0]), _as_agent_context(contexts[3]))
             result = _local_result("task_clarification_required", "请补充明确的指标和月份。", answer_status="clarification_required", caller_ref=caller.audit_ref if caller else None)
             if claim is None:
-                task, lifecycle = boundary.start(caller=caller, state=state)
+                task, lifecycle = boundary.start(caller=caller, state=state, active_role=request.harness_request.active_sql_role, event=_event(delta, transition, None))
             else:
-                task, lifecycle = boundary.commit(claim=claim, caller=caller, state=state)
+                task, lifecycle = boundary.commit(claim=claim, caller=caller, state=state, active_role=request.harness_request.active_sql_role, event=_event(delta, transition, None))
             return TaskTurnResult(result, request.action, 0, 1, task, delta, transition, local_contexts, lifecycle, boundary.runtime_identity)
         if delta.category == "cancel":
             local_contexts = (_as_agent_context(contexts[0]), _as_agent_context(contexts[3]))
             assert claim is not None
-            task, lifecycle = boundary.commit(claim=claim, caller=caller, state=state, terminal_status="cancelled")
+            task, lifecycle = boundary.commit(claim=claim, caller=caller, state=state, terminal_status="cancelled", active_role=request.harness_request.active_sql_role, event=_event(delta, transition, None))
             result = _local_result("task_cancelled", "当前任务已取消。", caller_ref=caller.audit_ref if caller else None)
             return TaskTurnResult(result, request.action, 0, 1, task, delta, transition, local_contexts, lifecycle, boundary.runtime_identity)
 
@@ -108,13 +108,13 @@ def run_task_turn(
         # 只保留实际执行节点：turn_understanding + Loop 的 decision/action/controller response。
         contexts = (_as_agent_context(contexts[0]), *loop.contexts)
         if request.action == "start":
-            task, lifecycle = boundary.start(caller=caller, state=committed_state)
+            task, lifecycle = boundary.start(caller=caller, state=committed_state, active_role=harness.active_sql_role, event=_event(delta, transition, loop))
         elif request.action == "switch":
             assert claim is not None
-            task, lifecycle = boundary.switch(claim=claim, caller=caller, state=committed_state)
+            task, lifecycle = boundary.switch(claim=claim, caller=caller, state=committed_state, active_role=harness.active_sql_role, event=_event(delta, transition, loop))
         else:
             assert claim is not None
-            task, lifecycle = boundary.commit(claim=claim, caller=caller, state=committed_state)
+            task, lifecycle = boundary.commit(claim=claim, caller=caller, state=committed_state, active_role=harness.active_sql_role, event=_event(delta, transition, loop))
         return TaskTurnResult(
             result, request.action, 1, 1, task, delta, transition, contexts,
             lifecycle, boundary.runtime_identity, loop,
@@ -125,11 +125,11 @@ def run_task_turn(
         return TaskTurnResult(result, "rejected", 0, 0, None, None, None, (), lifecycle, boundary.runtime_identity)
 
 
-def clear_task(*, task_id: str, expected_version: int, caller: TrustedCaller | None, boundary: TaskBoundary) -> tuple[TaskProjection | None, TaskLifecycleFact, bool, str]:
+def clear_task(*, task_id: str, expected_version: int, caller: TrustedCaller | None, boundary: TaskBoundaryPort, active_role: str | None = None) -> tuple[TaskProjection | None, TaskLifecycleFact, bool, str]:
     """将 boundary clear 的成功/失败收敛为 API 可投影结果。"""
 
     try:
-        task, lifecycle = boundary.clear(task_id=task_id, expected_version=expected_version, caller=caller)
+        task, lifecycle = boundary.clear(task_id=task_id, expected_version=expected_version, caller=caller, active_role=active_role)
         return task, lifecycle, True, "task_cleared"
     except TaskBoundaryError as exc:
         return None, boundary.lifecycle_rejection(task_id, exc.reason_code), False, exc.reason_code
@@ -142,6 +142,17 @@ def _as_agent_context(context: NodeContext) -> AgentNodeContext:
         purpose=context.purpose, source_identities=context.source_identities,
         payload=context.payload, allowed_fields=tuple(context.payload),
         field_budget=context.field_budget, token_budget=768,
+    )
+
+
+def _event(delta: TaskDelta, transition: TaskTransition, loop: AgentLoopResult | None) -> TaskBoundaryEvent:
+    """从本 turn 同源 typed fact 形成最小持久事件，不写 question/answer/rows。"""
+
+    return TaskBoundaryEvent(
+        delta_category=delta.category,
+        transition_identity=transition.after_identity,
+        action_count=len(loop.attempts) if loop else 0,
+        termination_reason=loop.termination.reason if loop else None,
     )
 
 

@@ -1,0 +1,36 @@
+{
+  "contract_version": "phase4b-b5-contracts-v1",
+  "predecessor_contract_identity": "ebb06f82a919ab009ea10eea27ed06c7dcb709b03f8ee414682485d3fc03f164",
+  "runtime_identity": "phase4b-mysql-task-boundary-v1",
+  "state_schema_version": "phase4b-task-state-v2",
+  "event_schema_version": "phase4b-task-boundary-event-v1",
+  "storage": {
+    "product_backend": "mysql",
+    "test_backend": "memory_explicit_only",
+    "atomicity": "database_compare_and_set",
+    "active_ttl_seconds": 900,
+    "tombstone_retention_seconds": 86400,
+    "max_state_bytes": 65536,
+    "payload_scrub": ["cleared", "cancelled", "switched", "expired"]
+  },
+  "ownership": {
+    "dimensions": ["owner_ref", "tenant_ref", "active_role"],
+    "wrong_owner_policy": "uniform_task_unavailable",
+    "task_lookup": "sha256_task_key",
+    "claim_fencing": "single_use_token_hash"
+  },
+  "statuses": ["active", "claimed", "cancelled", "switched", "cleared", "expired"],
+  "reason_codes": ["task_started", "task_claimed", "task_active", "task_cancelled", "task_switched", "task_cleared", "task_expired", "task_unavailable", "task_not_active", "task_version_conflict", "task_owner_mismatch", "task_storage_unavailable", "task_schema_incompatible", "task_payload_too_large"],
+  "persisted_state_fields": ["owner_ref", "generation", "status", "goal", "constraints", "pending_questions", "requirements", "evidence_requirements", "route", "evidence", "termination", "last_action_attempts", "last_budget", "last_termination", "state_version"],
+  "forbidden_payload_fields": ["raw_question", "raw_answer", "sql_rows", "document_body", "retrieved_chunks", "prompt", "authorization_header", "credential", "secret", "token"],
+  "artifact_versions": {
+    "agent_scenario": "phase4b-agent-scenario-artifact-v5",
+    "checkpoint_snapshot": "phase4b-task-checkpoint-v1",
+    "event_ledger": "phase4b-task-boundary-event-v1"
+  },
+  "scenarios": ["RESTART_RESUME", "MULTIWORKER_CONFLICT", "WRONG_OWNER", "EXPIRED", "CLEAR", "SWITCH"],
+  "capability_matrix": {
+    "implemented": ["durable_task_state", "strict_state_codec", "mysql_compare_and_set", "typed_event_ledger", "restart_resume", "multiworker_conflict", "bounded_tombstone_purge", "agent_scenario_v5"],
+    "reserved": ["context_compact"]
+  }
+}

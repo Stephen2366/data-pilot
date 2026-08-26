@@ -136,7 +136,8 @@ def test_b4_business_subgraph_is_one_parent_action_with_safe_child_timeline(tmp_
     assert body["answer_status"] == "complete"
     assert 2 <= child["consumption"]["selected"] <= 3
     assert len([item for item in body["task"]["state"]["evidence"] if item["route"] == "document"]) == child["consumption"]["selected"]
-    assert trace["runtime_identity"]["contract_identity"] == body["agent_loop_runtime"]["contract_identity"]
+    # M47 后 Trace 顶层是 B5 durable envelope，父 Loop 仍保留自己的 B4 identity。
+    assert trace["runtime_identity"]["predecessor_contract_identity"] == body["agent_loop_runtime"]["contract_identity"]
     assert trace["runtime_identity"]["predecessor_contract_identity"]
     assert "question" not in json.dumps(child, ensure_ascii=False).lower()
 

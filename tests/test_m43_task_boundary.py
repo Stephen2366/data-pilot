@@ -35,8 +35,9 @@ def test_ttl_and_clear_are_explicitly_process_local() -> None:
     expired._items = boundary._items  # 测试同一 adapter 的时钟推进，不作为公开接口使用。
     with pytest.raises(TaskBoundaryError, match="task_expired"):
         expired.claim(task_id=task.task_id, expected_version=1, caller=caller)
-    cleared, fact = boundary.clear(task_id=task.task_id, expected_version=1, caller=caller)
-    assert cleared.status == "cleared" and fact.action == "cleared"
+    # M47 parity：expiry 已立即擦除共享 payload，不能再被另一个 adapter clear/复活。
+    with pytest.raises(TaskBoundaryError, match="task_not_active"):
+        boundary.clear(task_id=task.task_id, expected_version=1, caller=caller)
 
 
 def test_switch_retires_old_and_creates_new_in_one_boundary_operation() -> None:
