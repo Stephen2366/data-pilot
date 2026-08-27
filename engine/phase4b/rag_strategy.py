@@ -30,7 +30,7 @@ from engine.rag.evidence_acquisition import (
     DocumentEvidenceAcquirer,
     PipelineEvidenceAcquirer,
 )
-from engine.rag.knowledge_tool import KnowledgeTool
+from engine.rag.knowledge_tool import ContextLoader, KnowledgeTool
 
 RAGStrategyName = Literal["pipeline", "subgraph"]
 B4_BUNDLE = load_b4_contract_bundle()
@@ -111,6 +111,7 @@ def configure_external_acquisition(
     active_loader: ActiveLoader,
     proposal_transport: B4ProposalTransport | None = None,
     expansion_adapter: ContextExpansionAdapter | None = None,
+    context_loader: ContextLoader | None = None,
 ) -> ConfiguredRAGAcquisition:
     """组装 external strategy；仅 Subgraph 要求 proposal transport 与 authority expansion。"""
 
@@ -121,7 +122,7 @@ def configure_external_acquisition(
     )
     acquirer: DocumentEvidenceAcquirer = pipeline
     if selected == "subgraph":
-        if proposal_transport is None or expansion_adapter is None:
+        if proposal_transport is None or expansion_adapter is None or context_loader is None:
             raise RAGStrategyConfigurationError("rag_subgraph_dependencies_unavailable")
         former = ExternalRequirementFormer(
             structured_supplier=B4QuestionObligationSupplier(proposal_transport)
@@ -133,5 +134,6 @@ def configure_external_acquisition(
             slot_provider=ExternalFormationSlotProvider(former),
             runtime_scope="external_profile",
             expansion_adapter=expansion_adapter,
+            context_loader=context_loader,
         )
     return ConfiguredRAGAcquisition(selected, "external_profile", acquirer)

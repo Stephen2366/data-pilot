@@ -65,6 +65,13 @@ M41 `phase4-rag-e2e-review-v1` 同样绑定 artifact 与逐 execution checkpoint
 
 这里保留仍能帮助判断当前路线的真实运行；它们未必已成为正式长期 baseline，也未必能作严格对照。每条都必须写清楚证据状态和解释边界。Smoke、运行事故、中断和外部服务异常不作为独立记录进入本账本。
 
+### M49 收工后 RAG 固定场景探索重验（2026-08-27）
+
+- 本轮是 `exploratory / baseline-ineligible / not-development-probe`，不登记正式长期基线。Business `quality_refund_materials` required `14/0/0`、1 Qwen / 1013 tokens；`unsupported_warranty_rule` required `9/0/0`、Composer 0；external semantic Pipeline qst_0386 required `12/0/0`、漏斗 `5→3→3→1`、1 embedding + 1 Qwen / 2082 observed chat tokens，advisory `2/1`。
+- external Subgraph qst_0431 首次完成 initial retrieval、deterministic procedure admission、2-unit expansion 和 3 条 Evidence merge，但 generation context 正文为 0；Qwen 返回后被 `composer_response_invalid_cardinality` 拒绝，required `9/1/2`、漏斗 `3→3→3→0`。根因是 recovery merge 没有对 Enterprise metadata-only entry 调用 SQLite materializer。
+- 修复后同题 R4R 恢复 SQLite 正文水化：`context_characters=5425`、answer complete、漏斗 `3→3→3→2`，1 embedding + 1 Qwen / 2304 tokens；required 仍为 `11/1/0`，失败项是 cited-gold，advisory exact-fact 也失败。因此只证明原产品断点修复，不能登记质量通过。
+- R4R 无系统性失败后执行原预注册 R5：真实 Qwen/MySQL/business Subgraph Hybrid 单 turn 完成 SQL/Document 双 Evidence，8 rows、2 citations、2 calls / 9696 tokens，task/event cleanup 0/0。campaign 总计 `9 provider attempts（6 chat + 3 embedding）/ 15502 observed chat tokens`；没有 held-out、reserve、fallback、索引或默认切换。该证据不形成质量分母，也不改写 M46 historical paired no-go。详细命令和 identity 见 `docs/notes/m49-rag-postprobe.md`。
+
 ### M49 evidence-backed Scenario v7 与连续 Dev Probe（2026-08-27）
 
 - additive `phase4b-agent-scenario-artifact-v7` 保留 v1～v6 可读，并把 required observation 的 passed 状态绑定到 M49-P2 r8 safe artifact、deterministic JUnit 或 M48 durable negative-path artifact；缺 execution locator/identity 时必须 `not_observed`。Scenario v7 identity=`9b133cdf0bd1c071a0f10f79d03e86a0cdc00a4a75258a5d0e878a78e8ced080`，assurance v2=`bc4958405eb777b9be3a0ee1e392a9592181792d3563e0b1be33db53312e36bf`。

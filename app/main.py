@@ -115,6 +115,7 @@ def _lifespan(settings: Settings):
                     active_loader=product.runtime.active_loader,
                     proposal_transport=proposal_transport,
                     expansion_adapter=expansion_adapter,
+                    context_loader=product.runtime.context_loader,
                 )
                 flow = RAGAnswerFlow(
                     knowledge_tool=knowledge_tool,

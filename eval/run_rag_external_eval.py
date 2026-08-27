@@ -196,6 +196,7 @@ def main() -> None:
                 active_loader=external.active_loader,
                 proposal_transport=proposal_transport,
                 expansion_adapter=expansion_adapter,
+                context_loader=external.context_loader,
             )
             return RAGAnswerFlow(
                 knowledge_tool=knowledge_tool,

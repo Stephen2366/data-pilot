@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from types import SimpleNamespace
 from typing import Any
@@ -15,13 +15,20 @@ from engine.phase4b.rag_subgraph import (
     SlotResolution,
     _safe_runtime_failure_code,
 )
-from engine.rag.answer_flow import RAGAnswerRequest
+from engine.rag.answer_flow import ClaimDraft, GenerationContext, RAGAnswerFlow, RAGAnswerRequest
 from engine.rag.catalog import CatalogEntry
-from engine.rag.evidence import Evidence, EvidenceContractError, EvidenceLedger, make_document_evidence
+from engine.rag.evidence import (
+    DocumentContextCoordinates,
+    Evidence,
+    EvidenceContractError,
+    EvidenceLedger,
+    make_document_evidence,
+)
 from engine.rag.evidence_acquisition import AcquisitionResult
 from engine.rag.knowledge_tool import (
     KnowledgeRequest,
     KnowledgeToolContractError,
+    MaterializedDocumentContext,
     RetrievalDiagnostics,
     RetrievalOutcome,
 )
@@ -325,6 +332,105 @@ def test_external_procedure_uses_direct_forward_expansion_without_rewrite() -> N
     assert child["consumption"]["expansion_evidence_added"] == 1
     assert child["termination"] == "answer_ready"
     assert tool.requests == []
+
+
+def test_external_metadata_only_recovery_hydrates_sqlite_content_before_composer() -> None:
+    """产品 profile 只载 metadata；recovery 后必须重新水化正文才能生成并引用。"""
+
+    initial_entry = _entry("procedure-initial", "operational procedure rollback workflow steps")
+    forward_entry = _entry("procedure-forward", "hosted and dedicated environment variants")
+    metadata_entries = tuple(replace(entry, content="") for entry in (initial_entry, forward_entry))
+    hydrated = {entry.document_key: entry for entry in (initial_entry, forward_entry)}
+    initial = _outcome(_evidence(initial_entry), query="procedure-initial")
+    slot = RequirementSlot(
+        "procedure_core",
+        "operational procedure rollback workflow steps",
+        (("procedure", "steps", "workflow"),),
+        marker_match_mode="token_overlap",
+    )
+    formed = FormedRequirement(
+        slot=slot,
+        supplier_identity="phase4b-b4-procedure-supplier-v1",
+        formation_reason_category="requested_procedure",
+        allowed_recovery_actions=("context_expansion_candidate",),
+    )
+    bundle = SimpleNamespace(
+        release_identity=RELEASE,
+        corpus_identity="corpus-m46-metadata-only",
+        authorization_policy_identity="fixture-auth",
+        outbound_policy_identity="fixture-outbound",
+        entries=metadata_entries,
+    )
+
+    def context_loader(entry: CatalogEntry) -> MaterializedDocumentContext:
+        """模拟 Enterprise SQLite loader：metadata identity 不变，只补回受控正文。"""
+
+        return MaterializedDocumentContext(
+            entry=hydrated[entry.document_key],
+            coordinates=DocumentContextCoordinates(
+                source_type="fixture",
+                logical_document_id=entry.document_key,
+                physical_source_identity=f"physical:{entry.document_key}",
+                unit_identity=f"unit:{entry.document_key}",
+                normalized_start=0,
+                normalized_end=len(hydrated[entry.document_key].content),
+            ),
+        )
+
+    class _RecordingComposer:
+        """记录真正入模的 context，并返回严格绑定首条 Evidence 的合法 claim。"""
+
+        identity = "m49-metadata-hydration-recording-composer"
+
+        def __init__(self) -> None:
+            self.context_contents: tuple[str, ...] = ()
+
+        def compose(
+            self,
+            *,
+            context: GenerationContext,
+            question: str,
+            confirmed_conditions: tuple[str, ...],
+            max_claims: int,
+        ) -> tuple[ClaimDraft, ...]:
+            del question, confirmed_conditions, max_claims
+            self.context_contents = tuple(item.payload.content for item in context.evidence)
+            first = context.evidence[0]
+            return (ClaimDraft(
+                text="Rollback applies to hosted and dedicated environments.",
+                support_text=first.payload.content,
+                evidence_id=first.ref.evidence_id,
+                anchor=first.ref.anchor,
+            ),)
+
+    composer = _RecordingComposer()
+    acquirer = BoundedRAGSubgraphAcquirer(
+        initial_acquirer=_InitialAcquirer(AcquisitionResult(initial, {}, "fixture-initial")),
+        knowledge_tool=_RewriteTool({}),  # type: ignore[arg-type]
+        active_loader=lambda: (object(), bundle),
+        slot_provider=_SlotProvider(SlotResolution(
+            slots=(slot,),
+            formed_requirements=(formed,),
+            continuation_policy="procedure_boundary_v1",
+            decision="deterministic_procedure",
+            admission_reason_code="eligible",
+        )),
+        runtime_scope="external_profile",
+        expansion_adapter=_ExpansionAdapter(_evidence(forward_entry)),
+        context_loader=context_loader,
+    )
+    result = RAGAnswerFlow(
+        composer=composer,
+        active_loader=lambda: (object(), bundle),
+        evidence_acquirer=acquirer,
+    ).run(RAGAnswerRequest(question="rollback procedure", caller=CALLER, run_id=RUN_ID))
+
+    assert result.answer_status == "complete"
+    assert result.safety_status == "passed"
+    assert result.diagnostics.context_characters > 0
+    assert composer.context_contents
+    assert all(content.strip() for content in composer.context_contents)
+    assert result.citations
 
 
 def test_external_noncanonical_gap_can_select_direct_expansion_from_observation() -> None:

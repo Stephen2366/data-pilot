@@ -18,6 +18,23 @@
 
 ## 变更记录（新的在上）
 
+### [实验] Phase 4B 整体审计双 Probe（2026-08-27 后，审计轮）
+
+- **范围与授权**：M49 收工后对 B0～B6 做整体审计，用户授权两个 `exploratory / baseline-ineligible / development-probe`：P1 纵向链 ≤14 calls/≤60,000 tokens（运行仓库已提交 `scripts/probe_m49_phase4b_continuity.py`，r9），P2 真实 lineage 安全负例 ≤6 calls/≤15,000 tokens；后经用户裁决追加 P2 attempt 2 最小重验 ≤2 calls/≤6,000 tokens。只写隔离库 `datapilot_m48_test` 并清理 0/0；不碰 held-out/reserve/生产数据/默认切换。
+- **P1 r9 结果**：当前工作区（含未提交 external Subgraph 水化修复）真实 Qwen/MySQL/business Subgraph 同一 task T1→T6 一次贯通，版本链 `1→3→5→7→9→11`；T3 Observation 驱动两次 SQL action；T4/T5 Hybrid+business Subgraph 各 2 citations；新进程 T6 Compact `triggered_and_committed`（`68cae70a...`）零 Graph/Tool/provider 复述；no-resolver 负例 `task_unavailable`/0 provider/不创建 task；12 calls/52,709 tokens、retry0、cleanup 0/0。**证明未提交改动没有破坏整条链，当前工作区可一键复现招牌演示。**
+- **P2 attempt 1**：T2 前置 turn 的 `sql_generation` 阶段 Qwen 网络调用 120s 超时（query_plan 68s 已成功），产品正确失败关闭（`llm_generation_error`→不执行 SQL→`no_answer`，usage 完整记账），负例未触达；根因=provider 抖动，非产品缺陷。证据保留，不自动重跑。
+- **P2 attempt 2（用户裁决最小重验）**：T1 真实 v1 后，不存在的 `expected_version=2` → `task_version_conflict`（0 provider/0 invocation/不投影 task），`customer_service` 角色漂移 → `task_unavailable`（blocked/0 provider/0 invocation）；两负例与预注册预期一致。state 直查因审计 runner 用错列名（真实主键 `task_key=sha256(task_id)`）未观察到，间接证据：0 invocations + 无 task 投影 + M48-P2 边界 artifact。2 calls/5,783 tokens。
+- **总账**：18 calls / 71,001 tokens（≤20/≤75,000），retry0。审计发现（README 过期/默认演示库缺 8 月种子/未提交工作区/purge 无 scheduler/演示链对 Qwen 延迟敏感等）与三态结论见 `docs/notes/phase4b-audit-notes.md`；本轮只审计不修代码。
+
+### [实验] M49 收工后 RAG 真实链路探索重验（2026-08-27）
+
+- **范围与边界**：用户授权 5 个固定场景、最多 10 provider attempts / 35000 observed tokens 的收工后探索重验；只读业务 active release、external `diagnostic_dev/qst_0386` 与 `qst_0431`、冻结 semantic profile/collection，禁止 held-out、sealed reserve、生产数据、重建索引、切默认或自动重跑。该运行标记为 `exploratory / baseline-ineligible / not-development-probe`，不是 Formal Eval 或开发期 Probe。
+- **已通过链路**：Business happy path `quality_refund_materials` required `14/0/0`、1 Qwen / 1013 tokens；无候选 `unsupported_warranty_rule` required `9/0/0`、Composer 0；Enterprise semantic Pipeline qst_0386 required `12/0/0`，漏斗 `5→3→3→1`，1 embedding + 1 Qwen / 2082 observed chat tokens，advisory 仍 `2/1`。
+- **首个失败与根因**：experimental Subgraph qst_0431 已完成 semantic initial retrieval、deterministic procedure admission、2-unit sibling expansion 和 3 条最终 Evidence，但最终 `context_characters=0`；Qwen transport 成功后以 `composer_response_invalid_cardinality` 失败（398+9=407 tokens），required `9/1/2`、漏斗 `3→3→3→0`，安全关闭无答案。根因是 external active bundle 按设计只载 metadata/空 content，正常 Pipeline 通过 SQLite materializer 水化；`BoundedRAGSubgraphAcquirer._reauthorize_and_merge()` 却直接用 metadata entry 重建 Evidence，没有调用正文 loader。现有 external chain fixture 自带正文，聚焦 qst_0431 类测试仍通过，未覆盖产品 metadata-only seam。
+- **初始停门**：累计 `5 provider attempts（3 chat + 2 embedding）/ 3502 observed chat tokens` 后按预注册首个产品失败停止，未立即执行 R5 或重跑 R4。该时点只证明 Business、External Pipeline 与 Subgraph 检索/扩展/失败关闭，不能宣称 external recovery→Composer 或本轮 Hybrid 贯通。
+- **修复与 R4R**：用户授权修复和下一次 Probe。Subgraph recovery 现在显式注入既有 Enterprise SQLite context loader；每条 metadata entry 水化后必须保持 key/revision/content hash/anchor、正文非空且有坐标，再重建 Evidence。FastAPI/Eval 产品组装都注入同一 loader；缺依赖或漂移失败关闭，不放宽 Composer/support/citation validator。R4R 同题一次将 `context_characters 0→5425`，结果 `completed/complete/passed`、漏斗 `3→3→3→2`、1 embedding + 1 Qwen / 2304 tokens；required Gate 仍因 `cited_gold` 为 `11/1/0`，所以技术链恢复但质量未通过。
+- **R5 与验证**：R4R 无系统性失败后，原预注册 R5 单 turn 真实 Hybrid 通过：Qwen + SQL Guard + `datapilot_m48_test` + business Subgraph 同一父 Loop 完成 SQL/Document 双 Evidence，8 rows、2 citations、2 calls / 9696 tokens，task/event `0/0→1/1→0/0`。campaign 最终 `9 attempts（6 chat + 3 embedding）/ 15502 observed chat tokens`；受影响回归 `84 passed, 1 existing warning`，compileall通过。没有 held-out、reserve、fallback、索引或默认切换；证据见 `docs/notes/m49-rag-postprobe.md` 和 `.agent_work/temp/m49/rag-postprobe/`。
+
 ### [模块任务] M49 Phase 4B 最终联调与证据可信度优化（2026-08-27）
 
 - **改动范围**：基线 HEAD=`6e3cf3459088010e308a28d8361cd10b4348faba`，模块期间无提交。修复完整显式重述仍叠加旧 requirement、comparison repair-success/跨 turn coverage、conditional quality dependency、QueryPlan/SQL derived-scope fidelity 与重启后 existing-result 断点；新增 Context/Compact v2 bounded latest result digest、Scenario v7、assurance v2、真实 P1/P2 Probe、连续 rehearsal、报告和回归。M42～M48 artifact 保持可读；没有修改业务 seed、Knowledge active release、Milvus/index、Pipeline/Subgraph rollout 或 sealed reserve。

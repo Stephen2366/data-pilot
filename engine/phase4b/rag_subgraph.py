@@ -38,6 +38,7 @@ from engine.rag.evidence import (
 )
 from engine.rag.evidence_acquisition import AcquisitionResult, ActiveLoader, DocumentEvidenceAcquirer
 from engine.rag.knowledge_tool import (
+    ContextLoader,
     KnowledgeRequest,
     KnowledgeTool,
     KnowledgeToolContractError,
@@ -371,6 +372,7 @@ class BoundedRAGSubgraphAcquirer:
         slot_provider: RequirementSlotProvider,
         runtime_scope: Literal["business_release", "external_profile"],
         expansion_adapter: ContextExpansionAdapter | None = None,
+        context_loader: ContextLoader | None = None,
     ) -> None:
         self._initial_acquirer = initial_acquirer
         self._knowledge_tool = knowledge_tool
@@ -378,6 +380,9 @@ class BoundedRAGSubgraphAcquirer:
         self._slot_provider = slot_provider
         self._runtime_scope = runtime_scope
         self._expansion_adapter = expansion_adapter
+        # external profile 的 bundle 为节省内存只保存 metadata；recovery Evidence 必须再次
+        # 走同一 SQLite loader 才能得到正文。business release 本来就内嵌正文，不需要它。
+        self._context_loader = context_loader
         if runtime_scope == "business_release" and expansion_adapter is not None:
             raise RAGSubgraphContractError("business_expansion_adapter_invalid")
 
@@ -652,14 +657,48 @@ class BoundedRAGSubgraphAcquirer:
             )
             if not pre_selection.allowed or not pre_generation.allowed:
                 raise RAGSubgraphContractError("recovery_reauthorization_denied")
+            # ★ Enterprise bundle 的 entry.content 按设计为空。正常 Pipeline 会在命中后调用
+            # context_loader；Subgraph recovery 也必须复用这条 authority seam，不能拿着只有
+            # “文档身份证”的 metadata Evidence 进入 Composer。
+            hydrated_entry = entry
+            context_coordinates = payload.context_coordinates
+            if self._runtime_scope == "external_profile":
+                if self._context_loader is None:
+                    if not entry.content.strip():
+                        raise RAGSubgraphContractError("recovery_context_loader_unavailable")
+                else:
+                    try:
+                        materialized = self._context_loader(entry)
+                    except Exception as exc:  # noqa: BLE001 - 只向 child ledger 投影稳定 reason。
+                        raise RAGSubgraphContractError("recovery_context_unavailable") from exc
+                    hydrated_entry = materialized.entry
+                    hydrated_identity = (
+                        hydrated_entry.document_key,
+                        hydrated_entry.revision,
+                        hydrated_entry.content_identity,
+                        hydrated_entry.anchor,
+                    )
+                    metadata_identity = (
+                        entry.document_key,
+                        entry.revision,
+                        entry.content_identity,
+                        entry.anchor,
+                    )
+                    if (
+                        hydrated_identity != metadata_identity
+                        or not hydrated_entry.content.strip()
+                        or materialized.coordinates is None
+                    ):
+                        raise RAGSubgraphContractError("recovery_context_invalid")
+                    context_coordinates = materialized.coordinates
             selected_item = make_document_evidence(
                 run_id=request.run_id,
                 release_identity=bundle.release_identity,
-                entry=entry,
+                entry=hydrated_entry,
                 purpose=request.purpose,
                 authorization=pre_selection,
                 runtime_ref=f"subgraph:{self.identity}",
-                context_coordinates=payload.context_coordinates,
+                context_coordinates=context_coordinates,
             )
             selected.append(selected_item)
             authorizations.append((selected_item.ref.evidence_id, pre_generation))

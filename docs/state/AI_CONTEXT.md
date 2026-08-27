@@ -8,10 +8,10 @@
 | ------------ | ------------------------------------------- |
 | 阶段路线     | `docs/phase4b-roadmap.md`                   |
 | 阶段参考     | `docs/phase4-reference.md`                  |
-| 当前活动模块 | M49 / 技术收工完成                          |
+| 当前活动模块 | M49 / 收工后 RAG 正文水化修复与重验完成          |
 | 当前 plan    | `docs/notes/m49-plan.md`                    |
-| 当前 notes   | `docs/notes/m49-notes.md`                   |
-| 待决事项     | Phase 4B 固定 Demo 技术链已闭合；无新增功能阻塞，reserve 继续 sealed/not-run |
+| 当前 notes   | `docs/notes/m49-rag-postprobe.md`           |
+| 待决事项     | external Subgraph 技术链已恢复，但 qst_0431 的 cited-gold/精确事实质量 Gate 仍未通过；Pipeline 默认、reserve sealed/not-run |
 | 更新时间     | 2026-08-27                                  |
 
 ## 必读规则
@@ -42,7 +42,7 @@
 - Agent task boundary：产品默认 `phase4b-mysql-task-boundary-v1`，以 MySQL checkpoint + typed event ledger 持久化已提交 TaskState v2 与 bounded Context Window/Compact；owner/tenant/active role、expected version、single-use claim token 与 TTL 共同参与数据库 CAS。state/context/event 同 claim 原子提交，active TTL 默认 900s，terminal/clear/expiry 立即 scrub，24h tombstone 后 bounded purge；claimed crash 保守停止、不自动重放 Tool。memory backend 仅允许 `APP_ENV=test` 显式使用。payload 不保存完整 rows、文档正文、Prompt、凭据、Thought 或 Graph/RAG program counter；M49 仅在 Context/Compact v2 中新增一份最近完成结果的有界摘要（最多 8 KiB、16 个 Evidence ID），用于重启后零 Tool/零模型解释既有结果。`datapilot_dev` 已于 M49 正常迁移到 0005，未 reset/reseed，默认演示 schema 前置已闭合。
 - Task Context Compact：当前写入 `phase4b-task-context-window-v2` + `phase4b-task-compact-v2`，旧 v1 仍严格可读；typed Compact 继续使用 deterministic facts，不使用 LLM summary。latest result digest 是独立、有界的最近结果展示材料，不是 Evidence/ACL/业务 authority，也不保存任意 SQL、原始文档正文或无界 rows。下一个 accepted turn 前按 5 committed turns 或 candidate node Context 75% token budget 双触发；只保留最近 2 个 raw user turns、每条 2048 UTF-8 bytes，独立总 payload 上限 65536 bytes。source gap、schema/identity/索引列漂移在 Tool 前失败关闭；switch 的新 task 从独立 T1/version=1 Context lineage 起步。
 - B2 Agent Loop：只有 accepted task turn 进入独立 `phase4b-agent-loop-v1`，由确定性 Controller 选择 closed-world Evidence action；父预算最多 3 次 Evidence action/deep Tool、1 次 Knowledge、每 requirement 1 次 repair、6 次 model call、24000 observed tokens。clarification/cancel/clear/pre-rejection 为零 Loop，legacy 非 task Harness 拓扑不变。
-- B4 RAG acquisition：服务端保留 Pipeline/Subgraph 两个 adapter，Pipeline 仍为产品默认与显式 baseline，Subgraph 仅 server-controlled experimental；Subgraph 在一次父级 Knowledge action内执行 bounded initial retrieval → Observation → eligible rewrite/expansion/stop → Evidence merge/reauthorize，并投影独立 child ledger。historical candidate `ab66f20d...2f78` 已完成最后一次60×2且no-go；当前内容绑定rollout contract `ebb06f82...f164`明确`quality_claim=not_established`、无自动跨策略fallback、reserve sealed/not-run。
+- B4 RAG acquisition：服务端保留 Pipeline/Subgraph 两个 adapter，Pipeline 仍为产品默认与显式 baseline，Subgraph 仅 server-controlled experimental；Subgraph 在一次父级 Knowledge action内执行 bounded initial retrieval → Observation → eligible rewrite/expansion/stop → Evidence merge/reauthorize，并投影独立 child ledger。external recovery 现与 Pipeline 共用 Enterprise SQLite context loader，metadata identity 水化后必须保持 key/revision/content hash/anchor、正文非空且坐标有效；缺依赖或漂移失败关闭。historical candidate `ab66f20d...2f78` 仍 no-go；rollout contract `ebb06f82...f164` 的 `quality_claim=not_established`、无自动 fallback、reserve sealed/not-run 均不变。
 - Task Knowledge runtime：服务端 requirement scope 只允许 `business_release/external_profile`，请求不能选择 corpus/backend。business 使用 22 条 active release lexical，external 与普通非 task RAG 使用 Enterprise semantic；SQLite profile 是正文 authority，Milvus/identity/ACL/readiness 缺失时失败关闭且不跨账 fallback。完整 runtime identity 与 preflight 见 RAG/Milvus 专项 state。
 - Evidence follow-up：SQL 没有可靠业务 snapshot，永远重查；EnterpriseRAG-Bench external 永远重检索；只有业务 22-entry release 的同 requirement 解释动作可按当前 active authority/revision/content/anchor 重新加载并重新授权，随后签发新 run Evidence/ledger/citation。requirement/identity 变化重检索一次，ACL/用途拒绝零 retrieval 停止。
 - Caller：`local/demo/test` 使用明确标记的 fixture resolver，请求 `user_role` 只能选择 resolver 已解析的 role；其他环境没有 authenticated resolver 时在 Tool 前失败关闭。生产认证尚未建设。
@@ -57,6 +57,8 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-27 | Phase 4B 整体审计双 Probe：P1 r9 在含未提交 RAG 修复的当前工作区真实贯通 T1→T6（12 calls/52709 tokens、Compact/重启/cleanup 0/0）；P2 两负例（不存在版本→`task_version_conflict`、角色漂移→`task_unavailable`）在真实 lineage 上 0 provider 成立；P2 attempt 1 另暴露 T2 的 Qwen `sql_generation` 120s 网络超时（retry0 下安全失败关闭，非产品缺陷）。审计发现与收口建议见 `docs/notes/phase4b-audit-notes.md`（含：默认 `datapilot_dev` 仍无 Phase 4B 7/8 月种子、README 多节过期、RAG 修复未提交、tombstone purge 无 scheduler、演示链对 Qwen 延迟敏感）。 |
+| 2026-08-27 | M49 收工后 RAG 重验与修复：Business happy/no-candidate、Enterprise Pipeline qst_0386 通过；external Subgraph qst_0431 首次暴露 metadata-only recovery 漏水化，修复后 R4R `context_characters=5425`、answer complete、漏斗 `3→3→3→2`，但 required `11/1/0` 仍因 cited-gold 质量失败。随后真实 Qwen/MySQL/business Subgraph Hybrid 单 turn 通过，2 calls/9696 tokens、task cleanup 0/0。campaign 总计 9 attempts / 15502 observed chat tokens；不是 Formal Eval/基线/开发期 Probe。 |
 | 2026-08-27 | M49 技术收工：最终聚焦 `35 passed`、deterministic evidence `6 passed`；全仓前台收集 677 项后后台同次 `677 passed, 1 warning in 595.25s`，warning 仅既有 Starlette/httpx deprecation。compileall、rehearsal 重签、diff check、Alembic current/check 均通过。Phase 4B 固定 Demo 技术链可收口，但不外推为质量或生产能力。 |
 | 2026-08-27 | M49-P2 r8 最终 `continue`：真实 Qwen + Text2SQL + SQL Guard + MySQL + business Subgraph 同一 task 完成 T1～T5；新进程恢复并在 T6 提交 Compact v2、零 Graph/Tool/provider 复用 latest result digest；安全负例在 deep runtime/provider 前统一 `task_unavailable`。总计 12 calls / 51013 observed tokens、cleanup `0/0`。deterministic evidence 6/6，Scenario v7=`9b133cdf...ed080`、assurance v2=`bc495840...e36bf` 均 completed；只证明当前固定演示链技术闭环，不外推质量或生产能力。 |
 | 2026-08-27 | M49-P1 最终 `continue`：真实 Qwen/Text2SQL/MySQL T1/T2 均 complete，T2 完整重述正确替换为唯一 comparison requirement；自然出现 `DATE_TRUNC` failure 后 deterministic repair 成功，得到 120000/180000/60000/50%，4 calls / 13075 tokens，cleanup `0/0`。同次还修复了 Controller 把 failure+repair success 误判为 observation missing 的断点；离线同源复核新增 provider/DB writes=`0/0`。`datapilot_dev` 已从 0003 正常升级到 0005，业务关键计数不变。 |
@@ -76,7 +78,7 @@
 
 - (2026-08-24) M44A 仍是 B2 前置修复、不占 B milestone。business 小 catalog 与 external 180 题继续分账，120 held-out 保持停门；external 产品默认为 semantic，但历史 lexical artifact/正式 retrieval baseline 不改签，也没有证据宣称 semantic 质量更优。
 - (2026-08-25) M45/B3最终以v4 `go_for_M46`完成，rewrite、bounded sibling expansion与procedure forward continuation两张action card已闭合；M46已消费这些diagnostic contracts并完成experimental产品Subgraph。M45的Evidence gain仍不能外推为答案正确率，最终默认/质量结论以M46 historical no-go与rollout为准。
-- (2026-08-26) M46/B4技术收工已完成：完整experimental Subgraph、父子预算和同源Eval child ledger可复用；最后一次historical v3仍60题无答案并三档退化。Pipeline默认、Subgraph server-controlled experimental、无自动fallback、quality claim未建立；candidate不冻结，reserve sealed/not-run。后续质量修复须以新假设/新candidate/新授权另立计划；其稳定 TaskState/child ledger 已由 M47 durable boundary 消费。
+- (2026-08-27) M46/B4 external recovery 的 metadata-only 正文水化接线已修复并由同题 R4R 证明可进入 Composer/citation 完成态；business Hybrid 也已再次真实贯通。qst_0431 仍未通过 cited-gold/精确事实质量 Gate，因此只能恢复“技术链可运行”，不能声称 Subgraph 质量胜出。Pipeline 默认、Subgraph experimental、无自动 fallback、reserve sealed/not-run 均不变。
 - (2026-08-26) M47/B5技术收工已完成：产品 task boundary 已从进程内实现升级为 MySQL durable 默认，B5 的 restart、多worker/CAS、TTL/clear/tombstone/typed ledger 与安全失败已闭合；M37 thread checkpoint 仍是独立的进程内 legacy family，不因 B5 自动升级。
 - (2026-08-27) M49 已修复自然 T2 requirement 合并、comparison/conditional dependency、跨 turn Evidence 复用与重启解释断点；Context/Compact v2 的 latest result digest 让 T6 可零 Graph/Tool/provider 解释最近完成结果，v1 继续可读。evidence-backed Scenario v7/assurance v2 已由真实 Probe、deterministic JUnit 和历史 durable negative-path artifact 独立签发 completed。Phase 4B 展示型 technical integration 可收口；仍不包含 RAG/LLM 质量提升、生产认证、性能/HA、外部 Tool exactly-once 或 sealed reserve 结论。
 

@@ -13,7 +13,7 @@ from engine.phase4b.rag_strategy import (
 )
 from engine.phase4b.rag_subgraph import BoundedRAGSubgraphAcquirer
 from engine.rag.evidence_acquisition import PipelineEvidenceAcquirer
-from engine.rag.knowledge_tool import KnowledgeTool
+from engine.rag.knowledge_tool import KnowledgeTool, MaterializedDocumentContext
 from engine.rag.release import load_active_release
 
 
@@ -28,6 +28,12 @@ class _ProposalTransport:
 
 class _ExpansionAdapter:
     identity = "fixture-expansion-v1"
+
+
+def _context_loader(entry: object) -> MaterializedDocumentContext:
+    """strategy 组装测试只验证依赖闭合；产品运行会注入真实 SQLite loader。"""
+
+    return MaterializedDocumentContext(entry=entry)  # type: ignore[arg-type]
 
 
 def test_pipeline_is_default_and_explicit_baseline_for_both_scopes() -> None:
@@ -64,6 +70,7 @@ def test_server_subgraph_strategy_wires_business_and_external_without_client_fie
         active_loader=load_active_release,
         proposal_transport=_ProposalTransport(),
         expansion_adapter=_ExpansionAdapter(),  # type: ignore[arg-type] - 只验证 trusted assembly。
+        context_loader=_context_loader,
     )
     assert isinstance(business.acquirer, BoundedRAGSubgraphAcquirer)
     assert isinstance(external.acquirer, BoundedRAGSubgraphAcquirer)
@@ -75,6 +82,14 @@ def test_subgraph_missing_dependencies_and_unknown_strategy_fail_closed() -> Non
     with pytest.raises(RAGStrategyConfigurationError, match="rag_subgraph_dependencies_unavailable"):
         configure_external_acquisition(
             strategy="subgraph", knowledge_tool=tool, active_loader=load_active_release
+        )
+    with pytest.raises(RAGStrategyConfigurationError, match="rag_subgraph_dependencies_unavailable"):
+        configure_external_acquisition(
+            strategy="subgraph",
+            knowledge_tool=tool,
+            active_loader=load_active_release,
+            proposal_transport=_ProposalTransport(),
+            expansion_adapter=_ExpansionAdapter(),  # type: ignore[arg-type]
         )
     with pytest.raises(RAGStrategyConfigurationError, match="rag_acquisition_strategy_invalid"):
         configure_business_acquisition(
