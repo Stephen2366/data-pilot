@@ -4,7 +4,8 @@
 
 1. 私有 recent user turns 与安全 typed turn facts 的严格持久化；
 2. 5-turn / 75% 双触发和 deterministic Task Compact；
-3. 各节点最小 Context 的统一投影。
+3. 各节点最小 Context 的统一投影；
+4. M49 最近完成结果的有界 digest，使重启解释无需重跑 Tool/provider。
 
 Compact 是 TaskState/event 的派生索引，不是业务、Evidence 或权限 authority。
 """
@@ -24,8 +25,12 @@ _BUNDLE = load_b6_contract_bundle()
 _POLICY = _BUNDLE.payload["trigger"]
 _FORBIDDEN = frozenset(str(item).casefold() for item in _BUNDLE.payload["forbidden_payload_fields"])
 
-CONTEXT_SCHEMA_VERSION = str(_BUNDLE.payload["context_schema_version"])
-COMPACT_SCHEMA_VERSION = str(_BUNDLE.payload["compact_schema_version"])
+LEGACY_CONTEXT_SCHEMA_VERSION = str(_BUNDLE.payload["context_schema_version"])
+LEGACY_COMPACT_SCHEMA_VERSION = str(_BUNDLE.payload["compact_schema_version"])
+# M49 additive successor：B6 v1 artifact 保持只读，当前 runtime 写入带有界结果摘要的 v2。
+CONTEXT_SCHEMA_VERSION = "phase4b-task-context-window-v2"
+COMPACT_SCHEMA_VERSION = "phase4b-task-compact-v2"
+RESULT_DIGEST_SCHEMA_VERSION = "phase4b-task-result-digest-v1"
 NODE_CONTEXT_VERSION = str(_BUNDLE.payload["node_context_version"])
 
 
@@ -94,6 +99,43 @@ class RawUserTurn:
 
 
 @dataclass(frozen=True)
+class TaskResultDigest:
+    """最近一次完整回答的有界持久摘要；不保存 SQL、rows、prompt 或文档原文。"""
+
+    route: str
+    answer_status: str
+    summary_text: str = field(repr=False)
+    evidence_ids: tuple[str, ...] = ()
+    digest_version: str = RESULT_DIGEST_SCHEMA_VERSION
+    identity: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        size = len(self.summary_text.encode("utf-8"))
+        if (
+            self.digest_version != RESULT_DIGEST_SCHEMA_VERSION
+            or self.answer_status != "complete"
+            or not self.summary_text.strip()
+            or size > 8192
+            or len(self.evidence_ids) > 16
+            or len(set(self.evidence_ids)) != len(self.evidence_ids)
+        ):
+            raise TaskContextError("task_context_payload_too_large", f"result digest invalid bytes={size}")
+        object.__setattr__(self, "identity", canonical_hash(self.safe_projection(include_identity=False)))
+
+    def safe_projection(self, *, include_identity: bool = True) -> dict[str, Any]:
+        """返回可落库的有界摘要；这里的 safe 指闭集限额，不代表摘要是业务 Evidence。"""
+
+        result = {
+            "digest_version": self.digest_version, "route": self.route,
+            "answer_status": self.answer_status, "summary_text": self.summary_text,
+            "evidence_ids": list(self.evidence_ids),
+        }
+        if include_identity:
+            result["identity"] = self.identity
+        return result
+
+
+@dataclass(frozen=True)
 class TypedTurnFact:
     """event v2/context window 共用的逐 turn 安全事实。"""
 
@@ -134,7 +176,7 @@ class TypedTurnFact:
 
 @dataclass(frozen=True)
 class TaskCompact:
-    """由 TaskState + typed turn facts 唯一派生的可验证 Compact v1。"""
+    """由 TaskState + typed turn facts 唯一派生的可验证 Compact；当前写 v2、兼容读 v1。"""
 
     goal: str
     constraints: tuple[tuple[str, Any], ...]
@@ -144,6 +186,7 @@ class TaskCompact:
     last_action_attempts: tuple[Mapping[str, Any], ...]
     last_budget: Mapping[str, Any] | None
     last_termination: Mapping[str, Any] | None
+    result_digest: TaskResultDigest | None
     high_risk_references: Mapping[str, Any]
     source_turn_range: tuple[int, int]
     source_version_range: tuple[int, int]
@@ -155,7 +198,7 @@ class TaskCompact:
 
     def __post_init__(self) -> None:
         if (
-            self.compact_version != COMPACT_SCHEMA_VERSION
+            self.compact_version not in {LEGACY_COMPACT_SCHEMA_VERSION, COMPACT_SCHEMA_VERSION}
             or self.source_turn_range[0] > self.source_turn_range[1]
             or self.source_version_range[0] > self.source_version_range[1]
             or self.source_turn_range[1] != self.source_watermark
@@ -188,6 +231,8 @@ class TaskCompact:
             "source_identities": list(self.source_identities),
             "source_watermark": self.source_watermark, "trigger": self.trigger,
         }
+        if self.compact_version == COMPACT_SCHEMA_VERSION:
+            result["result_digest"] = self.result_digest.safe_projection() if self.result_digest else None
         if include_identity:
             result["identity"] = self.identity
         return result
@@ -203,12 +248,15 @@ class TaskContextWindow:
     committed_turns_since_compact: int = 0
     source_watermark: int = 0
     source_complete: bool = True
+    latest_result_digest: TaskResultDigest | None = None
     context_version: str = CONTEXT_SCHEMA_VERSION
     identity: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.context_version != CONTEXT_SCHEMA_VERSION:
+        if self.context_version not in {LEGACY_CONTEXT_SCHEMA_VERSION, CONTEXT_SCHEMA_VERSION}:
             raise TaskContextError("task_context_schema_incompatible", self.context_version)
+        if self.context_version == LEGACY_CONTEXT_SCHEMA_VERSION and self.latest_result_digest is not None:
+            raise TaskContextError("task_context_schema_incompatible", "legacy context 不能携带 result digest")
         if self.committed_turns_since_compact != len(self.uncovered_turns):
             raise TaskContextError("task_context_schema_incompatible", "uncovered turn 计数不一致")
         if len(self.recent_raw_turns) > int(_POLICY["recent_raw_turn_count"]):
@@ -250,6 +298,10 @@ class TaskContextWindow:
             "committed_turns_since_compact": self.committed_turns_since_compact,
             "source_watermark": self.source_watermark, "source_complete": self.source_complete,
         }
+        if self.context_version == CONTEXT_SCHEMA_VERSION:
+            result["latest_result_digest"] = (
+                self.latest_result_digest.safe_projection() if self.latest_result_digest else None
+            )
         if include_identity:
             result["identity"] = self.identity
         return result
@@ -266,6 +318,7 @@ class TaskContextWindow:
             "source_complete": self.source_complete,
             "uncovered_turn_count": len(self.uncovered_turns),
             "recent_raw_turn_count": len(self.recent_raw_turns),
+            "result_digest_identity": self.latest_result_digest.identity if self.latest_result_digest else None,
         }
 
 
@@ -305,11 +358,23 @@ class TaskContextCodec:
     def decode(self, payload: Any) -> TaskContextWindow:
         """严格恢复 window，并通过 encode 比较捕捉静默类型漂移。"""
 
-        raw = _exact(_json_safe(payload), {
+        safe_payload = _json_safe(payload)
+        version = safe_payload.get("context_version") if isinstance(safe_payload, Mapping) else None
+        keys = {
             "context_version", "compact", "uncovered_turns", "recent_raw_turns",
             "committed_turns_since_compact", "source_watermark", "source_complete", "identity",
-        }, "TaskContextWindow")
+        }
+        if version == CONTEXT_SCHEMA_VERSION:
+            keys.add("latest_result_digest")
+        elif version != LEGACY_CONTEXT_SCHEMA_VERSION:
+            raise TaskContextError("task_context_schema_incompatible", str(version))
+        raw = _exact(safe_payload, keys, "TaskContextWindow")
         compact = self._decode_compact(raw["compact"]) if raw["compact"] is not None else None
+        digest = (
+            self._decode_result_digest(raw["latest_result_digest"])
+            if version == CONTEXT_SCHEMA_VERSION and raw["latest_result_digest"] is not None
+            else None
+        )
         turns = tuple(self._decode_turn(item) for item in raw["uncovered_turns"])
         recent = tuple(
             RawUserTurn(**_exact(item, {"ordinal", "version_after", "text"}, "RawUserTurn"))
@@ -319,7 +384,7 @@ class TaskContextCodec:
             compact=compact, uncovered_turns=turns, recent_raw_turns=recent,
             committed_turns_since_compact=int(raw["committed_turns_since_compact"]),
             source_watermark=int(raw["source_watermark"]), source_complete=bool(raw["source_complete"]),
-            context_version=str(raw["context_version"]),
+            latest_result_digest=digest, context_version=str(raw["context_version"]),
         )
         if window.identity != raw["identity"] or self.encode(window) != raw:
             raise TaskContextError("task_compact_identity_mismatch", "context decode 后 identity/round-trip 不一致")
@@ -327,6 +392,8 @@ class TaskContextCodec:
 
     @staticmethod
     def _decode_turn(value: Any) -> TypedTurnFact:
+        """恢复并复核一条 typed turn；外层 hash 正确也不能掩盖内层篡改。"""
+
         row = _exact(value, {
             "ordinal", "version_after", "delta_category", "transition_identity", "state_identity",
             "constraint_keys", "requirement_identities", "active_evidence_identities", "action_count",
@@ -347,12 +414,27 @@ class TaskContextCodec:
 
     @staticmethod
     def _decode_compact(value: Any) -> TaskCompact:
-        row = _exact(value, {
+        """按版本闭集解码 Compact，v1 无 digest、v2 必须显式携带 digest 槽位。"""
+
+        if not isinstance(value, Mapping):
+            raise TaskContextError("task_context_schema_incompatible", "TaskCompact 必须为 object")
+        version = value.get("compact_version")
+        keys = {
             "compact_version", "goal", "constraints", "pending_questions", "requirements", "evidence",
             "last_action_attempts", "last_budget", "last_termination", "high_risk_references",
             "source_turn_range", "source_version_range", "source_identities", "source_watermark",
             "trigger", "identity",
-        }, "TaskCompact")
+        }
+        if version == COMPACT_SCHEMA_VERSION:
+            keys.add("result_digest")
+        elif version != LEGACY_COMPACT_SCHEMA_VERSION:
+            raise TaskContextError("task_context_schema_incompatible", str(version))
+        row = _exact(value, keys, "TaskCompact")
+        digest = (
+            TaskContextCodec._decode_result_digest(row["result_digest"])
+            if version == COMPACT_SCHEMA_VERSION and row["result_digest"] is not None
+            else None
+        )
         compact = TaskCompact(
             goal=str(row["goal"]), constraints=tuple(dict(row["constraints"]).items()),
             pending_questions=tuple(row["pending_questions"]), requirements=tuple(row["requirements"]),
@@ -360,6 +442,7 @@ class TaskContextCodec:
             last_action_attempts=tuple(dict(item) for item in row["last_action_attempts"]),
             last_budget=dict(row["last_budget"]) if row["last_budget"] is not None else None,
             last_termination=dict(row["last_termination"]) if row["last_termination"] is not None else None,
+            result_digest=digest,
             high_risk_references=dict(row["high_risk_references"]),
             source_turn_range=tuple(row["source_turn_range"]), source_version_range=tuple(row["source_version_range"]),
             source_identities=tuple(row["source_identities"]), source_watermark=int(row["source_watermark"]),
@@ -368,6 +451,22 @@ class TaskContextCodec:
         if compact.identity != row["identity"]:
             raise TaskContextError("task_compact_identity_mismatch", "Compact identity 漂移")
         return compact
+
+    @staticmethod
+    def _decode_result_digest(value: Any) -> TaskResultDigest:
+        """恢复 bounded digest，并重新计算 identity 防止摘要或 Evidence ID 被替换。"""
+
+        row = _exact(value, {
+            "digest_version", "route", "answer_status", "summary_text", "evidence_ids", "identity",
+        }, "TaskResultDigest")
+        digest = TaskResultDigest(
+            route=str(row["route"]), answer_status=str(row["answer_status"]),
+            summary_text=str(row["summary_text"]), evidence_ids=tuple(row["evidence_ids"]),
+            digest_version=str(row["digest_version"]),
+        )
+        if digest.identity != row["identity"]:
+            raise TaskContextError("task_compact_identity_mismatch", "result digest identity 漂移")
+        return digest
 
 
 class TaskContextBuilder:
@@ -425,7 +524,8 @@ class TaskContextBuilder:
         prepared = TaskContextWindow(
             compact=compact, uncovered_turns=(), recent_raw_turns=current.recent_raw_turns,
             committed_turns_since_compact=0, source_watermark=current.source_watermark,
-            source_complete=current.source_complete,
+            source_complete=current.source_complete, latest_result_digest=current.latest_result_digest,
+            context_version=CONTEXT_SCHEMA_VERSION,
         )
         return prepared, CompactDecision(
             "triggered_and_committed", "task_compact_committed", trigger,
@@ -443,6 +543,7 @@ class TaskContextBuilder:
         action_count: int,
         termination_reason: str | None,
         budget_identity: str | None,
+        result_digest: TaskResultDigest | None = None,
     ) -> TaskContextWindow:
         """commit 前追加本 turn；调用方把返回值与 state/event 一起原子提交。"""
 
@@ -465,6 +566,8 @@ class TaskContextBuilder:
             recent_raw_turns=tuple(recent),
             committed_turns_since_compact=window.committed_turns_since_compact + 1,
             source_watermark=ordinal, source_complete=window.source_complete,
+            latest_result_digest=result_digest or window.latest_result_digest,
+            context_version=CONTEXT_SCHEMA_VERSION,
         )
 
     def project_node_contexts(
@@ -538,6 +641,7 @@ class TaskContextBuilder:
             requirements=state.requirements, evidence=evidence,
             last_action_attempts=state.last_action_attempts, last_budget=state.last_budget,
             last_termination=state.last_termination, high_risk_references=high_risk,
+            result_digest=window.latest_result_digest,
             source_turn_range=(start_turn, window.source_watermark),
             source_version_range=(start_version, turns[-1].version_after),
             source_identities=sources, source_watermark=window.source_watermark, trigger=trigger,

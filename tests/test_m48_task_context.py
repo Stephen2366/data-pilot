@@ -14,6 +14,7 @@ from engine.phase4b.task_context import (
     TaskContextCodec,
     TaskContextError,
     TaskContextWindow,
+    TaskResultDigest,
 )
 from engine.phase4b.task_runtime import TaskDelta, TaskEvidence, TaskState, apply_delta, understand_turn
 from engine.phase4b.task_state_codec import TaskStateCodec
@@ -59,6 +60,47 @@ def test_context_codec_round_trip_and_raw_is_not_public() -> None:
     safe = restored.safe_projection()
     assert "金额不要取绝对值" not in str(safe)
     assert safe["recent_raw_turn_count"] == 2
+
+
+def test_result_digest_round_trips_and_survives_compact_without_raw_tool_payload() -> None:
+    """M49 C：只保存有界回答摘要，Compact 后仍可由新 worker 读取。"""
+
+    digest = TaskResultDigest(
+        route="hybrid", answer_status="complete",
+        summary_text="7 月和 8 月已按渠道比较，并核验退款政策。",
+        evidence_ids=("sql-evidence", "doc-evidence"),
+    )
+    builder = TaskContextBuilder()
+    window = builder.append_committed_turn(
+        window=TaskContextWindow.empty(), question="原问题", version_after=1,
+        delta=_delta(), state=_state(), action_count=2, termination_reason="answer_ready",
+        budget_identity="budget", result_digest=digest,
+    )
+    restored = TaskContextCodec().decode(TaskContextCodec().encode(window))
+    assert restored.latest_result_digest == digest
+    assert "sql_rows" not in str(TaskContextCodec().encode(restored))
+
+    five = window
+    for ordinal in range(2, 6):
+        five = builder.append_committed_turn(
+            window=five, question=f"第 {ordinal} 轮", version_after=ordinal * 2 - 1,
+            delta=_delta(), state=_state(ordinal), action_count=1,
+            termination_reason="answer_ready", budget_identity=f"budget:{ordinal}",
+        )
+    prepared, decision = builder.prepare(
+        window=five, state=_state(5),
+        candidate_contexts=(AgentNodeContext("decision", ("state",), {}, (), 0, 128),),
+    )
+    assert decision.outcome == "triggered_and_committed"
+    assert prepared.latest_result_digest == digest
+    assert prepared.compact is not None and prepared.compact.result_digest == digest
+
+
+def test_result_digest_is_bounded() -> None:
+    """摘要文本和 Evidence ID 数量任一越界都必须在落库前拒绝。"""
+
+    with pytest.raises(TaskContextError, match="task_context_payload_too_large"):
+        TaskResultDigest(route="sql", answer_status="complete", summary_text="数" * 3000)
 
 
 def test_task_state_v2_normalizes_json_array_constraints_across_restart() -> None:

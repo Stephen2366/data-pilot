@@ -150,6 +150,33 @@ class ProductSQLTool:
 
 
 @dataclass
+class MonthlyQualityProductSQLTool:
+    """模拟真实 T3：质量原因先返回两个月基础聚合，不预造 increment 列。"""
+
+    august_quality: int = 96000
+    include_july: bool = True
+    calls: int = 0
+
+    def run_for_hybrid(self, request: HarnessRequest) -> ToolObservation:
+        self.calls += 1
+        if "退款原因" in request.question:
+            rows = []
+            if self.include_july:
+                rows.append({"month": "2026-07", "refund_reason": "quality_issue", "net_refund_amount": 48000})
+            rows.append({
+                "month": "2026-08", "refund_reason": "quality_issue",
+                "net_refund_amount": self.august_quality,
+            })
+            return _sql_observation(request, rows=tuple(rows))
+        if "商品 SKU" in request.question:
+            return _sql_observation(request, rows=({"sku": "SKU-HIGH-REFUND-01", "increment": 24000},))
+        return _sql_observation(request, rows=({"period": "2026-08", "net_refund_amount": 180000},))
+
+    def run(self, request: HarnessRequest) -> ToolObservation:
+        return self.run_for_hybrid(request)
+
+
+@dataclass
 class BusinessRAGTool:
     both: bool = True
     calls: int = 0
@@ -210,6 +237,29 @@ class ComparisonSQLTool:
         return self.run_for_hybrid(request)
 
 
+@dataclass
+class RepairingComparisonSQLTool:
+    """先返回 allowlisted dialect failure，再由 deterministic repair 返回两期结果。"""
+
+    calls: int = 0
+    repair_calls: int = 0
+
+    def run_for_hybrid(self, request: HarnessRequest) -> ToolObservation:
+        self.calls += 1
+        return _dialect_failure()
+
+    def run(self, request: HarnessRequest) -> ToolObservation:
+        return self.run_for_hybrid(request)
+
+    def run_repair(self, request: HarnessRequest, *, snapshot: SQLRepairSnapshot) -> ToolObservation:
+        self.repair_calls += 1
+        assert snapshot.issue_code == "mysql_unsupported_date_trunc"
+        return _sql_observation(request, rows=(
+            {"month": "2026-07-01", "net_refund_amount": 120000},
+            {"month": "2026-08-01", "net_refund_amount": 180000},
+        ))
+
+
 def _state(question: str):
     delta = understand_turn(question, action="start", previous=None)
     return apply_delta(None, delta, owner_ref="owner:m44")[0]
@@ -238,6 +288,35 @@ def test_t3_second_product_action_depends_on_positive_quality_observation() -> N
     stopped = run_agent_loop(request=_request(question, "m44-negative"), state=_state(question), runtime=_runtime(negative))
     assert negative.calls == 1 and stopped.termination.reason == "answer_ready"
     assert len(stopped.attempts) == 1
+
+
+def test_t3_dependency_derives_positive_increment_from_guarded_monthly_rows() -> None:
+    """没有现成 increment 列时，也只能从 requirement 明示两期的 typed rows 窄域计算。"""
+
+    question = "2026 年 7 月和 8 月质量问题对净退款增长贡献了多少？哪些商品最突出？"
+    positive = MonthlyQualityProductSQLTool()
+    completed = run_agent_loop(
+        request=_request(question, "m49-monthly-positive"), state=_state(question),
+        runtime=_runtime(positive),  # type: ignore[arg-type]
+    )
+    assert positive.calls == 2
+    assert [item.requirement_identity for item in completed.attempts] == [
+        "sql:refund_reason:quality_issue:2026-07,2026-08",
+        "sql:product_sku:quality_issue:2026-07,2026-08",
+    ]
+    assert completed.termination.reason == "answer_ready"
+
+    for tool in (
+        MonthlyQualityProductSQLTool(august_quality=47000),
+        MonthlyQualityProductSQLTool(include_july=False),
+    ):
+        stopped = run_agent_loop(
+            request=_request(question, f"m49-monthly-stop-{tool.august_quality}-{tool.include_july}"),
+            state=_state(question), runtime=_runtime(tool),  # type: ignore[arg-type]
+        )
+        assert tool.calls == 1
+        assert len(stopped.attempts) == 1
+        assert stopped.termination.reason == "answer_ready"
 
 
 def test_metric_comparison_completion_controls_answer_ready() -> None:
@@ -270,6 +349,28 @@ def test_metric_comparison_completion_controls_answer_ready() -> None:
     assert incomplete.result.answer_status == "partial"
 
 
+def test_metric_comparison_uses_unique_successful_observation_after_dialect_repair() -> None:
+    """失败历史必须留在账本，但不能遮住同 requirement 的唯一 repair success。"""
+
+    question = "查询 2026 年 7 月和 8 月实际净退款金额，并计算差额和变化率。"
+    tool = RepairingComparisonSQLTool()
+    result = run_agent_loop(
+        request=_request(question, "m49-comparison-repair"),
+        state=_state(question),
+        runtime=_runtime(tool),  # type: ignore[arg-type]
+    )
+
+    assert [item.action_id for item in result.attempts] == [
+        "collect_sql_evidence",
+        "repair_sql_evidence",
+    ]
+    assert tool.calls == tool.repair_calls == 1
+    assert result.termination.reason == "answer_ready"
+    assert result.result.answer_status == "complete"
+    assert result.result.observation is not None
+    assert result.result.observation.rows[1]["delta"] == 60000.0
+
+
 def test_t3_after_existing_t2_evidence_does_not_repeat_old_requirement() -> None:
     t2_question = "查询 2026 年 7 月和 8 月实际净退款金额，并计算差额和变化率。"
     t2_state = _state(t2_question)
@@ -289,6 +390,8 @@ def test_t3_after_existing_t2_evidence_does_not_repeat_old_requirement() -> None
         "sql:refund_reason:quality_issue:2026-07,2026-08",
         "sql:product_sku:quality_issue:2026-07,2026-08",
     ]
+    assert t3.termination.reason == "answer_ready"
+    assert t3.termination.detail_code == "answer_ready"
 
 
 def test_only_allowlisted_dialect_failure_gets_one_repair() -> None:

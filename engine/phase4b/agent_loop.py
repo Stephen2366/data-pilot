@@ -8,6 +8,7 @@ EvidenceDelta、Progress、Hybrid 汇合和稳定停止都藏在 module 内部�
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import re
 from typing import Any, Literal, Mapping, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -147,6 +148,8 @@ def _dependency_status(requirement: EvidenceRequirement, observations: tuple[tup
     if not reason_observations:
         return None
     observation = reason_observations[-1]
+    paired_values: dict[str, float] = {}
+    identity_periods = tuple(dict.fromkeys(re.findall(r"20\d{2}-(?:0[1-9]|1[0-2])", requirement.identity)))
     for row in observation.rows:
         normalized = {str(key).lower(): value for key, value in row.items()}
         reason = str(normalized.get("reason") or normalized.get("refund_reason") or normalized.get("reason_code") or "")
@@ -159,6 +162,25 @@ def _dependency_status(requirement: EvidenceRequirement, observations: tuple[tup
                     return True
             except (TypeError, ValueError):
                 continue
+        # ★ 真实 Text2SQL 常按“原因 × 月份”返回基础聚合，而不是替 Controller
+        # 预先算好 increment。这里只消费 guarded typed rows，并且必须与 dependent
+        # requirement 明示的两个月份精确对齐；缺月、坏值或无法辨认时都不解锁。
+        period = str(normalized.get("month") or normalized.get("period") or "")[:7]
+        amount = next(
+            (
+                normalized.get(key)
+                for key in ("net_refund_amount", "refund_amount", "amount", "value")
+                if normalized.get(key) is not None
+            ),
+            None,
+        )
+        if len(identity_periods) == 2 and period in identity_periods and amount is not None:
+            try:
+                paired_values[period] = paired_values.get(period, 0.0) + float(amount)
+            except (TypeError, ValueError):
+                return False
+    if len(identity_periods) == 2 and set(paired_values) == set(identity_periods):
+        return paired_values[identity_periods[1]] - paired_values[identity_periods[0]] > 0
     # deterministic oracle fake 也可显式给出安全 predicate，避免 Controller 解析答案文本。
     predicate = observation.diagnostics.get("quality_increment_positive")
     return bool(predicate) if isinstance(predicate, bool) else False
@@ -673,14 +695,28 @@ def _complete_comparison_if_required(
         (index, observation) for index, (requirement_id, observation) in enumerate(observations)
         if requirement_id == requirement.identity
     ]
-    if len(matches) != 1:
+    # 后续 turn 没改 metric/periods 时，主 comparison Evidence 会作为 active durable
+    # coverage 进入 covered。此时本轮应专注新增 requirement，不能强迫重复查 SQL；
+    # 但凡本轮真的重查过 comparison，仍继续走下面的唯一成功 Observation 严格校验。
+    if not matches and requirement.identity in set(covered):
+        return observations, termination, {
+            "status": "already_covered", "reason_code": "comparison_evidence_already_covered",
+        }
+    # 同一 requirement 经过 allowlisted repair 时会合法留下两条 Observation：首次
+    # dialect failure 与 repair success。比较完成只能消费唯一成功且安全的那一条；
+    # 不能因为账本保留了失败历史，就把真实成功结果误报为“没有 Observation”。
+    successful_matches = [
+        (index, observation) for index, observation in matches
+        if observation.execution_status == "completed" and observation.safety_status == "passed"
+    ]
+    if len(successful_matches) != 1:
         stopped = _termination(
             "no_progress", "comparison_observation_missing",
             state.evidence_requirements, covered, observations,
         )
         return observations, stopped, {"status": "blocked", "reason_code": stopped.detail_code}
 
-    index, observation = matches[0]
+    index, observation = successful_matches[0]
     completion = complete_metric_comparison(
         requirement=requirement, constraints=constraints, observation=observation,
     )

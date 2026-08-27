@@ -194,6 +194,25 @@ def understand_turn(question: str, *, action: str, previous: TaskState | None) -
         category = "ask_about_existing_result"
     elif action == "continue" and any(token in text for token in ("再查证", "补充证据")):
         category = "add_evidence_requirement"
+    # ★ 完整重述本身就是一种“修改”信号，不要求用户背诵“改成”口令。
+    # 这里只处理主指标查询：当前 turn 必须同时显式给出 metric 和 period，且没有
+    # 原因/商品/渠道/政策等追加取证意图。这样“比较 7 月和 8 月净退款”会替换旧的
+    # 单月主 requirement，而“再查证 8 月”仍由上面的 additive category 保留旧要求。
+    elif (
+        action == "continue"
+        and previous is not None
+        and metric is not None
+        and bool(periods)
+        and not any((policy_intent, channel_intent, product_intent, reason_intent))
+    ):
+        category = "modify_constraint"
+    # M49：既有结果解释只引用 durable result digest。这里必须返回空增量，不能根据
+    # previous metric/periods 偷偷新造 SQL requirement，也不能把 T5 channel 修正退回 T2。
+    if category == "ask_about_existing_result":
+        return TaskDelta(
+            category=category, goal=previous.goal if previous else None,
+            route=previous.route if previous else "none",
+        )
     resolved_metric = metric or previous_constraints.get("metric")
     resolved_periods = periods
     if category in {"modify_constraint", "correct_previous_understanding"} and periods and any(token in text for token in ("相比", "比较", "对比", "和")):

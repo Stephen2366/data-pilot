@@ -18,5 +18,5 @@
 - [ ] T1–T5 remain one task lineage and T6 shows Compact T1–T5.
 - [ ] Restart continuation reuses the same Compact identity.
 - [ ] Role drift/version conflict execute zero deep runtime.
-- [ ] Response/Trace contain no raw recent turns, rows, document body, prompt or credentials.
+- [ ] Durable task/context/action artifact contain no historical raw recent turns、document body、prompt、credentials 或任意完整 rows；SQL 单路 Response/JSONL Trace 可按兼容合同保留当前 turn question 与 Guarded rows，检查时只验证其未扩散到 durable Context/Compact/assurance。
 - [ ] Explain Pipeline default, experimental Subgraph, sealed reserve and non-production claim boundary.

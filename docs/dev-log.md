@@ -4311,3 +4311,232 @@ python -m uvicorn app.main:app --reload
 
 体验时应重点看**控制与可追溯结果**，不要把本地回答文字当成 M48 的质量验收：模型、业务数据库和 Knowledge runtime 的真实可用性仍服从各自 runbook 与当前环境。
 
+## ★ M49 把 Phase 4B 从“零件齐全”修成“整条 Agent 链真能跑”
+
+（2026-08-27）
+
+**简述**：M49 修复了连续自然语言任务中的多个真实断点，让 Phase 4B 的 TaskState（任务状态）、Decision Loop（受限决策循环）、SQL 数据库查询、Knowledge/RAG（知识检索）、Evidence（证据账本）、预算、MySQL 持久化、Context Compact（上下文压缩）、重启续接、Response/Trace（响应与执行轨迹）和 Scenario Eval（场景评测）在同一条固定演示链中真正贯通，并把“合同存在”与“真实执行过”分成两类证据。
+
+### 先用大白话讲
+
+可以把 Phase 4B 想成一家已经建好各部门的**数据分析事务所**：前台负责听需求，调度员决定查数据库还是查制度，档案室保存任务，审计员记录证据。M48 结束时，每个部门单独看都能工作，但把一个客户连续服务到底，仍会暴露交接问题。
+
+- 客户第二次把需求完整重说一遍，前台可能把**新旧要求叠在一起**，最后同时处理两份互相冲突的任务。
+- SQL 第一次写错、第二次修好后，调度员仍可能只看到“曾经失败过”，误判成**没有成功结果**。
+- 客户继续追问时，系统可能忘记上一轮已经取得的 Evidence（证据引用），重复查库，或者把旧目标当成当前目标。
+- 服务重启后，档案室知道“之前做过分析”，却没有足够材料回答“**解释一下刚才的结果**”。
+- 旧报告能证明合同格式正确，却不一定能证明那条链路**真的执行过**。
+
+M49 做的就是一次完整联调：不仅修各部门内部逻辑，还通过 Dev Probe（开发期真实探针）使用 Qwen 大模型、Text2SQL（自然语言转 SQL）、SQL Guard（SQL 安全门）、MySQL 和业务 RAG Subgraph（检索增强生成子图），从 T1（第一轮）连续跑到 T6（第六轮）。最终新进程能够接回任务，并且不重新调用模型或工具就复述最近结果。**价值收口**是：Phase 4B 现在具备一条适合现场演示、也能讲清工程取舍的真实 Agent（可自主规划并调用工具的智能体）主链；但这仍不是开放问题正确率或生产能力证明。
+
+### 这次做了什么
+
+这次工作的核心矛盾是：**组件测试通过，不等于连续业务过程正确**。M49 因此没有只补几个断言，而是从自然语言状态更新、Controller（确定性调度器）决策、SQL 计划、跨轮证据、重启结果恢复，到执行证据报告逐层修复，并用同一条真实任务验证它们如何协作。
+
+1. **让“完整重说需求”真正替换旧目标，而不是继续叠加。**
+
+   原来的 `continue`（继续任务）默认采用追加式合并，所以用户第二轮完整说“比较 7 月和 8 月净退款金额”时，旧的“只查 7 月”仍可能留在 TaskState（任务状态）里。
+
+   - **解决方式**：Turn Understanding（轮次理解）先判断本轮是否独立给出了完整的 metric（指标）和 period（时间范围）。如果信息完整且没有“再补充政策、原因、商品、渠道”等追加意图，就生成 `modify_constraint`，用新主要求替换旧主要求。
+   - **保守边界**：像“再查一下政策依据”这种明显补证据的说法仍然追加，不能因为句子里出现指标和月份就误删其他任务。
+   - **方案取舍**：没有直接让大模型自由改写 TaskState，而是保留 typed rule（类型化规则）和确定性校验。LLM Turn Understanding 被记入后续能力账本，只有规则在代表性改写句上形成稳定失败簇才重开。
+   - **真实证据**：P1 中 T2 最终只保留一个双月 comparison requirement（比较要求），并得到 7 月 `120000`、8 月 `180000`、差额 `60000`、增长 `50%`。
+   - **未证明范围**：这不代表所有中文改写、指代和省略都能正确理解，只证明当前规则覆盖了固定演示链和相应回归用例。
+
+2. **让 Controller 看懂“先失败、后修复成功”和“上一轮已经查过”。**
+
+   Agent 的 Observation（工具执行观察）会保留完整历史。这样有利于审计，却产生了一个真实问题：同一 requirement 既有失败记录又有修复成功记录时，旧逻辑会因为“不是唯一一条 Observation”而拒绝完成。
+
+   - **修复成功选择**：比较完成只消费唯一一条 `completed + safety passed` 的成功 Observation；失败记录继续保留在 Trace（执行轨迹）中。没有成功或出现多条互相竞争的成功结果时，仍然失败关闭。
+   - **跨轮 Evidence 复用**：如果主 comparison requirement 已被 active Evidence 覆盖，而且本轮没有重新查询它，就承认 `already_covered`，不要求每轮重复查库；如果本轮确实重查，仍必须重新完成严格校验。
+   - **条件动作计算**：T3 的“质量问题退款增长后，再分析商品”不再依赖模型碰巧输出 `increment` 列。Controller 只从经过 SQL Guard 的两期 typed rows（类型明确的安全结果行）计算“后期减前期是否大于 0”，缺月、坏值或非正增长都不解锁下一动作。
+   - **真实证据**：P1 自然出现 MySQL 不支持 `DATE_TRUNC` 的失败，随后 deterministic repair（确定性修复）成功；P2 又证明跨轮比较证据与质量增量能够推动后续商品分析。
+   - **未证明范围**：当前只支持明确的两期指标比较和窄域质量增量，不是任意公式、多期趋势或通用计算平台。
+
+3. **不放宽 SQL 安全校验，而是让模型更容易生成可证明的计划和 SQL。**
+
+   真实 P2 先后暴露两类问题：QueryPlan（结构化查询计划）漏绑 `month` 派生别名，以及模型用多余子查询造成字段来源无法证明。它们在业务语义上“看起来可能没错”，但 validator（校验器）无法确认，就必须在碰库前停止。
+
+   - **解决方式**：在 QueryPlan prompt（计划提示词）中加入 `month + net_refund_amount` 正反例；在 SQL generation prompt（SQL 生成提示词）中说明单层聚合能完成时不要额外套 CTE（公共表表达式）或子查询，并展示错误的 derived scope（派生作用域）结构。
+   - **关键取舍**：没有自动补别名、自动展平 SQL，也没有弱化 M24 plan fidelity（计划一致性）校验。候选 SQL 不能反过来证明自己的计划正确，否则模型既当运动员又当裁判。
+   - **安全结果**：字段来源、聚合粒度或排序表达式无法证明时，系统仍在 SQL Guard 和数据库执行之前 fail closed（失败即停止）。
+   - **验证证据**：方案 A 的相关聚焦回归分别得到 `20 passed` 与 `43 passed`；最终真实 P2 的 T1～T5 SQL/Hybrid（SQL 与知识混合分析）路径全部完成。
+   - **未证明范围**：prompt 正反例只能降低常见结构错误概率，复杂 derived scope 的完整 lineage（字段血缘）解析仍未建设。
+
+4. **用有界结果摘要解决“重启后解释刚才结果”的演示断点。**
+
+   M48 的 Compact（压缩档案）刻意不保存完整 answer、rows 和文档正文，因此新进程能知道“做过哪些动作”，却不能诚实复述刚才的具体结论。若偷偷重查，不仅昂贵，还可能查到与刚才不同的数据。
+
+   - **最终方案**：新增 `TaskResultDigest`（最近结果摘要），通过 Context/Compact additive v2（加法式第二版）保存最近一次完成回答所需的有限文本、结果类型和 Evidence ID。
+   - **严格上限**：摘要最多 **8 KiB**，最多 **16 个 Evidence ID**；不保存任意 SQL、Prompt、Trace、原始文档正文或无界 rows。
+   - **兼容方式**：不修改 TaskState 和数据库表，继续使用 0005 已有 JSON context 列；旧 Context/Compact v1 仍可严格读取。旧任务没有 digest 时，系统明确要求重新取证，不能编一个答案。
+   - **运行效果**：T6 的“解释这个结果”生成空 TaskDelta（本轮状态变更），不进入 Graph（LangGraph 执行图），不调用 SQL、RAG 或模型，直接返回最近完成结果。P2 同源复核确认 T6 与 T5 answer 逐字一致，`graph_invocation_count=0`。
+   - **边界说明**：digest 是展示和续接材料，不是 Evidence、ACL（访问控制）或业务事实 authority（权威来源）；它增加了有限的持久化文本面，但仍受大小限制和 terminal scrub（任务结束时清理）约束。
+
+5. **把“合同写得对”和“功能真的跑过”拆成两套证据。**
+
+   旧 Scenario v6 可以证明 artifact（评测产物）的结构、签名和 required case（必需场景）完整，但部分 observation 可由常量构造；这意味着“报告是 completed”不能自动推出“真实链路执行成功”。
+
+   - **Scenario v7**：每个 passed observation 必须绑定独立的 execution locator（执行证据位置）和 execution identity（执行证据身份）；缺失时自动降为 `not_observed`，合同 identity 不能冒充执行 identity。
+   - **Assurance v2**：再把 B0～B6 合同、Scenario v7 和真实执行证据聚合成一份技术保证包，同时保留 v1～v6 只读兼容。
+   - **证据来源**：10 个场景分别绑定 M49-P2 r8、deterministic JUnit（确定性测试报告）或 M48 durable negative-path（持久化失败路径）原件，不读取 sealed reserve（封存保留集）。
+   - **最终身份**：Scenario v7 为 `9b133cdf...ed080`，assurance v2 为 `bc495840...e36bf`，两者均为 `completed`。
+   - **未证明范围**：它们证明的是固定 Demo 技术链和安全控制确实执行过，不是 RAG/LLM 质量胜出、开放问题正确率、Reliability（多次稳定性）或生产认证。
+
+### 新概念
+
+- **完整显式重述**：用户不是补一句条件，而是把指标和时间范围重新完整说一遍。系统把它理解成“新版任务说明书”，替换旧主要求；如果只是“再补政策依据”，则继续追加。
+- **Guarded typed rows**：经过 SQL 安全检查、并且列含义可识别的结果行。Controller 只在这种数据上做两期差额计算，不从自然语言回答里猜数字。
+- **Latest result digest**：类似快递柜里的“小票”，只保存最近结果的有限展示内容和证据编号，方便重启后复述；它不是仓库原件，也不能代替重新授权 Evidence。
+- **Evidence-backed artifact**：不是只写“我通过了”，而是每个通过结论都要指向一份可校验的真实执行记录。就像测试报告必须附上考场录像编号，不能拿考试规则编号冒充考试成绩。
+- **Fail closed**：系统无法证明安全或语义正确时，选择停止并返回稳定原因，而不是“看起来差不多就执行”。这和 Spring Security 权限不明确时默认拒绝很像。
+
+### 代码阅读路线
+
+1. **先看一轮自然语言如何变成状态变化**：`engine/phase4b/task_turn.py`
+   从 `understand_turn()` 和 TaskDelta 相关逻辑开始。重点看**完整重述替换**、补证据继续追加、`ask_about_existing_result` 生成空 delta 三条分支；不需要先死抠所有关键词，先理解“什么情况下改旧任务，什么情况下加新任务”。
+
+2. **再看任务状态如何交给真实运行时**：`engine/phase4b/task_runtime.py`
+   这里负责把 accepted turn（已接受轮次）接入 task boundary、Context 和 Agent Loop。阅读重点是 existing-result 为什么可以在深 Graph 前短路，以及 digest 缺失时为何不能猜测回答。
+
+3. **理解 Controller 怎样根据证据决定下一步**：`engine/phase4b/agent_loop.py`
+   先看 comparison completion，再看 `_dependency_status()` 一类依赖判断。这里解决三件事：从失败历史里选唯一成功 Observation、复用跨轮 active Evidence、从两期安全 rows 计算质量增量；核心思想是**模型负责候选，确定性 Controller 负责能否继续**。
+
+4. **看 Context v2 如何保存最近结果但不越权**：`engine/phase4b/task_context.py`
+   先看 `TaskResultDigest` 的大小/数量限制和 safe projection，再看 Context/Compact v2 codec（编解码器）如何兼容 v1。重点理解 digest 为什么不是 Evidence，以及数据库 JSON 虽能装更多内容，代码仍主动限制持久化范围。
+
+5. **看模型提示词如何配合严格校验器**：`engine/nl2sql/prompt.py`
+   找 `month` 派生别名正反例和单层 SQL 规则。这里没有修改 validator，而是让模型输出更符合既有计划一致性合同；这是“提高可生成性，但不降低安全门”的落点。
+
+6. **看真实连续链怎样被执行和收集证据**：`scripts/probe_m49_phase4b_continuity.py`
+   按 T1→T6 阅读：单月查询、双月比较、条件商品分析、Hybrid、纠正维度、重启解释。再看调用预算、首错停止、worker（工作进程）A/B、finally cleanup（无论成败都执行的清理）和安全负例，理解为什么它是一条真实 Probe，而不是把六个单测结果拼起来。
+
+7. **最后看证据如何进入 Scenario 和 assurance**：`eval/agent_scenario_v7_contracts.py`、`eval/phase4b_assurance_v2.py`、`scripts/rehearse_m49_phase4b.py`
+   先看 v7 如何拒绝缺 locator/identity 的 passed observation，再看 assurance v2 如何聚合各代合同。rehearsal 只是读取已有证据并重签，不会重新调用模型或数据库。
+
+8. **用测试反向确认每条边界**：`tests/test_m43_task_runtime.py`、`tests/test_m44_agent_loop.py`、`tests/test_m48_task_context.py`、`tests/test_m49_probe_contract.py`、`tests/test_m49_v7_assurance.py`
+   按“状态替换 → Controller → Context v1/v2 → Probe 预算 → 证据防伪”顺序读。测试最值得看的不是 happy path，而是缺月、坏值、多条成功、digest 缺失、私有 payload 和假 execution identity 如何被拒绝。
+
+核心调用链：
+
+`POST /api/query + task envelope（任务信封）`
+→ `understand_turn / TaskDelta`
+→ `MySQLTaskBoundary claim（领取任务版本）`
+→ `Context v1/v2 decode + Compact`
+→ `bounded Decision Loop`
+→ `SQL / Knowledge / RAG Subgraph`
+→ `Evidence + budget + termination`
+→ `state + context + event atomic commit`
+→ `Response / Trace`
+→ `Scenario v7 / assurance v2`
+
+**模块闭环**：M42～M48 建好了 B0～B6 的合同、任务状态、决策循环、RAG 恢复、Subgraph、MySQL durable state 和 Context Compact；M49 用真实 T1～T6 把它们贯通，并补上重启解释与执行证据可信度。现在可以演示“一个自然语言任务如何持续推进、修改、查证、保存、重启和解释”，而不是只展示一组互不相连的接口。
+
+### 设计要点
+
+- **完整重述替换，但补充证据仍追加**：避免新旧主要求打架，同时保留真正的多目标任务。
+- **保留失败历史，只让唯一成功结果驱动完成**：Trace 不丢信息，Controller 也不会被旧失败绑架。
+- **提示词增强不等于放宽校验**：模型更容易输出合法结构，但字段来源和计划一致性仍由确定性 validator 证明。
+- **结果摘要是有界展示材料，不是新 authority**：8 KiB/16 Evidence ID、v1 兼容、terminal scrub 和无 digest 明确重查共同限制它的权力。
+- **真实执行 identity 与合同 identity 分账**：Scenario completed 必须能找到执行证据，报告格式正确不再等于功能跑过。
+- **展示型收口不包装成生产结论**：Pipeline（单轮检索流水线）继续默认，Subgraph 继续 server-controlled experimental（仅服务端可选的实验策略），reserve sealed/not-run，质量与生产边界都不偷换，汪。
+
+### 有面试价值的亮点
+
+1. **“我不是补一个 bug，而是用真实纵向 Probe 找系统交接断点。”** 单测曾经都能过，但连续 T1～T6 仍暴露需求合并、失败修复、跨轮 Evidence、SQL fidelity 和重启解释问题。我把每次首错定位到具体层，修复后从头重跑同一链，最终没有把不同运行片段拼成一次成功。
+
+2. **“我让 Agent 的灵活性停在候选层，把最终控制留给确定性代码。”** 模型负责理解和生成 QueryPlan/SQL，Controller 只依据 closed-world requirement、guarded rows、Evidence、预算和权限决定能否继续。这样既能用模型理解自然语言，又不会把任务状态和安全边界交给自由文本。
+
+3. **“我把重启体验做稳，但没有把隐私边界无限扩大。”** 为了个人 Demo 的现场稳定性，我选择持久化最近结果摘要；实现上没有改 TaskState 或新增数据库表，而是用 additive Context v2、8 KiB/16 Evidence ID 上限、v1 兼容和任务结束清理把范围收紧。
+
+4. **“我的评测产物不能自己给自己作证。”** Scenario v7 要求 passed observation 指向独立执行 artifact；合同 identity、常量 observation 或格式正确的 JSON（结构化数据文件）都不能冒充真实执行。这是把 Eval 从“报告生成器”提升为可追溯证据链。
+
+5. **“我能明确区分技术闭环、效果胜出和生产就绪。”** 真实 Qwen 链路和 677 项测试证明固定 Demo 可运行；M46 的质量 no-go、Pipeline 默认、Subgraph experimental 和 sealed reserve 仍然保留。我不会用控制链通过偷换成 RAG 质量提升。
+
+### 面试官追问
+
+1. **[基础追问] 为什么完整重述要替换，而不是所有 continue 都追加？**
+
+   因为 continue 只是生命周期动作，不代表业务语义一定是追加。如果本轮已经独立给出指标和时间范围，再保留旧主要求会让一个问题变成两个冲突问题；但“补政策依据”显然是新增证据需求。所以我先做 typed completeness 判断，再区分替换主 requirement 与追加辅助 requirement，最后仍由确定性 validator 检查 TaskDelta。
+
+2. **[工程/深挖追问] 为什么失败记录和成功记录都保留，却只用一条成功结果？**
+
+   Trace 的目标是完整审计，所以 dialect failure 不能删除；Controller 的目标是决定能否完成，所以只应消费唯一、执行完成且安全通过的 Observation。零条成功说明没完成，多条成功可能代表重复执行或结果竞争，都不应该静默选一条。这个分离同时保住可观测性和确定性。
+
+3. **[工程/深挖追问] 你为什么不自动修复缺失别名或展平子查询？**
+
+   因为别名可能对应不同粒度、字段和函数，展平又可能改变聚合或窗口语义。自动修看起来稳定，最危险的是生成“能跑但含义错”的 SQL。我选择用正反例提高模型遵守率，同时保留 plan fidelity validator 的 fail-closed 边界；复杂 derived lineage 将来需要独立设计，不能在收口时临时猜。
+
+4. **[工程/深挖追问] Result digest 会不会把 M48 的隐私设计推翻？**
+
+   它确实新增了一块有限的持久化文本面，所以不能说零风险。但它只保存最近一次完成结果的有界摘要和 Evidence ID，最大 8 KiB/16 个 ID，不保存任意 SQL、Prompt、Trace、文档正文或无界 rows；它不拥有 Evidence/ACL 权力，并跟随 terminal scrub。对个人 Demo 来说，这是用受控数据面换取重启后稳定解释的明确取舍。
+
+5. **[工程/深挖追问] Scenario v7 怎样防止再出现“伪 completed”？**
+
+   passed observation 必须同时有 execution locator 和 content identity，validator 会拒绝拿 B0～B6 contract identity 充当 execution identity。正式 v7 分别绑定真实 P2 safe artifact、deterministic JUnit 和历史 durable negative-path artifact；任何 required evidence 缺失都会变成 `not_observed/inconclusive`，不会靠常量补成通过。
+
+6. **[压力追问] 你重试到 r8 才跑通，这是不是说明系统很不稳定，最后只是调题调出来的？**
+
+   这个质疑有合理部分：一次固定 Demo 通过不能证明开放场景稳定。我的处理是保留 r1～r7，每次区分基础设施失败、模型结构错误和确定性合同缺口；没有改问法、放宽 validator、增加 retry 或拼接不同运行结果。最终 r8 在同一任务、同一预算内完成 T1～T6，之后还有 677 项全仓回归。它证明的是这些已定位断点被修复且固定演示链可复现，不证明泛化正确率；若要回答稳定性，需要另做代表性问题集和多次 Reliability，而不能把本次结果包装成生产结论喵。
+
+### 验证与下一步
+
+**验证结果：**
+
+| 范围 | 真实结果 | 证明什么 |
+|---|---:|---|
+| M49-P1 | 4 calls / 13,075 tokens；cleanup `0/0` | 完整重述替换、双月比较和自然 dialect repair 链闭合 |
+| M49-P2 r8 | 12 calls / 51,013 tokens；retry 0；cleanup `0/0` | 同一 task 的 T1～T6、SQL/Knowledge/Subgraph、重启/Compact 和安全负例贯通 |
+| T6 同源复核 | Graph/Tool/provider（模型服务调用）=`0/0/0`；T6 与 T5 answer 一致 | latest result digest 被真实消费，没有偷偷重查 |
+| Deterministic evidence | 6 passed，0.73s | budget trigger、fallback、版本 fencing、scrub 和私有 payload 拒绝 |
+| 最终聚焦 | 35 passed，1 个既有 warning（警告） | M49 直接影响的状态、Loop、Context、API（应用接口）和 artifact 合同闭合 |
+| Scenario v7 / assurance v2 | `9b133cdf...ed080` / `bc495840...e36bf` | 技术结论绑定独立执行证据 |
+| Alembic（数据库迁移工具）/ 默认开发库 | 0005 head；业务计数 `200/10000/1000/11` 不变 | 正常迁移完成，没有 reset/reseed |
+| 最终全仓 | 677 passed，1 warning，595.25s | 当前代码下旧合同、Phase 4 和 Phase 4B 同次回归无失败 |
+
+warning 只是既有 Starlette TestClient/httpx deprecation。P2 r1～r7 的失败没有被覆盖：它们分别帮助定位 QueryPlan、网络环境、derived scope、Controller dependency/cross-turn coverage 和 T6 结果解释合同。
+
+**下一步**：Phase 4B 固定 Demo 技术链已经收口，当前没有证据支持为了凑模块号继续扩功能。只有代表性 paraphrase（改写问法）形成稳定 Turn Understanding 失败簇，或出现新的 RAG quality candidate（质量候选）时，才另立计划；Pipeline 默认、Subgraph experimental 和 reserve sealed/not-run 保持不变。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录，已激活项目 Python 环境。
+# 1. 零 provider、零数据库写入地重新聚合已有执行证据；预计输出两个 completed identity。
+python scripts/rehearse_m49_phase4b.py --evidence-package eval/reports/m49/m49-evidence-package.json --scenario-output eval/reports/m49/m49-agent-scenario-v7.json --assurance-output eval/reports/m49/m49-phase4b-assurance-v2.json
+
+# 2. 运行 M49 直接相关合同回归；预计相关用例全部通过。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m49-devlog tests/test_m49_probe_contract.py tests/test_m49_v7_assurance.py tests/test_m48_task_context.py tests/test_m44_agent_loop.py
+
+# 3. 全仓回归约需 10 分钟；只在确实需要复核时运行，当前收工证据为 677 passed。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m49-devlog-full
+```
+
+环境未激活时，把 `python` 替换为 `AGENTS.md` 中项目学习环境的完整 Python 路径。真实 P1/P2 会调用 Qwen 并写隔离数据库，**不要为了阅读复盘重复运行**。
+
+**本地启动体验：**
+
+本机默认开发库 `datapilot_dev` 已迁移到 **Alembic 0005**。启动前仍应确认 `.env` 中的数据库、Qwen 和业务 Knowledge 配置属于本地演示环境；不要把测试命令指向生产数据。
+
+```powershell
+# 1. 只读确认数据库处于 20260827_0005 head；预计显示 0005 (head)。
+python -m alembic current
+
+# 2. 启动 FastAPI（Python Web 服务）；预计 Swagger（交互式接口文档）可访问。
+python -m uvicorn app.main:app --reload
+```
+
+打开 `http://127.0.0.1:8000/docs`，在 `POST /api/query` 先提交：
+
+```json
+{"question":"查询 2026 年 7 月实际净退款金额。","user_role":"ops","task":{"action":"start"}}
+```
+
+之后把响应中的 `task_id` 和 `task_version` 带入下一轮的 `task` envelope：
+
+```json
+{"question":"完整比较 2026 年 7 月和 8 月实际净退款金额。","user_role":"ops","task":{"action":"continue","task_id":"<上一响应 task_id>","expected_version":<上一响应 task_version>}}
+```
+
+继续完成商品、政策和渠道分析后，可重启 FastAPI，再用最新 `task_id/expected_version` 提交“解释这个结果”。预期能看到 **`existing_result_digest_ready`**，并且该轮没有新的 Graph action、SQL、RAG 或模型调用。现场演示应强调状态流、Evidence、预算、Trace 和重启续接；回答质量仍受当前模型和数据快照影响，不把单次 Demo 当成泛化结论。
+

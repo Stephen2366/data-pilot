@@ -31,9 +31,9 @@
 
 ## Current Status
 
-**Phase 4 — Trustworthy Multi-Evidence Agent**
+**Phase 4B — Evidence-driven Bounded Agent**
 
-当前已完成 **M46 / Phase 4B B4**，SQL、RAG、Hybrid、任务状态和有界 Agentic RAG 等主路径已经进入统一 Agent Harness、Evidence、预算与 Trace 合同。
+当前已完成 **B0～B6 的技术集成与 M49 连续联调**：自然语言任务可在同一 durable TaskState 中连续经过 Decision Loop、SQL/Knowledge/RAG Subgraph、Evidence、父子预算、MySQL checkpoint、Context Compact、重启续接、Response/Trace 与 evidence-backed Scenario Eval。
 
 ```text
 Phase 2        Basic NL2SQL / API / SQL Guard
@@ -54,15 +54,14 @@ Phase 4
 Phase 4B      TaskState + bounded Decision Loop + RAG Subgraph  ✅
 ```
 
-Latest deterministic regression snapshot:
+Latest Phase 4B integration evidence:
 
 ```text
-626 tests with current-code pass evidence
-1 warning
+M49-P2: T1→T6 continuous demo, 12 provider calls / 51,013 observed tokens
+Scenario v7 + assurance v2: completed with independent execution evidence
 ```
 
-> M46 technical closure means the current contracts, focused verification and repository regression evidence are complete.
-> It **does not** mean production authentication, distributed conversation persistence, universal intent routing, or production certification are complete.
+> 这里的 completed 指版本化合同与固定演示链的技术闭环；Pipeline 仍是默认，Subgraph 仍是服务端实验策略。它不代表通用自然语言正确率、RAG 质量胜出或生产认证。
 
 ------
 
@@ -371,7 +370,7 @@ Pipeline 是稳定默认，Subgraph 是可显式启用的实验策略；两者�
 
 > **复杂度必须由 Eval 证据证明，而不是因为 Agent 框架支持循环就增加循环。**
 
-当前 candidate 未进入 sealed decision reserve。后续优化将围绕运行身份一致性、Composer 结构化输出和 requirement grounding 形成新 candidate，再通过同一晋级流程评审。
+当前采用 `Pipeline default / Subgraph server-controlled experimental / no auto-fallback`。未来若形成新的默认晋级候选，再用独立且未污染的 sealed decision evidence 评审，不影响当前 Demo 展示完整子图、父子预算和 Trace 的工程能力。
 
 ------
 
@@ -524,7 +523,7 @@ data-pilot/
 └── docs/
     ├── state/               # Current runtime / eval truth
     ├── notes/               # Module plans and implementation notes
-    └── phase4-roadmap.md     # Phase 4 architecture roadmap
+    └── phase4b-roadmap.md    # Phase 4B architecture roadmap
 ```
 
 ------
@@ -536,9 +535,9 @@ data-pilot/
 | Area               | Current Boundary                                             |
 | ------------------ | ------------------------------------------------------------ |
 | Authentication     | local/demo/test fixture resolver；尚无生产 JWT/OAuth/SSO     |
-| Conversation state | 单进程内存 checkpoint；重启 / 多 worker 不共享               |
+| Conversation state | MySQL durable TaskState + typed event + Context/Compact；外部 Tool 不做自动重放 |
 | Router             | closed-world deterministic route 为主，开放式混合意图仍较保守 |
-| RAG retrieval      | 当前 lexical baseline 优于已测试 semantic candidate          |
+| RAG retrieval      | business release 走 deterministic lexical；Enterprise 产品路径走 semantic runtime |
 | Agentic RAG        | bounded RAG Subgraph 已实现；Pipeline 默认，Subgraph 服务端实验 |
 | Hybrid             | canonical controlled operators，不是开放式 research Agent    |
 | Milvus             | adapter 已实现，但不是默认 runtime                           |

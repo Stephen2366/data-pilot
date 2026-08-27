@@ -7,6 +7,8 @@
 > **效力关系**：本文只拥有 Phase 4B 的路线决策权。Phase 4 的历史目标与合同来源见 `docs/phase4-roadmap.md`；当前运行、数据库、RAG、Eval 与默认配置分别以 `docs/state/` 对应事实源和实际代码为准；外部设计参考统一从 `docs/phase4-reference.md` 进入。进入任一能力切片后，仍须结合最新 state、失败证据、相关源码和 reference 编写独立 module plan 与 notes，不能直接把本文当逐文件施工清单。
 >
 > **路线决策基线**：2026-08-22。本文由 `docs/notes/phase4-rag-capability-status.md` 第 12 节的已确认方案升格而来。
+>
+> **M49 路线修订（2026-08-27，用户确认）**：B4 的“完整 experimental 工程能力”与“产品默认晋级”正式分开。M46 已实现可运行、可追踪、有父子预算的 Subgraph，并用 historical paired evidence 得到当前 candidate `no-go`；因此 Phase 4B 展示型收口接受 `Pipeline default + Subgraph server-controlled experimental + no auto-fallback + reserve sealed/not-run`。当前 reserve 不再是 Phase 4B 最终验收前置；未来若形成新质量 candidate 并申请切换默认，仍必须另立计划、保持 reserve 未污染，并用新 sealed decision evidence 裁决。该修订不把 no-go 改写成质量胜出，也不降低 ACL、Evidence、预算、终止或 Trace 硬门。
 
 ## 1. 阶段目标与完成故事
 
@@ -144,6 +146,7 @@ trigger / Evidence requirement
 - SQL 节点不看全部文档，RAG 节点不看完整 SQL rows，Router 不看 Document 正文，Composer 只看 Gate 允许的 generation-visible Evidence。
 - Task Compact 是 typed turn/event ledger 的确定性结构化派生物，至少保留 goal、confirmed/corrected constraints、pending questions、unresolved Evidence requirements、active EvidenceRef/validity、action/budget/termination 与高风险原始 reference。
 - Compact 必须记录来源 turn 范围、版本/fingerprint、触发原因和失败降级；不得用不可验证摘要替代时间、金额、指标口径、否定、政策例外或 Evidence identity。
+- M49 为个人 Demo 的重启解释链新增 additive Context/Compact v2：仅持久化最近一次已完成结果的有界 digest（最多 8 KiB、16 个 Evidence ID），使 `ask_about_existing_result` 可零 Graph/Tool/provider 复述最近结果。digest 不是 TaskState、Evidence、ACL 或业务 authority，不保存任意 SQL、原始文档正文或无界 rows；旧 v1 payload 继续严格可读，缺 digest 时必须明确要求重新取证，不能猜测旧答案。
 - 基础版不依赖 LLM 自由摘要。未来若引入叙述性摘要，它只能作为不可信派生字段，并单独通过 outbound、faithfulness 与降级门。
 
 ### 4.5 Durable checkpoint
@@ -408,7 +411,7 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 
 - 定点复核 `ARAG-GRAPH/STATE/TOOLS`，借鉴主图/子图分工、child search 与 parent expansion 独立动作、retrieval key/context 去重及显式 Tool/iteration stop；不照搬 `MessagesState`、强制搜索、开放 LLM 动作、字符串 Tool output、子图答案或其预算参数。
 - 定点复核 `DBGPT-TOOL/RESOURCE` 和 `GUSTO-WORKFLOW`，用“纯正文 Observation/末尾拼 sources”与 structured references 的差异检查 Subgraph 是否丢失 Evidence identity；不照搬 PostgreSQL→Milvus级联、自动多后端 fallback、“任一命中就 complete”或最后去重文档名作 citation。
-- B4 必须把参考项目的实际控制流与 DataPilot 的父子预算、eligible action set、Shared Gate/Composer/Citation 唯一所有者逐项对照，并在 business 与大规模 reserve 上分别验证；只跑通参考项目的 toy demo 或 DataPilot 单条 T4 不算完成。
+- B4 必须把参考项目的实际控制流与 DataPilot 的父子预算、eligible action set、Shared Gate/Composer/Citation 唯一所有者逐项对照，并在 business 与真实 historical diagnostic 上验证；只跑通参考项目的 toy demo 或 DataPilot 单条 T4 不算完成。新 sealed reserve 只在未来新 candidate 申请默认晋级时解封，不为证明代码结构存在而运行。
 
 ### 能力范围
 
@@ -417,12 +420,12 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 - 顶层父预算覆盖所有子图 retrieval/model/context 动作，子消费回写总账；
 - Subgraph 不调用 SQL、不生成答案、不决定产品四轴、不放宽 ACL/outbound、不复制 Shared Gate/Composer/Citation Validator；
 - Pipeline 与 Subgraph 通过同一 Knowledge Tool/AnswerFlow 合同，Pipeline 长期保留 baseline/fallback；
-- business T4 演示与新 sealed decision reserve A/B 都必须完成，不能只在 external benchmark 或只在 demo 成功；M34 historical regression set 另行报告，不冒充新决策证据。
+- business T4 演示与 historical paired diagnostic 都必须完成，不能只在 external benchmark 或只在 demo 成功；historical 结果可以作 experimental/no-go 诊断，不能冒充新默认决策证据。未来默认晋级仍必须使用当时未污染的新 sealed decision reserve。
 
 ### 主要交付物
 
 - bounded RAG Subgraph experimental adapter；
-- Pipeline/Subgraph 同合同 dev、sealed decision reserve、historical regression、contract/security 视图；
+- Pipeline/Subgraph 同合同 dev、historical regression、sealed reserve 状态与 contract/security 视图；
 - business canonical Observation→Action→Evidence gain→Answer/Stop 证据；
 - 父子预算、无双循环、ACL/outbound/prompt injection、fallback 与 Trace/Eval 回归；
 - default/experimental/fallback 决策记录。
@@ -432,13 +435,13 @@ B3 可在 B1/B2 施工间隙交错推进；B5 不必机械等待 B4，但 B4 必
 1. 全局 catalog 至少有两种合格动作；每次首次 Observation 能正确形成 eligible action set 并选择动作或停止，且至少一个 runtime/corpus 通过不同真实 Scenario 分别证明两种动作的 Observation-driven 选择、错误动作排除与 no-progress stop；
 2. 每次恢复可看到 EvidenceDelta、budget consumption、progress/no-progress 和终止；
 3. 顶层与子图不会对同一失败各循环一次；
-4. Pipeline/Subgraph 在同 corpus、合同、AnswerFlow、provider 条件和可比预算下完成新 sealed decision reserve A/B；reserve 的首次解封、访问和退出状态可审计；
+4. Pipeline/Subgraph 在同 corpus、合同、AnswerFlow、provider 条件和可比预算下完成 historical paired diagnostic，并形成可审计的 experimental/no-go 结论；reserve 保持 sealed/read0/not-run。只有未来新 candidate 申请默认晋级时，才要求新 sealed decision A/B、首次解封和退出状态审计；
 5. experimental adapter 即使不切默认也完整可运行、可回退、可追踪；
 6. 没有稳定净收益时 Pipeline 继续默认，不能把“实现 Subgraph”写成“效果提升”。
 
 ### 决策门 G4B-4
 
-**实现与默认化分离**：B4 实现是 Phase 4B 硬交付；是否切换默认由新 sealed decision reserve 的 Evidence/answer/citation/stop 净收益、额外调用、延迟、成本和安全等价性决定，并需用户确认；M34 historical regression set 只提供历史连续性，不能单独切默认。默认、experimental-only、fallback 三种结论都必须有正式记录。
+**实现与默认化分离**：B4 experimental 实现是 Phase 4B 硬交付；M46 historical no-go 可以支撑“Pipeline 继续默认、Subgraph 仅服务端实验、无自动 fallback、reserve 不解封”的展示型收口，但不能支撑默认切换或质量提升声明。未来是否切换默认，仍由新 candidate 的 sealed decision reserve 在 Evidence/answer/citation/stop 净收益、额外调用、延迟、成本和安全等价性上裁决，并需用户再次确认。
 
 ## 12. B5：Durable Task State
 
@@ -575,7 +578,7 @@ RAG/Answer 继续分开报告 retrieval coverage、selected/generation-visible c
 ### 15.1 阶段级交付物
 
 - Evidence-driven top-level Decision Loop 与多维父子预算；
-- bounded RAG Subgraph experimental adapter、Pipeline fallback、新 sealed decision reserve A/B 与 historical regression 视图；
+- bounded RAG Subgraph experimental adapter、Pipeline 默认/fallback、historical regression 视图与 sealed/not-run reserve 账本；
 - TaskState/TaskDelta/turn-event 自然多轮 runtime；
 - durable checkpoint 与 in-memory compatibility adapter；
 - node-level Context Builder、实际入模投影与 Task Compact 基础版；
@@ -590,7 +593,7 @@ Phase 4B 只有在以下条件全部满足后才能收工：
 1. 六项最终能力全部交付，不存在被改写成“未来按需优化”的持久状态、Compact 或 Subgraph；
 2. 北极星从 T1 连续执行到 T5，并分别通过 restart/multi-worker 与 compact extended variants；
 3. 顶层 Loop 由 Observation/EvidenceDelta 驱动，所有动作有预算、进展与确定性终止；
-4. RAG Subgraph 的全局 catalog 至少有两种合格动作，每次运行按 runtime/corpus、ACL 与 Observation 形成 eligible action set 并选择动作或停止；至少一个 runtime/corpus 在不同真实 Scenario 下分别证明两种动作，Pipeline 保留，默认决策有新 sealed decision reserve 证据；
+4. RAG Subgraph 的全局 catalog 至少有两种合格动作，每次运行按 runtime/corpus、ACL 与 Observation 形成 eligible action set 并选择动作或停止；至少一个 runtime/corpus 在不同真实 Scenario 下分别证明两种动作。Pipeline 保持默认，当前 Subgraph 以 historical no-go 作为 experimental-only 结论，reserve 保持 sealed/not-run；未来默认晋级才要求新 sealed decision reserve 证据；
 5. 自然多轮支持任务修改、追问、补 Evidence、correction、switch、cancel 与受控 route 变化，不是固定字符串模板；
 6. durable checkpoint 通过 owner/tenant/role、CAS、restart、多 worker、TTL、clear 和不兼容版本门；
 7. node Context 与 Compact 可直接 Eval，compact 前后关键 typed 行为等价；

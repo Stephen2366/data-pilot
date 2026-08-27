@@ -121,9 +121,14 @@ def test_prompts_declare_exact_output_projection_and_mysql_contract() -> None:
 
     assert "精确合同" in plan_prompt
     assert "output_expressions" in plan_prompt
+    assert '"month": "DATE_FORMAT(refunds.processed_at, \'%Y-%m\')"' in plan_prompt
+    assert "漏掉 `month`" in plan_prompt
     assert "不得添加排序键、辅助列" in sql_prompt
     assert "MySQL 兼容语法" in sql_prompt
     assert "SQLite 只用于本地结果核对" in sql_prompt
+    assert "可由单层 SELECT + GROUP BY 完成时，禁止额外包装 CTE 或派生子查询" in sql_prompt
+    assert "ORDER BY refunds.refund_reason ASC, month ASC" in sql_prompt
+    assert "本可单层完成" in sql_prompt
 
 
 def test_multiple_sql_query_steps_are_rejected_for_phase3a() -> None:

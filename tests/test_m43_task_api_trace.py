@@ -95,6 +95,32 @@ def test_canonical_t1_t2_share_task_fact_and_requery_after_invalidation(tmp_path
     assert traces[1]["tool_observation"]["diagnostics"]["comparison_completion"]["status"] == "complete"
 
 
+def test_existing_result_uses_durable_digest_without_requery(tmp_path: Path) -> None:
+    """M49 C：普通 continue 和重启 worker 都只需 Context digest，不再调用深 Tool。"""
+
+    with _client(tmp_path / "digest.jsonl") as client:
+        first = client.post("/api/query", json={
+            "question": "查询 2026 年 7 月实际净退款金额。", "user_role": "ops",
+            "task": {"action": "start"},
+        }).json()
+        explained = client.post("/api/query", json={
+            "question": "解释这个结果。", "user_role": "ops",
+            "task": {
+                "action": "continue", "task_id": first["task"]["task_id"],
+                "expected_version": first["task"]["task_version"],
+            },
+        }).json()
+
+    assert _B1SQLTool.calls == 1
+    assert explained["task_delta"]["category"] == "ask_about_existing_result"
+    assert explained["answer"] == first["answer"] == "7 月为 120000。"
+    assert explained["answer_status"] == "complete"
+    assert explained["reason_code"] == "existing_result_digest_ready"
+    assert explained["graph_invocation_count"] == 0
+    assert explained["action_attempts"] == []
+    assert explained["task_context"]["result_digest_identity"]
+
+
 def test_clarify_cancel_clear_and_pre_rejection_never_call_graph(tmp_path: Path) -> None:
     trace_path = tmp_path / "m43-zero.jsonl"
     with _client(trace_path) as client:

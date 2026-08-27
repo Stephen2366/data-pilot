@@ -8,7 +8,7 @@
 
 ## 一句话结论
 
-DataPilot 当前 schema 有 **14 张业务物理表 + 2 张 Agent task 状态基础设施表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs` 和两张基础设施表。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。M48 Probe 只在隔离库 `datapilot_m48_test` 验证了 0005、Context 原子提交与清理；本机 `datapilot_dev` 按用户禁区仍未迁移，产品 task runtime 启动前必须正常升级到 0005。
+DataPilot 当前 schema 有 **14 张业务物理表 + 2 张 Agent task 状态基础设施表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs` 和两张基础设施表。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。M49 已在用户授权下把本机 `datapilot_dev` 从 0003 正常升级到 `20260827_0005`：升级前后 users/orders/refunds/knowledge_docs 计数保持 `200/10000/1000/11`，未 reset/reseed，新 task checkpoint/event 为 `0/0`。隔离库 `datapilot_m48_test` 继续用于真实 Probe，不与默认开发库混算。
 
 ## 关键入口
 
@@ -56,7 +56,7 @@ M47 另增加两张不进入 Text2SQL schema、RBAC 表集或业务 seed 的基�
 
 | 表 | 当前职责 | 关键边界 |
 |---|---|---|
-| `agent_task_checkpoints` | 保存当前 task lifecycle、owner/tenant/active-role binding、version/claim token/TTL、closed-world TaskState 与 bounded Context/Compact payload | state/context/event 同 claim 原子提交；terminal/clear/expiry 立即 scrub；不保存 rows、正文、答案、Prompt、凭据、Thought 或 program counter |
+| `agent_task_checkpoints` | 保存当前 task lifecycle、owner/tenant/active-role binding、version/claim token/TTL、closed-world TaskState 与 bounded Context/Compact payload | state/context/event 同 claim 原子提交；terminal/clear/expiry 立即 scrub；不保存完整 rows、文档正文、Prompt、凭据、Thought 或 program counter；M49 Context/Compact v2 只额外保存最多 8 KiB 的最近结果摘要与最多 16 个 Evidence ID，供重启后的本地解释 |
 | `agent_task_events` | 保存按 task/version 排序的 typed lifecycle/action 安全摘要；M48 新写 event v2，旧 v1 仍可读但不能冒充完整 Compact source | 只保存不可逆 safe ref 和 allowlisted typed summary，不保存 raw recent turn，也不作为正文/Trace 旁路 |
 
 两张表由 0004 创建，0005 只给 checkpoint additive 增加 context schema/identity/payload/source watermark 四列，表数量不变；它们不属于 `EXPECTED_SEED_COUNTS` 的 14 张业务表，模型回归分别核对业务表集合与基础设施表集合。M48 真实 MySQL Probe 只在 `datapilot_m48_test` 创建 Agent synthetic 行并最终清零；为 SQL oracle 写入的 Phase 4B deterministic business seed按授权保留，未访问 `datapilot_dev`。

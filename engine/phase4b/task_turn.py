@@ -11,7 +11,13 @@ from engine.phase4b.agent_loop import AgentLoopResult, AgentLoopRuntime, run_age
 from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver
 from engine.phase4b.loop_contracts import AgentNodeContext
 from engine.phase4b.task_boundary import TaskBoundaryError, TaskBoundaryEvent, TaskBoundaryPort, TaskLifecycleFact, TaskProjection
-from engine.phase4b.task_context import CompactDecision, TaskContextBuilder, TaskContextError, TaskContextWindow
+from engine.phase4b.task_context import (
+    CompactDecision,
+    TaskContextBuilder,
+    TaskContextError,
+    TaskContextWindow,
+    TaskResultDigest,
+)
 from engine.governance import TrustedCaller
 from engine.phase4b.task_runtime import NodeContext, TaskDelta, TaskState, TaskTransition, apply_delta, project_node_contexts, understand_turn
 
@@ -119,6 +125,46 @@ def run_task_turn(
             result = _local_result("task_cancelled", "当前任务已取消。", caller_ref=caller.audit_ref if caller else None)
             return TaskTurnResult(result, request.action, 0, 1, task, delta, transition, local_contexts, lifecycle, _runtime_identity(boundary, builder), compact_decision=compact_decision)
 
+        if delta.category == "ask_about_existing_result":
+            # ★ T6 restart 只读取原子恢复的 Context digest，不重跑 SQL/RAG/LLM。
+            # digest 不存在时明确要求重新查询，绝不从 EvidenceRef 猜数值或正文。
+            digest = prepared_context.latest_result_digest
+            local_contexts = (_as_agent_context(contexts[0]), _as_agent_context(contexts[3]))
+            if digest is None:
+                result = _local_result(
+                    "existing_result_digest_missing",
+                    "当前任务没有可重放的结果摘要，请明确要求重新查询。",
+                    caller_ref=caller.audit_ref if caller else None,
+                )
+                termination_reason = "no_progress"
+            else:
+                result = _local_result(
+                    "existing_result_digest_ready", digest.summary_text,
+                    answer_status="complete", caller_ref=caller.audit_ref if caller else None,
+                )
+                termination_reason = "answer_ready"
+            committed_context = builder.append_committed_turn(
+                window=prepared_context, question=request.harness_request.question,
+                version_after=claim.task_version + 1 if claim else 1,
+                delta=delta, state=state, action_count=0,
+                termination_reason=termination_reason, budget_identity=None,
+                result_digest=digest,
+            )
+            assert claim is not None
+            task, lifecycle = boundary.commit(
+                claim=claim, caller=caller, state=state,
+                active_role=request.harness_request.active_sql_role,
+                event=_event(
+                    delta, transition, None, committed_context,
+                    termination_reason=termination_reason,
+                ),
+                context=committed_context,
+            )
+            return TaskTurnResult(
+                result, request.action, 0, 1, task, delta, transition, local_contexts,
+                lifecycle, _runtime_identity(boundary, builder), compact_decision=compact_decision,
+            )
+
         resolved_question = _execution_question(state)
         harness = request.harness_request
         deep_request = HarnessRequest(question=resolved_question, run_id=harness.run_id, caller=caller, active_sql_role=harness.active_sql_role, force_new_pipeline=harness.force_new_pipeline, schema_retrieval_profile=harness.schema_retrieval_profile, schema_fusion_strategy=harness.schema_fusion_strategy)
@@ -153,6 +199,7 @@ def run_task_turn(
             version_after=1 if request.action in {"start", "switch"} else claim.task_version + 1,
             delta=delta, state=committed_state, action_count=len(loop.attempts),
             termination_reason=loop.termination.reason, budget_identity=str(budget_identity),
+            result_digest=_make_result_digest(result, committed_state),
         )
         if request.action == "start":
             task, lifecycle = boundary.start(caller=caller, state=committed_state, active_role=harness.active_sql_role, event=_event(delta, transition, loop, committed_context), context=committed_context)
@@ -198,7 +245,14 @@ def _as_agent_context(context: NodeContext | AgentNodeContext) -> AgentNodeConte
     )
 
 
-def _event(delta: TaskDelta, transition: TaskTransition, loop: AgentLoopResult | None, context: TaskContextWindow) -> TaskBoundaryEvent:
+def _event(
+    delta: TaskDelta,
+    transition: TaskTransition,
+    loop: AgentLoopResult | None,
+    context: TaskContextWindow,
+    *,
+    termination_reason: str | None = None,
+) -> TaskBoundaryEvent:
     """从本 turn 同源 typed fact 形成最小持久事件，不写 question/answer/rows。"""
 
     turn = context.uncovered_turns[-1] if context.uncovered_turns else None
@@ -206,7 +260,7 @@ def _event(delta: TaskDelta, transition: TaskTransition, loop: AgentLoopResult |
         delta_category=delta.category,
         transition_identity=transition.after_identity,
         action_count=len(loop.attempts) if loop else 0,
-        termination_reason=loop.termination.reason if loop else None,
+        termination_reason=loop.termination.reason if loop else termination_reason,
         turn_ordinal=turn.ordinal if turn else None, state_identity=transition.after_identity,
         constraint_keys=turn.constraint_keys if turn else (),
         requirement_identities=turn.requirement_identities if turn else (),
@@ -240,6 +294,24 @@ def _execution_question(state: TaskState) -> str:
         left, right = periods[-2:]
         return f"查询 {left} 和 {right} 的实际净退款金额，并计算差额和变化率。"
     return state.goal
+
+
+def _make_result_digest(result: AgentRunResult, state: TaskState) -> TaskResultDigest | None:
+    """只固化最近一次完整、安全回答；按 UTF-8 上限确定性截断，不保存 Tool 私有载荷。"""
+
+    if result.answer_status != "complete" or result.safety_status != "passed" or not result.answer.strip():
+        return None
+    raw = result.answer.encode("utf-8")
+    summary = result.answer if len(raw) <= 8192 else raw[:8189].decode("utf-8", errors="ignore").rstrip() + "…"
+    evidence_ids = tuple(dict.fromkeys(
+        str(item.ref.get("evidence_id"))
+        for item in state.evidence
+        if item.validity == "active" and item.ref.get("evidence_id")
+    ))[-16:]
+    return TaskResultDigest(
+        route=result.route, answer_status="complete", summary_text=summary,
+        evidence_ids=evidence_ids,
+    )
 
 
 def _local_result(reason: str, answer: str, *, answer_status: str = "no_answer", safety_status: str = "passed", caller_ref: str | None) -> AgentRunResult:

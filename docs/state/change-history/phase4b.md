@@ -18,6 +18,16 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M49 Phase 4B 最终联调与证据可信度优化（2026-08-27）
+
+- **改动范围**：基线 HEAD=`6e3cf3459088010e308a28d8361cd10b4348faba`，模块期间无提交。修复完整显式重述仍叠加旧 requirement、comparison repair-success/跨 turn coverage、conditional quality dependency、QueryPlan/SQL derived-scope fidelity 与重启后 existing-result 断点；新增 Context/Compact v2 bounded latest result digest、Scenario v7、assurance v2、真实 P1/P2 Probe、连续 rehearsal、报告和回归。M42～M48 artifact 保持可读；没有修改业务 seed、Knowledge active release、Milvus/index、Pipeline/Subgraph rollout 或 sealed reserve。
+- **关键决策与实现**：用户确认 G49-1～G49-5 均采用 A：typed completeness 替换完整重述、additive v7/assurance v2、B4 experimental-only 正式收口、`datapilot_dev` 正常迁移 0005、内部 `caller_untrusted`/公开 `task_unavailable` 分层。QueryPlan 与 derived SQL 均只强化 prompt 正反例，不弱化 validator。G49-6/G49-7 采用 guarded typed rows 的确定性两期增量与 active Evidence 跨 turn 复用。G49-8 针对个人 Demo 采用 C，但收敛为 Context/Compact additive v2：最近结果摘要最多 8 KiB/16 Evidence ID，不改 TaskState/数据库 schema，v1 继续可读，terminal scrub 不变；`ask_about_existing_result` 可零 Graph/Tool/provider 复用，缺 digest 则明确要求重查。LLM Turn Understanding C 只进入防遗忘账本，未实施。
+- **真实 Probe 与实验结论**：P1 最终在真实 Qwen + Text2SQL + Guard + MySQL 完成 T1/T2，完整重述只保留 comparison requirement，并自然覆盖 `DATE_TRUNC` failure→deterministic repair success，4 calls/13075 tokens、cleanup 0/0。P2 r1～r7 依次暴露 QueryPlan alias、代理/网络、derived scope、Controller dependency/cross-turn coverage 与 T6 结果解释合同，均按首错分层保留；r8 同一 task 贯通 T1～T5，worker B 新进程恢复并在 T6 从 Compact v2 digest 零调用复用最近结果，安全负例在 deep runtime/provider 前关闭，12 calls/51013 tokens、retry0、cleanup 0/0。两项均为 exploratory/baseline-ineligible，只证明固定 Demo 技术链，不外推泛化、质量或生产能力。
+- **证据可信度修复**：旧 Scenario v6/assurance 继续只读，但不再允许 contract identity 或常量 observation 冒充执行。v7 required assertion 必须绑定独立 execution locator/identity，缺失自动 `not_observed`；assurance v2 再聚合 v7、各 B 合同与 execution evidence。正式 Scenario v7 identity=`9b133cdf0bd1c071a0f10f79d03e86a0cdc00a4a75258a5d0e878a78e8ced080`，assurance v2=`bc4958405eb777b9be3a0ee1e392a9592181792d3563e0b1be33db53312e36bf`，均 completed。
+- **参考与适配**：依据 `docs/phase4-reference.md` 与 M42～M48 合同，复用 additive version、closed-world identity、父子预算、Evidence/Context 分权、服务端受控策略和失败关闭 seam。未照搬 LLM 自由摘要/TaskDelta、自动 SQL 语义改写、弱化 plan fidelity、Graph program counter 持久化或用 deterministic artifact 代替质量 Eval；本模块无新增外部研究。
+- **验证快照**：最终聚焦=`35 passed, 1 existing warning`；deterministic evidence=`6 passed`，JUnit SHA-256=`9f2f9e55...65e0`。全仓前台收集 677 项后后台同次=`677 passed, 1 warning in 595.25s`；首次 launcher 失败发生在 collection 前、零测试执行，已分账保留。compileall、rehearsal 重签、`git diff --check`、Alembic `current=20260827_0005 (head)` 与 `check=No new upgrade operations detected` 均通过。`datapilot_dev` 从 0003 正常升级且 users/orders/refunds/knowledge_docs 仍为 `200/10000/1000/11`，无 reset/reseed。
+- **遗留/后续**：Phase 4B 固定展示链可技术收口；Pipeline 仍默认、Subgraph 仍 server-controlled experimental、no-auto-fallback、reserve sealed/not-run。未证明开放问法泛化、RAG/LLM 质量胜出、生产认证、性能/HA、跨 task 长期记忆或外部 Tool exactly-once。只有形成稳定失败簇和新候选时再立编号计划，不为扩功能而扩功能。
+
 ### [模块任务] M48 Phase 4B B6 Context Compact 与全阶段技术集成（2026-08-27）
 
 - **改动范围**：起始 HEAD=`472b1ca55fad9c373839d0e82f7dc4d815a63b92`，期间无模块提交。新增 content-bound B6 contract/manifest、strict Task Context Window/Task Compact codec、统一 Context Builder、memory/MySQL boundary context seam、event v2、Alembic `20260827_0005`、API/Trace 安全投影、真实 MySQL 双 Probe、continuous rehearsal、Agent Scenario v6、B0～B6 assurance、报告和 M48 测试；旧 v1～v5 artifact、业务表/seed authority、Knowledge release、Milvus/index、M46 rollout/reserve 均未改签或切换。
@@ -26,6 +36,8 @@
 - **参考与适配**：定点复核 agentic-rag-for-dummies 的 token-trigger/summary+recent/orchestrator 重入通路，以及 LangGraph Memory/Context/Graph API 对 thread state、runtime context 与 model context 的分权。借鉴“先判规模、压缩后让真实节点消费、保留去重/执行 identity、用真实下游验证”的 seam；适配为 DataPilot typed Compact、MySQL task boundary、per-node allowlist/budget/fingerprint 和 paired behavior Gate。未照搬 LLM 自由摘要、MessagesState 全历史、RemoveMessage 保真假设、framework checkpointer/program counter、文本相似度代替安全与行为等价。
 - **验证快照**：M48 final focused=`21 passed`，switch 修复跨 M43/M48=`6 passed`；M42～M48=`185 passed`、M31～M41=`237 passed`。真实隔离库 Alembic `current=20260827_0005 (head)`、`check=No new upgrade operations`，P1 完成 downgrade→0004→upgrade 对称验证；compileall、rehearsal、`git diff --check` 通过。Scenario v6 identity=`53dde9550b9e10c8565bdb4f6b6224cc6bfbb594140fa99ddd6fe5df8767beaf`，assurance=`4084e4289b0cee7e8cb9cabaf139f41eba761a4d111a90ce6d5705ba271ca22b`。首轮全仓 `1 failed, 660 passed` 暴露 switch lineage 并修复，最终独立后台全仓=`662 passed, 1 warning in 589.75s`；warning 仅既有 Starlette/httpx deprecation。
 - **遗留/后续**：B6 与 Phase 4B technical integration 已完成，但尚不等于最终验收、RAG/LLM 质量提升、生产认证、外部 Tool exactly-once、性能/HA 或长期/跨 task memory。`datapilot_dev` 按禁区仍未迁移 0005。Pipeline 继续默认、Subgraph 继续 server-controlled experimental、无自动跨策略 fallback、reserve sealed/read0/not-run；后续只有形成明确失败簇或新质量 candidate 才另立有编号 plan。当前流程进入 finish-docs、人工演示与 `accept-module`。
+
+> ⚠️ 注（2026-08-27，M49 修正）：上述“`datapilot_dev` 未迁移”和“进入最终验收流程”是 M48 收工时事实。M49 经用户授权已将默认开发库正常迁移至 0005、业务关键计数不变，并修复连续自然语言链与执行证据独立性；当前以 M49 Scenario v7/assurance v2 和 677 项全仓结果为最新技术收口证据。M48 v6/assurance 原件不改签，但不能再作为执行证据可信度的最高版本。
 
 ### [模块任务] M47 Phase 4B B5 Durable Task State（2026-08-26）
 

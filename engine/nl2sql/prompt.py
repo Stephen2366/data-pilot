@@ -204,7 +204,9 @@ def build_query_plan_prompt(
 2. 不要输出原始推理过程；每个 step 只用 `purpose` 写一句话意图摘要。
 3. 表、字段、指标和 joins 必须只来自下面的局部 Schema；字段推荐写成 `table.column`。
 4. Phase 3A 只允许一个 `step_type="sql_query"` 的可执行步骤；不要规划多个 SQL 查询。
-5. `output_columns` 是 SQL 结果/API 展示列的精确合同：按用户需要的显示顺序填写，不能添加辅助列；ORDER BY 使用聚合输出别名时，必须在 `output_expressions` 写明 alias 到聚合表达式的绑定。
+5. `output_columns` 是 SQL 结果/API 展示列的精确合同：按用户需要的显示顺序填写，不能添加辅助列。凡是输出或排序使用的名称不是局部 Schema 中的物理列，而是聚合、计算或时间分桶得到的派生别名，都必须在 `output_expressions` 写明 alias 到表达式的绑定。
+   - 正确例子：`output_columns=["month", "net_refund_amount"]`、`order_by=["month ASC"]`、`output_expressions={{"month": "DATE_FORMAT(refunds.processed_at, '%Y-%m')", "net_refund_amount": "SUM(refunds.refund_amount)"}}`。
+   - 错误例子：`order_by=["month ASC"]`，但 `output_expressions` 只绑定 `net_refund_amount`、漏掉 `month`。不要照此错误例子输出。
 6. 展示图表类型不在本步骤决定，不要输出 display_type。
 
 QueryPlan JSON Schema：
@@ -249,7 +251,10 @@ def build_local_schema_sql_prompt(
 3. 必须服务于 QueryPlanStep 的 `purpose`、`filters`、`aggregations`、`group_by`、`order_by` 和 `limit`；排序项、方向、先后顺序和条数上限都不能静默省略或改写。
 4. SELECT 必须严格按照 `output_columns` 的集合与顺序输出；不得添加排序键、辅助列或其他未计划列，聚合结果应使用计划中的显式别名。
 5. SQL 使用 MySQL 兼容语法；SQLite 只用于本地结果核对，不是生成方言合同。日期范围使用明确字面值。
-6. 只返回 JSON：{{"sql": "...", "tables_used": ["..."], "confidence": 0.0-1.0, "reasoning_summary": "一句话说明"}}。
+6. QueryPlan 可由单层 SELECT + GROUP BY 完成时，禁止额外包装 CTE 或派生子查询。物理字段在 SELECT/GROUP BY/ORDER BY 中保留表名前缀；计划已绑定的输出别名可在同一层 ORDER BY 使用。
+   - 正确结构：`SELECT refunds.refund_reason, DATE_FORMAT(refunds.processed_at, '%Y-%m') AS month, SUM(refunds.refund_amount) AS net_refund_amount FROM refunds ... GROUP BY refunds.refund_reason, DATE_FORMAT(refunds.processed_at, '%Y-%m') ORDER BY refunds.refund_reason ASC, month ASC`。
+   - 错误结构：本可单层完成，却生成 `SELECT refund_reason, month, ... FROM (SELECT ...) t ORDER BY refund_reason, month`。不要照此错误结构输出。
+7. 只返回 JSON：{{"sql": "...", "tables_used": ["..."], "confidence": 0.0-1.0, "reasoning_summary": "一句话说明"}}。
 
 用户角色：{user_role}
 用户问题：{question}

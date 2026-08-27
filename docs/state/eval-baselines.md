@@ -10,7 +10,7 @@
 - **当前 Text2SQL 合同**：`m27-v3`；延续 v2 的 `external_unavailable / not_observed` 语义，并把 Schema Context 的物理字段、metric key、输出 alias 分开静态校验；`orders_wide` 的业务月份统一按 `paid_at`，`snapshot_at/batch_id` 只表示快照版本。
 - **当前 Text2SQL catalog**：28 个 Scenario；分类为 Core / Stress / Manual Lab。Smoke、Reliability、Database Exception 是 selector，不是复制题面的独立题集。
 - **当前 Text2SQL 真实 LLM 基线**：尚未登记正式长期基线；现有真实运行均为 v2，只能作为修复前过渡证据，不能与 v3 直接比较。该结论不适用于上方已经登记的 M34 RAG 真实 Qwen Answer Eval。
-- **Phase 4B B6 deterministic artifact**：M48 Scenario v6 identity=`53dde9550b9e10c8565bdb4f6b6224cc6bfbb594140fa99ddd6fe5df8767beaf`，Phase 4B assurance identity=`4084e4289b0cee7e8cb9cabaf139f41eba761a4d111a90ce6d5705ba271ca22b`。它们证明 B0～B6 technical integration、Context Compact/continuity 与 closed-world safety checks，不是 RAG/LLM 正确率、Reliability 或生产认证；reserve 仍 sealed/not-run。
+- **当前 Phase 4B deterministic artifact**：M49 Scenario v7 identity=`9b133cdf0bd1c071a0f10f79d03e86a0cdc00a4a75258a5d0e878a78e8ced080`，assurance v2 identity=`bc4958405eb777b9be3a0ee1e392a9592181792d3563e0b1be33db53312e36bf`。v7 要求每个 passed observation 绑定独立 execution locator/identity，contract identity 不能冒充执行；它们证明固定 Demo 的 B0～B6 technical integration、Context v2 continuity 与 closed-world safety checks，不是 RAG/LLM 正确率、Reliability 或生产认证。M48 v6/assurance v1 保持历史可读，reserve 仍 sealed/not-run。
 - **默认运行配置**：仍以 [runbook.md](runbook.md) 为准；M27 没有切换模型、检索、embedding、数据库、oracle、timeout 或 retry。
 - **M38 Hybrid 合同**：`phase4-harness-hybrid-v1` 是独立 deterministic 控制/安全 artifact（5 Scenario / 25 required），不与 M27 或 M34 的真实质量/长期数字混算；完整能力边界见 `rag-current-state.md` 和 Phase 4 changelog。
 - **M39 P6 readiness audit**：只读取六份冻结 M34 输入并校验 SHA-256 / identity / split / runtime；它不是新的 retrieval 或 Answer Eval，也不新增质量基线。audit `324ec7f8...b726c6` 的严格 `no_go`、dev 分层计数与重开缺口见 [`m39-p6-readiness.md`](../../eval/reports/m39-p6-readiness.md)。
@@ -64,6 +64,12 @@ M41 `phase4-rag-e2e-review-v1` 同样绑定 artifact 与逐 execution checkpoint
 ## 当前有效实验快照
 
 这里保留仍能帮助判断当前路线的真实运行；它们未必已成为正式长期 baseline，也未必能作严格对照。每条都必须写清楚证据状态和解释边界。Smoke、运行事故、中断和外部服务异常不作为独立记录进入本账本。
+
+### M49 evidence-backed Scenario v7 与连续 Dev Probe（2026-08-27）
+
+- additive `phase4b-agent-scenario-artifact-v7` 保留 v1～v6 可读，并把 required observation 的 passed 状态绑定到 M49-P2 r8 safe artifact、deterministic JUnit 或 M48 durable negative-path artifact；缺 execution locator/identity 时必须 `not_observed`。Scenario v7 identity=`9b133cdf0bd1c071a0f10f79d03e86a0cdc00a4a75258a5d0e878a78e8ced080`，assurance v2=`bc4958405eb777b9be3a0ee1e392a9592181792d3563e0b1be33db53312e36bf`。
+- M49-P2 r8 是一次开发期连续真实 Probe：Qwen + Text2SQL + Guard + MySQL + business Subgraph 同一 task 完成 T1～T5，新进程恢复并以 Context/Compact v2 在 T6 零 Graph/Tool/provider 复用 latest result digest；安全负例在 deep runtime/provider 前关闭。总 usage=`12 calls / 51013 observed tokens`、retry0、cleanup=`0/0`。
+- 该 Probe、v7 与 assurance v2 均为 `exploratory / baseline-ineligible` 技术证据，不登记正式长期质量基线，不证明开放问法泛化、RAG/LLM 质量胜出、Reliability 或生产能力，也不改变 Pipeline default/Subgraph experimental、M46 no-go 与 reserve sealed/read0/not-run。
 
 ### M48 Agent Scenario v6 Context Compact artifact（2026-08-27）
 
