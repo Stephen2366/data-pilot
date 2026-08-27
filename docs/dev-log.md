@@ -4540,3 +4540,212 @@ python -m uvicorn app.main:app --reload
 
 继续完成商品、政策和渠道分析后，可重启 FastAPI，再用最新 `task_id/expected_version` 提交“解释这个结果”。预期能看到 **`existing_result_digest_ready`**，并且该轮没有新的 Graph action、SQL、RAG 或模型调用。现场演示应强调状态流、Evidence、预算、Trace 和重启续接；回答质量仍受当前模型和数据快照影响，不把单次 Demo 当成泛化结论。
 
+## ★ ★ ★ Phase 4B 阶段总结：把可信问答升级为可持续推进的任务型 Agent
+
+（2026-08-27）
+
+**简述**：Phase 4B 用 M42～M49 建成了一条 Evidence-driven Bounded Agent（证据驱动、行动次数受限的智能体）主链：它能围绕同一自然语言任务连续查 SQL（数据库查询）、查知识、补证据、保存状态、跨进程恢复，并留下可核验的 Response（响应）、Trace（执行轨迹）和 Eval（评测）；当前适合个人项目的固定场景演示，但不等于开放问法质量胜出或生产就绪。
+
+**范围口径**：本总结覆盖 B0～B6 对应的 M42～M48、插入建设 Enterprise RAG 运行底座的 M44A，以及最终联调 M49；M41 属于 Phase 4 的 RAG Eval 前置背景，不并入本阶段模块范围。
+
+### 先用大白话讲
+
+Phase 4 结束时，DataPilot 更像一家**各部门都能独立办事的数据分析事务所**：有人能查数据库，有人能查制度，有人能审查 SQL，还有人能记录引用。但用户连续追问时，系统还缺少一个能记住任务、调度部门、控制预算和保存进度的总负责人。
+
+Phase 4B 补上的就是这套“总负责人制度”：
+
+- **任务前台**把自然语言变成受控的任务变化，分清“修改条件”“追加证据”“解释旧结果”和“切换任务”。
+- **总控调度员**只从登记好的动作里选下一步，并根据新证据、剩余预算和停止原因决定继续还是刹车。
+- **SQL 与资料室**分别产出结构化证据；资料室内部还有一个受限 RAG Subgraph（检索增强生成子图），可以在允许范围内补找上下文。
+- **MySQL（关系型数据库）档案室**保存任务版本和精简上下文，服务重启后仍能接着办；任务结束、过期或清除时会擦除敏感 payload（载荷）。
+- **审计员**把状态、动作、证据、预算、响应和轨迹投影到同一套 Scenario（场景）证据里，不能再用“合同文件存在”冒充“功能真的执行过”。
+
+最终价值很直白：面试演示时不再是逐个展示孤立接口，而是可以演示一个任务从提问、修改、查证、混合分析、重启恢复到解释结果的完整生命周期。
+
+### 这次做了什么
+
+这个阶段解决的核心矛盾是：**企业 Agent 不能只会调用工具，还必须能持续理解任务、掌握证据、限制行动、恢复状态，并证明自己为什么这样做。** 因此主线不是按模块机械堆功能，而是逐层建立“任务语义 → 决策 → 取证 → 持久化 → 上下文 → 审计”的闭环。
+
+1. **先把“聊天”变成有版本、有边界的任务。**
+
+   - **原来的问题**：上一轮查 7 月、下一轮改成比较 7 月和 8 月时，如果只是把文字不断追加，系统会同时保留互相冲突的旧要求；切换、取消或纠正后，旧证据也可能继续污染新结论。
+   - **关键机制**：TaskDelta（本轮允许发生的任务变化）只修改 TaskState（当前任务事实）中的特定字段。完整重述会替换主 requirement（证据需求），补政策依据则追加新需求；修正、切换和取消会显式使旧 Evidence（证据）失效。
+   - **安全点**：客户端和模型都不能整份覆盖状态，也不能直接指定 route（路线）、Action（动作）、预算或知识库；owner（任务所有者）、tenant（租户）、role（角色）、版本和 claim token（一次性领取令牌）共同守住任务边界。
+   - **结果**：同一个 `/api/query` 保留旧 legacy（历史兼容）请求，同时只有严格的 nested task envelope（嵌套任务信封）才进入新 Agent family（智能体运行家族），旧合同没有被静默改写。
+   - **还不能说明什么**：当前自然语言理解仍以确定性 typed rules（类型化规则）为主，不代表任意改写问法都能正确理解；LLM Turn Understanding（大模型轮次理解）只保留为出现稳定失败簇后的候选。
+
+2. **把“模型想做什么”改成“系统根据证据允许做什么”。**
+
+   - **原来的问题**：自由 ReAct（模型边想边调用工具）容易出现重复调用、预算失控、证据没增加还继续循环，以及失败原因无法审计。
+   - **关键机制**：顶层 Decision Loop（决策循环）围绕 `Action → Observation → EvidenceDelta → Progress → Next Action/Stop` 工作。简单说，每做一步都要回答：花了多少预算、看到了什么、证据有没有增加、还能不能继续。
+   - **确定性刹车**：动作来自 closed-world allowlist（封闭动作白名单）；父级最多 3 次证据动作或深层工具调用、1 次知识动作、6 次模型调用和 24,000 个可观测 token（模型文本计量单位）。重复、无进展、预算耗尽、外部不可用和权限拒绝都有稳定终止原因。
+   - **SQL 纵深防御**：QueryPlan（查询计划）、SQL fidelity（SQL 是否忠于计划）、SQL Guard（只读与权限安全门）和执行结果逐层检查。窄范围 MySQL 日期方言错误可做一次 deterministic repair（确定性修复），但修复结果仍要重新过全部门。
+   - **结果**：T3 能根据“8 月质量问题退款确实上涨”的 Observation 再查商品分解；T4/T5 能把 SQL Evidence 与 Document Evidence（文档证据）汇合，而不是预先把路径写死。
+
+3. **让 RAG 从固定检索流水线升级为有父子预算的实验子图。**
+
+   - **原来的问题**：一次检索漏掉基础政策或后续步骤时，系统只有“答不出来”，却不知道什么时候值得改写问题、补相邻上下文或停止。
+   - **关键机制**：B3 先根据真实失败漏斗准入受控恢复动作，B4 再把它们装进 RAG Subgraph。顶层 Loop 只提出“缺文档证据”，子图只负责 initial retrieval（初次检索）、受控 rewrite/expansion（改写或扩展）、Evidence merge（证据合并）和停止，不能越权调用 SQL 或生成最终答案。
+   - **权威分工**：Enterprise（企业长文档）场景中，Milvus（向量数据库）只负责选 unit（检索单元），SQLite profile（只读权威快照）才负责正文、revision（版本）、content hash（内容哈希）、anchor（原文坐标）和引用权威。收工后的真实 Probe（小规模真实探针）还找出并修复了 Subgraph 对 metadata-only entry（只有元数据的条目）漏做正文水化的问题。
+   - **当前策略**：Pipeline（确定性检索流水线）仍是产品默认；Subgraph 只允许服务端显式选择，保持 experimental（实验能力）、no auto-fallback（不自动跨策略降级）。M46 historical paired（历史成对实验）仍是 no-go（不晋级），60 题 reserve（封存决策集）保持 sealed/read0/not-run（未解封、未读取、未运行）。
+   - **真实边界**：修复后的 qst_0431 已能把 5,425 个正文字符送入 Composer（答案生成器）并完成回答与引用，但 required Gate（必过检查）仍为 `11 passed / 1 failed / 0 not_observed`，失败在没有引用指定 gold 文档；所以这里只能说**技术链恢复**，不能说 Subgraph 质量胜出。
+
+4. **把任务状态从进程内存升级为 MySQL 可恢复档案。**
+
+   - **原来的问题**：服务一重启或换 worker（工作进程），内存里的 task 就丢了；两个请求同时继续同一版本，还可能重复调用工具或相互覆盖。
+   - **关键机制**：MySQLTaskBoundary（MySQL 任务边界）用 checkpoint（当前任务快照）和 typed event ledger（类型化事件账本）保存 TaskState。expected version、single-use claim、owner/tenant/role 和 TTL（存活时间）共同进入数据库 CAS（带条件的原子更新）。
+   - **失败关闭**：只有一个 worker 能成功领取同一版本；旧版本、错角色、错租户和未知任务在深 Tool 前关闭。claimed crash（领取后进程崩溃）不会自动重放外部动作，避免把“可能重复执行”伪装成 exactly-once（严格只执行一次）。
+   - **数据最小化**：checkpoint 不保存完整 SQL rows、文档正文、Prompt、凭据、Thought（模型思维过程）或 Graph program counter（子图执行位置）。terminal、clear、expiry 会立即 scrub（清空）payload，再保留有限 tombstone（墓碑记录）用于审计。
+   - **结果**：真实 MySQL Probe 覆盖了 restart、multi-worker、版本冲突、角色漂移、clear、expiry、purge 和事务回滚；默认开发库也已正常迁移到 Alembic 0005，未 reset/reseed。
+
+5. **让长任务会压缩，但不让压缩摘要变成新的事实来源。**
+
+   - **原来的问题**：任务轮次变多后，把全部历史塞给每个节点会越来越贵，也会把文档、SQL rows 和无关旧信息扩散到不该看到它们的节点。
+   - **关键机制**：Context Builder（上下文构建器）按节点生成 typed projection（类型化最小投影）；Task Compact（任务压缩档案）由已提交 state、turn、Evidence、预算和终止事实确定性派生，不使用自由模型摘要。
+   - **触发与上限**：距离上次 Compact 已提交 5 个业务 turn，或候选节点上下文达到预算的 75% 时触发；仅保留最近 2 条用户原文，每条最多 2,048 bytes，总 payload 最多 65,536 bytes。
+   - **演示增强**：M49 的 additive v2（增量兼容版本）额外保存最近完成结果的有界 digest（摘要），最多 8 KiB 和 16 个 Evidence ID。它让新进程在 T6 可以零 Graph、零 Tool、零 provider（模型服务调用）解释最近结果；旧 v1 仍可读，缺 digest 时明确要求重查。
+   - **权力边界**：Compact 和 digest 都不是 Evidence、ACL（访问控制）或业务 authority（权威事实源）。source gap、身份漂移、内容损坏会在 Tool 前失败关闭，任务结束后仍随 payload 一起清理。
+
+6. **把 Response、Trace 和 Eval 做成同源证据链。**
+
+   - **原来的问题**：测试或报告格式通过，只能说明“我们会生成一份看起来正确的 JSON”，不能证明自然语言、数据库、RAG 和重启链真的执行过。
+   - **关键机制**：API Response（接口响应）、JSONL Trace（逐行 JSON 执行轨迹）和 Agent Scenario 都从同一 TaskDelta、状态迁移、Evidence validity（证据有效性）、动作消费和终止事实投影，避免三套口径各说各话。
+   - **证据升级**：Scenario v1～v6 保持可读；v7 要求每个 passed observation（通过的观察项）绑定独立 execution locator 和 identity（执行文件位置与内容身份）。合同 identity、常量 observation 或格式正确的报告不能给自己作证。
+   - **兼容与隐私**：legacy/agent runtime family 分离，旧 M31～M40 assertion（断言）继续显式回归；task/action/Context artifact 不保存私有 Evidence、文档正文、raw error、Prompt、raw task ID 或完整 Hybrid rows。
+   - **结果**：Scenario v7 identity 为 `9b133cdf...ed080`，assurance v2（阶段技术保证聚合）为 `bc495840...e36bf`，均为 completed；它们证明固定 Demo 的技术集成与证据闭环，不是答案质量分数。
+
+7. **最终用真实纵向 Probe 证明“整条链能走”，同时把证据外推范围写死。**
+
+   - **招牌链**：真实 Qwen、Text2SQL、SQL Guard、MySQL、business RAG Subgraph 在同一 task 中完成 T1～T5；新进程恢复后通过 Compact v2 完成 T6，版本链为 `1→3→5→7→9→11`。
+   - **安全负例**：不存在的版本得到 `task_version_conflict`，角色漂移得到 `task_unavailable`；两者都在 runtime/provider 前停止，没有创建或泄露任务状态。
+   - **RAG 补充验证**：业务 happy path、无候选零生成、Enterprise semantic Pipeline、修复后的 external Subgraph 和单 turn SQL+RAG Hybrid 都经过真实调用；campaign 共 9 attempts、15,502 个可观测 chat tokens。
+   - **最新复验**：整体审计的 P1 r9 再次一次贯通 T1～T6，12 calls / 52,709 tokens、cleanup `0/0`；P2 两条真实 lineage（任务版本链）安全负例均为零 provider。
+   - **还不能说明什么**：这些是固定场景的 exploratory / baseline-ineligible（探索性、不可登记基线）证据。它们不证明开放问法泛化、稳定正确率、RAG 质量胜出、吞吐/高可用、生产认证或外部 Tool exactly-once。
+
+### 阶段主线图
+
+`自然语言请求 + task envelope（任务信封）`
+→ `Turn Understanding（轮次理解）`
+→ `Typed TaskDelta / TaskState（受控任务变化与当前事实）`
+→ `MySQL claim + version CAS（原子领取任务版本）`
+→ `node-level Context Builder / Compact（节点最小上下文与压缩档案）`
+→ `Evidence-driven Decision Loop（证据驱动决策循环）`
+→ `Text2SQL / Knowledge Tool / RAG Subgraph`
+→ `SQL Evidence + Document Evidence`
+→ `Shared Answer Gate / Composer / Citation（回答门、生成与引用）`
+→ `TaskState + Context + event 原子提交`
+→ `Response / JSONL Trace / Scenario v7 / assurance v2`
+
+这条主线里，**顶层 Loop 只管任务级决策，RAG Subgraph 只管文档取证，Shared Answer Gate 才有资格决定能不能回答**。这样避免两个循环同时处理同一个失败，也避免子图越权扩大任务。
+
+### 关键知识点串联
+
+- **TaskState / TaskDelta / Event Ledger**：State 是当前任务事实，Delta 是本轮允许改什么，Event Ledger 是发生过什么的安全流水。类比 SpringBoot 业务系统里的聚合状态、Command 和审计表，三者职责不能混成一份聊天记录。
+- **Observation / EvidenceDelta / Progress**：Observation 是工具看到了什么，EvidenceDelta 是证据增加、删除、失效还是重复，Progress 才据此判断是否值得继续。它让“Agent 在行动”变成可计算、可停止的业务流程。
+- **父预算 / 子预算**：顶层 Agent 掌握总预算，RAG 子图只能消费分给它的子预算；子图消费必须回写父账本。像公司总预算和部门预算，不能两边各算一份来绕过上限。
+- **State / Context / Compact 分权**：State 保存事实，Context 决定当前节点能看什么，Compact 压缩已提交历史。三者分开后，既能续接任务，也能减少隐私扩散和无界 token 增长。
+- **Authority / Derived Index / Evidence**：SQLite/业务原件是权威正文，Milvus 是派生检索索引，Evidence 是本轮经权限和版本核验后签发的证据。检索命中不等于有权回答，更不等于答案正确。
+- **四轴状态**：route、execution、answer、safety 分别描述走哪条路、是否执行成功、是否有足够答案、是否安全。技术不可用、证据不足和权限拒绝不会被压成一个模糊的 `failed`。
+- **Deterministic Gate / Real Probe / Formal Eval**：确定性测试证明合同和安全；真实 Probe 证明固定产品链可运行；Formal Eval 才能讨论有分母的质量与稳定性。三类证据不能互相冒充。
+
+### 阶段设计取舍
+
+- **确定性控制，模型负责受限候选**：模型可以理解问题、生成 QueryPlan 或 SQL，但 TaskDelta、动作白名单、预算、权限、证据有效性和终止由代码校验。个人 Demo 也保留这条边界，因为它最能体现 Agent 工程能力。
+- **旧合同增量兼容，不原位升级**：Scenario v1～v7、Context v1/v2、legacy/agent runtime family 都采用 additive version（增量版本）；旧报告继续可读，不能通过改写历史 artifact 让新方案看似一直正确。
+- **持久化任务，不持久化执行栈**：MySQL 保存安全任务事实和事件，不恢复 LangGraph 节点栈或隐藏 Thought。崩溃后从任务边界重新决策，比宣称无法证明的 exactly-once 更诚实。
+- **Pipeline 与 Subgraph 能力、默认策略、质量结论三分开**：Subgraph 已实现且可真实运行，不等于应该切默认；historical no-go 与最新 cited-gold 失败仍被保留，所以 Pipeline 继续默认、reserve 继续封存。
+- **结果摘要换演示稳定性，但严格限制权力**：为重启后解释旧结果增加 8 KiB digest，是个人 Demo 的明确取舍；通过 v2 兼容、Evidence ID 上限、terminal scrub 和“不是 authority”把风险限定住。
+- **失败关闭优先于表面成功率**：模型结构错、权限不明、版本冲突、正文未水化或身份漂移时，系统宁可给出 unavailable/insufficient evidence，也不让模型猜测或自动降级到另一套数据。
+
+### 有面试价值的亮点
+
+1. **“我做的不是会调工具的聊天机器人，而是一套有任务边界的 Agent 控制系统。”** 自然语言先变成受控 TaskDelta，再由版本化 TaskState、Evidence、预算和终止规则推进；模型不能直接写状态或无限调用工具。这个设计把 Agent 的灵活性放在候选层，把最终控制权留在可测试代码里。
+
+2. **“我用父子预算解决了顶层 Agent 和 RAG 子图双循环失控的问题。”** 顶层只决定缺哪类证据，子图只在一次 Knowledge action 内补文档证据；每次 retrieval、model call 和 Evidence 增量都回写总账。这样既能展示 Agentic RAG，又不会让两个循环互相重试。
+
+3. **“我没有把有 checkpoint 说成 durable，而是把数据库并发语义真正补齐。”** owner/tenant/role、expected version、一次性 claim、TTL 和存储层 CAS 一起决定谁能继续任务；多 worker 只有一个赢家，崩溃后不自动重放外部动作。它比简单接一个框架 saver 更接近真实后端工程。
+
+4. **“我的上下文压缩不是自由摘要，而是可追溯的类型化档案。”** Compact 只从已提交事实派生，带 source range、identity 和高风险引用；节点看到的是最小 typed Context。为了 Demo 增加的结果 digest 也有大小、Evidence ID、兼容和清理上限。
+
+5. **“评测产物不能自己给自己作证。”** Scenario v7 把 passed observation 绑定到独立 Probe/JUnit/durable negative-path 原件；缺证据就是 `not_observed`。这能展示我不只会写 Eval 报告，还考虑执行证据、内容身份和结论边界。
+
+6. **“我能把技术闭环、效果胜出和生产就绪分开。”** 677 项回归和真实 T1～T6 证明固定 Demo 技术链能跑；qst_0431 的 cited-gold 仍失败，M46 historical 仍 no-go，所以我没有切 Subgraph 默认，也没有解封 reserve。这个取舍比只报一个成功率更可信。
+
+### 面试官追问
+
+1. **[基础追问] 这条链为什么算 Agent，而不是普通工作流？**
+
+   普通工作流通常按固定顺序执行。这里的下一步由当前 TaskState、缺失的 Evidence requirement、上一动作的 Observation、EvidenceDelta 和剩余 Budget 共同决定：T3 只有观察到质量问题退款上涨才会继续查商品分解，无进展或预算不足就停止。但它又不是自由 ReAct，因为动作、依赖、预算和终止都是 closed-world 的；所以更准确地说，它是受限的任务型 Agent。
+
+2. **[基础追问] TaskState、Context 和 Compact 为什么一定要分开？**
+
+   TaskState 是任务事实源，不能为了适配某个模型 Prompt 随意裁剪；Context 是某个节点此刻真正需要看到的最小输入；Compact 是历史变长后的可验证派生物。如果混在一起，Router 可能看到文档正文，RAG 可能看到完整 SQL rows，摘要还可能反过来篡改事实。分权后既方便 Eval，也能控制 token 和隐私面。
+
+3. **[工程/深挖追问] 多 worker 如何避免同一任务执行两次？**
+
+   请求必须带上一响应的 expected version，数据库用条件更新同时核对 active 状态、owner/tenant/role、TTL 和一次性 claim token。只有一个事务能领取成功，其他请求在 Tool 前得到版本冲突或不可用。完成时 state、context 和 event 使用同一 claim 原子提交；如果领取后崩溃，系统保守停止而不是自动重放，因此我只承诺 version fencing（版本围栏）和单赢家，不承诺外部副作用 exactly-once。
+
+4. **[工程/深挖追问] 为什么 RAG Subgraph 已经跑通却不切默认？**
+
+   “代码能运行”“固定题完成回答”“整体质量稳定提升”是三个不同结论。M46 historical paired 仍是 no-go；修复后的 qst_0431 虽然正文水化、Composer 和 citation 都完成，但 cited-gold 与 exact-fact 仍未过。当前证据只够证明实验链可运行，所以 Pipeline 继续默认。只有形成新 candidate、完成可比 review，并在不污染 reserve 的前提下获得新授权，才讨论默认晋级。
+
+5. **[工程/深挖追问] Context Compact 会不会把关键条件压丢？**
+
+   Compact 不让模型自由总结金额、月份、否定和 Evidence identity，而是从 typed turn/event 连续序列确定性派生；source range 必须无缺号，版本严格递增，高风险字段要与 TaskState 精确对账。source gap、identity 或 content binding 不一致会在 Tool 前失败关闭。真实 MySQL Probe 还覆盖了跨进程恢复、损坏 Compact 和 source gap 负例。
+
+6. **[工程/深挖追问] 你怎么证明 Response、Trace 和 Eval 没有各写一套故事？**
+
+   三者都从同一 task turn result、action ledger、Evidence validity、budget consumption 和 termination facts 投影。Scenario v7 还要求 passed assertion 指向独立执行文件及其 hash identity，不能拿合同 hash 代替执行 hash。最终 v7 绑定真实连续 Probe、deterministic JUnit 和 durable negative-path artifact，缺任何一类就会成为 `not_observed`。
+
+7. **[工程/深挖追问] provider 超时或模型输出坏结构时，系统怎么处理？**
+
+   retry 默认是 0，超时或坏结构会记录实际调用和 usage，然后在当前层失败关闭；没有 QueryPlan 就不生成 SQL，没有正文就不让 Composer 猜，没有通过 citation/support 合同就不发布答案。整体审计中确实观察过 T2 的 120 秒网络超时，产品没有碰 SQL 执行并正确返回 no-answer。固定 Demo 因此仍依赖现场网络状态，但安全边界不会因为演示焦虑而放宽。
+
+8. **[压力追问] 你做了这么多状态、预算和 Eval，但 RAG 质量没有明显胜出，这是不是工程自嗨？**
+
+   这个质疑有一部分成立：Phase 4B 的主要成果是控制、状态和证据工程，不是新的质量冠军。我能给出的证据是固定 T1～T6 真实贯通、MySQL 重启与并发边界、Subgraph 技术链恢复、677 项兼容回归，以及 Scenario v7 的独立执行证据；同时我保留了 M46 no-go 和 qst_0431 质量失败，没有把“能跑”包装成“更准”。对个人项目而言，这套闭环能展示企业 Agent 最难讲清的控制权和可信度；若目标改成质量提升，就必须另建代表性问题集、新 candidate 和 Formal Eval，而不是继续堆节点喵。
+
+9. **[压力追问] 一条固定演示链重试多次才跑通，你凭什么说它完整？**
+
+   完整指的是能力链和合同闭合，不是统计稳定性。每次首错都按 QueryPlan、SQL scope、Controller dependency、Context 或外部网络分层保留，修复后从头运行同一条链，没有拼接不同 run、换题、增加 retry 或放宽 Guard。M49 r8 与之后的整体审计 r9 都能在一次运行中完成 T1～T6，安全负例也在真实 lineage 上零 provider 通过；这足以证明当前固定链可复现，但不够证明 Reliability 或开放问法成功率，我会明确把后者留给新的评测计划喵。
+
+### 阶段成果与边界
+
+**已经完成：**
+
+| 关键证据 | 当前数字 | 能说明什么 |
+|---|---:|---|
+| M49 技术收工连续 Probe r8 | 12 calls / 51,013 tokens | 同一次 T1～T6、重启、Compact 与安全路径贯通 |
+| 阶段整体审计 P1 r9 | 12 calls / 52,709 tokens | 最新工作区再次一键复现招牌链 |
+| 收工后 RAG campaign | 9 attempts / 15,502 chat tokens | 业务、Enterprise Pipeline、Subgraph 与 Hybrid 的固定场景链路 |
+| M49 收工全仓回归 | 677 passed / 1 warning / 595.25s | M49 冻结点的新旧合同同次无失败 |
+| RAG 水化修复受影响回归 | 84 passed / 1 existing warning | 收工后 Subgraph 修复未破坏 M44A～M46 相关链路 |
+
+这些数字来自不同目的、不同运行，**不能相加成成功率，也不能把固定场景 Probe 当成 Formal Eval**。
+
+- **B0～B6 技术能力链**：版本化合同、隔离 seed/oracle、TaskState/TaskDelta、Decision Loop、SQL/Knowledge/Hybrid、实验 RAG Subgraph、Evidence/预算、MySQL durable state、Context Compact、重启续接和 Response/Trace/Eval 已串成一条固定 Demo。
+- **真实纵向证据**：M49-P2 r8 为 12 calls / 51,013 tokens，整体审计 P1 r9 为 12 calls / 52,709 tokens；两次均在单次运行中完成 T1～T6，并最终 cleanup `0/0`。
+- **真实安全边界**：版本冲突、角色漂移、无 caller resolver、Compact 损坏/source gap、无知识候选和外部依赖不可用均有失败关闭证据，关键负例不会调用深 Tool/provider。
+- **RAG 技术链**：业务 RAG、Enterprise semantic Pipeline、external experimental Subgraph 正文水化、SQL+Document Hybrid 均有真实调用证据；Milvus 选 unit、SQLite 管正文 authority 的分权已闭合。
+- **持久化与兼容**：MySQL 0004/0005、TaskState/Context v1/v2、Scenario v1～v7 和 legacy/agent runtime family 保持增量可读；M49 冻结点全仓 `677 passed, 1 warning in 595.25s`，后续 RAG 水化修复的受影响集合为 `84 passed, 1 existing warning`。
+- **评测可信度**：Scenario v7=`9b133cdf...ed080`、assurance v2=`bc495840...e36bf`，passed 结论必须绑定独立执行证据；60 题 reserve 仍为 `20/20/20` 且 sealed/read0/not-run。
+
+**没有完成，或刻意不做：**
+
+- **没有证明质量胜出**：Subgraph 仍是 experimental；qst_0431 required Gate 仍有 1 项 cited-gold 失败，M46 historical no-go 不改写，不能宣称 RAG/LLM 整体更准。
+- **没有证明生产能力**：没有生产 JWT/OAuth/SSO、真实 connector ACL、吞吐/高可用/压测、跨地域恢复、外部 Tool exactly-once 或长期跨 task 记忆。
+- **没有运行 reserve/held-out**：sealed reserve、120 held-out、大规模 Reliability 和默认策略切换都没有被本阶段授权或执行。
+- **运维仍是展示级**：tombstone purge 只有 bounded maintenance seam，没有常驻 scheduler；event 保留和长期容量不是生产方案。
+- **演示入口还需最终对齐**：招牌 7/8 月 `120000/180000` 数据存在于显式 Phase 4B profile 和隔离演示库，默认 `datapilot_dev` 虽已到 0005，但没有自动切换成该业务数据世界；README/Streamlit 与最终演示脚本仍需按同一入口统一说明。
+
+### 下一阶段怎么接
+
+Phase 4B 之后不应为了凑模块号继续加功能。更合理的顺序是：
+
+1. **先完成展示交付收口**：统一招牌 Demo 使用的数据库/profile、README 和 Swagger/Streamlit 操作路径，让面试现场按一份说明就能复现；这属于交付一致性，不是扩大 Agent 能力。
+2. **只在出现稳定失败簇时重开理解能力**：如果代表性 paraphrase 持续让确定性 Turn Understanding 误判，再单独评估 LLM structured TaskDelta（大模型生成结构化任务变化）；仍保留 closed-world schema、validator、预算、ACL 和失败关闭。
+3. **只在形成新 RAG candidate 时讨论质量升级**：先冻结新假设和 runtime identity，在未污染 dev 上证明净收益，再申请 sealed reserve 或 Reliability；没有新证据时保持 Pipeline 默认、Subgraph experimental。
+4. **只有真实部署需求才补生产设施**：认证、scheduler、容量治理、性能/HA、外部 Tool 幂等和更严格隐私策略，都应由明确部署场景驱动，而不是个人 Demo 为了“看起来生产级”提前堆复杂度。
+
+一句话收口：**Phase 4B 已经把 DataPilot 的“会回答”升级成了“能围绕同一任务安全推进、保存、恢复并自证过程”的展示型 Agent；下一步优先把这条能力稳定地交付出来，而不是继续扩张边界。**
+
