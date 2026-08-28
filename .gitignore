@@ -27,5 +27,3 @@ web/coverage/
 web/playwright-report/
 web/test-results/
 
-*.png
-*.jpg
