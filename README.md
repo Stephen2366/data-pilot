@@ -8,19 +8,19 @@ DataPilot 不是把数据库、向量库和大模型简单串起来的聊天 Dem
 
 **截图1：工作台总览**
 
-![查询2026年7月实际净退款金额](docs\asset\查询2026年7月实际净退款金额.png)
+![DataPilot 单月 Text2SQL 查询结果](docs/assets/datapilot-sql-single.png)
 
 **截图2：7/8 月退款比较结果与 SQL Evidence**
 
-![比较2026年7月和8月实际净退款金额，并计算差额和变化率 (1)](docs\asset\比较2026年7月和8月实际净退款金额，并计算差额和变化率 (1).png)
+![DataPilot 7 月与 8 月实际净退款金额比较结果](docs/assets/datapilot-sql-comparison-answer.png)
 
-![比较2026年7月和8月实际净退款金额，并计算差额和变化率 (2)](docs\asset\比较2026年7月和8月实际净退款金额，并计算差额和变化率 (2).png)
+![DataPilot 月份比较明细表](docs/assets/datapilot-sql-comparison-table.png)
 
 **截图3：Hybrid Evidence、Citation 与 Agent Inspector**
 
-![比较2026年7月和8月实际净退款金额，并说明质量问题全额退款的前提和材料 (1)](docs\asset\比较2026年7月和8月实际净退款金额，并说明质量问题全额退款的前提和材料 (1).png)
+![DataPilot Hybrid 分析结果](docs/assets/datapilot-hybrid-answer.png)
 
-![比较2026年7月和8月实际净退款金额，并说明质量问题全额退款的前提和材料 (2)](docs\asset\比较2026年7月和8月实际净退款金额，并说明质量问题全额退款的前提和材料 (2).png)
+![DataPilot Hybrid Evidence、Citation 与分支状态](docs/assets/datapilot-hybrid-evidence.png)
 
 ## 项目亮点
 
