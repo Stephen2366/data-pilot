@@ -95,6 +95,7 @@ tests/                  # pytest 测试
 
 ## 工作约定
 
+- **Eval 执行授权**：用户要求执行范围明确的 Eval，即授权按既有 runbook 执行一次；不得重复确认或扩大范围，只有新增外发/写操作或范围有歧义时才询问。
 - 所有 AI 工具共享同一个临时目录：`.agent_work/temp/`，用于存放脚本中间产物、一次性 JSON、缓存、临时 smoke 摘要等。新建的模块临时产物统一放入 `.agent_work/temp/<module>/<run-name>/`：`<module>` 使用小写模块号（如 `m46`），每次测试、Dev Probe 或后台任务再使用独立且能辨认的子目录（如 `pytest-focused`、`pytest-full-r2`、`probe-p2r`）；同一运行的 basetemp、日志、退出码和完成标记放在该子目录内。已有历史目录无需迁移，非模块任务可继续使用明确命名的独立目录。
 - 可复用运行数据不要放临时目录：模块 smoke 脚本放 `scripts/`（如 `scripts/smoke_m2_api.py`），Agent Trace 写入 `eval/traces/`，eval 报告（report / triage / compare）写入 `eval/reports/`，开发过程中的 notes / 实验 / 审查等 写入 `docs/notes/`（见「开发素材与收工」）；smoke 的一次性输出摘要仍放临时目录。
 - 当前阶段的能力顺序和长期边界以阶段 roadmap 为准；当前模块合同和验收以独立 `<module>-plan.md` 为准；运行配置、Eval、数据库和索引事实分别以对应 state 文档为准。模块 plan 只引用这些事实源，不复制形成第二份权威定义。
