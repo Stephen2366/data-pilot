@@ -19,3 +19,13 @@ eval/traces/*.jsonl
 
 *-dataset_items-export-*.csv
 *-lf-dataset_items-export-*.csv
+
+# M50 Web 工程本地依赖、构建与浏览器测试产物
+web/node_modules/
+web/.next/
+web/coverage/
+web/playwright-report/
+web/test-results/
+
+*.png
+*.jpg

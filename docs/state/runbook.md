@@ -2,7 +2,7 @@
 
 > DataPilot 的公共运行入口。运行任何项目命令前先读本文，再按任务进入 Text2SQL 或 RAG 专用 runbook。当前状态见 `AI_CONTEXT.md`，评测数字见 `eval-baselines.md`；本文不保存历史实验和基线数字。
 
-更新时间：2026-08-27
+更新时间：2026-08-28
 
 ## 先选链路
 
@@ -37,7 +37,7 @@
 - clear：`DELETE /api/query/threads/{thread_id}?user_role=<role>&expected_version=<version>`。
 - 进程内 thread checkpoint 默认 TTL：`THREAD_CHECKPOINT_TTL_SECONDS=900`；重启或多 worker 不恢复、不共享。
 - M43 Agent task family 仍走同一 `POST /api/query`，只有请求携带严格 nested envelope 才启用：start 为 `"task":{"action":"start"}`；continue/switch/cancel 必须同时提交服务端上一响应的 `task_id` 与 `expected_version`。task envelope 与 legacy thread/follow-up payload 互斥，客户端不得提交 delta/state/route/Evidence/runtime 字段。
-- task clear：`DELETE /api/query/tasks/{task_id}?user_role=<role>&expected_version=<version>`。M47/M48 后产品 task boundary 默认 `TASK_BOUNDARY_BACKEND=mysql`，使用 MySQL durable checkpoint + typed event ledger + bounded Context payload；`TASK_CHECKPOINT_TTL_SECONDS=900`、`TASK_TOMBSTONE_RETENTION_SECONDS=86400`、`TASK_STATE_MAX_BYTES=65536`、`TASK_CONTEXT_MAX_BYTES=65536`。memory 仅允许 `APP_ENV=test` 显式选择。该 family 与仍为进程内的 legacy thread checkpoint 分离；产品启动前数据库必须处于 Alembic `20260827_0005` head，否则 task storage 失败关闭。
+- task status/clear：mutation 结果 unknown 后可显式调用只读 `GET /api/query/tasks/{task_id}?user_role=<role>` 核对 owner 可见的最小 status/version；它不消费 claim、不解码 state/context、不调用 Graph/Tool/provider，也不自动重放 mutation。清理仍用 `DELETE /api/query/tasks/{task_id}?user_role=<role>&expected_version=<version>`。M47/M48 后产品 task boundary 默认 `TASK_BOUNDARY_BACKEND=mysql`，使用 MySQL durable checkpoint + typed event ledger + bounded Context payload；`TASK_CHECKPOINT_TTL_SECONDS=900`、`TASK_TOMBSTONE_RETENTION_SECONDS=86400`、`TASK_STATE_MAX_BYTES=65536`、`TASK_CONTEXT_MAX_BYTES=65536`。memory 仅允许 `APP_ENV=test` 显式选择。该 family 与仍为进程内的 legacy thread checkpoint 分离；产品启动前数据库必须处于 Alembic `20260827_0005` head，否则 task storage 失败关闭。
 - M48 Context Compact 在下一 accepted turn 执行前按“距上次 Compact 已提交 5 个业务 turn”或“任一候选 node Context 达到其 token budget 的 75%”双触发；只保留最近 2 个原始 user turns、每条最多 2048 UTF-8 bytes。M49 当前写 Context/Compact v2，旧 v1 仍可读；v2 的 latest result digest 最多 8 KiB/16 个 Evidence ID，只供 `ask_about_existing_result` 在重启后零 Graph/Tool/provider 复用最近完成回答，不保存任意 SQL、文档正文或无界 rows。Compact/digest 都不是 Evidence、权限或业务 authority；source 缺失/identity 漂移在 Tool 前失败关闭。`switch` 会退役旧 task，但新 task Context 从 T1/version=1 独立起步。
 - M47 lifecycle maintenance 通过 `MySQLTaskBoundary.expire_stale(limit=...)` 与 `purge_tombstones(limit=...)` 的受限 seam 执行：两者均 bounded，只返回处理数量，不暴露 task 内容；purge 会先处理已到期 active/claimed 并立即 scrub，再删除已满 24h 的 tombstone。当前没有常驻 scheduler，部署方必须以受控运维入口周期调用；不得用业务 seed/reset 代替 maintenance。
 - B1 零 provider rehearsal：`python -m scripts.rehearse_m43_b1`。它只复核 B1 contract、TaskState/Evidence invalidation、node Context、Scenario v2 和冻结 SQL oracle，输出到 `eval/reports/m43/`；不运行真实 LLM、embedding、数据库或 sealed reserve。
@@ -46,6 +46,16 @@
 - B6/Phase 4B 零 provider continuous rehearsal：`python scripts/rehearse_m48_b6.py --probe-result .agent_work/temp/m48/probe-p2/result.json`。它从同源 P2 安全摘要生成/复核 Scenario v6、B0～B6 assurance 与 `eval/reports/m48/` 演示链；不读取 sealed reserve，也不产生 RAG/LLM 质量分数。真实 MySQL P1/P2 的执行与清理命令、时点证据见 `docs/notes/m48-notes.md`，不得把 rehearsal 冒充真实 Probe。
 - M49 evidence-backed rehearsal：`python scripts/rehearse_m49_phase4b.py --evidence-package eval/reports/m49/m49-evidence-package.json --scenario-output eval/reports/m49/m49-agent-scenario-v7.json --assurance-output eval/reports/m49/m49-phase4b-assurance-v2.json`。v7 只有绑定 execution locator/identity 的 observation 才能 passed；缺失即 not_observed/inconclusive，B0～B6 contract identity 不能冒充 execution evidence。该入口零 provider、零数据库写入，不读取 sealed reserve。
 - SQL repair 仅由服务端将 `sql_dialect_incompatible` + `mysql_unsupported_date_trunc` 准入一次，并使用独立 `sql_repair` outbound purpose；timeout、provider unavailable、generic DB error 和 Guard deny 均不自动 retry。真实 provider repair showcase 仍须按本 runbook 的真实运行纪律单独授权。
+
+## M50 本地 Web 工作台
+
+- 完整说明与架构图见 `web/README.md`。浏览器只访问 Next Route Handler；薄 BFF 默认把 `/api/datapilot/*` 同源请求转发到 `http://127.0.0.1:8000`，负责 timeout、错误净化和 Zod 网络边界校验，不复制 Router、Evidence Gate、Controller 或 task 状态机。
+- 首次或显式重建演示世界：`python -m scripts.prepare_m50_demo prepare --confirm-database datapilot_demo`。该命令只允许精确库名 `datapilot_demo`，会重建目标库并加载 Phase 4B profile；不得把目标改成 `datapilot_dev/test/prod`，也不得由 Web 按钮触发。
+- 只读开机前核验：`python -m scripts.prepare_m50_demo preflight --confirm-database datapilot_demo`。必须观察 migration `20260827_0005`、7/8 月 oracle `120000.00/180000.00`、synthetic task rows `0/0` 和 `ready=true`。
+- 启动受保护 FastAPI：`python scripts/run_m50_demo_api.py --rag-strategy pipeline`。Pipeline 是默认；只有明确演示既有 experimental Subgraph 时由操作员把参数改为 `subgraph`，客户端没有 strategy/corpus/model 字段。provider transport 需要本机代理时可显式追加 `--proxy http://127.0.0.1:7897`，不要修改 `.env` 默认数据库。
+- 启动 Web：在 `web/` 执行 `npm ci`，再执行 `npm run dev -- --hostname 127.0.0.1 --port 3100`，访问 `http://127.0.0.1:3100`。BFF timeout 默认 300s；mutation timeout/abort/合同漂移为 unknown outcome，页面持久化冻结现场且绝不自动 retry，可由用户显式执行只读 status 对账。
+- 前端验证：`npm run typecheck`、`npm run lint`、`npm test`、`npm run test:e2e`、`npm run build`。Python-authoritative fixture 重签入口是 `python scripts/export_m50_web_contract_fixtures.py`；只有后端公开合同确实变化时才运行并审查 identity。
+- `datapilot_demo` 是可重建的本地演示库，不是默认业务库或生产环境。task clear 会按产品合同保留 scrubbed tombstone/event；开发 Probe 若需物理 0/0，只能对已记录的精确 `task_safe_ref` 使用 `python -m scripts.cleanup_m50_demo_task --task-safe-ref <safe-ref>`，不得模糊删除。
 
 ## Trace / LangFuse
 

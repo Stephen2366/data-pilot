@@ -150,3 +150,26 @@ def test_expired_claim_cannot_commit_after_ttl(tmp_path):
     with engine.connect() as connection:
         row = connection.execute(select(AgentTaskCheckpoint.status, AgentTaskCheckpoint.state_payload)).one()
         assert row == ("expired", None)
+
+
+def test_status_is_read_only_owner_scoped_and_does_not_decode_payload(tmp_path):
+    """恢复 GET 只读版本/status；错误 owner 仍统一，payload 损坏也不影响最小对账。"""
+
+    boundary, engine = _boundary(tmp_path)
+    caller, state = _caller(), _state(boundary)
+    started, _ = boundary.start(caller=caller, active_role="ops", state=state)
+    with engine.begin() as connection:
+        connection.execute(
+            AgentTaskCheckpoint.__table__.update().values(state_payload={"poisoned": True})
+        )
+    status, fact = boundary.status(task_id=started.task_id, caller=caller, active_role="ops")
+    assert status.safe_projection() == {
+        "task_id": started.task_id,
+        "task_version": 1,
+        "status": "active",
+        "expires_at": started.expires_at.isoformat(),
+    }
+    assert fact.action == "status" and fact.version_before == fact.version_after == 1
+    with pytest.raises(TaskBoundaryError) as caught:
+        boundary.status(task_id=started.task_id, caller=_caller("mallory"), active_role="ops")
+    assert caught.value.reason_code == "task_unavailable"

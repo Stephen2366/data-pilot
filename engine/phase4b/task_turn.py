@@ -10,7 +10,7 @@ from engine.harness.graph import HarnessRuntime
 from engine.phase4b.agent_loop import AgentLoopResult, AgentLoopRuntime, run_agent_loop
 from engine.phase4b.knowledge_runtime import KnowledgeRuntimeResolver
 from engine.phase4b.loop_contracts import AgentNodeContext
-from engine.phase4b.task_boundary import TaskBoundaryError, TaskBoundaryEvent, TaskBoundaryPort, TaskLifecycleFact, TaskProjection
+from engine.phase4b.task_boundary import TaskBoundaryError, TaskBoundaryEvent, TaskBoundaryPort, TaskLifecycleFact, TaskProjection, TaskStatusProjection
 from engine.phase4b.task_context import (
     CompactDecision,
     TaskContextBuilder,
@@ -167,7 +167,13 @@ def run_task_turn(
 
         resolved_question = _execution_question(state)
         harness = request.harness_request
-        deep_request = HarnessRequest(question=resolved_question, run_id=harness.run_id, caller=caller, active_sql_role=harness.active_sql_role, force_new_pipeline=harness.force_new_pipeline, schema_retrieval_profile=harness.schema_retrieval_profile, schema_fusion_strategy=harness.schema_fusion_strategy)
+        deep_request = HarnessRequest(
+            question=resolved_question, run_id=harness.run_id, caller=caller,
+            active_sql_role=harness.active_sql_role, force_new_pipeline=harness.force_new_pipeline,
+            schema_retrieval_profile=harness.schema_retrieval_profile,
+            schema_fusion_strategy=harness.schema_fusion_strategy,
+            base_aggregate_only=bool(dict(state.constraints).get("comparison")),
+        )
         # M44：task family 的唯一 Graph 是独立 Decision Loop。未显式注入 resolver 的旧
         # direct caller 仍能跑 SQL-only task，但 registry 为空，绝不把 legacy RAG 当 fallback。
         active_agent_runtime = agent_runtime or AgentLoopRuntime(
@@ -229,6 +235,23 @@ def clear_task(*, task_id: str, expected_version: int, caller: TrustedCaller | N
     try:
         task, lifecycle = boundary.clear(task_id=task_id, expected_version=expected_version, caller=caller, active_role=active_role)
         return task, lifecycle, True, "task_cleared"
+    except TaskBoundaryError as exc:
+        return None, boundary.lifecycle_rejection(task_id, exc.reason_code), False, exc.reason_code
+
+
+def read_task_status(
+    *, task_id: str, caller: TrustedCaller | None, boundary: TaskBoundaryPort,
+    active_role: str | None = None,
+) -> tuple[TaskStatusProjection | None, TaskLifecycleFact, bool, str]:
+    """将 adapter 的只读 status 成功/拒绝统一成 API 可安全投影的结果。
+
+    ★ 这里与 ``clear_task`` 共用同一错误收口，但 status 不 claim、不改版本；页面只能据此
+    恢复 last-acknowledged identity，不能借恢复接口重放上一条 mutation。
+    """
+
+    try:
+        task, lifecycle = boundary.status(task_id=task_id, caller=caller, active_role=active_role)
+        return task, lifecycle, True, "task_status_ready"
     except TaskBoundaryError as exc:
         return None, boundary.lifecycle_rejection(task_id, exc.reason_code), False, exc.reason_code
 

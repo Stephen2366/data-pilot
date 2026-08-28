@@ -1,0 +1,167 @@
+{
+  "$defs": {
+    "TaskRequestEnvelope": {
+      "additionalProperties": false,
+      "description": "M43 新 task family 的严格信封；delta/state/route/evidence 均不能由客户端提交。",
+      "properties": {
+        "action": {
+          "enum": [
+            "start",
+            "continue",
+            "switch",
+            "cancel"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "expected_version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Version"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "TaskRequestEnvelope",
+      "type": "object"
+    }
+  },
+  "description": "自然语言查询请求。\n\n`user_role` 在 M35 起只表示请求者选择的 active role：应用组装层必须先通过 caller\nresolver 把它解析为可信 fixture / authenticated caller，才能进入 SQL Guard 或知识 ACL。\n`force_new_pipeline` 是新旧 Text2SQL 的兼容开关：默认 True，让普通 API 与 M27 Eval 都走\nSchema Retrieval → QueryPlan → SQL Guard 的新 pipeline；显式传 False 才暂时回到 legacy\nbaseline，供兼容排障使用。\n`schema_retrieval_profile` 是本地实验开关：默认不传时沿用环境变量；演示页可显式选择\nMilvus + Qwen embedding，方便 Phase 3 RAG / Hybrid 前手动对比。\n`schema_fusion_strategy` 是 M21 的受控实验开关：默认 `weighted` 保持既有排序，只有显式\n传 `rrf` 才会改用 rank-based fusion；它不改变默认检索或响应契约。",
+  "properties": {
+    "clarification_answers": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Clarification Answers",
+      "type": "object"
+    },
+    "enable_bounded_follow_up": {
+      "default": false,
+      "title": "Enable Bounded Follow Up",
+      "type": "boolean"
+    },
+    "expected_version": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Version"
+    },
+    "follow_up_action": {
+      "anyOf": [
+        {
+          "enum": [
+            "adjust_sql_scope",
+            "explain_same_evidence",
+            "ask_related_evidence"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Follow Up Action"
+    },
+    "follow_up_fields": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Follow Up Fields",
+      "type": "object"
+    },
+    "force_new_pipeline": {
+      "default": true,
+      "title": "Force New Pipeline",
+      "type": "boolean"
+    },
+    "question": {
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+    },
+    "schema_fusion_strategy": {
+      "default": "weighted",
+      "enum": [
+        "weighted",
+        "rrf"
+      ],
+      "title": "Schema Fusion Strategy",
+      "type": "string"
+    },
+    "schema_retrieval_profile": {
+      "default": "default",
+      "enum": [
+        "default",
+        "milvus_qwen37"
+      ],
+      "title": "Schema Retrieval Profile",
+      "type": "string"
+    },
+    "task": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaskRequestEnvelope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "thread_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Thread Id"
+    },
+    "user_role": {
+      "default": "ops",
+      "title": "User Role",
+      "type": "string"
+    }
+  },
+  "required": [
+    "question"
+  ],
+  "title": "QueryRequest",
+  "type": "object"
+}

@@ -54,6 +54,26 @@ class TaskProjection:
 
 
 @dataclass(frozen=True)
+class TaskStatusProjection:
+    """恢复页只需的最小 task 事实；不解码或公开 state/context。"""
+
+    task_id: str
+    task_version: int
+    status: Literal["claimed", "active", "cancelled", "switched", "cleared", "expired"]
+    expires_at: datetime
+
+    def safe_projection(self) -> dict[str, object]:
+        """返回可由合法 owner 对账的只读状态。"""
+
+        return {
+            "task_id": self.task_id,
+            "task_version": self.task_version,
+            "status": self.status,
+            "expires_at": self.expires_at.isoformat(),
+        }
+
+
+@dataclass(frozen=True)
 class TaskLifecycleFact:
     """API/Trace/Eval 共用的不可逆生命周期事实。"""
 
@@ -121,6 +141,7 @@ class TaskBoundaryPort(Protocol):
     def claim(self, *, task_id: str, expected_version: int, caller: TrustedCaller | None, active_role: str | None = None) -> TaskProjection: ...
     def commit(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, terminal_status: str | None = None, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
     def clear(self, *, task_id: str, expected_version: int, caller: TrustedCaller | None, active_role: str | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
+    def status(self, *, task_id: str, caller: TrustedCaller | None, active_role: str | None = None) -> tuple[TaskStatusProjection, TaskLifecycleFact]: ...
     def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]: ...
     def lifecycle_rejection(self, task_id: str, reason_code: str) -> TaskLifecycleFact: ...
     @staticmethod
@@ -136,7 +157,7 @@ class _Checkpoint:
     tenant_ref: str
     active_role: str
     version: int
-    status: Literal["claimed", "active", "cancelled", "switched", "cleared"]
+    status: Literal["claimed", "active", "cancelled", "switched", "cleared", "expired"]
     state: TaskState | None
     expires_at: datetime
     claim_token_hash: str | None = None
@@ -227,6 +248,20 @@ class TaskBoundary:
         )
         state = replace(claim.state, status="cleared", termination="cleared_by_caller", evidence=evidence)
         return self.commit(claim=claim, caller=caller, state=state, terminal_status="cleared", active_role=active_role)
+
+    def status(self, *, task_id: str, caller: TrustedCaller | None, active_role: str | None = None) -> tuple[TaskStatusProjection, TaskLifecycleFact]:
+        """只读对账当前版本；TTL 过期按有效状态投影，不消费 claim 或修改 checkpoint。"""
+
+        owner, tenant, role = self.owner_scope(caller, active_role)
+        with self._lock:
+            item = self._owned(task_id, owner, tenant, role)
+            effective_status = "expired" if item.status in {"active", "claimed"} and self._now() >= item.expires_at else item.status
+        projection = TaskStatusProjection(item.task_id, item.version, effective_status, item.expires_at)
+        fact = TaskLifecycleFact(
+            self.safe_ref(item.task_id), "status", "task_status_ready", item.version, item.version,
+            item.state.identity if item.state else None,
+        )
+        return projection, fact
 
     def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """在同一把锁内终止旧 task 并签发新 task，避免出现只完成半边的切换。"""

@@ -18,6 +18,20 @@
 
 ## 变更记录（新的在上）
 
+### [小修] M50 用户实测的 unknown 恢复与月份比较收敛（2026-08-28）
+
+- 用户连续查询 7 月、再比较 7/8 月时，BFF 150 秒先于服务端完成而进入 unknown；服务端随后提交新版本，浏览器仍持有旧版本。同时 QueryPlan 把 `diff/change_rate` 下推为 MySQL 嵌套聚合。修正为 BFF 默认 300 秒、unknown 跨刷新、owner-scoped 只读 task status 对账，以及仅在 Agent `comparison=true` 时把 SQL 计划收敛为 month + base metric，由既有 completion 层计算差值/变化率；mutation 仍不自动重试。
+- 聚焦 Python/前端回归、E2E 与 build 已通过；授权 Probe `M50-UXR-P1` 首次双轮真实链以 4 calls / 16029 observed tokens 得到 `120000/180000/delta=60000/rate=0.5`，UI 与服务端同为 task v3，精确 cleanup 后 0/0。该证据为 exploratory/baseline-ineligible，只覆盖固定演示场景。按用户要求，本次小修不重复完整测试或整套 `finish-module` / `finish-docs`。
+
+### [模块任务] M50 DataPilot Web 工作台（2026-08-28）
+
+- **改动范围**：起始 HEAD=`9a3ac84da3678adaaf2f8a03115ffcc117fdff8d`，模块期间无提交。新增完整 `web/` Next.js 16/React 19/TypeScript 6 工程、thin BFF、Zod 网络合同、深 `DataPilotClient`、纯 `ResponsePresenter`、task-first 工作台、结果/图表/citation/Hybrid/Inspector、legacy compatibility、session restore、fixture gallery、Vitest/Playwright；新增 Python-authoritative fixture/schema export、`datapilot_demo` prepare/preflight/API launcher/safe cleanup 与 Python contract test，固化 plan/notes/截图，并更新 AGENTS/README/runbook/state。未跟踪的 `.agent_work/emilkowalski skill 描述.md` 不属于本模块，未修改。起始 commit 明确，最终原始清单见 `docs/notes/m50-notes.md`。
+- **关键记录与用户决策**：G50-1 采用用户确认方案 A（Next App Router + thin same-origin BFF），集中 transport/timeout/error/runtime validation，但不复制 Router/Evidence/Controller/task state；FastAPI/Pydantic 保持业务 authority。G50-2 采用方案 A（独立 `datapilot_demo` + 精确确认 prepare），不 reset/reseed `datapilot_dev`。首次 P2 的模糊问法在现有 business admission seam 下无 candidate，且执行控制在剩余 1 call 时漏停导致 9/8 attempts；按硬门 `failed→stop`，没有把 partial 改签。用户随后确认方案 A：不改 Agent/RAG、不降验收，使用已有真实证据支持的明确质量退款问法，以全新 lineage、6 calls/30000 tokens 执行 P2R；旧失败永久保留。
+- **实现与真实证据**：浏览器只推进服务端最后确认的 task id/version；typed stale/role rejection 为 known-rejected，不追加 turn、不冻结，timeout/abort/合同漂移为 unknown 并冻结，mutation retry=0。P1 经 proxy 与 demo `get_db` 装配修复后得到 120000 oracle，campaign 5 calls/12160 tokens；P2R 三轮得到 120000/180000/60000/0.5、SQL + 3 Document Evidence、2 citations、Hybrid 双分支，6 calls/23009 tokens；P3 version conflict、role drift、clear 均 0 provider/0 Graph/Tool，最终 demo task 0/0。Probe 都在依赖切片前执行，属于 exploratory/baseline-ineligible，不是 Formal Eval/质量基线。
+- **参考资料**：借鉴 AskData Studio 的统一 request、turn snapshot、pending/empty/error、sticky table；适配为 DataPilot task/version authority、四轴 Presenter 与安全 Inspector，不照搬无限聊天、客户端历史拼接、登录 token、导出或 runtime 开关。按 Next 16 随包文档实现 App Router/Route Handler/server-only/Link；按 Vega Embed 生命周期使用 object spec + finalize，失败回退 table。前端 polish 使用 Emil design engineering 原则；不改变产品合同。
+- **验证快照**：clean `npm ci`=528 packages/audit 529/0 vulnerabilities；lint/typecheck exit 0；Vitest 35 passed；Playwright desktop/mobile 12 passed；Next production build 6/6 static pages + 3 dynamic BFF routes。Python 49 文件聚焦 245 passed；后台同次全仓 681 passed、1 个既有 Starlette/httpx deprecation warning、581.33s。demo preflight 为 0005、120000/180000、task 0/0、provider0；fixture identity=`04998899e0d98f194ce0778784458d25a94d9f9b0c2b6df9ef0eeef9f86c280f`。sandbox 内 npm/pytest 的 `spawn EPERM`/WinError5 均在获批沙箱外以原命令闭合，不是产品失败。
+- **遗留/后续**：M50 只声明固定本地 Web 展示链完成；用户实测小修已增加本地/demo owner-scoped 只读 task status 对账，但仍不包含公网 deployment/auth/abuse、streaming、MCP、Eval Dashboard、全量导出、HA/性能/exactly-once，也不宣称 RAG/LLM 质量提升或 Subgraph 胜出。Pipeline default、Subgraph server-controlled experimental、no auto-fallback、reserve sealed/not-run 不变。下一模块编号未预定；任何部署、认证、核心合同/默认数据库/runtime 或质量路线变化必须另立 plan 和用户决策。
+
 ### [实验] Phase 4B 整体审计双 Probe（2026-08-27 后，审计轮）
 
 - **范围与授权**：M49 收工后对 B0～B6 做整体审计，用户授权两个 `exploratory / baseline-ineligible / development-probe`：P1 纵向链 ≤14 calls/≤60,000 tokens（运行仓库已提交 `scripts/probe_m49_phase4b_continuity.py`，r9），P2 真实 lineage 安全负例 ≤6 calls/≤15,000 tokens；后经用户裁决追加 P2 attempt 2 最小重验 ≤2 calls/≤6,000 tokens。只写隔离库 `datapilot_m48_test` 并清理 0/0；不碰 held-out/reserve/生产数据/默认切换。

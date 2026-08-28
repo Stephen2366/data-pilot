@@ -381,6 +381,7 @@ class Text2SQLToolAdapter:
             schema_vector_index=self._schema_vector_index,
             repair_context=repair_context,
             repair_strategy=self._repair_strategy,
+            base_aggregate_only=request.base_aggregate_only,
         )
         semantic_request_rejection = any(
             step.name == "plan_validation"

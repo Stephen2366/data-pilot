@@ -33,7 +33,7 @@
 
 **Phase 4B — Evidence-driven Bounded Agent**
 
-当前已完成 **B0～B6 的技术集成与 M49 连续联调**：自然语言任务可在同一 durable TaskState 中连续经过 Decision Loop、SQL/Knowledge/RAG Subgraph、Evidence、父子预算、MySQL checkpoint、Context Compact、重启续接、Response/Trace 与 evidence-backed Scenario Eval。
+当前已完成 **B0～B6 的技术集成、M49 连续联调与 M50 Web 产品展示层**：自然语言任务可在同一 durable TaskState 中连续经过 Decision Loop、SQL/Knowledge/RAG Subgraph、Evidence、父子预算、MySQL checkpoint、Context Compact、重启续接、Response/Trace，并由真实 Next.js 工作台展示结果、引用、安全停止和 Agent Inspector。
 
 ```text
 Phase 2        Basic NL2SQL / API / SQL Guard
@@ -52,6 +52,8 @@ Phase 4
     └── P7  cross-route Trace & runtime assurance   ✅
     ↓
 Phase 4B      TaskState + bounded Decision Loop + RAG Subgraph  ✅
+    ↓
+M50           Next.js evidence-first Web workbench              ✅
 ```
 
 Latest Phase 4B integration evidence:
@@ -59,6 +61,8 @@ Latest Phase 4B integration evidence:
 ```text
 M49-P2: T1→T6 continuous demo, 12 provider calls / 51,013 observed tokens
 Scenario v7 + assurance v2: completed with independent execution evidence
+M50-P2R: Browser→BFF→Agent SQL/Hybrid→UI, 6 calls / 23,009 tokens
+M50-P3: version/role rejection + clear, 0 provider / 0 deep invocation
 ```
 
 > 这里的 completed 指版本化合同与固定演示链的技术闭环；Pipeline 仍是默认，Subgraph 仍是服务端实验策略。它不代表通用自然语言正确率、RAG 质量胜出或生产认证。
@@ -69,7 +73,9 @@ Scenario v7 + assurance v2: completed with independent execution evidence
 
 ```mermaid
 flowchart TD
-    U[User Question] --> API[FastAPI /api/query]
+    U[User Question] --> WEB[Next.js Task Workbench]
+    WEB --> BFF[Thin Same-origin BFF]
+    BFF --> API[FastAPI /api/query]
 
     API --> C[Trusted Caller / Turn Lifecycle]
     C --> G[LangGraph Agent Harness]
@@ -102,6 +108,7 @@ flowchart TD
 
     CTRL --> CV[Citation Validation]
     CV --> A[Final Answer]
+    A --> WEB
 
     G --> TRACE[Trace / Eval]
     ST --> TRACE
@@ -232,26 +239,27 @@ SQL 与 Document branch 使用独立的 Evidence 类型和安全合同。
 
 DataPilot 没有实现无限 ReAct 循环，而是使用**有预算、可证明终止的状态迁移**。
 
-当前支持：
+Phase 4B task family 当前支持：
 
-- initial request
-- 一次结构化 clarification → resume
-- SQL / RAG 成功后的一次 closed-world follow-up
+- start / continue / switch / cancel / clear
+- 同一 task 的多轮 requirement / Evidence 推进
+- MySQL durable optimistic version 与 single-use claim
+- Context/Compact v2 和重启后最近结果摘要复用
 - Evidence validity check
 - 必要时重新查询 / 重新检索
 - ACL、身份或 Evidence 失效后的安全停止
 - Tool-call budget 与 no-progress termination
 
-当前 checkpoint 为：
+当前 task checkpoint 为：
 
 ```text
-inprocess-bounded-thread-v2
+phase4b-mysql-task-boundary-v1
 TTL: 900s
 ```
 
-它只保存恢复任务所需的最小状态，不保存旧 answer、完整 SQL rows、文档正文或 citation。
+它只保存恢复任务所需的 bounded TaskState/Context/Compact 与 typed event，不保存完整 SQL rows、文档正文、Prompt、Thought 或 Graph program counter。旧 legacy clarification/follow-up 仍使用独立的 `inprocess-bounded-thread-v2`，不冒充 durable task。
 
-当前设计明确**不宣称通用多轮对话**；进程重启或多 worker 之间也不会共享该 checkpoint。
+当前设计明确**不宣称无限对话或外部 Tool exactly-once**；claimed crash 会保守停止，不自动重放 mutation。
 
 ------
 
@@ -388,7 +396,7 @@ Pipeline 是稳定默认，Subgraph 是可显式启用的实验策略；两者�
 | Vector Store        | in-memory default, Milvus experimental adapter     |
 | Evaluation          | Pytest + custom Scenario / typed assertion runners |
 | Trace               | JSONL default, LangFuse optional                   |
-| Demo                | Streamlit                                          |
+| Web / Demo          | Next.js 16, React 19, TypeScript 6, Vega-Lite; legacy Streamlit |
 | Python              | 3.11+                                              |
 
 ------
@@ -441,11 +449,22 @@ Health check:
 GET http://127.0.0.1:8000/health
 ```
 
-### 5. Start Demo
+### 5. Start M50 Web Demo
 
-```bash
-python -m streamlit run demo/streamlit_app.py
+```powershell
+python -m scripts.prepare_m50_demo prepare --confirm-database datapilot_demo
+python scripts/run_m50_demo_api.py --rag-strategy pipeline
 ```
+
+另开一个终端：
+
+```powershell
+Set-Location web
+npm ci
+npm run dev -- --hostname 127.0.0.1 --port 3100
+```
+
+打开 `http://127.0.0.1:3100`。完整的 prepare/preflight、experimental Subgraph 演示和验证说明见 `web/README.md`；旧 Streamlit 页面只保留 legacy compatibility 演示。
 
 ### 6. Run Tests
 
@@ -518,6 +537,7 @@ data-pilot/
 │
 ├── eval/                    # Evaluation contracts / cases / reports
 ├── demo/                    # Streamlit demo
+├── web/                     # Next.js task workbench + thin BFF
 ├── scripts/                 # Maintenance / benchmark scripts
 ├── tests/                   # Deterministic regression tests
 └── docs/

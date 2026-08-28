@@ -166,6 +166,25 @@ class TaskControlResponse(BaseModel):
     task: TaskView | None = None
 
 
+class TaskStatusView(BaseModel):
+    """浏览器在 mutation 结果未知后用于恢复的最小只读投影。"""
+
+    task_id: str
+    task_version: int = Field(ge=1)
+    status: Literal["claimed", "active", "cancelled", "switched", "cleared", "expired"]
+    expires_at: str
+
+
+class TaskStatusResponse(BaseModel):
+    """GET status 的闭合响应；错误 owner 与未知 task 都不回显投影。"""
+
+    ok: bool
+    reason_code: str
+    safety_status: Literal["passed", "blocked"]
+    message: str
+    task: TaskStatusView | None = None
+
+
 class CostInfo(BaseModel):
     """一次 Agent 查询的成本与耗时快照。
 

@@ -1,0 +1,118 @@
+{
+  "action_attempts": [
+    {
+      "action": "query_sql",
+      "evidence_delta": 1,
+      "status": "completed"
+    }
+  ],
+  "agent_budget": {
+    "sql": {
+      "limit": 2,
+      "used": 1
+    }
+  },
+  "agent_loop_runtime": {
+    "format": "phase4b-agent-loop-v1"
+  },
+  "agent_scenario_source_identity": null,
+  "agent_termination": {
+    "action": "answer",
+    "reason": "requirements_satisfied"
+  },
+  "answer": "2026 年 7 月实际净退款金额为 120,000 元。",
+  "answer_status": "complete",
+  "blocked_reason": null,
+  "chart_spec": {
+    "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+    "data": {
+      "values": [
+        {
+          "amount": 120000.0,
+          "month": "2026-07"
+        }
+      ]
+    },
+    "encoding": {
+      "x": {
+        "field": "month"
+      },
+      "y": {
+        "field": "amount",
+        "type": "quantitative"
+      }
+    },
+    "mark": "bar"
+  },
+  "citations": [],
+  "columns": [
+    "month",
+    "net_refund_amount"
+  ],
+  "compact_decision": null,
+  "cost": {
+    "completion_tokens": 0,
+    "latency_ms": 0.0,
+    "model": null,
+    "prompt_tokens": 0,
+    "sql_time_ms": 0.0
+  },
+  "docs_used": [],
+  "error_type": null,
+  "execution_status": "completed",
+  "graph_invocation_count": 1,
+  "hybrid_branches": [],
+  "knowledge_runtimes": [],
+  "node_contexts": [],
+  "reason_code": null,
+  "route": "sql",
+  "rows": [
+    {
+      "month": "2026-07",
+      "net_refund_amount": 120000.0
+    }
+  ],
+  "runtime_family": "agent_task",
+  "safety_status": "passed",
+  "sql": "SELECT SUM(refund_amount) AS net_refund_amount FROM refunds",
+  "tables_used": [
+    "refunds"
+  ],
+  "task": {
+    "context": {
+      "committed_turn_count": 1,
+      "format": "phase4b-task-context-v2"
+    },
+    "expires_at": "2026-08-28T12:15:00+00:00",
+    "state": {
+      "goal": "分析实际净退款金额",
+      "requirement_count": 1,
+      "route": "sql"
+    },
+    "status": "active",
+    "task_id": "task_m50_fixture_001",
+    "task_version": 1
+  },
+  "task_action": "start",
+  "task_context": {
+    "committed_turn_count": 1,
+    "format": "phase4b-task-context-v2"
+  },
+  "task_delta": {
+    "category": "start",
+    "changed_fields": [
+      "goal",
+      "requirements"
+    ]
+  },
+  "task_runtime_invocation_count": 1,
+  "task_transition": {
+    "committed_version": 1,
+    "from": "new",
+    "to": "active"
+  },
+  "thread": null,
+  "tool_calls": [],
+  "trace_id": "trace-m50-fixture",
+  "turn_action": "initial"
+}

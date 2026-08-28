@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "TaskView": {
+      "description": "合法 owner 可见的 task 安全投影；不包含 owner 比较值、rows 或历史答案。",
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "state": {
+          "additionalProperties": true,
+          "title": "State",
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "claimed",
+            "active",
+            "cancelled",
+            "switched",
+            "cleared"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "task_version": {
+          "minimum": 1,
+          "title": "Task Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task_id",
+        "task_version",
+        "status",
+        "expires_at",
+        "state"
+      ],
+      "title": "TaskView",
+      "type": "object"
+    }
+  },
+  "description": "task clear 的闭合响应；失败不回显 task 状态。",
+  "properties": {
+    "message": {
+      "title": "Message",
+      "type": "string"
+    },
+    "ok": {
+      "title": "Ok",
+      "type": "boolean"
+    },
+    "reason_code": {
+      "title": "Reason Code",
+      "type": "string"
+    },
+    "safety_status": {
+      "enum": [
+        "passed",
+        "blocked"
+      ],
+      "title": "Safety Status",
+      "type": "string"
+    },
+    "task": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaskView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "ok",
+    "reason_code",
+    "safety_status",
+    "message"
+  ],
+  "title": "TaskControlResponse",
+  "type": "object"
+}

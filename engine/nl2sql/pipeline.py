@@ -23,7 +23,7 @@ from engine.nl2sql.generator import (
     validate_sql_plan_contract,
 )
 from engine.nl2sql.llm_call import LLMCallEvidence
-from engine.nl2sql.planner import QueryPlan, validate_query_plan
+from engine.nl2sql.planner import QueryPlan, normalize_base_aggregate_plan, validate_query_plan
 from engine.nl2sql.semantic_validation import validate_request_semantics
 from engine.nl2sql.schema_loader import DomainSchema, load_domain_schema
 from engine.nl2sql.sql_repair import (
@@ -258,6 +258,7 @@ def run_text2sql_pipeline(
     schema_vector_index: VectorIndex | None = None,
     repair_context: SQLRepairContext | None = None,
     repair_strategy: SQLRepairStrategy = "deterministic_ast",
+    base_aggregate_only: bool = False,
 ) -> Text2SQLPipelineResult:
     """执行 M11 single-step Text2SQL pipeline。
 
@@ -440,6 +441,10 @@ def run_text2sql_pipeline(
             trace_context,
         )
 
+    plan_normalized = False
+    if base_aggregate_only:
+        plan, plan_normalized = normalize_base_aggregate_plan(plan)
+
     span.end(
         output_summary=plan.to_human_explanation(),
         metadata={
@@ -464,6 +469,8 @@ def run_text2sql_pipeline(
                 for step in plan.steps
             ],
             "repair_plan_reused": repair_context is not None,
+            "base_aggregate_only": base_aggregate_only,
+            "plan_normalized": plan_normalized,
             **_llm_success_metadata(query_plan_call_evidence),
         },
     )

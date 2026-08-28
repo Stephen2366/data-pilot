@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, TaskControlResponse, TaskView, ThreadControlResponse, ThreadView, ToolCallTrace
+from app.schemas.agent import AgentResponse, CostInfo, QueryRequest, TaskControlResponse, TaskStatusResponse, TaskStatusView, TaskView, ThreadControlResponse, ThreadView, ToolCallTrace
 from engine.harness.adapters import RAGToolAdapter, Text2SQLToolAdapter, UnavailableRAGToolAdapter
 from engine.harness.contracts import HarnessRequest, ToolObservation
 from engine.harness.graph import HarnessRuntime
@@ -24,7 +24,7 @@ from engine.harness.turn import AgentTurnResult, TurnRequest, clear_thread, run_
 from engine.trace.recorder import TraceRecord, TraceStep, append_trace
 from engine.trace.runtime import build_trace_runtime_identity
 from engine.phase4b.task_boundary import TaskBoundaryPort
-from engine.phase4b.task_turn import TaskTurnRequest, TaskTurnResult, clear_task, run_task_turn
+from engine.phase4b.task_turn import TaskTurnRequest, TaskTurnResult, clear_task, read_task_status, run_task_turn
 from engine.phase4b.agent_loop import AgentLoopRuntime
 from engine.phase4b.b4_contracts import load_b4_contract_bundle
 from engine.phase4b.b5_contracts import load_b5_contract_bundle
@@ -450,6 +450,43 @@ def clear_query_task(
     path = _trace_path(request)
     append_trace(trace_record, path=path) if path is not None else append_trace(trace_record)
     return TaskControlResponse(ok=ok, reason_code=reason, safety_status=safety, message=message, task=TaskView.model_validate(task.safe_projection()) if task else None)
+
+
+@router.get("/query/tasks/{task_id}", response_model=TaskStatusResponse)
+def get_query_task_status(
+    task_id: str,
+    request: Request,
+    user_role: str = Query(default="ops"),
+) -> TaskStatusResponse:
+    """只读核对 unknown mutation 后的 task 版本/status，不调用 Graph 或消费 claim。"""
+
+    resolver = getattr(request.app.state, "caller_resolver", None)
+    resolution = resolver.resolve(user_role) if resolver is not None else None
+    boundary: TaskBoundaryPort = request.app.state.task_boundary
+    task, lifecycle, ok, reason = read_task_status(
+        task_id=task_id,
+        caller=resolution.caller if resolution else None,
+        boundary=boundary,
+        active_role=resolution.active_sql_role if resolution else None,
+    )
+    safety = "passed" if ok else ("blocked" if reason == "task_unavailable" else "passed")
+    message = "任务状态已核对。" if ok else "当前任务状态不可用。"
+    trace_record = TraceRecord(
+        trace_id=_trace_id(request), question="[task-status]", user_role=user_role, route="none", answer=message,
+        safety_status=safety, cost=CostInfo(), execution_status="completed" if ok else "not_started",
+        answer_status="no_answer", reason_code=reason, caller_safe_ref=resolution.caller.audit_ref if resolution else None,
+        termination_action="answer" if ok else ("blocked" if safety == "blocked" else "failed"), turn_action="status",
+        graph_invocation_count=0, checkpoint_runtime=boundary.runtime_identity,
+        runtime_identity={"format": "phase4b-task-runtime-v1", "status": "complete", "task_boundary": boundary.runtime_identity},
+        runtime_family="agent_task", task_action="status", task_runtime_invocation_count=0,
+        task_lifecycle=lifecycle.safe_projection(), task_state=None,
+    )
+    path = _trace_path(request)
+    append_trace(trace_record, path=path) if path is not None else append_trace(trace_record)
+    return TaskStatusResponse(
+        ok=ok, reason_code=reason, safety_status=safety, message=message,
+        task=TaskStatusView.model_validate(task.safe_projection()) if task else None,
+    )
 
 
 @router.delete("/query/threads/{thread_id}", response_model=ThreadControlResponse)

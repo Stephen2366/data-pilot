@@ -73,6 +73,52 @@ class QueryPlan(BaseModel):
         return "\n".join(parts)
 
 
+def normalize_base_aggregate_plan(plan: QueryPlan) -> tuple[QueryPlan, bool]:
+    """移除上层 comparison completion 已负责的差额/变化率列。
+
+    该函数只有收到服务端 ``base_aggregate_only`` authority 时才会被 pipeline 调用，避免
+    改变 legacy Text2SQL 的直接比较合同。保留时间桶与基础指标，SQL 只负责产出可验证行。
+    """
+
+    derived_aliases = {"diff", "difference", "delta", "change", "change_rate", "growth_rate", "rate"}
+    changed = False
+    normalized_steps: list[QueryPlanStep] = []
+    for step in plan.steps:
+        removed = {
+            value.rsplit(".", 1)[-1].strip().lower()
+            for value in step.output_columns
+            if value.rsplit(".", 1)[-1].strip().lower() in derived_aliases
+        }
+        if not removed:
+            normalized_steps.append(step)
+            continue
+        retained_outputs = [
+            value for value in step.output_columns
+            if value.rsplit(".", 1)[-1].strip().lower() not in removed
+        ]
+        retained_bindings = {
+            alias: expression for alias, expression in step.output_expressions.items()
+            if alias.strip().lower() not in removed
+        }
+        retained_aggregations = [
+            expression for alias, expression in retained_bindings.items()
+            if alias.rsplit(".", 1)[-1].strip().lower() not in {"month", "period", "date", "year"}
+        ]
+        retained_order = [
+            value for value in step.order_by
+            if value.split()[0].rsplit(".", 1)[-1].strip().lower() not in removed
+        ]
+        normalized_steps.append(step.model_copy(update={
+            "purpose": step.purpose + "；仅返回分组基础指标，由上层完成比较计算",
+            "output_columns": retained_outputs,
+            "output_expressions": retained_bindings,
+            "aggregations": retained_aggregations,
+            "order_by": retained_order,
+        }))
+        changed = True
+    return QueryPlan(steps=normalized_steps), changed
+
+
 class PlanValidationResult(BaseModel):
     """QueryPlan 自检结果，供 M11 trace 和 eval issue tags 复用。"""
 

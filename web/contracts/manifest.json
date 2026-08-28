@@ -1,0 +1,16 @@
+{
+  "authority": "app.schemas.agent",
+  "files": {
+    "contracts/agent-response.schema.json": "be84e86ae151f1100e5a9b1aee9a7b35097f1f4d566af11825eeecbf296d3a2e",
+    "contracts/query-request.schema.json": "3ae1b4e75b3c0862fd39866ef779b7ed429065581c7488697f883b3d0ce431ea",
+    "contracts/task-control-response.schema.json": "651b61464090c3ceb21025b60b72ccfd44a3e5adc4a9a8906cd210e2930a575c",
+    "contracts/thread-control-response.schema.json": "3491b318570f3edf2de99c86d58cb2b4b14967756265e641c7712f2295f88c72",
+    "test/fixtures/blocked.json": "8ce67d5a85c945532c57fdcc37042d4cd6b6925d7d5a2a0c316af1566fa4bb6b",
+    "test/fixtures/external-unavailable.json": "eaba5d3118058e83946b64cf2376198782df0978b19440fc470815b8a04ed3ed",
+    "test/fixtures/hybrid-partial.json": "366800578412a190cca37dd0216f1789a9d305f2fdc71d8166dbef073725b253",
+    "test/fixtures/legacy-clarification.json": "e8166013c0b1c8d1dd8b18c877afb1fc77579c229bffeb32e2de158a17a8171e",
+    "test/fixtures/sql-complete.json": "e54f54efbd78220aa89b7e5e0c76db0c9c535561545bd5f513e028c40d081313"
+  },
+  "format": "m50-web-contract-fixtures-v1",
+  "identity": "04998899e0d98f194ce0778784458d25a94d9f9b0c2b6df9ef0eeef9f86c280f"
+}

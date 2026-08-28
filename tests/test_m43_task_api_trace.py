@@ -138,6 +138,30 @@ def test_clarify_cancel_clear_and_pre_rejection_never_call_graph(tmp_path: Path)
     assert _B1SQLTool.calls == 2
 
 
+def test_task_status_get_reconciles_version_without_graph_or_payload(tmp_path: Path) -> None:
+    """status GET 回显 owner 可见最小版本，且 Trace 证明 Graph/Tool 调用为零。"""
+
+    trace_path = tmp_path / "status.jsonl"
+    with _client(trace_path) as client:
+        started = client.post("/api/query", json={
+            "question": "查询 2026 年 7 月实际净退款金额。", "user_role": "ops",
+            "task": {"action": "start"},
+        }).json()
+        response = client.get(
+            f"/api/query/tasks/{started['task']['task_id']}", params={"user_role": "ops"},
+        )
+    body = response.json()
+    traces = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    assert response.status_code == 200 and body["ok"] is True
+    assert body["task"] == {
+        "task_id": started["task"]["task_id"], "task_version": 1, "status": "active",
+        "expires_at": started["task"]["expires_at"],
+    }
+    assert traces[-1]["question"] == "[task-status]"
+    assert traces[-1]["graph_invocation_count"] == traces[-1]["task_runtime_invocation_count"] == 0
+    assert traces[-1]["task_state"] is None and traces[-1]["task_lifecycle"]["action"] == "status"
+
+
 def test_task_envelope_is_strict_but_legacy_top_level_compatibility_remains(tmp_path: Path) -> None:
     with _client(tmp_path / "shape.jsonl") as client:
         strict = client.post("/api/query", json={"question": "查询 2026 年 7 月实际净退款金额。", "task": {"action": "start", "route": "sql"}})

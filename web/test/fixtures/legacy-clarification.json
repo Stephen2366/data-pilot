@@ -1,0 +1,66 @@
+{
+  "action_attempts": [],
+  "agent_budget": null,
+  "agent_loop_runtime": null,
+  "agent_scenario_source_identity": null,
+  "agent_termination": null,
+  "answer": "请补充要分析的月份。",
+  "answer_status": "clarification_required",
+  "blocked_reason": null,
+  "chart_spec": null,
+  "citations": [],
+  "columns": [],
+  "compact_decision": null,
+  "cost": {
+    "completion_tokens": 0,
+    "latency_ms": 0.0,
+    "model": null,
+    "prompt_tokens": 0,
+    "sql_time_ms": 0.0
+  },
+  "docs_used": [],
+  "error_type": null,
+  "execution_status": "not_started",
+  "graph_invocation_count": 0,
+  "hybrid_branches": [],
+  "knowledge_runtimes": [],
+  "node_contexts": [],
+  "reason_code": "clarification_required",
+  "route": "none",
+  "rows": [],
+  "runtime_family": "legacy",
+  "safety_status": "passed",
+  "sql": null,
+  "tables_used": [],
+  "task": null,
+  "task_action": null,
+  "task_context": null,
+  "task_delta": null,
+  "task_runtime_invocation_count": 0,
+  "task_transition": null,
+  "thread": {
+    "checkpoint_version": 1,
+    "clarification": {
+      "fields": [
+        {
+          "allowed_values": [],
+          "key": "month",
+          "label": "月份",
+          "max_length": 32,
+          "value_type": "time_range"
+        }
+      ],
+      "identity": "clarification-m50-v1",
+      "prompt": "请选择月份。"
+    },
+    "expires_at": "2026-08-28T12:15:00+00:00",
+    "follow_up": null,
+    "follow_up_budget_remaining": 0,
+    "state_version": "phase4-turn-state-v1",
+    "status": "pending",
+    "thread_id": "thread_m50_fixture_001"
+  },
+  "tool_calls": [],
+  "trace_id": "trace-m50-legacy",
+  "turn_action": "initial"
+}

@@ -1,0 +1,117 @@
+{
+  "action_attempts": [
+    {
+      "action": "query_sql",
+      "status": "completed"
+    },
+    {
+      "action": "retrieve_knowledge",
+      "status": "completed"
+    }
+  ],
+  "agent_budget": {
+    "knowledge": {
+      "limit": 1,
+      "used": 1
+    },
+    "sql": {
+      "limit": 2,
+      "used": 1
+    }
+  },
+  "agent_loop_runtime": null,
+  "agent_scenario_source_identity": null,
+  "agent_termination": {
+    "action": "partial_answer",
+    "reason": "budget_exhausted"
+  },
+  "answer": "SQL 指标已完成；政策证据只覆盖部分要求。",
+  "answer_status": "partial",
+  "blocked_reason": null,
+  "chart_spec": null,
+  "citations": [
+    {
+      "anchor": "section:refund-window",
+      "evidence_id": "ev-safe-1",
+      "title": "基础退款政策"
+    }
+  ],
+  "columns": [
+    "month",
+    "net_refund_amount"
+  ],
+  "compact_decision": null,
+  "cost": {
+    "completion_tokens": 0,
+    "latency_ms": 0.0,
+    "model": null,
+    "prompt_tokens": 0,
+    "sql_time_ms": 0.0
+  },
+  "docs_used": [],
+  "error_type": null,
+  "execution_status": "completed",
+  "graph_invocation_count": 1,
+  "hybrid_branches": [
+    {
+      "answer_status": "complete",
+      "branch": "sql",
+      "reason_code": "completed",
+      "safety_status": "passed"
+    },
+    {
+      "answer_status": "partial",
+      "branch": "rag",
+      "reason_code": "required_coverage_incomplete",
+      "safety_status": "passed"
+    }
+  ],
+  "knowledge_runtimes": [
+    {
+      "rollout": "default",
+      "scope": "business_release",
+      "strategy": "pipeline"
+    }
+  ],
+  "node_contexts": [],
+  "reason_code": "required_coverage_incomplete",
+  "route": "hybrid",
+  "rows": [
+    {
+      "month": "2026-07",
+      "net_refund_amount": 120000.0
+    },
+    {
+      "month": "2026-08",
+      "net_refund_amount": 180000.0
+    }
+  ],
+  "runtime_family": "agent_task",
+  "safety_status": "passed",
+  "sql": null,
+  "tables_used": [],
+  "task": {
+    "context": {
+      "committed_turn_count": 3,
+      "format": "phase4b-task-context-v2"
+    },
+    "expires_at": "2026-08-28T12:15:00+00:00",
+    "state": {
+      "goal": "分析实际净退款金额",
+      "requirement_count": 1,
+      "route": "sql"
+    },
+    "status": "active",
+    "task_id": "task_m50_fixture_001",
+    "task_version": 3
+  },
+  "task_action": "continue",
+  "task_context": null,
+  "task_delta": null,
+  "task_runtime_invocation_count": 1,
+  "task_transition": null,
+  "thread": null,
+  "tool_calls": [],
+  "trace_id": "trace-m50-hybrid",
+  "turn_action": "initial"
+}

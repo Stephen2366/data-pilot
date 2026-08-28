@@ -1,0 +1,754 @@
+{
+  "$defs": {
+    "ClarificationFieldView": {
+      "description": "客户端可填写的单个 closed-world clarification 字段。",
+      "properties": {
+        "allowed_values": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Values",
+          "type": "array"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "max_length": {
+          "exclusiveMinimum": 0,
+          "title": "Max Length",
+          "type": "integer"
+        },
+        "value_type": {
+          "enum": [
+            "text",
+            "time_range",
+            "enum"
+          ],
+          "title": "Value Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "value_type",
+        "max_length"
+      ],
+      "title": "ClarificationFieldView",
+      "type": "object"
+    },
+    "ClarificationView": {
+      "description": "首次 pending 响应中的待补说明，不含任何已填写 value。",
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/ClarificationFieldView"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "identity": {
+          "title": "Identity",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "prompt",
+        "fields"
+      ],
+      "title": "ClarificationView",
+      "type": "object"
+    },
+    "CostInfo": {
+      "description": "一次 Agent 查询的成本与耗时快照。\n\n★ M5 先不做真实计费，只固定字段：模型名和 token 默认为空 / 0；SQL 耗时与总耗时真实记录。\n后续接入更完整 LLM usage 时，只需要填充这些字段，不改响应契约。",
+      "properties": {
+        "completion_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Completion Tokens",
+          "type": "integer"
+        },
+        "latency_ms": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Latency Ms",
+          "type": "number"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "prompt_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Prompt Tokens",
+          "type": "integer"
+        },
+        "sql_time_ms": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Sql Time Ms",
+          "type": "number"
+        }
+      },
+      "title": "CostInfo",
+      "type": "object"
+    },
+    "FollowUpActionView": {
+      "description": "成功回答后客户端可选择的一种受控追问动作。",
+      "properties": {
+        "action": {
+          "enum": [
+            "adjust_sql_scope",
+            "explain_same_evidence",
+            "ask_related_evidence"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/ClarificationFieldView"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "label",
+        "fields"
+      ],
+      "title": "FollowUpActionView",
+      "type": "object"
+    },
+    "FollowUpView": {
+      "description": "服务端签发的 follow-up 表单合同。",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/FollowUpActionView"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "identity": {
+          "title": "Identity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "actions"
+      ],
+      "title": "FollowUpView",
+      "type": "object"
+    },
+    "TaskView": {
+      "description": "合法 owner 可见的 task 安全投影；不包含 owner 比较值、rows 或历史答案。",
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "state": {
+          "additionalProperties": true,
+          "title": "State",
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "claimed",
+            "active",
+            "cancelled",
+            "switched",
+            "cleared"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "task_version": {
+          "minimum": 1,
+          "title": "Task Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task_id",
+        "task_version",
+        "status",
+        "expires_at",
+        "state"
+      ],
+      "title": "TaskView",
+      "type": "object"
+    },
+    "ThreadView": {
+      "description": "合法 owner 可见的 thread/checkpoint 安全投影。",
+      "properties": {
+        "checkpoint_version": {
+          "minimum": 1,
+          "title": "Checkpoint Version",
+          "type": "integer"
+        },
+        "clarification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClarificationView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "follow_up": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FollowUpView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "follow_up_budget_remaining": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Follow Up Budget Remaining",
+          "type": "integer"
+        },
+        "state_version": {
+          "title": "State Version",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "claimed",
+            "follow_up_ready",
+            "follow_up_claimed",
+            "resolved",
+            "cleared"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "checkpoint_version",
+        "state_version",
+        "status",
+        "expires_at"
+      ],
+      "title": "ThreadView",
+      "type": "object"
+    },
+    "ToolCallTrace": {
+      "description": "单次工具调用记录，供响应体和 JSONL trace 共用。\n\n类比 LangGraph / Agent 工程里的 tool call 日志：它不是给用户看的答案，而是给评测、\n调试和演示页解释“刚才调用了什么工具、花了多久、是否被拦截”。",
+      "properties": {
+        "error_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Type"
+        },
+        "latency_ms": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Latency Ms",
+          "type": "number"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "sql": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sql"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "blocked",
+            "error",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "tables_used": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tables Used",
+          "type": "array"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "status"
+      ],
+      "title": "ToolCallTrace",
+      "type": "object"
+    }
+  },
+  "description": "查询结果的兼容响应；M36/M37 只增量加入 bounded turn/thread 字段。\n\n字段顺序按“路由 → 答案 → 证据 → 图表 → 安全 → 成本 / 追踪”组织，方便前端和\nEvalOps 读取。旧字段只增不改，避免 M3/M4 测试和后续调用方失效。",
+  "properties": {
+    "action_attempts": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Action Attempts",
+      "type": "array"
+    },
+    "agent_budget": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Budget"
+    },
+    "agent_loop_runtime": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Loop Runtime"
+    },
+    "agent_scenario_source_identity": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Scenario Source Identity"
+    },
+    "agent_termination": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Termination"
+    },
+    "answer": {
+      "title": "Answer",
+      "type": "string"
+    },
+    "answer_status": {
+      "default": "no_answer",
+      "enum": [
+        "complete",
+        "partial",
+        "clarification_required",
+        "unsupported",
+        "insufficient_evidence",
+        "no_answer"
+      ],
+      "title": "Answer Status",
+      "type": "string"
+    },
+    "blocked_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Blocked Reason"
+    },
+    "chart_spec": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chart Spec"
+    },
+    "citations": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Citations",
+      "type": "array"
+    },
+    "columns": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Columns",
+      "type": "array"
+    },
+    "compact_decision": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Compact Decision"
+    },
+    "cost": {
+      "$ref": "#/$defs/CostInfo"
+    },
+    "docs_used": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Docs Used",
+      "type": "array"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error Type"
+    },
+    "execution_status": {
+      "default": "not_started",
+      "enum": [
+        "not_started",
+        "completed",
+        "external_unavailable",
+        "failed"
+      ],
+      "title": "Execution Status",
+      "type": "string"
+    },
+    "graph_invocation_count": {
+      "default": 1,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Graph Invocation Count",
+      "type": "integer"
+    },
+    "hybrid_branches": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Hybrid Branches",
+      "type": "array"
+    },
+    "knowledge_runtimes": {
+      "items": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "title": "Knowledge Runtimes",
+      "type": "array"
+    },
+    "node_contexts": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Node Contexts",
+      "type": "array"
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason Code"
+    },
+    "route": {
+      "enum": [
+        "sql",
+        "rag",
+        "hybrid",
+        "none"
+      ],
+      "title": "Route",
+      "type": "string"
+    },
+    "rows": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Rows",
+      "type": "array"
+    },
+    "runtime_family": {
+      "default": "legacy",
+      "enum": [
+        "legacy",
+        "agent_task"
+      ],
+      "title": "Runtime Family",
+      "type": "string"
+    },
+    "safety_status": {
+      "enum": [
+        "passed",
+        "blocked"
+      ],
+      "title": "Safety Status",
+      "type": "string"
+    },
+    "sql": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sql"
+    },
+    "tables_used": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tables Used",
+      "type": "array"
+    },
+    "task": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaskView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "task_action": {
+      "anyOf": [
+        {
+          "enum": [
+            "start",
+            "continue",
+            "switch",
+            "cancel",
+            "rejected"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Action"
+    },
+    "task_context": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Context"
+    },
+    "task_delta": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Delta"
+    },
+    "task_runtime_invocation_count": {
+      "default": 0,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Task Runtime Invocation Count",
+      "type": "integer"
+    },
+    "task_transition": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Transition"
+    },
+    "thread": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ThreadView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tool_calls": {
+      "items": {
+        "$ref": "#/$defs/ToolCallTrace"
+      },
+      "title": "Tool Calls",
+      "type": "array"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "turn_action": {
+      "default": "initial",
+      "enum": [
+        "initial",
+        "resume",
+        "follow_up",
+        "rejected"
+      ],
+      "title": "Turn Action",
+      "type": "string"
+    }
+  },
+  "required": [
+    "route",
+    "answer",
+    "safety_status",
+    "trace_id"
+  ],
+  "title": "AgentResponse",
+  "type": "object"
+}

@@ -226,6 +226,8 @@ class HarnessRequest:
     schema_fusion_strategy: str = "weighted"
     enable_bounded_follow_up: bool = False
     follow_up_context: FollowUpExecutionContext | None = None
+    # Agent task 的 comparison completion 在上层计算差额/变化率；深 SQL 只取基础分组聚合。
+    base_aggregate_only: bool = False
 
     def __post_init__(self) -> None:
         """保证 Graph identity 与当前问题非空。"""

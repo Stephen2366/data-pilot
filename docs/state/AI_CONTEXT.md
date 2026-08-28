@@ -8,11 +8,11 @@
 | ------------ | ------------------------------------------- |
 | 阶段路线     | `docs/phase4b-roadmap.md`                   |
 | 阶段参考     | `docs/phase4-reference.md`                  |
-| 当前活动模块 | M49 / 收工后 RAG 正文水化修复与重验完成          |
-| 当前 plan    | `docs/notes/m49-plan.md`                    |
-| 当前 notes   | `docs/notes/m49-rag-postprobe.md`           |
-| 待决事项     | external Subgraph 技术链已恢复，但 qst_0431 的 cited-gold/精确事实质量 Gate 仍未通过；Pipeline 默认、reserve sealed/not-run |
-| 更新时间     | 2026-08-27                                  |
+| 当前活动模块 | M50 / DataPilot Web 工作台技术收工完成       |
+| 当前 plan    | `docs/notes/m50-plan.md`                     |
+| 当前 notes   | `docs/notes/m50-notes.md`                    |
+| 待决事项     | M50 无阻塞；下一模块尚未立项。Pipeline 默认、Subgraph experimental、qst_0431 质量边界与 reserve sealed/not-run 均不变 |
+| 更新时间     | 2026-08-28                                   |
 
 ## 必读规则
 
@@ -30,7 +30,9 @@
 ## 当前默认值
 
 - 后端：FastAPI + Pydantic；`/api/query` 无 `task` 时保持 M37 legacy turn seam；只有严格 nested task envelope 才进入 Phase 4B agent task family。accepted task turn 为零或一次 B2 深 Loop Graph invoke，内部可按预算执行多个 closed-world Evidence action；clarification/cancel/clear/pre-rejection 为零次。响应、JSONL Trace 与 Eval 从同一 delta/state transition/Evidence validity/lifecycle/Loop 事实投影。
+- Web：M50 默认本地产品壳为 `web/` 的 Next.js 16.3.3 + React 19 + TypeScript 6。浏览器只经同源薄 BFF 调 FastAPI，Zod 只校验页面消费的公开网络边界；Python/Pydantic 仍是唯一业务 authority。BFF timeout 默认 300s，task mutation 不自动 retry；timeout/abort/合同漂移按 unknown outcome 冻结并跨刷新保留现场，可由用户显式调用 owner-scoped 只读 task status 对账后采用服务端版本。客户端不能选择 model/corpus/RAG strategy，sessionStorage 只保存最近 8 轮 validated 公开 snapshot、role、runtime family 与最小恢复投影。
 - 数据库：MySQL `datapilot_dev` + SQLAlchemy/Alembic；SQLite 仅用于测试、smoke 与 M27 deterministic oracle。
+- M50 演示数据库：独立可重建 `datapilot_demo`，只允许显式确认 prepare，固定 0005 + Phase 4B profile（7/8 月 120000/180000）；不修改 `.env` 或 reset/reseed `datapilot_dev`。最终 synthetic task rows 0/0。启动与 preflight 见 `runbook.md`。
 - Phase 4B seed：默认仍为 legacy `sqlite_deterministic_seed`；只有显式选择 `profile_alias="phase4b"` 才加载 content-bound B0 profile，生成 7/8 月 oracle。不得把两个 profile 的 artifact 混算。
 - NL2SQL：普通 API 默认走 Harness 内的 `new_text2sql` 深 Tool（Schema Retrieval → QueryPlan → SQL Guard）；显式 `force_new_pipeline=false` 只选择 adapter 内部 legacy baseline，不能绕过顶层 Harness。
 - SQL dialect repair：服务端默认 `deterministic_ast`，只处理 typed MySQL month DATE_TRUNC；私有复用首次可信 QueryPlan/candidate/issue，不重新调用 QueryPlan provider，结果重走 validator、fidelity、Guard 与执行。客户端不能选策略，LLM repair 仅为非默认候选。
@@ -57,6 +59,8 @@
 
 | 日期 | 事实 |
 |---|---|
+| 2026-08-28 | M50 用户实测小修：两轮月份比较因 150s BFF 先超时、服务端稍后提交及派生指标被错误下推为嵌套聚合而造成 unknown/version 分叉。现改为 300s、显式只读 task status 恢复、unknown 跨刷新，以及仅对 Agent comparison 启用 month+base metric 计划收敛；`M50-UXR-P1` 双轮真实链 4 calls/16029 tokens，通过 120000/180000/60000/50%、UI v3 与 cleanup 0/0。该 Probe 仅证明固定场景，不登记 Formal Eval。 |
+| 2026-08-28 | M50 Web 工作台技术收工：Next/React/TypeScript + thin BFF 真实消费 FastAPI task/legacy 两个 family，展示 SQL/Vega/citation/Hybrid 与公开 TaskDelta/Action/Budget/Termination/Context Inspector。P1 经网络与错库修正后 120000 oracle 通过；首次 P2 的问法失败和 9/8 attempts 控制错误永久保留，用户确认 P2R 后新 lineage 6 calls/23009 tokens 完成 120000/180000/60000/50% + Document Evidence/citation；P3 两拒绝+clear 0 provider/0 deep invocation、cleanup 0/0。前端 35 unit + 12 Playwright、Python 聚焦 245、全仓 681 均通过；只证明固定本地展示链，不是 Formal Eval 或质量/生产结论。 |
 | 2026-08-27 | Phase 4B 整体审计双 Probe：P1 r9 在含未提交 RAG 修复的当前工作区真实贯通 T1→T6（12 calls/52709 tokens、Compact/重启/cleanup 0/0）；P2 两负例（不存在版本→`task_version_conflict`、角色漂移→`task_unavailable`）在真实 lineage 上 0 provider 成立；P2 attempt 1 另暴露 T2 的 Qwen `sql_generation` 120s 网络超时（retry0 下安全失败关闭，非产品缺陷）。审计发现与收口建议见 `docs/notes/phase4b-audit-notes.md`（含：默认 `datapilot_dev` 仍无 Phase 4B 7/8 月种子、README 多节过期、RAG 修复未提交、tombstone purge 无 scheduler、演示链对 Qwen 延迟敏感）。 |
 | 2026-08-27 | M49 收工后 RAG 重验与修复：Business happy/no-candidate、Enterprise Pipeline qst_0386 通过；external Subgraph qst_0431 首次暴露 metadata-only recovery 漏水化，修复后 R4R `context_characters=5425`、answer complete、漏斗 `3→3→3→2`，但 required `11/1/0` 仍因 cited-gold 质量失败。随后真实 Qwen/MySQL/business Subgraph Hybrid 单 turn 通过，2 calls/9696 tokens、task cleanup 0/0。campaign 总计 9 attempts / 15502 observed chat tokens；不是 Formal Eval/基线/开发期 Probe。 |
 | 2026-08-27 | M49 技术收工：最终聚焦 `35 passed`、deterministic evidence `6 passed`；全仓前台收集 677 项后后台同次 `677 passed, 1 warning in 595.25s`，warning 仅既有 Starlette/httpx deprecation。compileall、rehearsal 重签、diff check、Alembic current/check 均通过。Phase 4B 固定 Demo 技术链可收口，但不外推为质量或生产能力。 |
@@ -81,6 +85,7 @@
 - (2026-08-27) M46/B4 external recovery 的 metadata-only 正文水化接线已修复并由同题 R4R 证明可进入 Composer/citation 完成态；business Hybrid 也已再次真实贯通。qst_0431 仍未通过 cited-gold/精确事实质量 Gate，因此只能恢复“技术链可运行”，不能声称 Subgraph 质量胜出。Pipeline 默认、Subgraph experimental、无自动 fallback、reserve sealed/not-run 均不变。
 - (2026-08-26) M47/B5技术收工已完成：产品 task boundary 已从进程内实现升级为 MySQL durable 默认，B5 的 restart、多worker/CAS、TTL/clear/tombstone/typed ledger 与安全失败已闭合；M37 thread checkpoint 仍是独立的进程内 legacy family，不因 B5 自动升级。
 - (2026-08-27) M49 已修复自然 T2 requirement 合并、comparison/conditional dependency、跨 turn Evidence 复用与重启解释断点；Context/Compact v2 的 latest result digest 让 T6 可零 Graph/Tool/provider 解释最近完成结果，v1 继续可读。evidence-backed Scenario v7/assurance v2 已由真实 Probe、deterministic JUnit 和历史 durable negative-path artifact 独立签发 completed。Phase 4B 展示型 technical integration 可收口；仍不包含 RAG/LLM 质量提升、生产认证、性能/HA、外部 Tool exactly-once 或 sealed reserve 结论。
+- (2026-08-28) M50 已把 Phase 4B 公开合同接成可操作的本地 Web 工作台；真实 Browser→BFF→FastAPI→Qwen/MySQL/business Knowledge→Response/Trace→UI 主故事与安全负路径均闭合。前端是 presentation/transport seam，不新增 Agent 里程碑，也不改变 Pipeline/Subgraph、数据库默认世界或质量结论。下一模块未预定；公网部署/auth、streaming、MCP 或质量优化必须分别立项。
 
 ## 防遗忘能力账本
 

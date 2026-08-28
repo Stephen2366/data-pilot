@@ -4749,3 +4749,249 @@ Phase 4B 之后不应为了凑模块号继续加功能。更合理的顺序是�
 
 一句话收口：**Phase 4B 已经把 DataPilot 的“会回答”升级成了“能围绕同一任务安全推进、保存、恢复并自证过程”的展示型 Agent；下一步优先把这条能力稳定地交付出来，而不是继续扩张边界。**
 
+## ★ M50 给 DataPilot 装上一座“只展示事实、不替 Agent 做决定”的 Web 驾驶舱
+
+（2026-08-28）
+
+**简述**：M50 用 Next.js（React 全栈 Web 框架）、React（组件化界面库）和 TypeScript（带静态类型的 JavaScript）交付了一个真实 DataPilot 工作台；它能连续操作 durable task（持久任务）、展示 SQL/文档/Hybrid（混合）证据和安全停止，并通过 thin BFF（只处理传输的轻量后端适配层）守住 FastAPI/Pydantic 的唯一业务权威。
+
+### 先用大白话讲
+
+Phase 4B 结束时，DataPilot 已经像一座**设备齐全的数据分析工厂**：后端会判断查数据库还是查制度，会控制预算，会保存任务版本，也会留下证据和轨迹。但面试现场如果只能看 JSON 和命令行，参观者很难一眼看懂“这一轮为什么继续、用了什么证据、为什么安全停止”。
+
+M50 做的是一座工厂驾驶舱：
+
+- **操作台**让用户开始、继续、切换、取消和清理任务，但每次只使用服务器最后确认的任务编号和版本。
+- **仪表盘**把答案、SQL 表格、图表、引用、Hybrid 双分支、Action（动作）、Budget（预算）和 Termination（终止原因）分层展示出来。
+- **同源门卫**接住浏览器请求，检查格式、隐藏后端内部错误，再转给 FastAPI；它不替后端选择路线、补证据或改任务状态。
+- **黑匣子检查**用 Browser（真实浏览器）、Response（接口响应）、Trace（执行轨迹）、MySQL（关系型数据库）和页面截图一起对账，避免“页面看起来成功，实际查了错误数据库”。
+
+最终价值是：DataPilot 的核心 Agent 能力现在不只“代码里存在”，而是能在一个专业、可操作、可解释的本地页面里完整演示。
+
+### 这次做了什么
+
+这次工作的核心矛盾是：**前端需要把复杂 Agent 状态讲清楚，但不能为了交互方便，自己变成第二套业务状态机。** M50 因此围绕“权威合同、任务版本、状态展示、演示数据和真实证据”建立了一条浏览器闭环。
+
+1. **把前端设计成 Presentation Layer（展示层），而不是第二个 Agent。**
+
+   页面可以组合信息，但不能替后端决定事实。
+
+   - **原来的问题**：如果 React 组件自己根据答案文字猜“成功/失败”、自己拼历史、自己选择 RAG strategy（检索策略），页面就会拥有一套和 FastAPI 不同的业务语义。后端即使安全停止，前端也可能误标成功。
+   - **关键机制**：`DataPilotClient` 是页面访问 DataPilot 的唯一 client interface（客户端接口）；Next.js App Router（文件路由模式）下的 Route Handler（服务端路由处理器）组成 thin BFF，只负责同源转发、150 秒 timeout（超时）、错误净化和响应校验。
+   - **运行时合同**：Zod（TypeScript 运行时数据校验库）在网络边界检查核心枚举、任务版本和四轴状态。它不是新的业务 authority（权威源）；Python/Pydantic 生成的 5 份 fixture（固定合同样本）和 4 份 JSON Schema（机器可读结构定义）才是跨语言锚点。
+   - **重要取舍**：没有让浏览器直连 FastAPI，也没有把 BFF 扩成业务后端。多一个 Node（JavaScript 运行时）进程和一次本地 HTTP hop（网络跳转），换来同源、安全错误和前端合同集中治理。
+   - **验证证据**：合同 identity（内容身份）固定为 `04998899...280f`；篡改核心枚举或必填字段会失败关闭。它证明前端消费的是已登记公开响应，不证明后端答案质量。
+
+2. **用 last-acknowledged version（最后确认版本）管理 task mutation（会改变任务状态的请求）。**
+
+   浏览器只在服务器明确成功后推进任务版本，结果未知时宁可冻结。
+
+   - **原来的问题**：用户点击“继续任务”后，如果网络在服务端提交成功、浏览器收到响应之前断开，自动 retry（重试）可能把同一动作提交两次。反过来，收到版本冲突也不能把本地最后一个好版本抹掉。
+   - **三类结果**：`known_rejected` 表示服务器明确没有执行，可以保留原版本；`unknown` 表示无法判断是否执行，必须冻结 lineage（任务版本链）；正常 validated response（通过校验的响应）才追加一轮并推进版本。
+   - **安全细节**：FastAPI 的 stale version（过期版本）和 role drift（角色漂移）使用 HTTP 200 + typed rejection（类型化拒绝），避免用状态码泄漏任务是否存在。前端只把 `task_version_conflict` 和 `task_unavailable` 识别为边界拒绝，不能把所有 `task_action=rejected` 都吞成提示，否则真正的敏感字段安全停止会从结果区消失。
+   - **single-flight（单请求在途）**：同一工作台一次只允许一个 mutation；停止等待使用 `AbortController`（浏览器取消信号），但取消只代表客户端不再等，不代表服务器一定没执行。
+   - **验证证据**：真实 P3 的版本冲突、角色漂移和 clear（清理）都在 Graph/Tool/provider（图、工具、模型服务）前停止；两个拒绝后页面仍保留 task v5，clear 后本地 snapshot（快照）和演示库 synthetic rows（合成状态行）最终为 `0/0`。
+
+3. **用 closed-world Presenter（封闭状态展示器）把“状态”与“答案文案”分开。**
+
+   页面成功与否由结构化四轴决定，而不是看模型说得像不像成功。
+
+   - **四轴投影**：route（走 SQL、RAG、Hybrid 还是 none）、execution（有没有执行完）、answer（答案完整/部分/不足/需澄清）、safety（是否安全）共同映射成唯一主状态。
+   - **失败关闭**：未登记的新组合进入 `unrecognized`，显示“合同保护”，不会悄悄套用绿色成功卡。安全 blocked（阻断）优先于看似完整的 answer；外部依赖不可用和证据不足也使用不同文案。
+   - **证据分层**：业务区展示答案、表格、Vega-Lite（声明式图表语法）、citation（引用）和 Hybrid branch（混合分支）；Inspector（检查面板）再展示公开 TaskDelta、Transition、Action、Budget、Termination、Context/Compact 和 Trace。
+   - **隐私边界**：Tool 的 `message`、原始 SQL 和 provider/driver 内部文本不进入 Inspector；图表动态加载失败时保留权威 table（数据表），不会为了视觉效果改写数据。
+   - **验证证据**：35 个 Vitest（TypeScript 单元测试）覆盖合同、Presenter、client、BFF 和结果组件；12 个 Playwright（真实浏览器自动化）用桌面和移动视口覆盖成功、安全停止、known rejection、unknown freeze、clear/session 和 legacy 恢复。
+
+4. **给招牌故事建立一个可重建、不会污染默认库的 `datapilot_demo`。**
+
+   页面可重复演示的前提，是数据库世界也能重复，而不是只把问题写死在按钮上。
+
+   - **原来的问题**：默认 `datapilot_dev` 已有完整 schema（表结构），但不是 Phase 4B 的 7/8 月业务数据世界；直接 reset 它会破坏历史开发数据和评测可比性。
+   - **精确护栏**：prepare script（准备脚本）只接受完整库名 `datapilot_demo`，在连接和 DDL（表结构操作）前拒绝 dev/test/prod 等相近目标。它把演示库迁移到 Alembic 0005，再显式加载 Phase 4B seed profile（确定性数据配方）。
+   - **双接线修正**：`create_app(settings)` 控制 durable task boundary，但 FastAPI 的 `get_db` 原本仍来自导入期全局 session。M50 launcher（启动器）显式 override（覆盖）后，任务 checkpoint 和 SQL business query 才真正落在同一个 demo world（演示数据世界）。
+   - **重要取舍**：演示准备动作只在命令行执行，Web 页面没有“重建数据库”按钮；`.env` 和 `datapilot_dev` 都不修改。clear 后的 scrubbed tombstone（已擦除墓碑）是产品审计事实，只有开发 Probe 才按精确 safe ref 物理清零。
+   - **验证证据**：最终 preflight（开机前只读检查）确认 migration=`20260827_0005`、7/8 月实际净退款金额=`120000.00/180000.00`、task rows=`0/0`、provider calls=`0`、ready=true。
+
+5. **用真实 Browser→BFF→Agent→UI 链证明“页面展示的就是后端实际做的”。**
+
+   fixture 能验证组件，却不能证明真实模型、数据库和页面来自同一个运行世界。
+
+   - **P1 单月 SQL**：真实链经过 Browser、Next BFF、FastAPI task Loop、Qwen、Text2SQL、SQL Guard、`datapilot_demo` MySQL、Response/Trace 和 UI。装配修正后页面、响应和 Trace 同时得到 `120000`，本次通过 attempt 为 2 calls / 6092 tokens。
+   - **P2R 招牌三轮**：同一新 task 依次完成 7 月单月、7/8 月比较、质量退款规则 Hybrid；总计 6 calls / 23009 observed tokens（可观测模型 token），得到 `120000/180000/60000/0.5`、SQL + 3 条 Document Evidence 和 2 条页面 citation。
+   - **P3 安全负例**：错误版本、漂移角色和页面 clear 全部零 provider、零 deep invocation（深层执行）；拒绝不会新增成功卡、推进版本或自动重试。
+   - **工程纪律**：首次问法不闭合和调用预算控制问题都按 `failed → stop` 保留，再由用户确认新场景和独立预算；没有偷偷换策略、把 partial（部分完成）降格成通过，或用最终成功覆盖旧证据。
+   - **结论边界**：这些 Live Dev Probe（开发期真实探针）证明固定本地产品链和 UI 映射闭合，属于 exploratory / baseline-ineligible（探索性、不可登记基线）；它们不是 Formal Eval（正式评测），不证明开放问法正确率、Subgraph 质量胜出或生产稳定性。
+
+6. **把前端工程质量也做成可复现的交付，而不是一台机器上的临时页面。**
+
+   lockfile（依赖锁文件）、自动化、移动端和文档共同决定别人能不能复现。
+
+   - **依赖闭合**：Next 16.3.3、React 19、TypeScript 6 使用 `package-lock.json` 固定；clean install（全新安装）得到 528 packages、audit 529、0 vulnerabilities。
+   - **可访问与视觉**：页面具备键盘 focus（焦点）、`aria-live`（辅助技术动态播报）、reduced-motion（减少动画偏好）、细指针设备 hover 和 390px/Pixel 7 窄屏布局。微交互只服务状态反馈，不伪造 Graph 节点进度。
+   - **恢复边界**：`sessionStorage`（当前浏览器标签页临时存储）只保存最近 8 轮 validated 公开响应、role 和 runtime family。刷新 legacy 澄清页仍能恢复正确模式；schema 漂移就整份丢弃，不用旧快照继续 mutation。
+   - **最终证据**：前端 lint/typecheck/build 均通过，35 个 unit、12 个 E2E（端到端）通过；Python 49 文件聚焦回归 245 passed，全仓后台同次 `681 passed / 1 warning / 581.33s`。唯一 Python warning 是既有 Starlette TestClient/httpx deprecation。
+   - **未证明边界**：没有建设公网部署、生产认证、streaming（流式输出）、MCP、Eval Dashboard、生产 task 查询恢复、HA（高可用）或 exactly-once；这些也不是 M50 完成条件。
+
+### 新概念
+
+- **Thin BFF（轻量 Backend for Frontend）**：可以把它理解成“前台专用门卫”。它把浏览器请求转换成后端能接收的同源请求，统一处理超时、格式和错误净化，但不拥有业务规则。类比 SpringBoot 项目里只做协议适配的 Gateway/Controller，而不是另写一套 Service。
+- **Runtime validation（运行时校验）**：TypeScript 类型在编译后会消失，网络返回什么并不会自动安全。Zod 像 FastAPI 的 Pydantic，在浏览器真正拿到 JSON 时再检查一次；核心枚举漂移就停止展示。
+- **Last-acknowledged version（最后确认版本）**：像 MySQL 乐观锁里的 version 字段。客户端只保存服务器明确确认的版本；网络结果未知时不擅自 `version + 1`，也不重发同一 mutation。
+- **Unknown outcome（结果未知）**：它不是普通失败，而是“请求可能已经执行，只是我没收到回执”。正确处理不是立刻 retry，而是冻结现场，让用户或查询接口重新确认。
+- **Closed-world Presenter（封闭状态展示器）**：所有允许的状态组合都显式登记。没有登记的组合宁可显示合同异常，也不猜成成功；类似 Java 的 sealed class（封闭类型）配合穷举 switch。
+- **Public snapshot（公开快照）**：前端只缓存后端已经允许公开的响应投影，不缓存数据库凭据、原始文档正文、Prompt 或隐藏执行状态。它是恢复 UI 的材料，不是新的任务 authority。
+
+### 代码阅读路线
+
+1. **先从页面入口看整体边界**：`web/app/page.tsx`、`web/components/workbench.tsx`
+   `Home` 只挂载 `Workbench`；真正的主角是后者。先看 `activeTask` 如何只接受最后一个 active task，再看 `submit` 如何在 task envelope 与 legacy thread payload 之间二选一。阅读重点是 **UI 只编排请求和已确认快照**，不需要先抠 JSX（组件模板）的每个样式类。
+
+2. **再看浏览器唯一客户端**：`web/lib/data-pilot-client.ts`
+   从 `DataPilotClient.query` 看请求如何先过本地 schema，再看 `decode` 如何区分 BFF error、合同漂移和成功响应。重点理解 `known_rejected` 与 `unknown` 为什么会导致不同 UI 行为，以及为什么这里故意没有 retry。
+
+3. **顺着请求进入 thin BFF**：`web/app/api/datapilot/`、`web/lib/server-adapter.ts`
+   三个 Route Handler 分别代理 health、query 和 task clear，都汇入 `proxyFastApi`。先看 request schema，再看 `AbortController` timeout、上游非 JSON、HTTP rejection 和 response schema；这层只管 transport，完全不解释 Evidence 或 route。
+
+4. **回头看跨语言合同**：`web/lib/contracts.ts`、`scripts/export_m50_web_contract_fixtures.py`
+   Python 脚本用真实 Pydantic Model 生成代表性响应和 schema，并为文件内容计算 identity；TypeScript 用 Zod 校验页面真正消费的字段。重点理解 **Python 是 authority，Zod 是不信任网络的门**，两者不是两套平级业务模型。
+
+5. **看状态如何变成用户能懂的页面**：`web/lib/presenter.ts`、`web/components/result-view.tsx`、`web/components/vega-chart.tsx`
+   `presentResponse` 先把四轴压成唯一产品状态；`ResultView` 再展示答案、table、citation、Hybrid branch 和 Inspector；`VegaChart` 动态加载图表并在卸载时 finalize。重点看安全 blocked 的优先级、unrecognized fallback 和 Tool 字段白名单。
+
+6. **看刷新与清理边界**：`web/lib/session-store.ts`
+   `loadSession` 重新用响应 schema 校验最近 8 轮，任何旧结构不兼容就删除整份 snapshot；`saveSession` 同时保存 mode/role/turns。它解决的是 UI 恢复，不提供服务端 task 查询或权威状态。
+
+7. **看演示数据库如何被保护**：`scripts/prepare_m50_demo.py`、`scripts/run_m50_demo_api.py`、`scripts/cleanup_m50_demo_task.py`
+   先看 `resolve_demo_url` 的精确白名单，再看 `prepare` 如何迁移和 seed，最后看 `build_demo_app` 如何同时接好 durable boundary 与 `get_db`。cleanup 只接受 Trace 中的不可逆 safe ref，并要求清理后 task 表为 0/0。
+
+8. **最后用测试反推合同**：`web/test/`、`web/e2e/workbench.spec.ts`、`tests/test_m50_web_contract.py`
+   unit tests 适合看合同漂移、BFF 错误和 Presenter 优先级；Playwright 适合看请求 shape、版本推进、unknown freeze、clear/session 和 legacy reload；Python test 则确保所有 fixture 仍能被当前 Pydantic 接受。
+
+核心调用链是：
+
+`用户操作`
+→ `Workbench`
+→ `DataPilotClient`
+→ `Next Route Handler / proxyFastApi`
+→ `FastAPI /api/query`
+→ `Task Loop / SQL / Knowledge / MySQL / Qwen`
+→ `Pydantic Response`
+→ `Zod runtime validation`
+→ `Presenter / ResultView / session snapshot`
+
+**模块闭环**：M42～M49 建好的 TaskState、Decision Loop、Evidence、durable boundary 和 Context/Compact，现在通过 M50 的真实浏览器入口形成了“可操作 → 可展示 → 可追踪 → 可复现”的完整作品链。
+
+### 设计要点
+
+- **权威只保留一份**：FastAPI/Pydantic 决定业务合同；BFF 与 Zod 只保护传输边界；Presenter 只投影状态；React 组件不推断 Agent 决策。
+- **mutation 不自动重试**：普通 GET 失败可以重试，但有版本和副作用的 task 请求在结果未知时重发，可能制造双提交；所以 M50 选择冻结 lineage，而不是追求表面“自动恢复”。
+- **演示数据与默认数据分账**：`datapilot_demo` 让 7/8 月故事可重建，却不为了演示方便 reset `datapilot_dev`；prepare 只能从命令行显式执行。
+- **技术闭环不冒充质量胜出**：真实 P2R 证明固定 Browser/Agent/Hybrid/UI 链能跑，不能推出 Subgraph 整体更准；Pipeline 默认和 reserve 封存保持原样。
+- **可恢复不等于生产会话**：sessionStorage 只恢复公开页面，服务端 task 才是 authority；公网 auth、task 查询恢复和多设备同步必须由独立部署目标驱动汪。
+
+### 有面试价值的亮点
+
+1. **“我没有把前端写成第二个 Agent。”** 我把页面职责收敛为 transport、runtime validation 和 presentation：FastAPI 继续决定 route、Evidence、预算和任务版本；前端只显示服务器签发的公开事实。这样既有完整产品体验，又不会出现前后端各维护一套状态机。
+
+2. **“我按分布式系统的思路处理了一个看似普通的按钮。”** task continue 是 mutation，网络超时后不能确定服务端有没有提交；所以我保留 last-acknowledged version，把失败分成 known rejection 和 unknown outcome，后者冻结 lineage、绝不自动 retry。这比“请求失败就再发一次”更符合 durable task 的并发语义。
+
+3. **“页面成功不是看模型文案，而是看四轴合同。”** route、execution、answer、safety 通过 closed-world Presenter 映射；未登记组合失败关闭，安全 blocked 优先。这个设计让外部不可用、证据不足、部分完成和权限拒绝不会被一个 `success=false` 混在一起。
+
+4. **“我用真实页面抓出了后端装配错库，而不是只做前端截图。”** Probe 对账 Browser、Response、Trace 和数据库 oracle，发现 durable boundary 已指向 demo、`get_db` 却仍指向 dev。修复后 120000 数值在 UI/Response/Trace/MySQL 同源闭合，说明我会用纵向证据排查全栈 seam。
+
+5. **“我把演示可复现性当成工程能力。”** 独立 demo DB、精确重建护栏、Python-authoritative fixture、npm lockfile、desktop/mobile E2E 和 681 项全仓回归共同保证别人能照文档运行；同时把公网、生产认证和质量评测边界写清楚。
+
+### 面试官追问
+
+1. **[基础追问] 为什么需要 BFF，浏览器直接请求 FastAPI 不行吗？**
+
+   直接请求在本地当然能做，但浏览器会知道后端地址，还要分别处理 CORS、timeout、错误 detail 和响应校验。M50 的 BFF 把这些 transport concerns（传输关注点）集中起来，并提供同源 API；它没有数据库 Service，也不解释 Agent 状态，所以复杂度被限制在一个深模块。代价是多一个 Node 进程，但换来了更清晰的部署 seam 和更安全的错误边界。
+
+2. **[基础追问] TypeScript 已经有类型，为什么还要 Zod？**
+
+   TypeScript 只在开发和编译阶段工作，运行时收到的 JSON 可以完全不符合 interface。Zod 相当于浏览器侧的 Pydantic：真正检查枚举、必填字段和版本。核心语义漂移时页面停止推进 task；开放安全投影允许后端增加新字段，不会因为无关扩展让页面全部挂掉。
+
+3. **[工程/深挖追问] 为什么版本冲突不冻结，timeout 却冻结？**
+
+   版本冲突是 typed known rejection：服务器明确告诉我本轮没有进入 deep runtime，本地最后确认版本仍可信。timeout 只说明浏览器没收到回执，服务端可能已经提交；如果继续用旧版本重发，就可能重复执行或产生新的冲突。因此前者保留现场并提示，后者冻结 lineage，等有权威查询或人工确认后再处理。
+
+4. **[工程/深挖追问] 你怎么防止前端把安全失败显示成成功？**
+
+   第一层是 Zod 拒绝未知核心枚举；第二层是 Presenter 的 closed-world table，并让 `safety_status=blocked` 优先；第三层是 E2E 反例，检查 blocked 页面没有成功标题。真实 P3 还验证 role drift 返回 `task_unavailable/blocked` 时 Graph、Tool、provider 都是 0，页面不新增成功 turn。
+
+5. **[工程/深挖追问] sessionStorage 里有 task id 和响应，这会不会变成新的 authority？**
+
+   不会。它只保存最近 8 轮后端已经公开的 validated snapshot，用于刷新后恢复 UI；下一次 mutation 仍必须携带服务端最后确认的 id/version，由 MySQL boundary 再做 owner、role、TTL 和 CAS 校验。schema 不兼容时整份丢弃，clear 成功后同步删除；它既不能查询服务端最新状态，也不能自己推进版本。
+
+6. **[工程/深挖追问] 图表坏了或者后端新增字段时，页面会怎样？**
+
+   Vega 动态加载或渲染失败时，组件显示提示并保留权威数据表；后端增加不影响核心语义的公开字段时，开放 projection 可以继续接受。只有核心枚举、identity 或版本合同漂移才失败关闭并冻结 mutation，这个取舍优先保护任务正确性，不让一个新字段把页面无故打挂。
+
+7. **[压力追问] 你这个页面是不是只是给已有后端套了层皮，工程价值在哪里？**
+
+   如果只是把 answer 放进聊天气泡，确实只是套皮。M50 真正解决的是跨系统边界：Python/TypeScript 合同如何对账、durable mutation 如何处理 unknown outcome、legacy/task family 如何隔离、公开 Inspector 如何不泄漏、demo 数据如何可重建、Browser/Trace/MySQL 如何证明同源。证据包括真实错库定位、6-call Hybrid 链、零 deep-invocation 安全负例、desktop/mobile E2E 和 681 项回归；我仍只把它定义为展示与交付工程，不把它包装成新的 Agent 智力喵。
+
+### 验证与下一步
+
+**真实收工证据：**
+
+| 验证层 | 最终结果 | 能说明什么 |
+|---|---:|---|
+| clean install | 528 packages，audit 529，0 vulnerabilities | lockfile 可从零安装 |
+| TypeScript / UI | lint、typecheck、production build 通过 | 静态合同与生产构建闭合 |
+| Vitest | 35 passed | contracts、Presenter、client、BFF、components |
+| Playwright | 12 passed | desktop/mobile task、错误、clear、legacy 恢复 |
+| Python 聚焦 | 245 passed | M5/M35–M38/M43–M50 兼容合同 |
+| 全仓 pytest | 681 passed，1 warning，581.33s | 当前仓库同次完整回归无失败 |
+| M50-P2R | 6 calls / 23009 tokens | 固定 SQL→比较→Hybrid→UI 真实链 |
+| M50-P3 | 0 provider / 0 deep invocation | 版本/角色拒绝与 clear 边界 |
+
+warning 是既有 Starlette TestClient/httpx deprecation；Vega-Lite v5 spec 在当前 v6 renderer 会给 compatibility warning，但图表和 table 都正常。以上数字来自 notes 中已完成的收工运行，**本节没有重新执行模型、数据库或测试**。
+
+**下一步**：M50 没有预先指定下一模块编号。后续若要做公网部署、认证、MCP 或质量优化，应分别立项；开始前先读 `web/README.md`、`DataPilotClient`、contracts、Presenter 和 `docs/notes/m50-notes.md`，继续保持“前端不拥有 Agent authority”的边界。
+
+可复制验证命令：
+
+```powershell
+# 前置：在仓库根目录；项目 Python 环境已激活，Node/npm 已安装。
+
+# 1. 只读检查 demo 数据世界；预计 ready=true、120000/180000、task 0/0。
+python -m scripts.prepare_m50_demo preflight --confirm-database datapilot_demo
+
+# 2. Python 跨语言合同测试；预计 3 passed。
+python -m pytest -p no:cacheprovider --basetemp=.agent_work/temp/m50-devlog tests/test_m50_web_contract.py
+
+# 3. 前端静态、单元与浏览器回归；预计 typecheck/lint/build 通过、35 unit、12 E2E。
+cd web
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run test:e2e
+npm run build
+```
+
+环境未激活时，把 `python` 替换为 `AGENTS.md` 中项目学习环境的完整 Python 路径。全仓 pytest 约需 10 分钟，当前已有同次 681 passed 证据；不要为了阅读复盘重复运行真实 Qwen Probe。
+
+**本地启动体验：**
+
+第一次体验会**重建且只重建 `datapilot_demo`**；确认本机 MySQL 和 `.env` 指向本地开发实例，再执行：
+
+```powershell
+# 仓库根目录：显式准备隔离演示库，预计 ready=true。
+python -m scripts.prepare_m50_demo prepare --confirm-database datapilot_demo
+
+# 启动受保护 FastAPI；默认保持 Pipeline。
+python scripts/run_m50_demo_api.py --rag-strategy pipeline
+```
+
+另开一个 PowerShell、Windows cmd 或 Anaconda Prompt 终端，并确认当前目录是仓库根目录 `data-pilot`：
+
+```powershell
+cd web
+npm ci
+npm run dev -- --hostname 127.0.0.1 --port 3100
+```
+
+打开 `http://127.0.0.1:3100`，先点击“退款趋势 · 招牌多轮”，依次提交 7 月单月和 7/8 月比较。若要复现 M50 的 business Hybrid experimental 演示，由操作员把 API 启动参数显式改为 `--rag-strategy subgraph`；页面仍没有 strategy 开关，**Pipeline 产品默认不会因此改变**。完整代理、preflight、清理和验证说明见 `web/README.md`。
+

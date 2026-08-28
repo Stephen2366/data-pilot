@@ -25,6 +25,7 @@ from engine.phase4b.identity import canonical_hash
 from engine.phase4b.task_context import TaskContextCodec, TaskContextError, TaskContextWindow
 from engine.phase4b.task_boundary import (
     TaskBoundary, TaskBoundaryError, TaskBoundaryEvent, TaskLifecycleFact, TaskProjection,
+    TaskStatusProjection,
 )
 from engine.phase4b.task_runtime import TaskState
 from engine.phase4b.task_state_codec import TaskStateCodec, TaskStateCodecError
@@ -202,6 +203,34 @@ class MySQLTaskBoundary:
         evidence = tuple(replace(item, validity="invalidated", invalidation_reason="task_cleared") if item.validity == "active" else item for item in claim.state.evidence)
         state = replace(claim.state, status="cleared", termination="cleared_by_caller", evidence=evidence)
         return self.commit(claim=claim, caller=caller, state=state, terminal_status="cleared", active_role=active_role)
+
+    def status(self, *, task_id: str, caller: TrustedCaller | None, active_role: str | None = None) -> tuple[TaskStatusProjection, TaskLifecycleFact]:
+        """按 owner scope 只读 checkpoint 元数据；恢复路径不解码可能已擦除的 payload。"""
+
+        owner, tenant, role = TaskBoundary.owner_scope(caller, active_role)
+        now_us = self._now_us()
+        try:
+            with self._engine.connect() as connection:
+                row = connection.execute(select(
+                    _CHECKPOINT.c.version, _CHECKPOINT.c.status, _CHECKPOINT.c.expires_at_us,
+                    _CHECKPOINT.c.state_identity, _CHECKPOINT.c.owner_ref,
+                    _CHECKPOINT.c.tenant_ref, _CHECKPOINT.c.active_role,
+                ).where(_CHECKPOINT.c.task_key == self._task_key(task_id))).mappings().first()
+        except SQLAlchemyError as exc:
+            raise self._storage_error(exc) from exc
+        if row is None or row["owner_ref"] != owner or row["tenant_ref"] != tenant or row["active_role"] != role:
+            raise TaskBoundaryError("task_unavailable", "task 不存在或不属于 caller", safety_status="blocked")
+        status = str(row["status"])
+        if status in {"active", "claimed"} and int(row["expires_at_us"]) <= now_us:
+            status = "expired"
+        projection = TaskStatusProjection(
+            task_id, int(row["version"]), status, self._from_us(int(row["expires_at_us"])),  # type: ignore[arg-type]
+        )
+        fact = TaskLifecycleFact(
+            TaskBoundary.safe_ref(task_id), "status", "task_status_ready",
+            projection.task_version, projection.task_version, row["state_identity"], resume_source="database",
+        )
+        return projection, fact
 
     def switch(self, *, claim: TaskProjection, caller: TrustedCaller | None, state: TaskState, active_role: str | None = None, event: TaskBoundaryEvent | None = None, context: TaskContextWindow | None = None) -> tuple[TaskProjection, TaskLifecycleFact]:
         """同一事务原子退休旧 task 并创建新 task。"""

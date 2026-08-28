@@ -4,11 +4,11 @@
 >
 > **事实来源分工**：表字段、索引和迁移以 Alembic / ORM 为准；指标公式以 `domain_pack/metrics.yaml` 为准；表关系以 `domain_pack/schema_desc/relations.yaml` 为准；本文只负责把这些当前事实和容易踩坑的业务规则讲清楚。归档设计背景见 `docs/archive-versions/database-upgrade-plan-v5.md`，完整技术取舍统一从 `docs/state/CHANGELOG_INDEX.md` 进入。
 
-更新时间：2026-08-27
+更新时间：2026-08-28
 
 ## 一句话结论
 
-DataPilot 当前 schema 有 **14 张业务物理表 + 2 张 Agent task 状态基础设施表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs` 和两张基础设施表。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。M49 已在用户授权下把本机 `datapilot_dev` 从 0003 正常升级到 `20260827_0005`：升级前后 users/orders/refunds/knowledge_docs 计数保持 `200/10000/1000/11`，未 reset/reseed，新 task checkpoint/event 为 `0/0`。隔离库 `datapilot_m48_test` 继续用于真实 Probe，不与默认开发库混算。
+DataPilot 当前 schema 有 **14 张业务物理表 + 2 张 Agent task 状态基础设施表**；Text2SQL 只暴露其中 **13 张可查询分析表**，明确排除 `knowledge_docs` 和两张基础设施表。主路径是 **MySQL `datapilot_dev` + SQLAlchemy ORM + Alembic**，seed 由 `scripts/seed_data.py` 确定性生成 **1 万级真实感业务数据**。知识 authority 位于 `domain_pack/kb_docs/` 与 `metrics.yaml`，物理 `knowledge_docs` 只是 source-backed builder 生成的 legacy 兼容投影。M49 已在用户授权下把本机 `datapilot_dev` 从 0003 正常升级到 `20260827_0005`：升级前后 users/orders/refunds/knowledge_docs 计数保持 `200/10000/1000/11`，未 reset/reseed，新 task checkpoint/event 为 `0/0`。隔离库 `datapilot_m48_test` 继续用于历史 Probe；M50 新增可重建的 `datapilot_demo` 作为 Web 招牌故事专用库，两者都不与默认开发库混算。
 
 ## 关键入口
 
@@ -137,6 +137,13 @@ M42 新增与默认 legacy 隔离的 `phase4b` profile；它仍只使用既有 1
 - legacy 6 月末退款会自然滑入 7 月。显式 profile 为保持同一产品 SQL 口径，只在该隔离副本内把 103 条 spillover 固定到 6 月末；不会修改默认 legacy recipe 或历史 artifact。
 
 完整边际表和 recipe 以 `domain_pack/phase4b/seed_profile.json` 为事实源；本节只保存运行时需立即知道的 identity、总额和隔离边界。
+
+### M50 Web 演示库
+
+- `datapilot_demo` 是 M50 本地 Web 的独立可重建数据库，不是 `.env` 默认值，也不代表生产数据世界。唯一 prepare 入口是 `python -m scripts.prepare_m50_demo prepare --confirm-database datapilot_demo`；精确确认门会在连接/DDL 前拒绝其他库名。
+- M50 prepare 将该库迁移到 `20260827_0005` 并显式加载上述 `phase4b` profile。当前最终 preflight 为 7/8 月 `120000.00/180000.00`、task checkpoint/event `0/0`、ready=true；profile/oracle identity 沿用本节现有事实源，不在 Web 另建 seed 合同。
+- `scripts/run_m50_demo_api.py` 同时把 durable task boundary 与 FastAPI `get_db` override 到该库，防止 task checkpoint 和 SQL business query 落入不同数据库；默认 `datapilot_dev` 与 `.env` 不被修改。
+- Web 正常查询只读业务表，task lifecycle 仍按产品合同写两张状态表。clear 的 scrubbed tombstone/event 是预期审计事实；只有开发 Probe 的精确 safe ref cleanup 才要求物理 0/0。启动和清理命令统一见 `runbook.md`。
 
 ## 数据质量与易错规则
 
