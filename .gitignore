@@ -9,13 +9,14 @@ __pycache__/
 *.sqlite
 *.sqlite3
 
-# `.agent_work/` 只保留临时目录骨架；AI 调研草稿和运行产物都不进入发布仓库。
-.agent_work/*
-!.agent_work/temp/
-.agent_work/temp/*
-!.agent_work/temp/.gitkeep
-
-# 所有 AI 工具共享 .agent_work/temp/；临时 trace / 缓存不应成为版本化评测产物。
+# 本地 AI 工具配置、技能与运行产物不进入发布仓库。
+AGENTS.md
+CLAUDE.md
+skills-lock.json
+.agent_work/
+.claude/
+.codex/
+.dsh/
 
 eval/traces/*.jsonl
 !eval/traces/.gitkeep
