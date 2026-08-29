@@ -18,6 +18,14 @@
 
 ## 变更记录（新的在上）
 
+### [模块任务] M51 TypeScript 本地 MCP Adapter（2026-08-29）
+
+- **改动范围**：起始 HEAD=`fb77479d46771d97f948be29ffcd3ce271c3ea7f`，模块期间无提交。新增 root npm workspace、`packages/data-pilot-contracts/` 共享网络合同、`mcp/` TypeScript stdio server/HTTP adapter/bounded projector/probe/test/README，并把 Web 合同入口改为共享包门面；同步更新 AGENTS 目录事实和 runbook。没有修改 FastAPI/Pydantic 业务 authority、Router、Agent Loop、Evidence、安全策略、数据库 schema/seed、RAG active release、Pipeline/Subgraph 默认或模型。
+- **关键设计与用户决定**：采用用户确认的 MCP TypeScript SDK v2 和私有共享网络合同包；只公开一个 `data_pilot_query` Tool，内部 closed-world 分派 query/status/clear。adapter 仅允许 loopback、固定本地 `ops` fixture caller、单次 HTTP/310 秒 timeout/redirect 拒绝/mutation retry0；unknown 只能显式 status 对账。结果按 allowlist 投影并限制为 20 列×50 行、cell 2 KiB、16 citations、structured output 64 KiB。用户最终确认 M51 以本地 stdio 基础适配器收口，真实 policy RAG/Hybrid MCP 路径迁移到独立 M51R，不改写为 M51 已完成能力，也不占用 M52 远程 MCP 路线。
+- **真实证据与边界**：P1 在 C 后/D 前按时完成真实 SDK stdio→HTTP→Qwen Text2SQL→Guard→`datapilot_demo` MySQL 纵向链，得到 2026-07 `120000`、task v1，2 calls/5900 tokens，Trace=`8e0e1fe4...60c06`；同场景重验再次得到 `120000`，2 calls/5908 tokens，Trace=`836c8d37...bc71e`。P3 验证非法输入零 HTTP、stale version 零 provider/deep invocation、status/clear 和精确 cleanup `0/0`。模块全部开发 Probe 总账为 8 calls/25940 observed tokens、retry0，均为 exploratory/baseline-ineligible。真实 policy RAG/Hybrid 尚未建立，详细待办按用户要求移至仓库外 `DevProbe-todo.md`，完成 M51R 前不得声称 MCP 已覆盖该 happy path。
+- **验证快照**：注释审计 10 个生产 TypeScript 文件、22 个非豁免函数/类，缺失 0。clean `npm ci`=532 packages/audit 536/0 vulnerabilities；typecheck/lint exit0；contracts 2、MCP 39、Web 36 tests passed；Next/MCP/contracts production build 通过。Python 聚焦 38 passed、1 个既有 Starlette/httpx warning；后台同次全仓 `684 passed, 1 warning in 577.38s`。首次 clean install 的 SWC EPERM、root Vitest 的 jsdom workspace 解析和 pytest basetemp WinError5 均已定位并以精确环境修正/同范围复验闭合，不是产品合同降级。
+- **遗留/后续**：M51 只声明本地 stdio、SQL happy path、transport/lifecycle 和安全负路径；不包含远程 transport、OAuth/生产认证、动态 Tool、streaming、性能/HA 或 exactly-once。M51R 的开工门是独立 plan、用户授权修改 Web/API/MCP 共用 turn understanding 与 Knowledge query formation、保持 Evidence/ACL/Gate 并另批 Probe 预算；最终需同 lineage 闭合 7/8 月比较值、政策前提/材料、citation、版本/Trace/bounded projection 和 cleanup 0/0。M52 仍只在出现明确非本地场景、认证 principal/tenant/threat model 与公网 E2E 授权后开工。
+
 ### [小修] M50 用户实测的 unknown 恢复与月份比较收敛（2026-08-28）
 
 - 用户连续查询 7 月、再比较 7/8 月时，BFF 150 秒先于服务端完成而进入 unknown；服务端随后提交新版本，浏览器仍持有旧版本。同时 QueryPlan 把 `diff/change_rate` 下推为 MySQL 嵌套聚合。修正为 BFF 默认 300 秒、unknown 跨刷新、owner-scoped 只读 task status 对账，以及仅在 Agent `comparison=true` 时把 SQL 计划收敛为 month + base metric，由既有 completion 层计算差值/变化率；mutation 仍不自动重试。

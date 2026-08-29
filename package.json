@@ -1,0 +1,23 @@
+{
+  "name": "datapilot-typescript-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/data-pilot-contracts",
+    "web",
+    "mcp"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @datapilot/contracts && npm run build --workspace datapilot-mcp && npm run build --workspace datapilot-web",
+    "typecheck": "npm run typecheck --workspace @datapilot/contracts && npm run typecheck --workspace datapilot-mcp && npm run typecheck --workspace datapilot-web",
+    "test": "npm run build --workspace @datapilot/contracts && npm run test --workspace @datapilot/contracts && npm run build --workspace datapilot-mcp && npm run test --workspace datapilot-mcp && npm run test --workspace datapilot-web",
+    "lint": "npm run lint --workspace datapilot-mcp && npm run lint --workspace datapilot-web"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

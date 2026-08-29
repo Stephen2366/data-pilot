@@ -16,11 +16,21 @@
 
 **3. 某人的简历**
 
+```markdown
+AegisEvo | Agent Harness Evolution Platform
+
+项目链接：https://github.com/ETOLucy/AegisEvo
+
+- Rust 高性能决策内核： 7-Crate 模块化架构(Domain / Protocol / Control / Storage / API / Worker / CLI)，基于 Rust + Axum 实现强类型、低延迟的受控演化引擎； JSON Schema (aegisevo-protocol)与Python 评估器(Pydantic 严格模型)双向跨语言契约统一,保证演化决策的确定性与可审计性；内置有界遥测白名单，杜绝敏感信息外泄。
+- 受限基因组与 Quality-Diversity 归档： Content-addressed 候选基因组+Allowlist 受限变异/交叉算子，不可变 Lineage DAG 保证血缘可追溯；4病理位点Niche归档+安全 Veto 解耦，精确区分“因安全拒”与“因证据不足拒”，防止演化产出越界配置。
+- 统计&安全双门控机制： Pairwise 统计比较(10,000 次 Bootstrap 重采样，95%CI，n<30输出小样本警告)，PairwiseDecision 将统计显著性与安全门禁拆分为正交布尔量；EvidenceChainV1 哈希证据链绑定 search 证据、报告、门禁与晋升记录，驱动 Evaluated → Challenger → Canary → Active → RolledBack 生命周期，确保晋升有统计证据支撑。
+- 高并发与分布式持久化： PostgreSQL 租户隔离(全仓 141 处 tenant_id 约束)、等命令、Fenced Local Workers ( FOR UPDATE SKIP LOCKED 原子抢任务+fencing token 递增防脑裂+租约到期自动回收）与事务性 Outbox，实现可重启恢复的 Durable 控制平面，断电重启不丢任务、不重复执行。
+- 跨语言联动与评测对齐： Content-addressed Target Pack (repoaegis-target-pack/v2)与RepoAegis 运行时联动，跨语言 Digest校验+联合治理流水线：392-task SWE-bench Verified 生成战役（166/392=42.3%生成率，官方判定待进行，按OpenAI 弃用 Verified指引定位为方向性工程证据、正迁移SWE-bench Pro);生成≠解决，仅官方 verifier 报告可建立 resolved.
 ```
-AegisEvo:Coding Agent 评测、优化与治理平台
-个人项目：独立负责候选评测、实验追踪与发布门禁」Rust、PostgreSQL、Arum、Python
-使用Rust构建Agent候选搜索内核，将Prompt、工具策略与检索参数编码为内容寻址基因组；通过结构化变异、不可变LineageDAG与多目标Pareto归档管理候选生成和淘汰。
-设计同任务、等预算的对照实验，采用配对Bootstrap与Holm多重检验判断候选收益，并设置安全硬门禁、隐藏验证及人工审批，防止以安全回归换取任务得分。
-打通AegisEvo与RepoAegis的版本化评测协议；使用官方SWE-bench4.1.0DockerHarness评测预先冻结的8个SWE-benchVerified任务，其中3个通过官方验证，结果与运行证据可追溯。
+
+**4.**
+
+```
+项目直接封装成 tool 和 skill，适配到 hermes 或者 claude code 这种，比你自己整个 react 框架有说服力
 ```
 

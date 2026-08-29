@@ -84,6 +84,9 @@ docs/                   # 项目文档（有时用户会自行把 `docs` 下的�
 
 demo/                   # Streamlit 演示页
 web/                    # M50 Next.js/React/TypeScript 本地产品工作台与薄 BFF
+mcp/                    # M51 TypeScript 本地 stdio MCP Adapter
+packages/
+  data-pilot-contracts/ # Web/MCP 共用的公开网络合同与 Zod schema
 scripts/                # 本地脚本，例如 seed 数据
 tests/                  # pytest 测试
 .agent_work/temp/       # AI 工具共享临时目录；新产物按 <module>/<run-name>/ 分层

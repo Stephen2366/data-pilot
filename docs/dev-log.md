@@ -4749,7 +4749,7 @@ Phase 4B 之后不应为了凑模块号继续加功能。更合理的顺序是�
 
 一句话收口：**Phase 4B 已经把 DataPilot 的“会回答”升级成了“能围绕同一任务安全推进、保存、恢复并自证过程”的展示型 Agent；下一步优先把这条能力稳定地交付出来，而不是继续扩张边界。**
 
-## ★ M50 给 DataPilot 装上一座“只展示事实、不替 Agent 做决定”的 Web 驾驶舱
+## ★ M50 Web
 
 （2026-08-28）
 
@@ -4994,4 +4994,238 @@ npm run dev -- --hostname 127.0.0.1 --port 3100
 ```
 
 打开 `http://127.0.0.1:3100`，先点击“退款趋势 · 招牌多轮”，依次提交 7 月单月和 7/8 月比较。若要复现 M50 的 business Hybrid experimental 演示，由操作员把 API 启动参数显式改为 `--rag-strategy subgraph`；页面仍没有 strategy 开关，**Pipeline 产品默认不会因此改变**。完整代理、preflight、清理和验证说明见 `web/README.md`。
+
+## ★ M51 本地 TypeScript MCP Adapter
+
+（2026-08-29）
+
+**简述**：M51 用 TypeScript（带静态类型的 JavaScript）和 MCP（Model Context Protocol，模型上下文协议）把现有 FastAPI 能力包装成一个标准本地工具；Claude、Cursor 或 MCP Inspector 可以通过 `stdio`（标准输入输出）启动它，而业务判断、权限和任务版本仍由 Python 后端负责。
+
+### 先用大白话讲
+
+M50 已经给 DataPilot 做了一个网页驾驶舱，但不同 AI 客户端接入时，仍不能直接把 FastAPI 当作自己的标准工具。M51 做的事情很像给一台专业设备安装**标准插头和转换器**：
+
+- **插头形状统一**：客户端只看到一个 `data_pilot_query`，不用理解 DataPilot 内部有 SQL、RAG（检索增强生成）和 Hybrid（混合查询）多少条链。
+- **转换器不越权**：MCP Adapter（协议适配器）只把工具调用转换成 HTTP 请求，再把公开响应裁成安全、有限的结果；它不替 Agent 选路线，也不自己改任务状态。
+- **断电不乱重试**：如果请求超时，适配器不会重新执行可能已经提交的任务，而是让客户端用 status（状态查询）对账。
+- **输出有行李限额**：表格、单元格、引用和总结果都有上限，避免把巨量数据或后端私有状态塞进模型上下文。
+
+最终效果是：DataPilot 不只可以被网页操作，也能作为一个**标准本地 MCP Tool（MCP 工具）**被 AI 客户端调用，同时保留原来后端的安全和状态边界。
+
+### 这次做了什么
+
+这次工作的核心矛盾是：**要让外部 AI 客户端方便调用 DataPilot，但不能因此复制一套业务后端、暴露过多数据，或在网络不确定时重复执行任务。** M51 围绕协议入口、共享合同、有界输出和任务对账建立了一条本地调用链。
+
+1. **把整个 DataPilot 收进一个 Tool，而不是把内部模块拆成一排按钮。**
+
+   一个深接口比多个浅接口更能守住业务边界。
+
+   - **原来的问题**：如果分别暴露“查 SQL”“查文档”“做 Hybrid”等 Tool，客户端就要替 Router（路由器）做业务选择，还可能绕过 Agent Loop（受控决策循环）和 Evidence Gate（证据门）。
+   - **关键机制**：MCP server 只注册 `data_pilot_query`。输入中的 operation（操作）是封闭集合，只允许 query、status、clear；query 再携带服务端定义的 start/continue/switch/cancel 任务动作。
+   - **如何解决**：`server.ts` 负责协议注册，`http-adapter.ts` 把请求送入既有 `/api/query`、task status 和 clear 接口。SQL、RAG、Hybrid 的选择仍发生在 FastAPI 后端。
+   - **重要取舍**：没有为了“工具看起来丰富”增加第二个 Tool，也没有开放 model、corpus（语料库）、RAG strategy（检索策略）或 role（角色）参数。这样少了一些客户端自由度，却避免客户端变成第二个 Agent。
+   - **验证与边界**：SDK（软件开发工具包）内存测试和真实 spawned stdio（拉起子进程）测试确认只列出一个 Tool；这证明标准协议入口成立，不代表任意客户端版本或远程部署已经兼容。
+
+2. **用共享网络合同消除 Web 与 MCP 的“各写一份类型”。**
+
+   第二个 TypeScript 消费者出现后，复制合同会让同一个后端响应产生两个解释版本。
+
+   - **原来的问题**：M50 的 Web 已有 Zod（TypeScript 运行时校验库）网络 schema；M51 若再复制一份，后端新增状态或修改枚举时，很容易只更新一侧。
+   - **关键概念**：`@datapilot/contracts` 是私有 workspace package（仓库内共享包）。它只描述两个消费者都需要的公开网络形状，相当于 Java 多模块工程里只共享 DTO（数据传输对象），不共享 Controller 或页面逻辑。
+   - **如何解决**：root npm workspace（Node 多包工作区）统一安装图和 lockfile（依赖锁文件）；Web 的 `contracts.ts` 变成稳定导入门面，MCP 也从同一个包校验响应。
+   - **重要取舍**：共享包没有收进 Web presenter（展示器）、session（会话缓存）、BFF（前端专用轻量后端）或 MCP projector（结果投影器）。Python/Pydantic 仍是业务 authority（权威源），共享包只是“不信任网络”的消费侧门卫。
+   - **验证与边界**：共享合同 2 项、Web 36 项和 MCP 39 项测试全部通过；这证明两个 TypeScript consumer（消费者）没有因抽包而分叉，不把 TypeScript 升格为业务真值源。
+
+3. **把 MCP 输出做成“有界公开投影”，而不是直接转发整份 FastAPI JSON。**
+
+   工具返回越大、越自由，模型上下文越容易被无关数据挤满，也越容易泄漏内部字段。
+
+   - **关键机制**：`projector.ts` 只允许 answer、SQL、安全表格、citation（引用）、四轴状态、reason、trace 和 task/version 等登记字段通过；后端新增的未知字段不会自动穿透。
+   - **硬上限**：最多 **20 列 × 50 行**、单个 cell（单元格）最多 **2 KiB**、最多 **16 条 citation**、整个 structured output（结构化输出）最多 **64 KiB**。
+   - **如何解决**：裁剪时保留 route/execution/answer/safety 四轴、reason、trace 和 task/version 等对账骨架，并返回 truncation metadata（裁剪元数据），让调用方知道删掉了多少内容。
+   - **重要取舍**：没有把完整 Trace、TaskState、Context、Prompt、私有 Evidence 或原始错误转给客户端。MCP 的结果适合模型继续使用，但不是后端调试数据库的镜像。
+   - **验证与边界**：边界/property test（属性测试）覆盖超长文本、超宽表格、总大小和未知字段；真实 SQL Probe 的结果为 885 bytes、所有裁剪计数为 0。它证明固定 SQL 结果完整通过，不证明所有大结果都不会被裁剪。
+
+4. **把 timeout 当成“结果未知”，而不是普通失败后自动再来一次。**
+
+   task mutation（会改变任务状态的请求）最怕“服务端已经提交，客户端却以为失败”。
+
+   - **原来的问题**：网络超时只说明客户端没收到回执，并不能证明服务端没执行。如果 adapter 自动 retry，同一个 continue 或 clear 可能执行两次。
+   - **关键机制**：每个 operation 最多一次 HTTP 请求，mutation retry 固定为 0；adapter timeout 为 **310 秒**。超时、断连、非 JSON 或合同漂移会形成安全的 unknown outcome（未知结果）。
+   - **如何恢复**：客户端随后显式调用 status，读取服务端确认的 task version；clear 也必须使用最后一次完整响应或 status 返回的版本，不能自行 `version + 1`。
+   - **安全边界**：adapter 只接受 `127.0.0.1` 或 `localhost`，固定本地 `ops` fixture caller（演示身份），并拒绝带凭据、路径、query 或非 loopback host 的 backend URL。
+   - **验证与边界**：HTTP fake matrix（模拟响应矩阵）覆盖 timeout、redirect、5xx、坏 JSON、合同漂移和零重试；P3 验证 stale version 在 provider 和 deep invocation 前拒绝。它仍是本地展示边界，不是生产认证或 exactly-once（严格只执行一次）保证。
+
+5. **用真实 stdio→HTTP→Qwen→MySQL 链证明“标准插头真的通电”。**
+
+   单元测试能证明格式，只有真实纵向链能证明进程、协议和现有 Agent 能一起工作。
+
+   - **真实链路**：MCP Client（协议客户端）通过 stdio 拉起构建后的 server，调用 Tool；adapter 转到 loopback FastAPI，后端经过 Qwen、Text2SQL（自然语言转 SQL）、SQL Guard（SQL 安全门）和 `datapilot_demo` MySQL，再把 Response/Trace 投影回 MCP。
+   - **业务结果**：固定问题“查询 2026 年 7 月实际净退款金额”得到 **120000**、task v1；首次通过证据为 **2 calls / 5900 tokens**，Trace=`8e0e1fe4...60c06`。
+   - **安全闭环**：非法输入在 HTTP 前拒绝；stale version 零额外 provider/deep invocation；status/clear 对账完成后，演示库 synthetic task rows（合成任务行）恢复为 **0/0**。
+   - **证据口径**：模块全部 Live Dev Probe（开发期真实探针）总账是 **8 calls / 25940 observed tokens**，retry=0，属于 exploratory / baseline-ineligible（探索性、不可登记基线）。
+   - **能力边界**：M51 的完成声明是本地 stdio、真实 SQL、transport（传输）、投影和 lifecycle（任务生命周期）。真实 policy RAG/Hybrid MCP happy path 需要 M51R 的独立计划和验收，本模块没有把它写成已完成能力。
+
+6. **把工程交付做成 clean install、自动化和客户端说明，而不是只留一段能跑的源码。**
+
+   标准协议只有在别人能安装、构建、配置和排障时，才真正有展示价值。
+
+   - **可复现工程**：root `package-lock.json` 固定 contracts、MCP 和 Web 三个 workspace 的依赖；`npm ci` 从干净状态安装 **532 packages**，audit **536**，0 vulnerabilities。
+   - **自动化证据**：typecheck（类型检查）、lint（代码规范检查）、77 项 TypeScript 测试和 production build（生产构建）全部通过；Python 聚焦 38 项、全仓 **684 passed**。
+   - **客户端入口**：`mcp/README.md` 给出 Cursor、Claude Code/Claude Desktop 和 MCP Inspector 的绝对路径配置、启动前置、task 示例及 unknown 排障方式。
+   - **重要取舍**：README 明确这是本地 adapter，不把配置样例包装成远程 MCP 或生产认证。M52 只有在出现真实非本地场景、身份来源和 threat model（威胁模型）后才开工。
+   - **未证明边界**：当前没有远程 transport、OAuth/JWT、多租户、动态 Tool、streaming（流式输出）、性能/HA（高可用）或公网滥用治理。
+
+### 新概念
+
+- **MCP（Model Context Protocol，模型上下文协议）**：可以把它理解成 AI 客户端使用工具的“USB 标准”。客户端不需要知道 DataPilot 的私有 HTTP 细节，只需要按协议发现和调用 Tool。
+- **stdio transport（标准输入输出传输）**：Host（宿主客户端）启动一个本地子进程，通过 stdin/stdout 交换 JSON-RPC（结构化远程调用消息）。因此人类日志必须写 stderr，任何 stdout 杂音都可能破坏协议。
+- **Tool schema（工具结构合同）**：Tool 不只是名字和说明，还会声明允许的输入与输出形状。客户端和 server 可以在网络前拒绝非法字段，类似 FastAPI/Pydantic 的请求模型。
+- **Bounded projection（有界投影）**：不是把源对象原样复制，而是只挑允许公开的字段，并对数量、单项大小和总大小设硬上限。它同时保护模型上下文预算和数据边界。
+- **Unknown outcome（结果未知）**：请求可能已经在服务端执行，只是客户端没收到回执。它与“明确拒绝”不同，正确做法是查询权威状态，而不是重发 mutation。
+- **npm workspace（Node 多包工作区）**：一个根 lockfile 管理多个内部 package，类似 Maven multi-module（多模块）工程；内部包可以显式依赖，但仍保持各自 build/test 边界。
+
+### 代码阅读路线
+
+1. **先看共享合同从哪里来**：`packages/data-pilot-contracts/src/index.ts`、`web/lib/contracts.ts`
+   先理解公开 QueryRequest、AgentResponse、task status/control 的 Zod schema，再看 Web 只保留 re-export（重新导出）门面。这里解决的是 **两个 TypeScript consumer 共享网络语言，但不共享业务实现**。
+
+2. **从 MCP 进程入口看协议生命周期**：`mcp/src/index.ts`、`mcp/src/server.ts`
+   `index.ts` 只创建 stdio server；`createDataPilotServer` 注册唯一 Tool、声明 input/output schema，并把调用交给 adapter 和 projector。重点看日志为什么只能走 stderr，以及 Tool 为什么不拆成 SQL/RAG/Hybrid。
+
+3. **看配置如何把部署边界锁在本机**：`mcp/src/config.ts`
+   `loadConfig` 校验 backend URL、固定 role 和 timeout。阅读重点是 loopback allowlist（本机白名单）与 URL 禁区，它在任何 HTTP 调用前阻断非本地目标。
+
+4. **顺着一次 Tool 调用进入 FastAPI**：`mcp/src/http-adapter.ts`
+   `callDataPilot` 根据 closed-world operation 选择 POST/GET/DELETE，并保证一次调用最多一个 HTTP 请求。重点理解 known rejection（明确拒绝）和 unknown outcome 的区别，以及为什么这里没有 retry loop（重试循环）。
+
+5. **看后端大响应如何变成模型可用结果**：`mcp/src/projector.ts`、`mcp/src/contracts.ts`
+   `projectBackendResult` 先做字段白名单和逐项裁剪，再检查总字节数；`DataPilotToolOutput` 保存四轴、reason、trace、task/version 与 truncation 账本。这里解决的是 **忠实对账与上下文限额同时成立**。
+
+6. **最后用测试反推安全合同**：`mcp/test/`、`packages/data-pilot-contracts/test/contracts.test.ts`
+   config test 看非 loopback 拒绝，HTTP test 看零重试和错误矩阵，projector test 看硬上限，server test 看 SDK in-memory 和 spawned stdio。测试比逐行阅读更快展示“哪些行为绝不能变”。
+
+核心调用链是：
+
+`Claude / Cursor / MCP Inspector`
+→ `StdioClientTransport`
+→ `data_pilot_query`
+→ `callDataPilot`
+→ `FastAPI /api/query 或 task status/clear`
+→ `Agent / Qwen / SQL Guard / MySQL`
+→ `共享网络合同校验`
+→ `bounded projector`
+→ `structuredContent + text summary`
+
+**模块闭环**：M50 的网页和 M51 的 MCP Host 现在是两个独立入口，却共同消费同一份公开网络合同，并把业务 authority 留在 FastAPI/Pydantic。
+
+### 设计要点
+
+- **一个 Tool，后端仍做路由**：客户端只表达业务问题，不替 Router 选择 SQL/RAG/Hybrid，也不能选择 model、corpus 或 strategy。
+- **共享合同只共享 DTO**：Web/MCP 共用网络 schema，但 presenter、session、BFF、projector 和 transport 各自留在深模块内部。
+- **mutation 永不自动重试**：unknown outcome 通过 status 对账，避免把“没收到回执”误解为“服务端没执行”。
+- **结果必须有界**：字段 allowlist、逐项限制和 64 KiB 总门同时存在，既控制模型上下文，又防未知后端字段穿透。
+- **本地能力与远程能力分开立项**：M51 完成本地 stdio 基础适配；M51R 负责被独立授权的真实政策链，M52 只在远程认证场景成熟后启动汪。
+
+### 有面试价值的亮点
+
+1. **“我没有把 MCP 做成第二套业务后端。”** 我只让 adapter 处理协议、transport、运行时校验和有界投影；Router、Agent Loop、Evidence、权限和 task version 都留在 FastAPI。这样新增一个客户端入口，却没有复制核心状态机。
+
+2. **“我按分布式系统语义处理本地 Tool。”** 即使是 loopback HTTP，timeout 后也可能出现服务端已提交、客户端未收到的 unknown outcome。我让 mutation retry=0，再用只读 status 对账版本，避免一个看似友好的自动重试制造双提交。
+
+3. **“我给模型上下文做了三层限流。”** 不是只限制 rows，而是字段白名单、单项/数量上限和 64 KiB 总上限一起生效；裁剪后仍保留四轴、Trace 和 task/version，因此结果变小但不会失去安全与对账骨架。
+
+4. **“我把第二个 TypeScript consumer 变成了架构重构触发器。”** Web 和 MCP 出现真实重合面后才抽 `@datapilot/contracts`，并严格限制它只共享网络 DTO。这个时点既消除复制，又没有过早建立一个什么都装的公共包。
+
+5. **“我不仅测协议，还跑通了真实纵向链。”** SDK spawn test 证明 stdout/JSON-RPC，真实 P1 再证明 stdio、HTTP、Qwen、SQL Guard、MySQL、Response/Trace 和 MCP 投影同源得到 120000；自动化与真实证据分工明确。
+
+### 面试官追问
+
+1. **[基础追问] 为什么只设计一个 `data_pilot_query`，多个 Tool 不是更符合 MCP 吗？**
+
+   多 Tool 适合职责真正独立、权限和状态也能独立定义的能力。DataPilot 的 SQL、RAG、Hybrid 共享 Router、task state、Evidence 和预算；拆开后，客户端反而要负责选路，容易绕过服务端控制。我因此公开一个深 Tool，让后端继续做业务决策，status/clear 也用 operation 复用同一安全入口。
+
+2. **[工程/深挖追问] 为什么不用 FastAPI 自动生成的 OpenAPI schema 直接生成全部 TypeScript 类型？**
+
+   OpenAPI 适合描述完整 HTTP API，但 MCP 和 Web 只应消费公开网络子集。全量生成会把内部兼容字段和不需要的结构一起带入两个前端模块，也不能代替运行时校验。我保留 Python/Pydantic authority，用共享 Zod schema 校验真实消费面，再用 fixture 证明跨语言一致；如果以后接口面扩大，可以在这个 authority 链上增加生成，而不是先把整份 OpenAPI 变成公共包。
+
+3. **[工程/深挖追问] 64 KiB 总限制触发时，怎么保证不会把最重要的信息裁掉？**
+
+   projector 不是随机截字符串。它先限制 rows、columns、cell 和 citations，再在总门下继续收缩大块展示数据；四轴状态、reason、trace、task id/version 和 truncation 账本是对账骨架，优先保留。测试覆盖超宽表、超长单元格和总大小，调用方也能看到删除数量。这个结果适合模型消费，但完整诊断仍应回到后端 Trace，而不是强塞进 Tool 输出。
+
+4. **[工程/深挖追问] 本地 loopback 为什么还要做 URL 和身份限制？**
+
+   因为 Host 的环境变量也可能配置错误或被不可信配置修改。如果允许任意 URL，adapter 就可能把问题、task id 或公开结果发到外部服务；如果允许 Client 自带 role，又会把身份选择权交给模型。所以 config 在网络前只接受无凭据 loopback URL，role 固定为本地 fixture。生产身份需要真实 principal（认证主体）映射，不能靠扩一个字符串参数解决。
+
+### 验证与下一步
+
+**真实收工证据：**
+
+| 验证层 | 最终结果 | 能说明什么 |
+|---|---:|---|
+| clean install | 532 packages，audit 536，0 vulnerabilities | root workspace 可从零安装 |
+| TypeScript 静态检查 | typecheck、lint 全部 exit 0 | contracts/MCP/Web 静态边界闭合 |
+| TypeScript 测试 | contracts 2、MCP 39、Web 36，共 77 passed | 共享合同、HTTP、projector、SDK stdio 和 Web 兼容 |
+| production build | contracts、MCP、Next build 通过 | 构建产物可交付给 Host |
+| Python 聚焦 | 38 passed，1 warning | M42/M43/M47/M48/M50 后端兼容 |
+| 全仓 pytest | 684 passed，1 warning，577.38s | 当前仓库同次完整回归无失败 |
+| M51-P1 | 2 calls / 5900 tokens，结果 120000 | 固定真实 SQL 纵向链闭合 |
+| M51-P3 | 0 额外 provider/deep invocation，cleanup 0/0 | 输入、版本、status/clear 安全边界 |
+
+warning 是既有 Starlette TestClient/httpx deprecation，与 M51 无关。以上数字来自 M51 notes 的已完成验证，**本节没有重新运行测试、数据库或真实模型**。
+
+**下一步**：如果优先补本地真实政策问法，应先按仓库外 `DevProbe-todo.md` 和 M51 plan 第 10 节另立 M51R；如果出现明确非本地部署需求，再按 M52 的认证、tenant（租户）、threat model 和公网授权门设计远程 MCP。两条路线都继续复用 server factory、共享网络合同和 bounded projector。
+
+可复制验证命令：
+
+```powershell
+# 前置：仓库根目录，Node 24/npm 可用；以下命令不调用真实模型。
+
+# 1. 从 lockfile 干净安装；预计 audit 0 vulnerabilities。
+npm ci
+
+# 2. 依次检查三个 workspace；预计 typecheck/lint/build 通过，测试共 77 passed。
+npm run typecheck
+npm run lint
+npm test
+npm run build
+
+# 3. 只运行 MCP 自动化；预计 5 files / 39 tests passed。
+npm --workspace datapilot-mcp test
+```
+
+全仓 pytest 约需 10 分钟，当前已经有同次 684 passed 证据；阅读复盘时不需要重复运行真实 Qwen Probe。
+
+**本地启动体验：**
+
+先确认本机 MySQL、`.env` 和 Qwen 配置可用。第一次体验如需准备演示库，使用 M50 的精确护栏命令；它只允许重建 `datapilot_demo`：
+
+```powershell
+# 仓库根目录：准备并核对隔离演示库。
+python -m scripts.prepare_m50_demo prepare --confirm-database datapilot_demo
+
+# 构建 MCP server。
+npm ci
+npm run build
+
+# 启动 FastAPI；需要本机代理时追加 --proxy http://127.0.0.1:7897。
+python scripts/run_m50_demo_api.py --rag-strategy pipeline
+```
+
+另开一个终端，用 MCP Inspector 拉起 adapter：
+
+```powershell
+npx @modelcontextprotocol/inspector "D:\.Programs\nodejs\node.exe" "D:\.Work\Practice\AI-Project\data-pilot\mcp\dist\index.js"
+```
+
+进入 Inspector 的 Tools 页面，只应看到 `data_pilot_query`。用下面输入调用：
+
+```json
+{
+  "operation": "query",
+  "question": "查询 2026 年 7 月实际净退款金额。"
+}
+```
+
+正常情况下会得到 **120000**、SQL、安全状态、Trace 和 task/version。体验结束后，用返回的 task id/version 先调用 status，再调用 clear；不要在 timeout 后直接重复 query。Cursor 和 Claude 的绝对路径配置见 `mcp/README.md`。
 

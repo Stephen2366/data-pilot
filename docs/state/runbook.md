@@ -2,7 +2,7 @@
 
 > DataPilot 的公共运行入口。运行任何项目命令前先读本文，再按任务进入 Text2SQL 或 RAG 专用 runbook。当前状态见 `AI_CONTEXT.md`，评测数字见 `eval-baselines.md`；本文不保存历史实验和基线数字。
 
-更新时间：2026-08-28
+更新时间：2026-08-29
 
 ## 先选链路
 
@@ -56,6 +56,14 @@
 - 启动 Web：在 `web/` 执行 `npm ci`，再执行 `npm run dev -- --hostname 127.0.0.1 --port 3100`，访问 `http://127.0.0.1:3100`。BFF timeout 默认 300s；mutation timeout/abort/合同漂移为 unknown outcome，页面持久化冻结现场且绝不自动 retry，可由用户显式执行只读 status 对账。
 - 前端验证：`npm run typecheck`、`npm run lint`、`npm test`、`npm run test:e2e`、`npm run build`。Python-authoritative fixture 重签入口是 `python scripts/export_m50_web_contract_fixtures.py`；只有后端公开合同确实变化时才运行并审查 identity。
 - `datapilot_demo` 是可重建的本地演示库，不是默认业务库或生产环境。task clear 会按产品合同保留 scrubbed tombstone/event；开发 Probe 若需物理 0/0，只能对已记录的精确 `task_safe_ref` 使用 `python -m scripts.cleanup_m50_demo_task --task-safe-ref <safe-ref>`，不得模糊删除。
+
+## M51 本地 TypeScript MCP Adapter
+
+- 完整使用说明见 `mcp/README.md`。MCP server 使用本地 stdio transport，对外只暴露一个 `data_pilot_query` Tool；它是 FastAPI 的协议适配层，不复制 Router、Agent Loop、Evidence、安全策略或 task 状态机。
+- 在仓库根目录执行 `npm ci`、`npm run build`。客户端 command 指向本机 Node，args 指向绝对路径 `mcp/dist/index.js`；server 只接受 `DATAPILOT_API_BASE_URL=http://127.0.0.1:<port>` 或 `localhost`，并固定使用本地 `ops` fixture caller。远程 host、任意 role、认证和公网部署不在 M51 范围。
+- FastAPI 仍按 M50 demo 入口启动；MCP 不启动 API、数据库、Milvus 或 provider。默认单次 HTTP timeout 为 310 秒，mutation 自动 retry 固定为 0；超时、断连或不可判定响应映射为 unknown outcome，调用方应随后显式调用同一个 Tool 的 `task_status`，不能自动重放 mutation。
+- Tool 支持 `query`、`task_status`、`task_clear` 三类动作。公开结果经过严格合同校验和有界投影：answer/sql、最多 20 列 × 50 行、单 cell 2 KiB、最多 16 条 citation、总输出 64 KiB；未知字段不会穿透 MCP。
+- M51 的真实证据只确认 SQL 纵向链、stdio/HTTP 生命周期、安全拒绝和 status/clear 对账。真实 policy RAG/Hybrid MCP 路径留给独立修复模块 M51R；完成 M51R 前不得宣称 MCP 已覆盖真实 RAG/Hybrid。
 
 ## Trace / LangFuse
 
