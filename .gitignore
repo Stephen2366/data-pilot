@@ -20,7 +20,12 @@ skills-lock.json
 
 # 本地开发记录、历史方案与运行生成的评测报告不进入发布仓库。
 eval/reports/
+eval/cases_plan.md
 docs/notes/
+docs/state/*
+!docs/state/runbook.md
+!docs/state/runbook-rag.md
+!docs/state/runbook-text2sql.md
 docs/archive-dormant/
 docs/archive-versions/
 docs/ref-discussion/
@@ -29,6 +34,11 @@ docs/dev-log(M0-M28).md
 docs/dev-log.md
 docs/phase4-reference.md
 docs/reference-dbgpt-analysis.md
+docs/ts-integration-plan-v3.md
+
+# 私有 Eval 设计与开发期诊断 campaign 不进入发布仓库。
+scripts/build_m42_decision_reserve.py
+domain_pack/phase4b/b3_diagnostic_campaign*.json
 
 eval/traces/*.jsonl
 !eval/traces/.gitkeep
