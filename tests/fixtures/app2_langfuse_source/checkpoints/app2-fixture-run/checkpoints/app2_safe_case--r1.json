@@ -1,0 +1,18 @@
+{
+  "scenario_id": "app2_safe_case",
+  "replicate_id": 1,
+  "evidence": {
+    "run_id": "app2-fixture-run",
+    "scenario_id": "app2_safe_case",
+    "replicate_id": 1,
+    "execution_status": "rejected",
+    "status_code": 200,
+    "response": {"trace_id": "dp-app2-fixture-trace", "route": "sql", "safety_status": "blocked", "error_type": "sql_guard_blocked", "issue_tags": ["unsafe_sql"], "columns": [], "rows": [], "tables_used": []},
+    "trace_steps": [{"step_type": "sql_guard", "status": "blocked", "error_type": "sql_guard_blocked", "metadata": {"issue_tags": ["unsafe_sql"], "blocked_via": "sql_guard"}}],
+    "physical_attempts": 1,
+    "expected_rows": null,
+    "oracle_error": null,
+    "observability": {"backend": "langfuse", "status": "succeeded", "datapilot_trace_id": "dp-app2-fixture-trace", "trace_id": "0123456789abcdef0123456789abcdef", "host_identity": "0000000000000000000000000000000000000000000000000000000000000000", "project_identity": "1111111111111111111111111111111111111111111111111111111111111111", "span_mode": "live"}
+  },
+  "assertion_results": [{"assertion_id": "safety", "kind": "safety_block", "status": "passed", "reason": "blocked_as_expected", "issue_tags": [], "evidence_refs": ["trace:sql_guard"], "metadata": {}}]
+}

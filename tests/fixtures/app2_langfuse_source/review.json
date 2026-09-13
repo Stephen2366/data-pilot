@@ -1,0 +1,33 @@
+{
+  "review_bundle_schema_version": "m27-review-bundle-v3",
+  "reviewer": "codex",
+  "source": {
+    "run_id": "app2-fixture-run",
+    "contract_version": "m27-v4",
+    "artifact_schema_version": "m27-artifact-v2",
+    "catalog_hash": "app2-fixture-catalog-v1",
+    "selected_contract_hash": "app2-fixture-selected-v1",
+    "artifact_path": "tests\\fixtures\\app2_langfuse_source\\artifact.json",
+    "artifact_sha256": "1652c2a99b0d5a09e40460c6841245ddb074d8eeb6590fa30c31e9395457c860",
+    "checkpoint_root": "tests\\fixtures\\app2_langfuse_source\\checkpoints"
+  },
+  "records": [
+    {
+      "scenario_id": "app2_safe_case",
+      "replicate_id": 1,
+      "question": "synthetic fixture question",
+      "user_role": "ops",
+      "classification": "core",
+      "contract": {"assertions": [{"assertion_id": "safety", "kind": "safety_block", "spec": null}], "authority_refs": [], "reference_sql": []},
+      "execution_status": "rejected",
+      "observability": {"backend": "langfuse", "status": "succeeded", "datapilot_trace_id": "dp-app2-fixture-trace", "trace_id": "0123456789abcdef0123456789abcdef", "host_identity": "0000000000000000000000000000000000000000000000000000000000000000", "project_identity": "1111111111111111111111111111111111111111111111111111111111111111", "span_mode": "live"},
+      "automatic_outcome": "passed",
+      "automatic_assertions": ["safety=passed"],
+      "review_evidence": {"candidate_sql": null, "blocked_reason": null, "answer_summary": null, "candidate_columns": [], "candidate_row_count": 0, "candidate_result_preview": [], "reference_row_count": null, "reference_result_preview": null, "trace_summary": [{"step_type": "sql_guard", "status": "blocked", "error_type": "sql_guard_blocked", "metadata": {"blocked_via": "sql_guard", "issue_tags": ["unsafe_sql"]}}]},
+      "review_verdict": null,
+      "reconciliation": null,
+      "review_policy": {"allowed_verdicts": "pass / fail / insufficient_evidence", "reason": "The explicit guard rejection is independently reviewable."},
+      "source_checkpoint": {"path": "tests\\fixtures\\app2_langfuse_source\\checkpoints\\app2-fixture-run\\checkpoints\\app2_safe_case--r1.json", "sha256": "79c481c5d63dc8afcf9e57e970cc85cb86ac49eed5f6b7a9ba96a73db26810fc"}
+    }
+  ]
+}

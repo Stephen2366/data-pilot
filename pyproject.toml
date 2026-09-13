@@ -33,7 +33,7 @@ dev = [
     "pytest>=8.0.0",
 ]
 observability = [
-    "langfuse==4.14.1",
+    "langfuse==4.15.1",
 ]
 
 [tool.pytest.ini_options]

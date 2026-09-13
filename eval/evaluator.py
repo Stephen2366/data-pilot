@@ -18,6 +18,7 @@ from eval.contracts import (
     EvalRun,
     EvalRunSpec,
     ExecutionEvidence,
+    ObservabilityEvidence,
     ScenarioContract,
     ScenarioRun,
 )
@@ -82,41 +83,12 @@ class Evaluator:
 
     def _execute_once(self, environment: Any, run_spec: EvalRunSpec, scenario: ScenarioContract, replicate_id: int) -> ScenarioRun:
         """执行唯一候选调用，再在同一 environment 的 oracle 证据上评分全部 assertions。"""
-        status_code, response, trace_steps = environment.pipeline.execute(
-            question=scenario.question,
-            user_role=scenario.user_role,
-            pipeline_mode=run_spec.execution_protocol.pipeline_mode,
-            fusion_strategy=run_spec.execution_protocol.schema_fusion_strategy,
-        )
-        execution_status = _execution_status(status_code, response, trace_steps)
-        expected_rows, oracle_error = self._oracle_rows(environment.oracle, scenario)
-        evidence = ExecutionEvidence(
-            run_id=run_spec.run_id,
-            scenario_id=scenario.scenario_id,
-            replicate_id=replicate_id,
-            execution_status=execution_status,
-            status_code=status_code,
-            response=response,
-            trace_steps=trace_steps,
-            expected_rows=expected_rows,
-            oracle_error=oracle_error,
-        )
-        results = tuple(score_assertion(assertion, evidence) for assertion in scenario.assertions)
-        return ScenarioRun(scenario.scenario_id, replicate_id, evidence, results)
+        return evaluate_scenario_once(environment, run_spec, scenario, replicate_id)
 
     def _oracle_rows(self, oracle: Any, scenario: ScenarioContract) -> tuple[tuple[dict[str, Any], ...] | None, str | None]:
         """同一 scenario 的多条 result assertion 共用一次 oracle 结果，避免 scorer 私下访问 DB。"""
 
-        result_assertions = [item for item in scenario.assertions if item.kind == "result_match"]
-        if not result_assertions:
-            return None, None
-        sql_values = {item.spec.reference_sql for item in result_assertions if item.spec is not None}
-        if len(sql_values) != 1:
-            return None, "scenario_has_conflicting_result_oracles"
-        try:
-            return tuple(oracle.execute(next(iter(sql_values)))), None
-        except Exception as exc:  # noqa: BLE001
-            return None, str(exc)
+        return oracle_rows(oracle, scenario)
 
     def _populate_hashes(self, spec: EvalRunSpec, scenarios: tuple[ScenarioContract, ...]) -> EvalRunSpec:
         """计算并核对四层 run identity，拒绝调用方伪造或陈旧 hash。"""
@@ -156,6 +128,56 @@ class Evaluator:
             failure_reason=failure_reason,
         )
 
+
+def evaluate_scenario_once(environment: Any, run_spec: EvalRunSpec, scenario: ScenarioContract, replicate_id: int) -> ScenarioRun:
+        """复用 M27 的单题真实执行与 typed assertion 语义。
+
+        ★ Hidden executor 有自己的私有 catalog/fixture，但不能复制 Pipeline→oracle→scorer
+        核心链。公开这个窄函数后，canonical M27 与 Hidden 仍共享唯一实现。
+        """
+        pipeline_result = environment.pipeline.execute(
+            question=scenario.question,
+            user_role=scenario.user_role,
+            pipeline_mode=run_spec.execution_protocol.pipeline_mode,
+            fusion_strategy=run_spec.execution_protocol.schema_fusion_strategy,
+        )
+        if len(pipeline_result) == 4:
+            status_code, response, trace_steps, observability = pipeline_result
+        else:
+            # 兼容已有 deterministic fake；正式 adapter 始终返回同一 JSONL trace 的观测事实。
+            status_code, response, trace_steps = pipeline_result
+            local_trace_id = str(response.get("trace_id") or f"{run_spec.run_id}:{scenario.scenario_id}:r{replicate_id}")
+            observability = ObservabilityEvidence("langfuse", "not_observed", local_trace_id, None, None, None, None)
+        execution_status = _execution_status(status_code, response, trace_steps)
+        expected_rows, oracle_error = oracle_rows(environment.oracle, scenario)
+        evidence = ExecutionEvidence(
+            run_id=run_spec.run_id,
+            scenario_id=scenario.scenario_id,
+            replicate_id=replicate_id,
+            execution_status=execution_status,
+            status_code=status_code,
+            response=response,
+            trace_steps=trace_steps,
+            expected_rows=expected_rows,
+            oracle_error=oracle_error,
+            observability=observability,
+        )
+        results = tuple(score_assertion(assertion, evidence) for assertion in scenario.assertions)
+        return ScenarioRun(scenario.scenario_id, replicate_id, evidence, results)
+
+def oracle_rows(oracle: Any, scenario: ScenarioContract) -> tuple[tuple[dict[str, Any], ...] | None, str | None]:
+        """同一 scenario 的多条 result assertion 共用一次 oracle 结果，避免 scorer 私下访问 DB。"""
+
+        result_assertions = [item for item in scenario.assertions if item.kind == "result_match"]
+        if not result_assertions:
+            return None, None
+        sql_values = {item.spec.reference_sql for item in result_assertions if item.spec is not None}
+        if len(sql_values) != 1:
+            return None, "scenario_has_conflicting_result_oracles"
+        try:
+            return tuple(oracle.execute(next(iter(sql_values)))), None
+        except Exception as exc:  # noqa: BLE001
+            return None, str(exc)
 
 def _execution_status(status_code: int, response: dict[str, Any], trace_steps: tuple[dict[str, Any], ...]) -> str:
     """把 HTTP/业务响应翻译为中性事实，不在这里判断拒绝是否符合期望。

@@ -1,0 +1,41 @@
+{
+  "run_id": "app2-fixture-run",
+  "run_status": "completed",
+  "contract_version": "m27-v4",
+  "artifact_schema_version": "m27-artifact-v2",
+  "catalog_hash": "app2-fixture-catalog-v1",
+  "selected_contract_hash": "app2-fixture-selected-v1",
+  "suite_policy_hash": "app2-fixture-policy-v1",
+  "suite_policy": {
+    "suite_id": "app2-fixture",
+    "selected_scenario_ids": ["app2_safe_case"],
+    "effects_by_classification": {"core": "required"},
+    "assertion_overrides": {},
+    "scenario_classifications": {"app2_safe_case": "core"}
+  },
+  "run_spec_hash": "app2-fixture-run-spec-v1",
+  "requested_runtime_constraints": {},
+  "resolved_runtime_identity": {"values": {"pipeline_mode": "new_text2sql"}},
+  "scenario_runs": [
+    {
+      "scenario_id": "app2_safe_case",
+      "replicate_id": 1,
+      "evidence": {
+        "run_id": "app2-fixture-run",
+        "scenario_id": "app2_safe_case",
+        "replicate_id": 1,
+        "execution_status": "rejected",
+        "status_code": 200,
+        "response": {"route": "sql", "safety_status": "blocked", "error_type": "sql_guard_blocked", "issue_tags": ["unsafe_sql"], "columns": [], "tables_used": [], "cost": {"latency_ms": 1.25, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}},
+        "trace_steps": [{"step_type": "sql_guard", "status": "blocked", "error_type": "sql_guard_blocked", "metadata": {"issue_tags": ["unsafe_sql"], "blocked_via": "sql_guard"}}],
+        "physical_attempts": 1,
+        "expected_rows": null,
+        "oracle_error": null,
+        "observability": {"backend": "langfuse", "status": "succeeded", "datapilot_trace_id": "dp-app2-fixture-trace", "trace_id": "0123456789abcdef0123456789abcdef", "host_identity": "0000000000000000000000000000000000000000000000000000000000000000", "project_identity": "1111111111111111111111111111111111111111111111111111111111111111", "span_mode": "live"},
+        "candidate_row_count": 0
+      },
+      "assertion_results": [{"assertion_id": "safety", "kind": "safety_block", "status": "passed", "reason": "blocked_as_expected", "issue_tags": [], "evidence_refs": ["trace:sql_guard"], "metadata": {}}]
+    }
+  ],
+  "failure_reason": null
+}

@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from eval.contracts import EvalRunSpec, ResolvedRuntimeIdentity
+from eval.contracts import EvalRunSpec, ObservabilityEvidence, ResolvedRuntimeIdentity, build_observability_evidence
 from engine.nl2sql.schema_loader import load_domain_schema
 from engine.schema_retrieval.document_builder import build_schema_documents, schema_documents_hash
 from engine.schema_retrieval.objects import SchemaDocument
@@ -77,6 +77,7 @@ class SQLiteRunEnvironmentFactory:
             return SQLiteRunEnvironment(
                 trace_path=self._trace_root / f"{run_spec.run_id}.jsonl",
                 resolved_runtime_identity=ResolvedRuntimeIdentity(values),
+                settings=settings,
                 schema_vector_index=vector_index,
             )
         except Exception:
@@ -147,6 +148,7 @@ class SQLiteRunEnvironment:
         *,
         trace_path: Path,
         resolved_runtime_identity: ResolvedRuntimeIdentity,
+        settings: Any,
         schema_vector_index: VectorIndex | None = None,
     ) -> None:
         self.resolved_runtime_identity = resolved_runtime_identity
@@ -171,8 +173,27 @@ class SQLiteRunEnvironment:
         app.state.trace_path = self._trace_path
         app.state.schema_vector_index = self._schema_vector_index
         self._client = TestClient(app)
-        self.pipeline = _FastApiPipelinePort(self._client, self._trace_path)
+        self.pipeline = _FastApiPipelinePort(self._client, self._trace_path, settings)
         self.oracle = _SQLiteOraclePort(self._engine)
+
+    def install_trusted_fixture(self, statements: list[str]) -> None:
+        """用受信 Hidden fixture 替换本环境的 canonical seed。
+
+        该 seam 只作用于当前进程内 SQLite engine；默认 M27 从不调用它。输入必须已经通过
+        Hidden material validator，并且这里只接受建表和插入语句，不提供普通 SQL 入口。
+        """
+
+        if not statements or not all(isinstance(item, str) and item.strip() for item in statements):
+            raise ValueError("trusted fixture statements must be non-empty SQL strings")
+        allowed = ("create table ", "insert into ")
+        for statement in statements:
+            normalized = " ".join(statement.strip().lower().split())
+            if not normalized.startswith(allowed):
+                raise ValueError("trusted fixture only accepts CREATE TABLE and INSERT INTO")
+        Base.metadata.drop_all(self._engine)
+        with self._engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
 
     def close(self) -> None:
         """撤销 FastAPI override 并释放本轮专属 SQLite snapshot。"""
@@ -207,11 +228,12 @@ def _close_vector_index(vector_index: VectorIndex | None) -> None:
 
 
 class _FastApiPipelinePort:
-    def __init__(self, client: TestClient, trace_path: Path) -> None:
+    def __init__(self, client: TestClient, trace_path: Path, settings: Any) -> None:
         self._client = client
         self._trace_path = trace_path
+        self._settings = settings
 
-    def execute(self, *, question: str, user_role: str, pipeline_mode: str, fusion_strategy: str) -> tuple[int, dict[str, Any], tuple[dict[str, Any], ...]]:
+    def execute(self, *, question: str, user_role: str, pipeline_mode: str, fusion_strategy: str) -> tuple[int, dict[str, Any], tuple[dict[str, Any], ...], ObservabilityEvidence]:
         """通过真实 API seam 执行一次请求，并按 trace_id 取回唯一 trace。"""
         # API 默认已经切到新 pipeline；Eval 仍需显式写出两条路径，才能让 legacy baseline
         # 读取保留的历史合同，而不是因为“省略字段”意外走到新链路。
@@ -229,8 +251,13 @@ class _FastApiPipelinePort:
             if raw.strip():
                 record = json.loads(raw)
                 if record.get("trace_id") == trace_id:
-                    return response.status_code, body, tuple(record.get("trace_steps") or [])
-        return response.status_code, body, ()
+                    return (
+                        response.status_code,
+                        body,
+                        tuple(record.get("trace_steps") or []),
+                        build_observability_evidence(record, self._settings),
+                    )
+        raise RuntimeError(f"trace record missing for execution: {trace_id!r}")
 
 
 class _SQLiteOraclePort:

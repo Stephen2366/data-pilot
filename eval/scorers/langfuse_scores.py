@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.core.config import Settings, get_settings
+from engine.trace.langfuse_safe_projection import project_score
 from eval.scorers.base import EvalScoreDetail, LangFuseScorePayload
 
 logger = logging.getLogger(__name__)
@@ -42,14 +43,7 @@ class LangFuseScoreWriter:
         failed = 0
         for payload in payloads:
             try:
-                client.create_score(
-                    trace_id=payload.trace_id,
-                    name=payload.name,
-                    value=payload.value,
-                    data_type=payload.data_type,
-                    comment=payload.comment,
-                    metadata=payload.metadata,
-                )
+                client.create_score(**project_score(payload))
                 ok += 1
             except Exception as exc:  # noqa: BLE001 - 单条 score 失败不影响其他 score
                 logger.warning("langfuse score write failed name=%s trace_id=%s: %s", payload.name, payload.trace_id, exc)
@@ -135,12 +129,13 @@ def _detail_to_payload(
         name=detail.name,
         value=detail.value,
         data_type="NUMERIC",
-        comment=detail.reason,
+        # ★ reason、issue_tags 与 scorer 自由 metadata 仍属于本地诊断正文，
+        # Cloud 只接收稳定身份和布尔状态；project_score 会再做一次 allowlist 校验。
+        comment="",
         metadata={
             "case_id": case_id,
+            "scorer_id": detail.name,
             "passed": detail.passed,
-            "issue_tags": detail.issue_tags,
             "review_required": detail.review_required,
-            **detail.metadata,
         },
     )

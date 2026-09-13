@@ -11,13 +11,13 @@ import os
 from pathlib import Path
 from typing import Any, Protocol
 
-from eval.contracts import EvalRun, ScenarioRun, dataclass_payload, safe_eval_run_payload
+from eval.contracts import EvalRun, ObservabilityEvidence, ScenarioRun, dataclass_payload, safe_eval_run_payload
 
 
 class PipelinePort(Protocol):
     """一次候选请求的执行 seam；一个 replicate 只允许调用一次。"""
 
-    def execute(self, *, question: str, user_role: str, pipeline_mode: str, fusion_strategy: str) -> tuple[int, dict[str, Any], tuple[dict[str, Any], ...]]:
+    def execute(self, *, question: str, user_role: str, pipeline_mode: str, fusion_strategy: str) -> tuple[int, dict[str, Any], tuple[dict[str, Any], ...], ObservabilityEvidence]:
         """返回 HTTP 状态、结构化响应和该请求唯一 trace 的步骤。"""
 
 

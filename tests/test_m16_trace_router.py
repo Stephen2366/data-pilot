@@ -235,8 +235,8 @@ def test_build_trace_router_can_switch_langfuse_enabled_in_same_process() -> Non
     assert [backend.name for backend in enabled.backends] == ["langfuse", "jsonl"]
 
 
-def test_langfuse_backend_records_flat_spans_and_flushes() -> None:
-    """LangFuseBackend 成功时回填映射字段，并按 M16 约定写 flat spans。"""
+def test_langfuse_backend_records_safe_post_hoc_spans_and_flushes() -> None:
+    """LangFuseBackend 成功时只发送 allowlist facts，并按 M16 约定 flush。"""
 
     factory = FakeLangFuseFactory()
     settings = Settings(
@@ -264,8 +264,10 @@ def test_langfuse_backend_records_flat_spans_and_flushes() -> None:
     ]
     assert all(span.ended for span in factory.client.spans)
     assert factory.client.observations[0]["metadata"]["datapilot_trace_id"] == record.trace_id
-    assert factory.client.observations[0]["metadata"]["rows_count"] == 1
-    assert factory.client.observations[1]["metadata"]["step_index"] == 1
+    assert "rows_count" not in factory.client.observations[0]["metadata"]
+    assert "input" not in factory.client.observations[0]
+    assert "output" not in factory.client.observations[0]
+    assert factory.client.spans[1].updates[0]["metadata"]["step_index"] == 1
 
 
 def test_langfuse_backend_skips_post_hoc_spans_when_record_is_live() -> None:
@@ -328,6 +330,8 @@ def test_trace_lifecycle_writes_live_span_and_returns_snapshot() -> None:
     ]
     assert factory.client.spans[0].ended is True
     assert factory.client.spans[1].updates[0]["metadata"]["step_index"] == 1
+    assert "input" not in factory.client.observations[0]
+    assert "output" not in factory.client.spans[1].updates[0]
     assert factory.client.spans[1].ended is True
 
 

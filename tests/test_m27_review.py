@@ -21,7 +21,7 @@ def _catalog_file(tmp_path: Path) -> Path:
     path = tmp_path / "catalog.yaml"
     path.write_text(
         """
-contract_version: m27-v3
+contract_version: m27-v4
 scenarios:
   - id: normal
     question: 查询演示商品
@@ -126,7 +126,7 @@ def test_review_bundle_joins_completed_artifact_contract_and_raw_checkpoint(tmp_
         checkpoint_root=checkpoint_root,
     )
 
-    assert bundle["review_bundle_schema_version"] == "m27-review-bundle-v2"
+    assert bundle["review_bundle_schema_version"] == "m27-review-bundle-v3"
     assert len(bundle["source"]["artifact_sha256"]) == 64
     normal = next(record for record in bundle["records"] if record["scenario_id"] == "normal")
     assert normal["review_evidence"]["candidate_sql"] == "SELECT product_name, email FROM products WHERE token = '[redacted]' LIMIT 1"

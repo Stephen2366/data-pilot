@@ -27,7 +27,7 @@ def _catalog_file(tmp_path: Path) -> Path:
     path = tmp_path / "catalog.yaml"
     path.write_text(
         """
-contract_version: m27-v3
+contract_version: m27-v4
 scenarios:
   - id: june_gmv
     question: 2026 年 6 月 GMV 是多少？
@@ -249,7 +249,7 @@ def test_sqlite_environment_scores_expected_rejection_without_llm(tmp_path: Path
     path = tmp_path / "rejection.yaml"
     path.write_text(
         """
-contract_version: m27-v3
+contract_version: m27-v4
 scenarios:
   - id: missing_supplier
     question: 查询商品的供应商名称

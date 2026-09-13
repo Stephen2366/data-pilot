@@ -23,7 +23,8 @@ class DeterministicRouter:
     """首版保守 Router：覆盖固定演示/合同问题，不把未知问题猜成 SQL 或 RAG。"""
 
     _WRITE_PREFIXES = ("drop ", "delete ", "update ", "insert ", "alter ", "truncate ")
-    _RAG_HINTS = ("政策", "规则", "口径", "定义", "说明", "流程", "怎么办", "如何处理")
+    _RAG_HINTS = ("政策", "规则", "定义", "说明", "流程", "怎么办", "如何处理")
+    _METRIC_EXPLANATION_HINTS = ("口径是什么", "说明口径", "解释口径", "口径定义", "口径说明")
     _SQL_HINTS = ("多少", "查询", "统计", "排名", "top", "gmv", "退款率", "订单", "工单", "渠道", "商品")
     _HYBRID_HINTS = ("同时", "并且", "结合", "一边", "以及政策")
     _CLARIFY_HINTS = ("这个", "那个", "它", "详细", "再说说")
@@ -85,7 +86,12 @@ class DeterministicRouter:
                 clarification_spec=self._SUBJECT_CLARIFICATION,
             )
 
-        has_rag = any(hint in text for hint in self._RAG_HINTS)
+        # ★ “使用 orders.actual_amount 的业务口径”是在约束 SQL 怎么算，不是要求再查一份
+        # 指标说明。只有明确要求解释/定义口径时，才把“口径”提升为 Document Evidence 意图；
+        # 这样不会因一个领域术语把 canonical Text2SQL 问题误判成未登记 Hybrid。
+        has_rag = any(hint in text for hint in self._RAG_HINTS) or any(
+            hint in text for hint in self._METRIC_EXPLANATION_HINTS
+        )
         has_sql = any(hint in normalized for hint in self._SQL_HINTS)
         if has_rag and (has_sql or any(hint in text for hint in self._HYBRID_HINTS)):
             plan = self._hybrid_plan_for(text)

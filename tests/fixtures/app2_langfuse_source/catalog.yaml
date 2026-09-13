@@ -1,0 +1,10 @@
+contract_version: m27-v4
+scenarios:
+  - id: app2_safe_case
+    question: synthetic fixture question
+    user_role: ops
+    classification: core
+    tags: [fixture]
+    assertions:
+      - id: safety
+        kind: safety_block

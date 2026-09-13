@@ -1,5 +1,4 @@
 """LangFuse trace backend：把 DataPilot TraceRecord 写入 LangFuse Cloud / self-host。
-
 M16 只做旁路观测，不让 LangFuse 接管 DataPilot 的请求级 `trace_id`。这里会生成独立
 `langfuse_trace_id`，并在 metadata 中保存 `datapilot_trace_id`，后续 M17 score 回写也只按
 LangFuse trace id 关联。
@@ -12,11 +11,12 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from app.core.config import Settings
+from engine.trace.langfuse_safe_projection import project_observation_finish, project_observation_start, project_root
 from engine.trace.recorder import TraceRecord
 
 
 class LangFuseBackend:
-    """把 TraceRecord 映射成 LangFuse flat spans。
+    """把 TraceRecord 映射成一个请求 root 和其直接 child spans。
 
     ★ 这里不伪造嵌套 span 和真实时间线：当前 TraceRecord 是请求结束后一次性生成的快照，
     只有每步 latency，没有每步 started_at / ended_at。RAG/Hybrid 阶段如果 pipeline 埋点下沉，
@@ -50,45 +50,29 @@ class LangFuseBackend:
 
         # 步骤 1：写请求级 root span ==========================================================
         # root span 只放最小必要信息，不上传完整 rows/docs，避免把 Cloud trace 变成敏感数据副本。
-        root_span = client.start_observation(
-            trace_context={"trace_id": langfuse_trace_id},
-            name="datapilot-query",
-            as_type="span",
-            input={
-                "question": record.question,
-                "user_role": record.user_role,
-                "route": record.route,
-            },
-            output={
-                "answer": record.answer,
-                "safety_status": record.safety_status,
-                "blocked_reason": record.blocked_reason,
-                "error_type": record.error_type,
-            },
-            metadata=self._record_metadata(record),
-        )
+        root_span = client.start_observation(**project_root(
+            trace_id=langfuse_trace_id,
+            datapilot_trace_id=record.trace_id,
+            route=record.route,
+            execution_status=record.execution_status,
+            answer_status=record.answer_status,
+            safety_status=record.safety_status,
+            trace_step_count=len(record.trace_steps),
+        ))
         root_span.end()
 
-        # 步骤 2：写 flat step spans ===========================================================
-        # 每个 TraceStep 都挂在同一个 trace_id 下，但不设置 parent，避免伪造当前没有的数据。
+        # 步骤 2：写 root 的直接 child spans ==================================================
+        # TraceRecord 没有可靠的 step 间树结构，因此只证明“请求包含这些步骤”，不伪造 step 间父子关系。
         for step in record.trace_steps:
-            step_span = client.start_observation(
-                trace_context={"trace_id": langfuse_trace_id},
+            step_span = client.start_observation(**project_observation_start(
+                trace_id=langfuse_trace_id,
                 name=step.name,
-                as_type="span",
-                input={"summary": step.input_summary},
-                output={"summary": step.output_summary, "status": step.status},
-                metadata={
-                    "datapilot_trace_id": record.trace_id,
-                    "step_index": step.step_index,
-                    "step_type": step.step_type,
-                    "status": step.status,
-                    "latency_ms": step.latency_ms,
-                    "error_type": step.error_type,
-                    "parent_step_id": step.parent_step_id,
-                    "metadata": step.metadata,
-                },
-            )
+                step_type=step.step_type,
+                parent_span_id=getattr(root_span, "id", None),
+                metadata=step.metadata,
+            ))
+            if hasattr(step_span, "update"):
+                step_span.update(**project_observation_finish(step=step))
             step_span.end()
 
         # 步骤 3：flush 确保送达 API ===========================================================
@@ -120,18 +104,3 @@ class LangFuseBackend:
         """生成调试 URL；不查询 project id，避免 URL 生成依赖额外 Cloud API。"""
 
         return f"{self.settings.langfuse_base_url.rstrip('/')}/project/traces/{langfuse_trace_id}"
-
-    def _record_metadata(self, record: TraceRecord) -> dict[str, Any]:
-        """整理请求级 metadata，控制 Cloud payload 体积和敏感面。"""
-
-        return {
-            "datapilot_trace_id": record.trace_id,
-            "columns": record.columns,
-            "tables_used": record.tables_used,
-            "docs_count": len(record.docs_used),
-            "rows_count": len(record.rows),
-            "tool_count": len(record.tool_calls),
-            "trace_step_count": len(record.trace_steps),
-            "cost": record.cost.model_dump(mode="json"),
-            "chart_type": (record.chart_spec or {}).get("mark") if record.chart_spec else None,
-        }

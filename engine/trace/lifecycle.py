@@ -13,6 +13,12 @@ from typing import Any, Callable, Literal
 from uuid import uuid4
 
 from app.core.config import Settings, get_settings
+from engine.trace.langfuse_safe_projection import (
+    project_observation_finish,
+    project_observation_start,
+    project_root,
+    project_root_finish,
+)
 from engine.trace.recorder import TraceStep
 
 LangFuseWriteStatus = Literal["ok", "skipped", "failed"]
@@ -58,6 +64,7 @@ class SpanHandle:
         self._closed = False
         self._live_span = context._start_live_span(  # noqa: SLF001 - handle 是 lifecycle 内部协作者
             name=name,
+            step_type=step_type,
             input_summary=input_summary,
             metadata=self._metadata,
             parent_step_id=parent_step_id,
@@ -240,6 +247,7 @@ class TraceContext:
         self,
         *,
         name: str,
+        step_type: str,
         input_summary: str,
         metadata: dict[str, Any],
         parent_step_id: str | None,
@@ -251,6 +259,7 @@ class TraceContext:
         try:
             return self._live_writer.start_span(
                 name=name,
+                step_type=step_type,
                 input_summary=input_summary,
                 metadata=metadata,
                 parent_step_id=parent_step_id,
@@ -290,55 +299,41 @@ class _LangFuseLiveWriter:
             secret_key=settings.langfuse_secret_key,
             base_url=settings.langfuse_base_url,
         )
-        self._root_span = self._client.start_observation(
-            trace_context={"trace_id": self.trace_id},
-            name="datapilot-query",
-            as_type="span",
-            input={
-                "question": question,
-                "user_role": user_role,
-            },
-            metadata={"datapilot_trace_id": datapilot_trace_id},
-        )
+        self._root_span = self._client.start_observation(**project_root(
+            trace_id=self.trace_id,
+            datapilot_trace_id=datapilot_trace_id,
+        ))
         self._root_closed = False
 
     def start_span(
         self,
         *,
         name: str,
+        step_type: str,
         input_summary: str,
         metadata: dict[str, Any],
         parent_step_id: str | None,
     ) -> Any:
         """用 LangFuse SDK 4.x `start_observation` 创建 span。"""
 
-        return self._client.start_observation(
-            trace_context={"trace_id": self.trace_id},
+        # DataPilot 的 parent_step_id 是规划 ID，不一定对应已存在的 Langfuse observation。
+        # SDK 的真实 parent 必须使用 root observation ID，概念 parent 仅作为安全枚举 metadata。
+        projected_metadata = dict(metadata)
+        if parent_step_id is not None:
+            projected_metadata["parent_step_id"] = parent_step_id
+        return self._client.start_observation(**project_observation_start(
+            trace_id=self.trace_id,
             name=name,
-            as_type="span",
-            input={"summary": input_summary},
-            metadata={
-                "datapilot_step_metadata": metadata,
-                "parent_step_id": parent_step_id,
-            },
-        )
+            step_type=step_type,
+            parent_span_id=getattr(self._root_span, "id", None),
+            metadata=projected_metadata,
+        ))
 
     def finish_span(self, live_span: Any, *, step: TraceStep) -> None:
         """把 DataPilot TraceStep 字段同步到 LangFuse span，再关闭 span。"""
 
         if hasattr(live_span, "update"):
-            live_span.update(
-                output={"summary": step.output_summary, "status": step.status},
-                metadata={
-                    "step_index": step.step_index,
-                    "step_type": step.step_type,
-                    "status": step.status,
-                    "latency_ms": step.latency_ms,
-                    "error_type": step.error_type,
-                    "parent_step_id": step.parent_step_id,
-                    "metadata": step.metadata,
-                },
-            )
+            live_span.update(**project_observation_finish(step=step))
         live_span.end()
 
     def finish_root_span(self, *, status: str, output_summary: str, error_type: str | None) -> None:
@@ -348,10 +343,7 @@ class _LangFuseLiveWriter:
             return
         self._root_closed = True
         if hasattr(self._root_span, "update"):
-            self._root_span.update(
-                output={"summary": output_summary, "status": status},
-                metadata={"status": status, "error_type": error_type},
-            )
+            self._root_span.update(**project_root_finish(status=status, error_type=error_type))
         self._root_span.end()
 
     def flush(self) -> None:

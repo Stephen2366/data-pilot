@@ -10,7 +10,10 @@ Trace，过去只能把同一题复制多遍。这里的 ``ScenarioContract`` �
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import hashlib
+import re
 from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 
 Classification = Literal["core", "stress", "manual_lab"]
@@ -21,10 +24,19 @@ RunStatus = Literal["running", "completed", "interrupted", "failed"]
 # M27 v3 把 Schema Context 的物理字段、metric key、输出 alias 三个命名空间彻底分开，
 # 并在 catalog 加载时验证合同确实能由当前 domain schema 满足。旧 v1/v2 artifact 仍可
 # 只读复核，但合同 hash 和判分语义不同，不能与 v3 直接比较。
-CONTRACT_VERSION = "m27-v3"
-LEGACY_REVIEWABLE_CONTRACT_VERSIONS = frozenset({"m27-v1", "m27-v2"})
-ARTIFACT_SCHEMA_VERSION = "m27-artifact-v1"
-PROJECTOR_VERSION = "m27-projector-v1"
+CONTRACT_VERSION = "m27-v4"
+LEGACY_REVIEWABLE_CONTRACT_VERSIONS = frozenset({"m27-v1", "m27-v2", "m27-v3"})
+ARTIFACT_SCHEMA_VERSION = "m27-artifact-v2"
+LEGACY_ARTIFACT_SCHEMA_VERSION = "m27-artifact-v1"
+PROJECTOR_VERSION = "m27-projector-v2"
+
+ObservabilityStatus = Literal["disabled", "not_observed", "succeeded", "failed"]
+ObservabilitySpanMode = Literal["live", "post_hoc"]
+_OBSERVABILITY_FIELDS = {
+    "backend", "status", "datapilot_trace_id", "trace_id", "host_identity", "project_identity", "span_mode"
+}
+_OPAQUE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -186,6 +198,19 @@ class ResolvedRuntimeIdentity:
 
 
 @dataclass(frozen=True)
+class ObservabilityEvidence:
+    """一次 DataPilot execution 的外部观测引用；不携带 URL 或任何 key。"""
+
+    backend: Literal["langfuse"]
+    status: ObservabilityStatus
+    datapilot_trace_id: str | None
+    trace_id: str | None
+    host_identity: str | None
+    project_identity: str | None
+    span_mode: ObservabilitySpanMode | None
+
+
+@dataclass(frozen=True)
 class ExecutionEvidence:
     """一个 scenario replicate 的共享运行事实，所有 scorer 都只读它。"""
 
@@ -200,6 +225,7 @@ class ExecutionEvidence:
     physical_attempts: int = 1
     expected_rows: tuple[dict[str, Any], ...] | None = None
     oracle_error: str | None = None
+    observability: ObservabilityEvidence | None = None
 
 
 @dataclass(frozen=True)
@@ -268,6 +294,16 @@ def safe_eval_run_payload(run: EvalRun) -> dict[str, Any]:
     protected = {"email", "phone", "authorization", "api_key", "token", "password"}
     for scenario_run in payload.get("scenario_runs", []):
         evidence = scenario_run.get("evidence", {})
+        observability = evidence.get("observability")
+        if not isinstance(observability, dict):
+            raise ValueError("m27-v4 execution evidence requires observability")
+        expected_trace_id = str(observability.get("datapilot_trace_id") or "")
+        evidence["observability"] = dataclass_payload(normalize_source_observability(
+            observability,
+            contract_version=run.contract_version,
+            artifact_schema_version=run.artifact_schema_version,
+            expected_datapilot_trace_id=expected_trace_id,
+        ))
         response = evidence.get("response", {})
         if isinstance(response, dict):
             cost = response.get("cost") if isinstance(response.get("cost"), dict) else {}
@@ -294,6 +330,111 @@ def safe_eval_run_payload(run: EvalRun) -> dict[str, Any]:
             if isinstance(step, dict)
         ]
     return payload
+
+
+def build_observability_evidence(trace_record: dict[str, Any], settings: Any) -> ObservabilityEvidence:
+    """从同一 JSONL trace 构造正式来源引用，避免 artifact 再猜 Cloud 状态。"""
+
+    datapilot_trace_id = _require_opaque(trace_record.get("trace_id"), "datapilot_trace_id")
+    if not settings.langfuse_enabled:
+        return ObservabilityEvidence("langfuse", "disabled", datapilot_trace_id, None, None, None, None)
+    write_status = trace_record.get("langfuse_write_status")
+    if write_status == "failed":
+        return ObservabilityEvidence("langfuse", "failed", datapilot_trace_id, None, None, None, None)
+    if write_status != "ok":
+        return ObservabilityEvidence("langfuse", "not_observed", datapilot_trace_id, None, None, None, None)
+    candidate = ObservabilityEvidence(
+        backend="langfuse",
+        status="succeeded",
+        datapilot_trace_id=datapilot_trace_id,
+        trace_id=trace_record.get("langfuse_trace_id"),
+        host_identity=langfuse_host_identity(settings.langfuse_base_url),
+        project_identity=_sha256_identity(settings.langfuse_public_key, "LANGFUSE_PUBLIC_KEY"),
+        span_mode=trace_record.get("langfuse_span_mode"),
+    )
+    return normalize_source_observability(
+        dataclass_payload(candidate),
+        contract_version=CONTRACT_VERSION,
+        artifact_schema_version=ARTIFACT_SCHEMA_VERSION,
+        expected_datapilot_trace_id=datapilot_trace_id,
+    )
+
+
+def normalize_source_observability(
+    raw: dict[str, Any] | None,
+    *,
+    contract_version: str,
+    artifact_schema_version: str,
+    expected_datapilot_trace_id: str,
+) -> ObservabilityEvidence:
+    """严格读取新来源，并把旧 m27 artifact 显式归一为 ``not_observed``。"""
+
+    if contract_version in LEGACY_REVIEWABLE_CONTRACT_VERSIONS:
+        if artifact_schema_version != LEGACY_ARTIFACT_SCHEMA_VERSION:
+            raise ValueError("legacy contract/artifact schema mismatch")
+        if raw is not None:
+            raise ValueError("legacy exact fields must not contain observability")
+        return ObservabilityEvidence("langfuse", "not_observed", None, None, None, None, None)
+    expected = _require_opaque(expected_datapilot_trace_id, "expected datapilot trace binding")
+    if contract_version != CONTRACT_VERSION or artifact_schema_version != ARTIFACT_SCHEMA_VERSION:
+        raise ValueError("unsupported contract/artifact schema pair")
+    if not isinstance(raw, dict) or set(raw) != _OBSERVABILITY_FIELDS:
+        raise ValueError("observability must contain exact fields")
+    if raw.get("backend") != "langfuse" or raw.get("status") not in {"disabled", "not_observed", "succeeded", "failed"}:
+        raise ValueError("observability backend/status is invalid")
+    datapilot_trace_id = _require_opaque(raw.get("datapilot_trace_id"), "datapilot_trace_id")
+    if datapilot_trace_id != expected:
+        raise ValueError("observability datapilot trace binding mismatch")
+    status = raw["status"]
+    references = (raw.get("trace_id"), raw.get("host_identity"), raw.get("project_identity"), raw.get("span_mode"))
+    if status == "succeeded":
+        if any(value is None for value in references):
+            raise ValueError("succeeded observability requires trace/project/span references")
+        trace_id = _require_opaque(raw.get("trace_id"), "trace_id")
+        host_identity = _require_sha256(raw.get("host_identity"), "host_identity")
+        project_identity = _require_sha256(raw.get("project_identity"), "project_identity")
+        span_mode = raw.get("span_mode")
+        if span_mode not in {"live", "post_hoc"}:
+            raise ValueError("succeeded observability requires a valid span_mode")
+    else:
+        if any(value is not None for value in references):
+            raise ValueError("non-succeeded observability must not contain external references")
+        trace_id = host_identity = project_identity = span_mode = None
+    return ObservabilityEvidence("langfuse", status, datapilot_trace_id, trace_id, host_identity, project_identity, span_mode)
+
+
+def normalize_langfuse_host(host: str) -> str:
+    """规范化受信 host 后再做摘要；不把 URL 本身写进 artifact。"""
+
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError("LANGFUSE_BASE_URL is required")
+    parsed = urlsplit(host.strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError("LANGFUSE_BASE_URL must be an http(s) origin without credentials")
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, "", ""))
+
+
+def langfuse_host_identity(host: str) -> str:
+    return hashlib.sha256(normalize_langfuse_host(host).encode("utf-8")).hexdigest()
+
+
+def _sha256_identity(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} is required")
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _require_opaque(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not _OPAQUE_ID.fullmatch(value):
+        raise ValueError(f"{label} must be an opaque identifier")
+    return value
+
+
+def _require_sha256(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not _SHA256.fullmatch(value):
+        raise ValueError(f"{label} must be a lowercase SHA-256 identity")
+    return value
 
 
 def _safe_response_value(key: str, value: Any, protected: set[str]) -> Any:

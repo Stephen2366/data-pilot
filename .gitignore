@@ -29,6 +29,7 @@ docs/state/*
 docs/archive-dormant/
 docs/archive-versions/
 docs/ref-discussion/
+interview/
 docs/todo.md
 docs/dev-log(M0-M28).md
 docs/dev-log.md
@@ -39,6 +40,7 @@ docs/ts-integration-plan-v3.md
 # 私有 Eval 设计与开发期诊断 campaign 不进入发布仓库。
 scripts/build_m42_decision_reserve.py
 domain_pack/phase4b/b3_diagnostic_campaign*.json
+eval/cases/evoloop_hidden/
 
 eval/traces/*.jsonl
 !eval/traces/.gitkeep
@@ -54,4 +56,3 @@ web/.next/
 web/coverage/
 web/playwright-report/
 web/test-results/
-

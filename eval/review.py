@@ -16,10 +16,20 @@ from pathlib import Path
 import re
 from typing import Any, Literal
 
-from eval.contracts import CONTRACT_VERSION, LEGACY_REVIEWABLE_CONTRACT_VERSIONS, Catalog, ResultMatchSpec
+from eval.contracts import (
+    ARTIFACT_SCHEMA_VERSION,
+    CONTRACT_VERSION,
+    LEGACY_ARTIFACT_SCHEMA_VERSION,
+    LEGACY_REVIEWABLE_CONTRACT_VERSIONS,
+    Catalog,
+    ResultMatchSpec,
+    dataclass_payload,
+    normalize_source_observability,
+)
 
 
-REVIEW_BUNDLE_SCHEMA_VERSION = "m27-review-bundle-v2"
+REVIEW_BUNDLE_SCHEMA_VERSION = "m27-review-bundle-v3"
+LEGACY_REVIEW_BUNDLE_SCHEMA_VERSION = "m27-review-bundle-v2"
 ReviewVerdict = Literal["pass", "fail", "insufficient_evidence"]
 Confidence = Literal["high", "medium", "low"]
 ReviewCategory = Literal[
@@ -73,7 +83,7 @@ def build_review_bundle(
         checkpoint_path = _checkpoint_path(checkpoint_root, run_id, scenario_id, replicate_id)
         checkpoint = _load_json_object(checkpoint_path, label="checkpoint")
         _validate_checkpoint(checkpoint, run_id=run_id, scenario_id=scenario_id, replicate_id=replicate_id)
-        record = _build_record(scenarios[scenario_id], artifact_run, checkpoint, max_result_rows)
+        record = _build_record(scenarios[scenario_id], artifact, artifact_run, checkpoint, max_result_rows)
         record["source_checkpoint"] = {
             "path": str(checkpoint_path),
             "sha256": _sha256_file(checkpoint_path),
@@ -105,13 +115,14 @@ def verify_review_bundle_sources(bundle: dict[str, Any]) -> dict[str, int]:
     当时那个 completed EvalRun。任一短期 checkpoint 被清理、改写或换成别的文件都会明确失败。
     """
 
-    if bundle.get("review_bundle_schema_version") != REVIEW_BUNDLE_SCHEMA_VERSION:
+    if bundle.get("review_bundle_schema_version") not in {REVIEW_BUNDLE_SCHEMA_VERSION, LEGACY_REVIEW_BUNDLE_SCHEMA_VERSION}:
         raise ValueError("unsupported review bundle schema")
     source = bundle.get("source")
     if not isinstance(source, dict):
         raise ValueError("review bundle source must be an object")
     artifact_path = Path(str(source.get("artifact_path", "")))
     _verify_file_hash(artifact_path, source.get("artifact_sha256"), label="artifact")
+    artifact = _load_json_object(artifact_path, label="artifact")
     records = bundle.get("records")
     if not isinstance(records, list):
         raise ValueError("review bundle records must be a list")
@@ -126,13 +137,32 @@ def verify_review_bundle_sources(bundle: dict[str, Any]) -> dict[str, int]:
             checkpoint.get("sha256"),
             label=f"checkpoint for {record.get('scenario_id')}",
         )
+        if bundle.get("review_bundle_schema_version") == REVIEW_BUNDLE_SCHEMA_VERSION:
+            recorded_observability = record.get("observability")
+            if not isinstance(recorded_observability, dict):
+                raise ValueError(f"review observability missing: {record.get('scenario_id')}")
+            checkpoint_payload = _load_json_object(Path(str(checkpoint.get("path", ""))), label="checkpoint")
+            artifact_run = next(
+                (
+                    item for item in artifact.get("scenario_runs", [])
+                    if isinstance(item, dict)
+                    and item.get("scenario_id") == record.get("scenario_id")
+                    and item.get("replicate_id") == record.get("replicate_id")
+                ),
+                None,
+            )
+            if not isinstance(artifact_run, dict):
+                raise ValueError(f"review artifact execution missing: {record.get('scenario_id')}")
+            recomputed = dataclass_payload(_cross_check_observability(artifact, artifact_run, checkpoint_payload))
+            if recorded_observability != recomputed:
+                raise ValueError(f"review/source observability mismatch: {record.get('scenario_id')}")
     return {"artifact": 1, "checkpoints": len(records)}
 
 
 def apply_review_verdicts(bundle: dict[str, Any], verdicts: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """为每个 logical Scenario 写入独立人工 verdict，绝不修改自动评测事实。"""
 
-    if bundle.get("review_bundle_schema_version") != REVIEW_BUNDLE_SCHEMA_VERSION:
+    if bundle.get("review_bundle_schema_version") not in {REVIEW_BUNDLE_SCHEMA_VERSION, LEGACY_REVIEW_BUNDLE_SCHEMA_VERSION}:
         raise ValueError("unsupported review bundle schema")
     copied = deepcopy(bundle)
     records = copied.get("records")
@@ -231,7 +261,13 @@ def write_review_markdown(bundle: dict[str, Any], path: Path) -> None:
     _write_atomic(path, {"markdown": "\n".join(lines) + "\n"}, text_key="markdown")
 
 
-def _build_record(scenario: Any, artifact_run: dict[str, Any], checkpoint: dict[str, Any], max_rows: int) -> dict[str, Any]:
+def _build_record(
+    scenario: Any,
+    artifact: dict[str, Any],
+    artifact_run: dict[str, Any],
+    checkpoint: dict[str, Any],
+    max_rows: int,
+) -> dict[str, Any]:
     """从同一 Scenario 的合同、自动事实和 checkpoint 原始证据构造一条可读记录。"""
 
     evidence = checkpoint["evidence"]
@@ -240,6 +276,7 @@ def _build_record(scenario: Any, artifact_run: dict[str, Any], checkpoint: dict[
     artifact_assertions = artifact_run.get("assertion_results")
     if not isinstance(artifact_assertions, list) or _assertion_identity(assertions) != _assertion_identity(artifact_assertions):
         raise ValueError(f"checkpoint/artifact assertion mismatch: {scenario.scenario_id}")
+    observability = _cross_check_observability(artifact, artifact_run, checkpoint)
     references = [item.spec.reference_sql for item in scenario.assertions if isinstance(item.spec, ResultMatchSpec)]
     record = {
         "scenario_id": scenario.scenario_id,
@@ -256,6 +293,7 @@ def _build_record(scenario: Any, artifact_run: dict[str, Any], checkpoint: dict[
             "reference_sql": [_redact_text(sql) for sql in references],
         },
         "execution_status": evidence.get("execution_status"),
+        "observability": dataclass_payload(observability),
         "automatic_outcome": _automatic_outcome(assertions),
         "automatic_assertions": [f"{item.get('assertion_id')}={item.get('status')}" for item in assertions],
         "review_evidence": {
@@ -284,6 +322,54 @@ def _validate_artifact(artifact: dict[str, Any], *, run_id: str) -> None:
     supported_versions = {*LEGACY_REVIEWABLE_CONTRACT_VERSIONS, CONTRACT_VERSION}
     if artifact.get("contract_version") not in supported_versions:
         raise ValueError(f"unsupported review contract: {artifact.get('contract_version')!r}")
+    expected_schema = (
+        ARTIFACT_SCHEMA_VERSION
+        if artifact.get("contract_version") == CONTRACT_VERSION
+        else LEGACY_ARTIFACT_SCHEMA_VERSION
+    )
+    if artifact.get("artifact_schema_version") != expected_schema:
+        raise ValueError("review contract/artifact schema mismatch")
+
+
+def _cross_check_observability(
+    artifact: dict[str, Any], artifact_run: dict[str, Any], checkpoint: dict[str, Any]
+) -> Any:
+    """三件套的同一 execution 必须发布完全相同的安全引用。"""
+
+    contract_version = str(artifact["contract_version"])
+    artifact_schema_version = str(artifact["artifact_schema_version"])
+    checkpoint_evidence = checkpoint["evidence"]
+    response = checkpoint_evidence.get("response") if isinstance(checkpoint_evidence.get("response"), dict) else {}
+    artifact_evidence = artifact_run.get("evidence") if isinstance(artifact_run.get("evidence"), dict) else {}
+    if contract_version in LEGACY_REVIEWABLE_CONTRACT_VERSIONS:
+        return normalize_source_observability(
+            None,
+            contract_version=contract_version,
+            artifact_schema_version=artifact_schema_version,
+            expected_datapilot_trace_id="",
+        )
+    artifact_observability = artifact_evidence.get("observability")
+    checkpoint_observability = checkpoint_evidence.get("observability")
+    if not isinstance(artifact_observability, dict) or not isinstance(checkpoint_observability, dict):
+        raise ValueError("m27-v4 artifact/checkpoint observability is required")
+    expected_trace_id = str(checkpoint_observability.get("datapilot_trace_id") or "")
+    if response.get("trace_id") != expected_trace_id:
+        raise ValueError("observability response/local trace binding mismatch")
+    artifact_normalized = normalize_source_observability(
+        artifact_observability,
+        contract_version=contract_version,
+        artifact_schema_version=artifact_schema_version,
+        expected_datapilot_trace_id=expected_trace_id,
+    )
+    checkpoint_normalized = normalize_source_observability(
+        checkpoint_observability,
+        contract_version=contract_version,
+        artifact_schema_version=artifact_schema_version,
+        expected_datapilot_trace_id=expected_trace_id,
+    )
+    if artifact_normalized != checkpoint_normalized:
+        raise ValueError("artifact/checkpoint observability mismatch")
+    return artifact_normalized
 
 
 def _checkpoint_path(root: Path, run_id: str, scenario_id: str, replicate_id: int) -> Path:

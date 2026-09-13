@@ -108,6 +108,30 @@ def test_router_is_conservative_for_sql_rag_clarification_and_hybrid() -> None:
     assert router.decide(_request("查询订单量并说明配送政策")).reason_code == "hybrid_unsupported"
 
 
+def test_router_distinguishes_metric_constraint_from_definition_request() -> None:
+    """业务口径可约束 SQL；只有显式索要定义时才增加 RAG 交付物。"""
+
+    router = DeterministicRouter()
+
+    # P1-C3 的 canonical 问法必须抵达 Text2SQL，不能因“业务口径”四个字提前停止。
+    actual_amount = router.decide(
+        _request("统计 2026 年 6 月非取消订单的实际成交金额合计，使用 orders.actual_amount 的业务口径。")
+    )
+    assert (actual_amount.route, actual_amount.reason_code) == ("sql", "sql_evidence_required")
+
+    # 已登记与未登记的真正 Hybrid 保持原来的 closed-world 行为。
+    gmv = router.decide(_request("查询 2026 年 6 月 GMV，并说明统计口径"))
+    assert gmv.route == "hybrid"
+    assert gmv.hybrid_plan is not None
+    assert gmv.hybrid_plan.operator == "metric_value_and_definition"
+    assert router.decide(_request("退款政策是什么？")).route == "rag"
+    assert router.decide(_request("查询订单量并说明配送政策")).reason_code == "hybrid_unsupported"
+
+    # Router 仍把危险 SQL 交给 SQL Guard，不因本次意图区分改变安全路径。
+    dangerous = router.decide(_request("DROP TABLE orders"))
+    assert (dangerous.route, dangerous.reason_code) == ("sql", "sql_guard_required")
+
+
 def test_each_graph_route_invokes_at_most_one_tool() -> None:
     """SQL、RAG 与 terminal 三条路径均只产生其必要的调用。"""
 
