@@ -36,6 +36,11 @@ docs/dev-log.md
 docs/phase4-reference.md
 docs/reference-dbgpt-analysis.md
 docs/ts-integration-plan-v3.md
+docs/DataPilot Eval 可观测与排障指南-v2.md
+docs/DataPilot 多重链路架构-v2.md
+docs/phase4-roadmap.md
+docs/phase4b-roadmap.md
+docs/module-plan-template.md
 
 # 私有 Eval 设计与开发期诊断 campaign 不进入发布仓库。
 scripts/build_m42_decision_reserve.py
