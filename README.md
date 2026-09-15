@@ -1,6 +1,6 @@
 # DataPilot
 
-DataPilot是面向企业数据分析场景的Agent系统，支持自然语言查询数据库、知识库问答和SQL/RAG混合分析。系统基于LangGraph编排Text2SQL与Agentic RAG，通过结构化Evidence、查询计划校验、权限控制和持久任务实现可追溯、可恢复、可评测的分析链路。
+DataPilot是面向企业数据分析场景的Agent系统，支持自然语言查询数据库、知识库问答和SQL/RAG混合分析。系统基于LangGraph编排Text-to-SQL与Agentic RAG，通过结构化Evidence、查询计划校验、权限控制和持久任务实现可追溯、可恢复、可评测的分析链路。
 
 项目提供Next.js工作台、FastAPI接口和本地stdio MCP Adapter，可查看回答、SQL、数据表、引用证据及Agent运行状态。
 
@@ -8,8 +8,8 @@ DataPilot是面向企业数据分析场景的Agent系统，支持自然语言查
 
 | 能力 | 实现 |
 | --- | --- |
-| Agent Harness | 将 Text2SQL 与 RAG 封装为受控 Tool，统一完成 SQL、RAG、Hybrid 路由、状态迁移和终止决策 |
-| Text2SQL | 从 Schema 混合检索、JoinPath 和 QueryPlan，一直到 SQL fidelity、AST Guard、执行与 Evidence 投影 |
+| Agent Harness | 将 Text-to-SQL 与 RAG 封装为受控 Tool，统一完成 SQL、RAG、Hybrid 路由、状态迁移和终止决策 |
+| Text-to-SQL | 从 Schema 混合检索、JoinPath 和 QueryPlan，一直到 SQL fidelity、AST Guard、执行与 Evidence 投影 |
 | Agentic RAG | 根据 Observation 执行 query rewrite、相邻证据扩展、Evidence 合并与 re-authorization，并通过父子预算控制检索成本 |
 | 持久化任务 | MySQL TaskState、版本化 CAS、single-use claim、Context Compact、跨进程恢复与 state reconciliation |
 | 数据治理 | SQL 只读检查、RBAC、敏感字段策略、文档 ACL、authority/revision 校验与出站数据最小化 |
@@ -52,13 +52,11 @@ flowchart TD
     ANSWER --> WEB
 ```
 
-核心分工很简单：Router 判断需要什么 Evidence，Tool 负责取得 Evidence，Controller 判断证据是否足够并决定继续、澄清或停止。
-
 ## 演示预览
 
-1. **Text2SQL 查询与结果表格**
+1. **Text-to-SQL 查询与结果表格**
 
-![DataPilot 单月 Text2SQL 查询结果](docs/assets/datapilot-sql-single.png)
+![DataPilot 单月 Text-to-SQL 查询结果](docs/assets/datapilot-sql-single.png)
 
 2. **多轮月份比较与 SQL Evidence**
 
@@ -97,9 +95,9 @@ Question
 
 SQL Evidence 和 Document Evidence 使用独立合同。任一必要证据缺失、过期或未通过授权时，Controller 不会把不完整结果包装成完整答案。
 
-### 2. Text2SQL
+### 2. Text-to-SQL
 
-Text2SQL 的重点不只是生成一条可执行 SQL，而是将开放的自然语言问题逐层收敛为可校验的查询合同。系统先从字段、指标和表关系中检索最小必要上下文，再生成 QueryPlan 和候选 SQL；每一层都保留独立的验证结果和 Trace。
+Text-to-SQL 的重点不只是生成一条可执行 SQL，而是将开放的自然语言问题逐层收敛为可校验的查询合同。系统先从字段、指标和表关系中检索最小必要上下文，再生成 QueryPlan 和候选 SQL；每一层都保留独立的验证结果和 Trace。
 
 ```text
 Question
@@ -144,7 +142,7 @@ Initial Retrieval
 - 对重复结果进行去重，并在没有新增 Evidence 时停止。
 - 合并后的文档重新校验 ACL、authority、revision、content hash 与 anchor。
 - Citation 只能引用本轮实际进入生成上下文的 Evidence。
-- 业务知识库与 Text2SQL Schema corpus 使用独立的 retrieval lifecycle。
+- 业务知识库与 Text-to-SQL Schema corpus 使用独立的 retrieval lifecycle。
 
 这套设计使检索过程可以被解释和评测：能够区分“没有召回”“召回但未采用”“采用后生成遗漏”和“答案正确但引用错误”。
 
@@ -177,25 +175,17 @@ Caller 身份由服务端 Resolver 提供，请求中的角色字段不能自行
 
 本地 JSONL Trace 按安全合同保留排障所需的运行事实；发送到 Langfuse 的数据再经过独立 allowlist 投影，只包含稳定 ID、枚举、布尔值和有限数值，不发送问题正文、答案、SQL、结果行、Prompt、文档正文或凭据。
 
-### 6. Eval
+### 6. 评测
 
 项目将 Eval 作为运行系统的一部分，分别维护三类评测合同：
 
 | 评测对象 | 检查内容 |
 | --- | --- |
-| Text2SQL | Schema Context、QueryPlan、SQL、执行结果、安全与业务语义 |
+| Text-to-SQL | Schema Context、QueryPlan、SQL、执行结果、安全与业务语义 |
 | RAG | Retrieval、Evidence、ACL、Answer、Citation |
 | Agent | Router、Action、预算、Hybrid、Clarification、Task lifecycle 与 Trace |
 
 评测系统使用版本化 Scenario、typed assertion、runtime identity、checkpoint、artifact 和 review bundle。一次运行中的 Response、Trace 和 Eval 共享同一事实来源，避免接口显示成功但评测读取到另一套结果。
-
-EvoLoop 集成进一步实现了：
-
-- 公开侧只接收 catalog 投影、材料 digest 和预算，不读取 Hidden 题面与 oracle。
-- 受信执行侧保存 append-only private ledger，并对中断、身份漂移和重复执行 fail closed。
-- Baseline 与 Candidate 使用冻结的 runtime、scorer、oracle 和授权身份。
-- 普通完成结果只公开状态、digest、usage 和受信 locator，不泄漏逐题 verdict。
-- Langfuse 分数只能从通过 artifact/checkpoint/review 交叉校验的来源生成。
 
 ## 接口
 
@@ -284,7 +274,7 @@ app/                    FastAPI API、配置、数据库与数据模型
 engine/
   harness/              LangGraph Harness、Router 与任务编排
   phase4b/              Agent Loop、TaskState、Context 与持久化边界
-  nl2sql/               Text2SQL Pipeline
+  nl2sql/               Text-to-SQL Pipeline
   schema_retrieval/     Schema Retrieval 与 SchemaGraph
   rag/                  Knowledge Retrieval、Evidence 与生成链路
   sql_guard/            SQL 安全检查
