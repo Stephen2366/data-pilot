@@ -8,7 +8,7 @@ DataPilot是面向企业数据分析场景的Agent系统，支持自然语言查
 
 | 能力 | 实现 |
 | --- | --- |
-| Agent Harness | 将 Text-to-SQL 与 RAG 封装为受控 Tool，统一完成 SQL、RAG、Hybrid 路由、状态迁移和终止决策 |
+| Agent Harness | 将 Text-to-SQL 与 RAG 封装为受控 Tool；意图路由采用确定性快路、单次 LLM 闭集提议和本地编译，统一完成 SQL、RAG、Hybrid、澄清与安全终止 |
 | Text-to-SQL | 从 Schema 混合检索、JoinPath 和 QueryPlan，一直到 SQL fidelity、AST Guard、执行与 Evidence 投影 |
 | Agentic RAG | 根据 Observation 执行 query rewrite、相邻证据扩展、Evidence 合并与 re-authorization，并通过父子预算控制检索成本 |
 | 持久化任务 | MySQL TaskState、版本化 CAS、single-use claim、Context Compact、跨进程恢复与 state reconciliation |
@@ -25,11 +25,17 @@ flowchart TD
     API --> TASK[Task Boundary / Caller Context]
     TASK --> GRAPH[LangGraph Agent Harness]
 
-    GRAPH --> ROUTER{Evidence Router}
-    ROUTER -->|SQL| SQL[Text2SQL Tool]
-    ROUTER -->|RAG| RAG[Knowledge Tool]
-    ROUTER -->|Hybrid| BOTH[SQL + Document Plan]
-    ROUTER -->|Ambiguous| CLARIFY[Clarification]
+    GRAPH --> ROUTER{Validated Intent Router}
+    ROUTER -->|Canonical / Safety / Clarify| DECISION[Deterministic RouteDecision]
+    ROUTER -->|Unsupported only| LLM[LLM Closed-set Proposal / retry0]
+    LLM --> COMPILER[Local Registry / Compiler]
+    COMPILER -->|Valid| DECISION
+    LLM -->|Invalid / unavailable| STOP[Safe Unsupported]
+    DECISION -->|SQL| SQL[Text2SQL Tool]
+    DECISION -->|RAG| RAG[Knowledge Tool]
+    DECISION -->|Hybrid| BOTH[SQL + Document Plan]
+    DECISION -->|Ambiguous| CLARIFY[Clarification]
+    DECISION -->|Rejected / unsupported| STOP
 
     SQL --> SCHEMA[Schema Retrieval / JoinPath]
     SCHEMA --> PLAN[QueryPlan]
@@ -74,7 +80,15 @@ Web 工作台可以同时查看回答、SQL、表格、Citation，以及 TaskDel
 
 ## 关键设计与实现
 
-### 1. Evidence 驱动的 SQL、RAG 与 Hybrid
+### 1. 受控 LLM 意图路由
+
+顶层 Router 默认使用 `llm_fallback` 分层模式：安全拒绝、已登记澄清和 canonical SQL/RAG/Hybrid 问法由确定性快路完成，模型调用数为零；只有旧 Router 无法识别的完整问题，才允许一次 retry0 的 LLM 提议。
+
+模型只能在 `sql/rag/hybrid/clarify/unsupported` 闭集中选择，并引用服务端已登记的 Hybrid operator 或澄清类型。最终 `RouteDecision`、分支计划和提示模板均由本地 registry/compiler 生成；模型不能直接提供 SQL、Tool、权限或答案。provider 不可用、响应格式错误或候选越权时，系统回到调用前的保守结果，不会猜测可执行路径。
+
+Router mode、model 和 operator 只能由服务端控制。默认 `HARNESS_ROUTER_MODE=llm_fallback`；如需停用模型 Router，可在启动进程设置 `HARNESS_ROUTER_MODE=deterministic`，无需修改代码。JSONL Trace 只记录 Router identity、来源、attempt、usage、延迟和 fallback 分类，不保存 Prompt 或原始模型响应。
+
+### 2. Evidence 驱动的 SQL、RAG 与 Hybrid
 
 本项目不把工具返回值直接拼成答案，而是先转换为带身份、来源和有效性状态的 Typed Evidence。
 
@@ -95,7 +109,7 @@ Question
 
 SQL Evidence 和 Document Evidence 使用独立合同。任一必要证据缺失、过期或未通过授权时，Controller 不会把不完整结果包装成完整答案。
 
-### 2. Text-to-SQL
+### 3. Text-to-SQL
 
 Text-to-SQL 的重点不只是生成一条可执行 SQL，而是将开放的自然语言问题逐层收敛为可校验的查询合同。系统先从字段、指标和表关系中检索最小必要上下文，再生成 QueryPlan 和候选 SQL；每一层都保留独立的验证结果和 Trace。
 
@@ -122,7 +136,7 @@ Question
 - **修复闭环**：对已识别的 SQL 方言错误执行 AST 定向修正；修正结果必须重新经过计划一致性校验、SQL Guard 和数据库执行，不能绕过原安全链路。
 - **结果证据化**：将 QueryPlan、SQL、执行结果、表依赖和验证状态统一投影为 SQL Evidence，供 Controller、Trace 和 Eval 使用。
 
-### 3. Agentic RAG
+### 4. Agentic RAG
 
 RAG 不止执行一次 Top-K 检索。系统实现了由 Observation 驱动的有界检索子图：
 
@@ -146,7 +160,7 @@ Initial Retrieval
 
 这套设计使检索过程可以被解释和评测：能够区分“没有召回”“召回但未采用”“采用后生成遗漏”和“答案正确但引用错误”。
 
-### 4. 有界、多轮、可恢复的 Durable Task
+### 5. 有界、多轮、可恢复的 Durable Task
 
 系统将一次分析任务建模为版本化Task，而不是把所有历史消息直接塞回Prompt。
 
@@ -154,7 +168,7 @@ Initial Retrieval
 - **并发与恢复**：通过MySQL条件更新、版本校验和一次性`claim_token`避免重复执行，支持跨进程恢复和断连状态对账。
 - **上下文控制**：保留近期必要内容，将较早历史压缩为有界结构化摘要。
 
-### 5. 数据安全与可观测性
+### 6. 数据安全与可观测性
 
 SQL 与文档数据分别经过各自的安全链路：
 
@@ -175,7 +189,7 @@ Caller 身份由服务端 Resolver 提供，请求中的角色字段不能自行
 
 本地 JSONL Trace 按安全合同保留排障所需的运行事实；发送到 Langfuse 的数据再经过独立 allowlist 投影，只包含稳定 ID、枚举、布尔值和有限数值，不发送问题正文、答案、SQL、结果行、Prompt、文档正文或凭据。
 
-### 6. 评测
+### 7. 评测
 
 项目将 Eval 作为运行系统的一部分，分别维护三类评测合同：
 
@@ -233,6 +247,12 @@ Copy-Item .env.example .env
 ```
 
 在 `.env` 中配置数据库和模型服务凭据。
+
+Router 默认使用受控 LLM fallback；需要临时回滚为历史确定性路由时，将该值改为 `deterministic`：
+
+```dotenv
+HARNESS_ROUTER_MODE=llm_fallback
+```
 
 ### 3. 准备演示数据库
 
