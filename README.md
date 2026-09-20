@@ -1,8 +1,8 @@
 # DataPilot
 
-DataPilot是面向企业数据分析场景的Agent系统，支持自然语言查询数据库、知识库问答和SQL/RAG混合分析。系统基于LangGraph编排Text-to-SQL与Agentic RAG，通过结构化Evidence、查询计划校验、权限控制和持久任务实现可追溯、可恢复、可评测的分析链路。
+DataPilot是一个面向企业数据分析场景的Agent系统，支持自然语言查询数据库、知识库问答和SQL/RAG混合分析。本项目实现了受控LLM意图路由、Text-to-SQL、知识库检索、结构化Evidence、查询计划校验、多轮任务、权限控制和持久化任务，并实现了可追溯、可恢复、可评测的分析链路。
 
-项目提供Next.js工作台、FastAPI接口和本地stdio MCP Adapter，可查看回答、SQL、数据表、引用证据及Agent运行状态。
+本项目提供Next.js工作台、FastAPI接口和本地stdio MCP Adapter，可以展示分析结果、生成的SQL、数据表、引用来源以及Agent的运行过程。
 
 ## 核心能力
 
@@ -60,23 +60,25 @@ flowchart TD
 
 ## 演示预览
 
-1. **Text-to-SQL 查询与结果表格**
+> 以下为真实截图。
+
+1. **自然语言查询数据库：查询结果与明细表**
 
 ![DataPilot 单月 Text-to-SQL 查询结果](docs/assets/datapilot-sql-single.png)
 
-2. **多轮月份比较与 SQL Evidence**
+2. **多轮对话：多轮月份比较与 SQL Evidence**
 
 ![DataPilot 7 月与 8 月实际净退款金额比较结果](docs/assets/datapilot-sql-comparison-answer.png)
 
 ![DataPilot 月份比较明细表](docs/assets/datapilot-sql-comparison-table.png)
 
-3. **Hybrid Evidence、Citation 与 Agent Inspector**
+3. **数据库+知识库混合分析：结果和引用依据**
 
 ![DataPilot Hybrid 分析结果](docs/assets/datapilot-hybrid-answer.png)
 
 ![DataPilot Hybrid Evidence、Citation 与分支状态](docs/assets/datapilot-hybrid-evidence.png)
 
-Web 工作台可以同时查看回答、SQL、表格、Citation，以及 TaskDelta、Action、Budget、Termination 和 Context 等 Agent 运行信息。
+Web 工作台可以同时展示分析结论、生成的 SQL、数据表和引用来源，并查看任务变化、执行动作、预算、终止原因及上下文等运行详情。
 
 ## 关键设计与实现
 
