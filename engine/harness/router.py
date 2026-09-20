@@ -6,14 +6,14 @@ Router 的职责是决定“是否取证、取哪一种”，不是理解 Tool �
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Literal, Protocol
 
 from engine.harness.contracts import ClarificationFieldSpec, ClarificationSpec, HarnessRequest, HybridPlan, RouteDecision
 from engine.rag.answer_flow import AnswerEvidenceRequirement
 
 
 class Router(Protocol):
-    """可替换 Router seam；测试可注入 fake，生产首版使用 deterministic adapter。"""
+    """可替换 Router seam；默认组装复合 Router，确定性实现保留为 fast path 与回滚。"""
 
     def decide(self, request: HarnessRequest) -> RouteDecision:
         """只根据最小请求事实返回一个闭合决定。"""
@@ -77,7 +77,11 @@ class DeterministicRouter:
                 "clarify",
                 clarification_spec=self._ANALYTICS_SCOPE_CLARIFICATION,
             )
-        if len(text) < 3 or text in {"?", "？"} or any(hint in text for hint in self._CLARIFY_HINTS):
+        # 指代词只有在短、明显缺主体的问法里才触发 closed-world 澄清。“请把成交额结果和
+        # 它的计算含义一起给我”虽含“它”，但主体和交付物都完整，应交给 model-eligible
+        # 分类，而不是被一个子串提前吞掉。12 字门只收窄旧启发式，不扩大任何 Tool 权限。
+        short_ambiguous_reference = len(text) <= 12 and any(hint in text for hint in self._CLARIFY_HINTS)
+        if len(text) < 3 or text in {"?", "？"} or short_ambiguous_reference:
             return RouteDecision(
                 "none",
                 "clarification_required",
@@ -116,19 +120,44 @@ class DeterministicRouter:
 
         normalized = text.lower()
         if "gmv" in normalized and any(hint in text for hint in ("口径", "定义", "说明")):
-            return HybridPlan(
-                identity="hybrid-metric-value-and-definition-v1",
-                operator="metric_value_and_definition",
-                sql_question="查询 2026 年 6 月 GMV",
-                rag_question="GMV 的定义和统计口径是什么？",
-                requirement=AnswerEvidenceRequirement(required_terms=("GMV",)),
-            )
+            return registered_hybrid_plan("metric_value_and_definition")
         if "退款" in text and any(hint in text for hint in ("政策", "规则", "材料")):
-            return HybridPlan(
-                identity="hybrid-refund-reason-and-policy-v1",
-                operator="refund_reason_and_policy",
-                sql_question="退款原因排名",
-                rag_question="质量问题退款规则",
-                requirement=AnswerEvidenceRequirement(required_terms=("质量问题",)),
-            )
+            return registered_hybrid_plan("refund_reason_and_policy")
         return None
+
+
+HybridOperator = Literal["metric_value_and_definition", "refund_reason_and_policy"]
+ClarificationKind = Literal["subject", "analytics_scope"]
+
+
+def registered_hybrid_plan(operator: HybridOperator) -> HybridPlan:
+    """把闭集 operator 编译成服务端计划；模型永远不能提供分支问题或 requirement。"""
+
+    if operator == "metric_value_and_definition":
+        return HybridPlan(
+            identity="hybrid-metric-value-and-definition-v1",
+            operator=operator,
+            sql_question="查询 2026 年 6 月 GMV",
+            rag_question="GMV 的定义和统计口径是什么？",
+            requirement=AnswerEvidenceRequirement(required_terms=("GMV",)),
+        )
+    if operator == "refund_reason_and_policy":
+        return HybridPlan(
+            identity="hybrid-refund-reason-and-policy-v1",
+            operator=operator,
+            sql_question="退款原因排名",
+            rag_question="质量问题退款规则",
+            requirement=AnswerEvidenceRequirement(required_terms=("质量问题",)),
+        )
+    # Literal 只保护静态调用；运行时仍需 fail-closed，防止反序列化/动态输入绕过。
+    raise ValueError(f"未登记 Hybrid operator: {operator}")
+
+
+def registered_clarification(kind: ClarificationKind) -> ClarificationSpec:
+    """返回服务端 owned 的澄清模板，禁止模型自由生成问题和字段。"""
+
+    if kind == "subject":
+        return DeterministicRouter._SUBJECT_CLARIFICATION
+    if kind == "analytics_scope":
+        return DeterministicRouter._ANALYTICS_SCOPE_CLARIFICATION
+    raise ValueError(f"未登记 clarification kind: {kind}")

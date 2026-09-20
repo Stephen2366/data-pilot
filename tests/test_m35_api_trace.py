@@ -17,7 +17,53 @@ from app.db.session import get_db
 from app.main import app
 from engine.harness.caller import FixtureCallerResolver
 from engine.harness.adapters import RAGToolAdapter
+from engine.harness.contracts import HarnessRequest, ToolObservation
+from engine.harness.llm_router import CompositeIntentRouter
 from scripts.seed_data import seed_database
+
+
+class _RouterClient:
+    """API/Trace 测试专用一次性 Router client，不访问网络。"""
+
+    provider_label = "Fake"
+    model = "fake-router"
+
+    def __init__(self, response: str) -> None:
+        """保存预置候选，并初始化本请求独享的 usage 计数器。"""
+
+        self.response = response
+        self.request_count = 0
+        self.successful_response_count = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
+
+    def complete(self, *, prompt: str, system_prompt: str | None = None, node_purpose: str = "") -> str:
+        """记录独立 usage 并返回预置结构化提案。"""
+
+        self.request_count += 1
+        self.successful_response_count += 1
+        self.prompt_tokens += 20
+        self.completion_tokens += 5
+        self.total_tokens += 25
+        return self.response
+
+
+class _CompletedSQLTool:
+    """只用于证明 model route 已进入 Harness SQL conditional edge。"""
+
+    def run(self, _request: HarnessRequest) -> ToolObservation:
+        """返回闭合 SQL observation，隔离本测试与真实 Text2SQL 模型调用。"""
+
+        return ToolObservation(
+            tool_name="text2sql",
+            route="sql",
+            execution_status="completed",
+            answer_status="complete",
+            safety_status="passed",
+            reason_code="sql_completed",
+            answer="完成",
+        )
 
 
 @contextmanager
@@ -136,3 +182,53 @@ def test_unknown_requested_role_fails_closed_before_sql_or_rag_tool(tmp_path: Pa
     assert trace["caller_safe_ref"] is None
     assert trace["graph_steps"] == ["route", "terminal", "controller"]
     assert trace["runtime_identity"]["route_runtime"] == {"kind": "none", "reason_code": "caller_untrusted"}
+
+
+def test_llm_router_adopted_and_rejected_paths_share_safe_trace_evidence(tmp_path: Path) -> None:
+    """模型采纳/拒绝都只在 Trace 投影安全计量，公开 API schema 保持不变。"""
+
+    adopted_path = tmp_path / "router-adopted.jsonl"
+    previous_router = app.state.harness_router
+    previous_sql_factory = app.state.sql_tool_factory
+    try:
+        app.state.harness_router = CompositeIntentRouter(
+            client_factory=lambda: _RouterClient('{"intent":"sql"}')
+        )
+        app.state.sql_tool_factory = _CompletedSQLTool
+        with _client(adopted_path) as client:
+            adopted_response = client.post(
+                "/api/query", json={"question": "盘点一下六月成交表现", "user_role": "ops"}
+            )
+
+        adopted = adopted_response.json()
+        adopted_trace = json.loads(adopted_path.read_text(encoding="utf-8"))
+        assert adopted_response.status_code == 200 and adopted["route"] == "sql"
+        assert "router_evidence" not in adopted
+        assert adopted_trace["route_decision"]["decision_source"] == "model"
+        evidence = adopted_trace["route_decision"]["router_evidence"]
+        assert evidence["validation_status"] == "accepted"
+        assert evidence["attempt_count"] == 1
+        assert evidence["usage"]["total_tokens"] == 25
+        assert "prompt" not in evidence and "raw_response" not in evidence
+
+        rejected_path = tmp_path / "router-rejected.jsonl"
+        app.state.harness_router = CompositeIntentRouter(
+            client_factory=lambda: _RouterClient('{"intent":"sql","sql":"SELECT secret"}')
+        )
+        with _client(rejected_path) as client:
+            rejected_response = client.post(
+                "/api/query", json={"question": "盘点一下六月成交表现", "user_role": "ops"}
+            )
+
+        rejected = rejected_response.json()
+        rejected_trace = json.loads(rejected_path.read_text(encoding="utf-8"))
+        assert rejected["route"] == "none" and rejected["answer_status"] == "unsupported"
+        assert rejected_trace["route_decision"]["decision_source"] == "deterministic"
+        rejected_evidence = rejected_trace["route_decision"]["router_evidence"]
+        assert rejected_evidence["validation_status"] == "rejected"
+        assert rejected_evidence["fallback_reason"] == "candidate_rejected"
+        serialized = rejected_path.read_text(encoding="utf-8")
+        assert "SELECT secret" not in serialized
+    finally:
+        app.state.harness_router = previous_router
+        app.state.sql_tool_factory = previous_sql_factory

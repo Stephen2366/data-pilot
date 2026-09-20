@@ -58,6 +58,8 @@ class SQLPlanContractError(LLMGenerationError):
     issue_tag = "sql_plan_contract_failed"
 
     def __init__(self, message: str, *, contract_result: SQLPlanFidelityResult) -> None:
+        """保存计划一致性检查结果，并映射为稳定的失败标签。"""
+
         super().__init__(
             message,
             stage="sql_generation",
@@ -117,6 +119,8 @@ class OpenAICompatibleChatClient:
         enable_thinking: bool | None = None,
         max_tokens: int | None = None,
     ) -> None:
+        """冻结本 client 的 provider、重试、出站策略和生成参数。"""
+
         self.api_key = api_key
         self.base_url = base_url.rstrip("/") or self.default_base_url
         self.model = model or self.default_model
@@ -263,14 +267,23 @@ class QwenChatClient(OpenAICompatibleChatClient):
     outbound_receiver = "qwen_chat"
 
 
-def get_default_llm_client() -> LLMClient:
+def get_default_llm_client(
+    *,
+    outbound_policy: OutboundPolicy | None = DEFAULT_OUTBOUND_POLICY,
+    outbound_data_class: str = "text2sql_prompt",
+    max_retries: int | None = None,
+) -> LLMClient:
     """按当前配置创建默认 LLM client。
 
     如果 `.env` 仍是 `LLM_PROVIDER=mock`，但已经配置 DeepSeek key，则按 M4 确认方案走
     DeepSeek 主路径，避免因为旧默认值误判为只能 mock。
+
+    可选的 outbound policy、数据类别和重试次数让 Router 复用同一传输实现，但不会继承
+    Text2SQL 的出站授权；调用方必须显式传入自己的最小策略。
     """
 
     settings = get_settings()
+    resolved_max_retries = settings.llm_max_retries if max_retries is None else max_retries
     provider = settings.llm_provider.lower()
     if provider not in {"deepseek", "mock", "qwen"}:
         raise LLMGenerationError(f"当前仅支持 DeepSeek / Qwen 主模型，LLM_PROVIDER={settings.llm_provider}。")
@@ -282,8 +295,10 @@ def get_default_llm_client() -> LLMClient:
             base_url=settings.dashscope_base_url,
             model=model,
             timeout=settings.llm_timeout_seconds,
-            max_retries=settings.llm_max_retries,
+            max_retries=resolved_max_retries,
             retry_backoff_seconds=settings.llm_retry_backoff_seconds,
+            outbound_policy=outbound_policy,
+            outbound_data_class=outbound_data_class,
         )
 
     api_key = settings.deepseek_api_key or settings.llm_api_key
@@ -294,8 +309,10 @@ def get_default_llm_client() -> LLMClient:
         base_url=settings.deepseek_base_url or "https://api.deepseek.com",
         model=model,
         timeout=settings.llm_timeout_seconds,
-        max_retries=settings.llm_max_retries,
+        max_retries=resolved_max_retries,
         retry_backoff_seconds=settings.llm_retry_backoff_seconds,
+        outbound_policy=outbound_policy,
+        outbound_data_class=outbound_data_class,
     )
 
 

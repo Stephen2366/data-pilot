@@ -27,6 +27,7 @@
 ## API / Harness
 
 - 统一入口：`POST /api/query`。
+- 顶层意图路由默认 `HARNESS_ROUTER_MODE=llm_fallback`：确定性安全/澄清/canonical 路径零 Router 模型调用，只有旧 Router 的 unsupported 问法才至多调用一次模型；最终计划由服务端闭集 compiler 生成。需要停用模型 Router 时，在启动进程显式设置 `HARNESS_ROUTER_MODE=deterministic`；请求体、Web 与 MCP 均不能选择 mode/model/operator。JSONL Trace 只记录 Router identity/source/attempts/usage/latency/validation/fallback 的安全投影，不记录 prompt 或原始响应。
 - EnterpriseRAG-Bench 产品 RAG 的环境变量、Milvus preflight 和 Uvicorn 启动方式见 `runbook-rag.md`；应用不会自动启动 Docker/Milvus。
 - `GET /health` 是进程 liveness；`GET /health/rag` 是 Enterprise RAG readiness。后者 503 时 RAG 失败关闭且零 Evidence/Composer，但 SQL 与 liveness 仍可工作；不得把它解释成 lexical fallback。
 - `APP_ENV=local|demo|test` 才注入 fixture caller resolver；请求里的 `user_role` 只能选择 fixture 身份，不能自行授权。

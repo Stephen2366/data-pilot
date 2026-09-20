@@ -104,24 +104,19 @@ Router 模型调用 SHALL 使用独立的 receiver、`intent_route` purpose、`r
 - **WHEN** provider 返回原始错误、响应文本或内部异常
 - **THEN** Trace 只保存 allowlisted 分类和数值 usage，不保存原始文本、stack、prompt 或 response
 
-### Requirement: 版本化 Router 评测与默认激活
+### Requirement: 服务端默认激活与确定性回滚
 
-系统 SHALL 提供一个预注册、版本化的 40 题 Router decision set，固定包含 10 个 SQL、10 个 RAG、10 个已登记 Hybrid、5 个 clarification、5 个 unsupported 场景，其中 20 题标记为 deterministic fast-path、20 题标记为 model-eligible，并覆盖 canonical、改写、词义重叠和控制指令干扰。Formal Router Eval SHALL 在同一 decision set 上分别执行 deterministic baseline 和 `llm_fallback` candidate；每个 arm 的每个场景只执行一次 Graph，多个断言共享同一 ExecutionEvidence，且使用 fake 深 Tool 隔离答案质量。`llm_fallback` 只有同时满足质量、控制、安全、观测和 Live Dev Probe 完成门后才能成为服务端默认。
+系统 SHALL 默认启用 `llm_fallback` 组合 Router，并保留 `deterministic` 服务端配置作为无需改代码的一键回滚模式。两种模式 SHALL 共享同一安全、Tool 预算、Evidence 和公开 API 合同；Router 模式、模型和 operator 只能由服务端决定。
 
-#### Scenario: Formal Eval 通过
+#### Scenario: 默认使用组合 Router
 
-- **WHEN** candidate 总体 route accuracy 不低于 90%、每类不低于 80%、canonical slice 无回归、model-eligible slice 相对 deterministic baseline 提升至少 10 个百分点，且所有 schema、安全、Tool 预算、usage 完整性断言 100% 通过
-- **THEN** candidate 满足默认激活的 Router Eval 门
+- **WHEN** 服务启动时没有显式覆盖 Router mode
+- **THEN** model-eligible 问法使用 `llm_fallback`，canonical 或前置决定仍可走零模型快路
 
-#### Scenario: Formal Eval 未通过
+#### Scenario: 服务端回滚为确定性 Router
 
-- **WHEN** 任一 required 质量阈值、安全/预算断言或 evidence completeness 不满足
-- **THEN** artifact 必须为 failed 或 inconclusive，服务端默认保持 deterministic，change 不得声明完成
-
-#### Scenario: Eval 与 Answer 质量分账
-
-- **WHEN** Router Eval 使用 fake SQL/RAG Tool 完成场景
-- **THEN** 报告只能声明意图/Tool 选择质量，不得声明 SQL 正确率、RAG 引用质量或最终回答质量
+- **WHEN** 运维配置将 Router mode 显式设为 `deterministic`
+- **THEN** 系统完全绕过 Router 模型并保留历史确定性路由行为
 
 #### Scenario: 客户端尝试选择 Router
 

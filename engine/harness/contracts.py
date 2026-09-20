@@ -237,6 +237,74 @@ class HarnessRequest:
 
 
 @dataclass(frozen=True)
+class RouterRunEvidence:
+    """一次 Router 裁决的安全计量，不保存 prompt、模型原文或私有上下文。
+
+    ★ Router 是顶层控制调用，不计入 SQL/RAG deep Tool budget；但它仍必须像收费小票一样
+    记录独立 attempts、tokens 和 latency，避免模型调用成为 Trace 里的“暗箱费用”。
+    """
+
+    mode: Literal["deterministic", "llm_fallback"]
+    router_identity: str
+    model_attempted: bool
+    attempt_count: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    latency_ms: float
+    validation_status: Literal["not_attempted", "accepted", "rejected", "failed"]
+    fallback_reason: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
+    def __post_init__(self) -> None:
+        """拒绝不闭合计量，避免 Eval 把缺 usage 或隐藏重试当成合法执行。"""
+
+        if not self.router_identity.strip():
+            raise HarnessContractError("router_identity 不能为空")
+        if self.attempt_count not in {0, 1}:
+            raise HarnessContractError("Router 每题只允许 0/1 attempt")
+        if self.model_attempted != (self.attempt_count == 1):
+            raise HarnessContractError("model_attempted 与 attempt_count 不一致")
+        if min(self.prompt_tokens, self.completion_tokens, self.total_tokens) < 0:
+            raise HarnessContractError("Router usage 不能为负数")
+        if self.total_tokens != self.prompt_tokens + self.completion_tokens:
+            raise HarnessContractError("Router total_tokens 必须等于 prompt + completion")
+        if self.latency_ms < 0:
+            raise HarnessContractError("Router latency 不能为负数")
+        if self.mode == "deterministic" and self.model_attempted:
+            raise HarnessContractError("deterministic mode 不得调用模型")
+        if self.validation_status == "not_attempted" and self.model_attempted:
+            raise HarnessContractError("已调用模型时 validation_status 不能是 not_attempted")
+        if self.validation_status != "not_attempted" and not self.model_attempted:
+            raise HarnessContractError("未调用模型时不能记录模型 validation 结果")
+        if self.validation_status in {"accepted", "not_attempted"} and self.fallback_reason is not None:
+            raise HarnessContractError("accepted/not_attempted 不得携带 fallback_reason")
+        if self.validation_status in {"rejected", "failed"} and not (self.fallback_reason or "").strip():
+            raise HarnessContractError("rejected/failed 必须携带安全 fallback_reason")
+
+    def safe_projection(self) -> dict[str, Any]:
+        """返回 Trace/Eval 可见白名单；不包含异常文本、prompt 或 raw response。"""
+
+        return {
+            "mode": self.mode,
+            "router_identity": self.router_identity,
+            "model_attempted": self.model_attempted,
+            "attempt_count": self.attempt_count,
+            "usage": {
+                "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens,
+                "total_tokens": self.total_tokens,
+            },
+            "latency_ms": round(self.latency_ms, 3),
+            "validation_status": self.validation_status,
+            "fallback_reason": self.fallback_reason,
+            "provider": self.provider,
+            "model": self.model,
+        }
+
+
+@dataclass(frozen=True)
 class RouteDecision:
     """Router 的封闭决定；它不能携带 Tool 输出、文档正文或答案。"""
 
@@ -244,10 +312,11 @@ class RouteDecision:
     reason_code: str
     needs_evidence: bool
     termination_action: TerminationAction
-    decision_source: Literal["deterministic", "controller"] = "deterministic"
+    decision_source: Literal["deterministic", "model", "controller"] = "deterministic"
     requirement: AnswerEvidenceRequirement | None = None
     hybrid_plan: HybridPlan | None = None
     clarification_spec: ClarificationSpec | None = None
+    router_evidence: RouterRunEvidence | None = None
 
     def __post_init__(self) -> None:
         """校验 route、Evidence requirement 与终止动作组成闭合决定。"""
@@ -266,6 +335,9 @@ class RouteDecision:
             raise HarnessContractError("clarify 决定必须携带 closed-world clarification spec")
         if self.termination_action != "clarify" and self.clarification_spec is not None:
             raise HarnessContractError("只有 clarify 决定可以携带 clarification spec")
+        if self.decision_source == "model":
+            if self.router_evidence is None or self.router_evidence.validation_status != "accepted":
+                raise HarnessContractError("model 决定必须绑定 accepted Router evidence")
 
 
 @dataclass(frozen=True)

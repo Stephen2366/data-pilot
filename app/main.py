@@ -16,6 +16,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, register_request_logging_middleware
 from app.db.session import build_engine
 from engine.harness.caller import build_default_caller_resolver
+from engine.harness.llm_router import build_configured_router
 from engine.harness.thread import ThreadCheckpointManager
 from engine.harness.adapters import RAGToolAdapter
 from engine.phase4b.task_boundary import TaskBoundary
@@ -285,8 +286,9 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     # M46：B4 子图只允许由 server assembly 显式启用。请求体没有开关，默认仍走 B2
     # Pipeline，避免把实验/Probe 策略变成客户端可选能力。
     application.state.b4_task_enabled = settings.phase4b_rag_strategy == "subgraph"
-    # 仅供显式 Eval 临时注入 Router seam；None 时普通 API 仍使用 Harness 的 deterministic 默认。
-    application.state.harness_router = None
+    # ★ 默认 llm_fallback 仍保留确定性 fast path；deterministic 是显式回滚模式。
+    # Router mode 只从服务端配置读取；请求体/Web/MCP 都不能选择 mode、model 或 operator。
+    application.state.harness_router = build_configured_router(settings.harness_router_mode)
     register_request_logging_middleware(application)
     register_exception_handlers(application)
     application.include_router(resources_router)

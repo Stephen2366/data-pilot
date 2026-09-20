@@ -12,8 +12,8 @@
 
 - 在不交出 Tool 控制权的前提下，让模型处理开放、改写和词义重叠的顶层意图。
 - 保留低延迟 deterministic fast path，并让模型失败时行为稳定、可解释、可回滚。
-- 为 Router 建立独立出站授权、运行身份、usage/latency 证据和可拒绝的 Formal Eval artifact。
-- 通过真实纵向链 Probe 和独立 Router Formal Eval 后，把 `llm_fallback` 作为服务端默认完成态。
+- 为 Router 建立独立出站授权、运行身份和 usage/latency 证据。
+- 通过聚焦合同测试、真实纵向链 Probe 和受影响回归后，把 `llm_fallback` 作为服务端默认完成态。
 
 **Non-Goals:**
 
@@ -72,18 +72,13 @@ Router 调用不是 deep Tool，不进入 SQL/RAG Tool call count；但它必须
 - `deterministic`：历史行为、回归 baseline 和一键 rollback。
 - `llm_fallback`：本 change 的组合 Router。
 
-不存在 `llm_only`，客户端请求/schema/MCP 均不能选择模式。开发期间先显式启用 candidate；只有 P1 Live Dev Probe 和 Formal Router Eval 两门通过后，才将配置默认切到 `llm_fallback`。任一门未通过时默认保留 deterministic，change 状态保持未完成，而不是降低验收线。
+不存在 `llm_only`，客户端请求/schema/MCP 均不能选择模式。开发期间先显式启用 candidate；只有 P1 Live Dev Probe、聚焦合同测试与受影响回归通过后，才将配置默认切到 `llm_fallback`。任一必需验证未通过时默认保留 deterministic，change 状态保持未完成。
 
-### D6：Router decision set 与 Formal Eval
+### D6：展示型完成门，不建设独立 Router Eval 平台
 
-建立 `router-intent-v1` 的 40 题版本化 decision set：SQL/RAG/registered-Hybrid 各 10，clarification/unsupported 各 5；其中恰好 20 题为 deterministic fast-path、20 题为 model-eligible。每类同时包含 canonical、自然改写、词义重叠；unsupported slice 包含控制指令干扰。题目、gold route、可选 operator/clarification kind、eligibility、slice 和理由在任何 candidate run 前冻结并哈希。
+用户于 2026-09-20 确认采用展示型收口：本 change 不再建设 40 题 decision set、paired runner、独立 artifact validator/report，也不以统计准确率门槛决定默认切换。原因是本项目目标是形成可运行、可讲解的 LLM Router 闭环；为单个路由改动额外建设一套 Formal Eval 基础设施会显著扩大交付面，而不会加强运行时的闭集编译、失败关闭或权限边界。
 
-同一 runner 用一个显式 arm 参数运行：
-
-- deterministic arm：零 Router provider call。
-- llm_fallback arm：只有 20 个 model-eligible case 才调用模型，Formal run 的硬上限为 20 provider attempts、30,000 observed tokens、20 分钟 wall time，retry0；任一上限或 identity 漂移立即停止，不用换问法或补跑凑结果。
-
-每题恰好一次 Graph invoke，深 Tool 使用 typed fake，route、termination、operator、Tool budget、source、fallback、usage 等断言共享同一 ExecutionEvidence。artifact validator 拒绝漏题、重复执行、arm/identity 漂移、调用数或 usage 不闭合。阈值以 spec 为准；报告同时给出 confusion matrix、slice 差异、latency/token 和失败明细。该 artifact 不写 SQL/RAG answer quality 结论。
+完成证据改为最小充分组合：表驱动 fake 测试覆盖全部候选类型、非法字段、失败降级、调用/Tool 预算和 Trace 私有载荷；真实 `LLMR-P1` 覆盖 SQL、RAG、Hybrid 三条纵向链；随后运行共享合同的受影响回归和一次全仓 deterministic 测试。Probe 只证明这三条开发场景可运行，不登记为质量基线，也不外推开放问法的总体准确率。
 
 ### D7：参考项目只做设计迁移，不直接复制代码
 
@@ -99,7 +94,7 @@ Router 调用不是 deep Tool，不进入 SQL/RAG Tool call count；但它必须
 
 该 change 修改真实 LLM 与 `/api/query` 外部行为，Live Dev Probe 适用。冻结 checkpoint `LLMR-P1`：
 
-- **时点**：完成首条 `question → Router model → deterministic compiler → Harness Tool → API/Trace` 真实纵向链并通过聚焦 deterministic 测试后；在 Formal Router Eval、默认切换和依赖这些证据的回归任务前执行。只有 `continue` 放行后续任务。
+- **时点**：完成首条 `question → Router model → deterministic compiler → Harness Tool → API/Trace` 真实纵向链并通过聚焦 deterministic 测试后；在默认切换和依赖这些证据的回归任务前执行。只有 `continue` 放行后续任务。
 - **场景**：通过真实 `/api/query` 依次执行三题各一次：开放改写 SQL（预期 SQL 和正确受 Guard 结果）、政策材料 RAG（预期 RAG 和有效 citation）、已登记“指标值+定义”混合问法（预期 Hybrid、SQL/RAG 各一次）。使用当时项目默认 Qwen、数据库和已批准 Knowledge runtime；不访问 held-out/reserve，不改问法凑成功。
 - **证据**：保存每题 request/response 安全投影、RouteDecision/Router evidence、Graph steps、Tool counts、citations、provider attempts/usage/latency、runtime identities、HEAD 与相关 dirty files；不得保存 prompt、原始模型响应、Thought 或凭据。
 - **通过**：三题 route/operator/Tool budget 正确；SQL/RAG/Hybrid 结果分别满足现有 Guard/Evidence/citation 合同；Router 每题不超过一次、retry0、usage 完整；API/Trace 同源且无私有载荷。
@@ -110,15 +105,14 @@ Router 调用不是 deep Tool，不进入 SQL/RAG Tool call count；但它必须
 
 - [模型提高语义覆盖但增加延迟和成本] → canonical fast path 零调用；fallback 单次/retry0；Trace 与 Eval 强制记录 usage/latency。
 - [模型输出看似合法但控制含义错误] → 模型只选闭集标签；服务端 registry/compiler 拥有 requirement、plan、clarification 和 Tool 权限。
-- [deterministic 快路继续吞掉应由模型判断的边界问法] → 40 题 decision set 同时度量 canonical 与 model-eligible slice；fast-path eligibility 用表驱动测试冻结，不能用新增 catch-all 扩张。
+- [deterministic 快路继续吞掉应由模型判断的边界问法] → fast-path eligibility 用表驱动测试冻结，不能用新增 catch-all 扩张；真实 Probe 至少覆盖自然改写和指代场景，但本 change 不声明总体语义准确率。
 - [provider 不可用导致体验退化] → 调用前保留保守决定；失败回到澄清/unsupported，不默认 Tool；deterministic 模式可立即回滚。
-- [新 Router 调用成为隐藏成本] → 独立 per-request evidence、usage completeness Gate 和 Eval validator；缺 usage 时 Formal artifact 只能 inconclusive。
-- [错误把 Router Eval 外推为回答质量] → runner 使用 fake 深 Tool，artifact/schema/report 明示 scope；真实 E2E 只由 `LLMR-P1` 提供有限纵向证据。
+- [新 Router 调用成为隐藏成本] → 独立 per-request evidence、usage completeness 断言和 Trace 审计。
+- [错误把三题 Probe 外推为总体质量] → notes/state 明示其仅为有限纵向证据；本 change 不生成或登记 Router 质量基线。
 
 ## Migration Plan
 
 1. 先以 additive contract、outbound policy、Router evidence 和 `deterministic` 兼容模式落盘；默认行为不变。
 2. 接入组合 Router 与 fake client tests，在显式 `llm_fallback` 模式完成聚焦验证。
-3. 执行 `LLMR-P1`；未获 `continue` 不进入 Formal Eval或默认切换。
-4. 在取得精确运行授权后，冻结 decision set identity 并各执行一次 deterministic/candidate arm；validator 和评审通过后切换服务端默认。
-5. 运行受影响回归与唯一一次全仓完成门，更新 state/changelog/notes。回滚只需把服务端模式设为 `deterministic`，不删除 additive contracts 或重写历史 artifact。
+3. 执行 `LLMR-P1`；未获 `continue` 不进入默认切换。
+4. Probe、聚焦合同测试通过后切换服务端默认，运行受影响回归与唯一一次全仓完成门，更新 state/changelog/notes。回滚只需把服务端模式设为 `deterministic`，不删除 additive contracts 或重写历史证据。

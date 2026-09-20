@@ -243,6 +243,7 @@ def _record_trace(
             "requirement_identity": decision.requirement.identity if decision.requirement else None,
             "clarification": decision.clarification_spec.safe_projection() if decision.clarification_spec else None,
             "hybrid_plan_identity": decision.hybrid_plan.identity if decision.hybrid_plan else None,
+            "router_evidence": decision.router_evidence.safe_projection() if decision.router_evidence else None,
         },
         graph_steps=list(result.graph_steps),
         caller_safe_ref=result.caller_safe_ref,

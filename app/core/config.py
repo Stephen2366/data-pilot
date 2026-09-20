@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     task_tombstone_retention_seconds: int = Field(default=86400, gt=0, alias="TASK_TOMBSTONE_RETENTION_SECONDS")
     task_state_max_bytes: int = Field(default=65536, ge=1024, alias="TASK_STATE_MAX_BYTES")
     task_context_max_bytes: int = Field(default=65536, ge=4096, alias="TASK_CONTEXT_MAX_BYTES")
+    # LLM Router rollout 只允许服务端启动配置选择；HTTP/Web/MCP 请求都没有对应字段。
+    # ★ 默认启用“确定性快路 + 单次 LLM fallback”；遇到 provider 故障会失败关闭，
+    # 运维仍可通过 HARNESS_ROUTER_MODE=deterministic 一键回滚，不需要改代码。
+    harness_router_mode: Literal["deterministic", "llm_fallback"] = Field(
+        default="llm_fallback", alias="HARNESS_ROUTER_MODE"
+    )
 
     # LLM 通用配置 =============================================================================
     # LLM 是大语言模型。这里先保留一个通用入口，后续 generator 可以按 provider 选择模型。
